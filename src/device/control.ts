@@ -17,7 +17,7 @@ export async function ensureDevice(): Promise<DeviceBinding> {
   const existing = await readDeviceBinding();
   if (existing && existing.relayUrl === auth.config.relayUrl && existing.userId === auth.user.id) return existing;
   const identity = await loadOrCreateDeviceIdentity(auth.config.relayUrl, auth.user.id);
-  const response = await relayFetch(auth.config.relayUrl, auth.cookie, "/api/user/device-relay/enroll", {
+  const response = await relayFetch(auth.config.relayUrl, auth.credential, "/api/user/device-relay/enroll", {
     method: "POST",
     body: JSON.stringify({
       publicKeySpki: identity.publicKeySpki,
@@ -61,7 +61,7 @@ export async function connectionGrant(binding?: DeviceBinding): Promise<Connecti
   const identity = await loadOrCreateDeviceIdentity(auth.config.relayUrl, auth.user.id);
   if (identity.keyThumbprint !== device.keyThumbprint) throw new Error("Device key does not match the enrolled device.");
   const proof = createConnectionProof(identity, device.deviceId);
-  const response = await relayFetch(auth.config.relayUrl, auth.cookie, "/api/user/device-relay/connect", {
+  const response = await relayFetch(auth.config.relayUrl, auth.credential, "/api/user/device-relay/connect", {
     method: "POST",
     body: JSON.stringify(proof),
   });
@@ -84,7 +84,7 @@ export async function revokeDevice(): Promise<void> {
     await deleteDeviceIdentity(auth.config.relayUrl, auth.user.id);
     return;
   }
-  const response = await relayFetch(auth.config.relayUrl, auth.cookie, "/api/user/device-relay/revoke", {
+  const response = await relayFetch(auth.config.relayUrl, auth.credential, "/api/user/device-relay/revoke", {
     method: "POST",
     body: JSON.stringify({ deviceId: binding.deviceId }),
   });
@@ -97,7 +97,7 @@ export async function revokeDevice(): Promise<void> {
   await deleteDeviceIdentity(auth.config.relayUrl, auth.user.id);
 }
 
-async function relayFetch(relayUrl: string, cookie: string, path: string, init: RequestInit): Promise<Response> {
+async function relayFetch(relayUrl: string, credential: { scheme: "bearer" | "cookie"; value: string }, path: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   timer.unref?.();
@@ -109,7 +109,7 @@ async function relayFetch(relayUrl: string, cookie: string, path: string, init: 
       headers: {
         "accept": "application/json",
         "content-type": "application/json",
-        "cookie": cookie,
+        ...(credential.scheme === "bearer" ? { authorization: `Bearer ${credential.value}` } : { cookie: credential.value }),
         "origin": relayUrl,
         ...(init.headers ?? {}),
       },

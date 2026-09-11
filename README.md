@@ -53,6 +53,8 @@ frely login
 frely mcp setup --workspace /path/to/project
 ```
 
+`frely login` starts a Better Auth device-authorization flow, opens the Frely approval page in your browser, and waits for explicit approval. The resulting OAuth access/refresh tokens are stored in the operating-system credential store; they are never written to the CLI config file, command line, URL, or logs. The CLI keeps accepting an existing legacy session cookie during the transition.
+
 `mcp setup` performs three client-side steps:
 
 1. enrolls this machine with the logged-in Frely account;
