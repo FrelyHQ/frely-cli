@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
 const worktree = process.env.PROJECT_GOVERNANCE_RELEASE_WORKTREE ?? process.cwd();
-const result = await exec('npm', ['pack', '--json'], { cwd: worktree, env: process.env });
+const result = await exec('npm', ['pack', '--json', '--ignore-scripts'], { cwd: worktree, env: process.env });
 const packed = JSON.parse(result.stdout);
 const filename = packed[0]?.filename;
 if (!filename) throw new Error('npm pack returned no artifact filename');
