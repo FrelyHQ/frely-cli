@@ -80,7 +80,9 @@ curl -fsSL https://app.frely.cloud/install.sh | FRELY_CLI_PACKAGE='frely-cli@nex
 frely login
 ```
 
-CLI 使用 Frely Web 账号。密码只进入 TTY 登录请求。密码不写入配置、argv、环境和日志。
+CLI 使用 Frely Web 账号。`frely login` 会启动 Better Auth Device Authorization，在浏览器中显示明确的授权页面并等待批准；密码只在浏览器登录流程中处理，不进入 CLI 的 argv、环境或日志。
+
+授权完成后，CLI 将 OAuth access/refresh token 存入操作系统凭据库。令牌不会写入配置文件、URL 或日志；旧版 session cookie 仍可在迁移期间读取。
 
 Frely session 存储位置：
 
