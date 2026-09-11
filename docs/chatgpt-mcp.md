@@ -25,6 +25,36 @@
 
 ## 安装
 
+### 从本地源码安装（Bun）
+
+`frely-cli` 要求 Node.js 22 或更高版本。要从当前源码目录安装全局 `frely` 命令：
+
+```bash
+cd /path/to/frely-cli
+bun install
+bun run build
+bun install --global "$PWD"
+```
+
+全局安装时使用绝对路径 `$PWD`。如果终端找不到 `frely`，将 Bun 的全局 bin 目录加入当前 shell 的 `PATH`：
+
+```bash
+export PATH="$(bun pm bin -g):$PATH"
+```
+
+如果 Bun 报告 `keytar` 的生命周期脚本被阻止，在源码目录执行以下命令，然后重新构建并安装：
+
+```bash
+bun pm trust keytar
+bun install
+bun run build
+bun install --global "$PWD"
+```
+
+当前仓库使用 npm lockfile，没有提交 Bun lockfile。第一次执行 `bun install` 可能会生成 `bun.lock`，请按仓库的 lockfile 约定处理该文件。
+
+### 使用仓库安装脚本
+
 仓库安装脚本：
 
 ```bash
@@ -37,7 +67,12 @@
 curl -fsSL https://app.frely.cloud/install.sh | sh
 ```
 
-安装脚本从 `app.frely.cloud` 下载版本化 `frely-cli` tarball，校验固定 SHA-256 后使用本机 npm 安装，并提供 `frely` 命令。该入口不依赖 `@frely/cli` 已发布到公共 npm registry。
+安装脚本检查本机 Node.js/npm 版本，然后从公共 npm registry 安装 `@frely/cli@latest` 并提供 `frely` 命令。可以通过 `FRELY_CLI_VERSION` 指定版本，或通过 `FRELY_CLI_PACKAGE` 覆盖完整 npm package spec：
+
+```bash
+curl -fsSL https://app.frely.cloud/install.sh | FRELY_CLI_VERSION=0.3.0 sh
+curl -fsSL https://app.frely.cloud/install.sh | FRELY_CLI_PACKAGE='@frely/cli@next' sh
+```
 
 ## 账号登录
 

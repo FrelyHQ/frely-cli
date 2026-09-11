@@ -20,6 +20,32 @@ curl -fsSL https://app.frely.cloud/install.sh | sh
 
 The installer requires Node.js 22 or newer and installs `@frely/cli@latest` through npm.
 
+## Install from a local checkout
+
+The package requires Node.js 22 or newer. To install the current source checkout with Bun:
+
+```sh
+cd /path/to/frely-cli
+bun install
+bun run build
+bun install --global "$PWD"
+```
+
+Use the absolute `$PWD` path in the global install command. Bun installs the `frely` executable in its global bin directory. If the command is not found, add that directory to your `PATH`:
+
+```sh
+export PATH="$(bun pm bin -g):$PATH"
+```
+
+If Bun reports that the `keytar` lifecycle script is blocked, trust the native dependency and reinstall:
+
+```sh
+bun pm trust keytar
+bun install
+```
+
+The repository currently has an npm lockfile rather than a committed Bun lockfile. The first `bun install` may create `bun.lock`; handle that file according to the repository's lockfile policy.
+
 ## First use
 
 ```sh
