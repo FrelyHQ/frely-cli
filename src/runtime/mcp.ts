@@ -15,7 +15,7 @@ export async function createMcpServer(workspaceInput: string): Promise<Server> {
   const workspace = await Workspace.open(workspaceInput);
   const scheduler = new FairRwScheduler(4);
   const processes = new ProcessManager();
-  const server = new Server({ name: "frely-cli", version: "0.2.0" }, { capabilities: { tools: {} } });
+  const server = new Server({ name: "frely-cli", version: "0.3.0" }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
     tool("workspace_info", "Return the active workspace root.", {}, { readOnly: true }),

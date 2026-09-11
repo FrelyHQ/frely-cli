@@ -1,4 +1,6 @@
 import { inspectAuth, probeCredentialStore, whoami } from "./auth.js";
+import { currentDevice } from "./device/control.js";
+import { serviceStatus } from "./service.js";
 
 export interface DiagnosticCheck {
   name: string;
@@ -8,11 +10,16 @@ export interface DiagnosticCheck {
 
 export async function statusSnapshot() {
   const auth = await inspectAuth();
+  let device = null;
+  if (auth.configured && auth.credentialStored) device = await currentDevice().catch(() => null);
+  const service = await serviceStatus().catch(() => ({ installed: false, active: false, platform: process.platform }));
   return {
-    version: "0.2.0",
+    version: "0.3.0",
     node: process.version,
     platform: process.platform,
     auth,
+    device: device ? { deviceId: device.deviceId, mcpUrl: device.mcpUrl, keyThumbprint: device.keyThumbprint } : null,
+    service,
   };
 }
 
@@ -40,12 +47,23 @@ export async function doctor(): Promise<{ ok: boolean; checks: DiagnosticCheck[]
     try {
       const user = await whoami();
       checks.push({ name: "relay_session", ok: true, detail: `${user.email} @ ${auth.relayUrl}` });
+      const device = await currentDevice();
+      checks.push({ name: "mcp_device", ok: Boolean(device), detail: device ? `${device.deviceId} -> ${device.mcpUrl}` : "not provisioned; run frely mcp url" });
     } catch (error) {
       checks.push({ name: "relay_session", ok: false, detail: message(error) });
+      checks.push({ name: "mcp_device", ok: false, detail: "unavailable until login is valid" });
     }
   } else {
     checks.push({ name: "relay_session", ok: false, detail: "login required" });
+    checks.push({ name: "mcp_device", ok: false, detail: "login required" });
   }
+
+  const service = await serviceStatus().catch((error) => ({ installed: false, active: false, platform: process.platform, error: message(error) }));
+  checks.push({
+    name: "mcp_service",
+    ok: service.installed && service.active,
+    detail: "error" in service ? service.error : service.active ? `running${service.workspace ? ` workspace=${service.workspace}` : ""}` : service.installed ? "installed but stopped" : "not installed; run frely mcp setup",
+  });
 
   return { ok: checks.every((check) => check.ok), checks };
 }
