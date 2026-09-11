@@ -1,22 +1,29 @@
 {
   "name": "@frely/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "bin": { "frely": "dist/index.js" },
+  "bin": {
+    "frely": "dist/index.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/runtime/scheduler.test.js dist/runtime/workspace.test.js dist/runtime/process-manager.test.js dist/runtime/mcp.integration.test.js",
     "start": "node dist/index.js"
   },
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.18.1",
-    "keytar": "^7.9.0",
-    "zod": "^3.25.76"
+    "keytar": "^7.9.0"
   },
   "devDependencies": {
     "@types/node": "^22.18.1",
     "typescript": "^5.9.2"
+  },
+  "allowScripts": {
+    "keytar@7.9.0": true
   }
 }

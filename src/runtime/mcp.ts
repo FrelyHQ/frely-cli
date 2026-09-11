@@ -1,198 +1,103 @@
-import { exec as execCallback } from "node:child_process";
-import { lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
-import { promisify } from "node:util";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { ProcessManager } from "./process-manager.js";
+import { FairRwScheduler } from "./scheduler.js";
+import { safeEnv, Workspace } from "./workspace.js";
 
-const exec = promisify(execCallback);
-const MAX_FILE_BYTES = 1024 * 1024;
-const MAX_OUTPUT_BYTES = 1024 * 1024;
-
-type Mode = "read" | "write";
-
-type Job<T> = { mode: Mode; work: () => Promise<T>; resolve: (value: T) => void; reject: (error: unknown) => void };
-
-class FairRwScheduler {
-  private activeReaders = 0;
-  private writer = false;
-  private readonly queue: Job<unknown>[] = [];
-  constructor(private readonly maxReaders = 4) {}
-
-  read<T>(work: () => Promise<T>): Promise<T> { return this.enqueue("read", work); }
-  write<T>(work: () => Promise<T>): Promise<T> { return this.enqueue("write", work); }
-
-  private enqueue<T>(mode: Mode, work: () => Promise<T>): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      this.queue.push({ mode, work, resolve: resolve as (value: unknown) => void, reject });
-      this.drain();
-    });
-  }
-
-  private drain(): void {
-    if (this.writer) return;
-    const first = this.queue[0];
-    if (!first) return;
-    if (first.mode === "write") {
-      if (this.activeReaders > 0) return;
-      this.writer = true;
-      this.queue.shift();
-      void first.work().then(first.resolve, first.reject).finally(() => { this.writer = false; this.drain(); });
-      return;
-    }
-    while (!this.writer && this.activeReaders < this.maxReaders && this.queue[0]?.mode === "read") {
-      const job = this.queue.shift()!;
-      this.activeReaders += 1;
-      void job.work().then(job.resolve, job.reject).finally(() => { this.activeReaders -= 1; this.drain(); });
-    }
-  }
+interface ToolFlags {
+  readOnly: boolean;
+  destructive?: boolean;
+  idempotent?: boolean;
 }
 
-export async function startStdioMcp(workspaceInput: string): Promise<void> {
-  const workspace = await realpath(resolve(workspaceInput));
+export async function createMcpServer(workspaceInput: string): Promise<Server> {
+  const workspace = await Workspace.open(workspaceInput);
   const scheduler = new FairRwScheduler(4);
-  const server = new Server({ name: "friday-local", version: "0.1.0" }, { capabilities: { tools: {} } });
+  const processes = new ProcessManager();
+  const server = new Server({ name: "frely-cli", version: "0.2.0" }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
-    tool("list_directory", "List one workspace directory.", { path: stringSchema("Relative directory path", ".") }, true),
-    tool("read_file", "Read a UTF-8 workspace file up to 1 MiB.", { path: stringSchema("Relative file path") }, true),
-    tool("search_files", "Search UTF-8 workspace files for a literal string.", { path: stringSchema("Relative directory path", "."), query: stringSchema("Literal text"), maxResults: numberSchema(100) }, true),
-    tool("write_file", "Atomically write a UTF-8 workspace file.", { path: stringSchema("Relative file path"), content: stringSchema("Complete file content"), overwrite: { type: "boolean", default: false } }, false),
-    tool("apply_patch", "Apply line replacements to a UTF-8 workspace file.", { path: stringSchema("Relative file path"), edits: { type: "array", minItems: 1, maxItems: 100, items: { type: "object", additionalProperties: false, required: ["startLine", "endLine", "replacement"], properties: { startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, replacement: { type: "string" } } } } }, false),
-    tool("run_command", "Run a shell command as the current OS user. Workspace only constrains cwd; this is not a sandbox.", { command: stringSchema("Shell command"), cwd: stringSchema("Relative working directory", "."), timeoutMs: { type: "integer", minimum: 100, maximum: 120000, default: 30000 } }, false)
+    tool("workspace_info", "Return the active workspace root.", {}, { readOnly: true }),
+    tool("list_directory", "List one workspace directory.", { path: stringSchema("Relative directory path", ".") }, { readOnly: true }),
+    tool("stat_path", "Inspect one workspace file or directory.", { path: stringSchema("Relative path") }, { readOnly: true }),
+    tool("find_files", "Find workspace files using *, ** and ? wildcards.", { path: stringSchema("Relative directory path", "."), pattern: stringSchema("Wildcard pattern"), maxResults: intSchema(100, 1, 1000) }, { readOnly: true }),
+    tool("search_files", "Search UTF-8 workspace files.", { path: stringSchema("Relative directory path", "."), query: stringSchema("Search text or regex"), regex: boolSchema(false), caseSensitive: boolSchema(false), maxResults: intSchema(100, 1, 500), contextLines: intSchema(0, 0, 10) }, { readOnly: true }),
+    tool("read_file", "Read a UTF-8 workspace file up to 1 MiB.", { path: stringSchema("Relative file path") }, { readOnly: true }),
+    tool("read_file_lines", "Read a line range from a UTF-8 workspace file.", { path: stringSchema("Relative file path"), startLine: intSchema(1, 1, Number.MAX_SAFE_INTEGER), endLine: { type: "integer", minimum: 1 } }, { readOnly: true }),
+    tool("write_file", "Atomically write a UTF-8 workspace file.", { path: stringSchema("Relative file path"), content: stringSchema("Complete file content"), overwrite: boolSchema(false) }, { readOnly: false, idempotent: false }),
+    tool("apply_patch", "Apply non-overlapping line replacements to a UTF-8 workspace file.", { path: stringSchema("Relative file path"), expectedSha256: { type: "string", pattern: "^[a-f0-9]{64}$" }, edits: { type: "array", minItems: 1, maxItems: 100, items: { type: "object", additionalProperties: false, required: ["startLine", "endLine", "replacement"], properties: { startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, replacement: { type: "string" } } } } }, { readOnly: false, idempotent: false }),
+    tool("create_directory", "Create a workspace directory.", { path: stringSchema("Relative directory path") }, { readOnly: false, idempotent: true }),
+    tool("delete_path", "Delete a workspace path. Recursive directory deletion requires recursive=true.", { path: stringSchema("Relative path"), recursive: boolSchema(false) }, { readOnly: false, destructive: true, idempotent: false }),
+    tool("move_path", "Move or rename a workspace path.", { from: stringSchema("Source path"), to: stringSchema("Destination path"), overwrite: boolSchema(false) }, { readOnly: false, destructive: true, idempotent: false }),
+    tool("run_command", "Run a shell command as the current OS user. Workspace only constrains cwd; this is not a sandbox.", { command: stringSchema("Shell command"), cwd: stringSchema("Relative working directory", "."), timeoutMs: intSchema(30000, 100, 120000) }, { readOnly: false, destructive: true, idempotent: false }),
+    tool("start_process", "Start a persistent shell process as the current OS user.", { command: stringSchema("Shell command"), cwd: stringSchema("Relative working directory", ".") }, { readOnly: false, destructive: true, idempotent: false }),
+    tool("list_processes", "List processes started by this MCP session.", {}, { readOnly: true }),
+    tool("read_process", "Read process output using absolute cursors.", { processId: stringSchema("Process id"), stdoutCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), stderrCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER) }, { readOnly: true }),
+    tool("write_process", "Write stdin to a running process.", { processId: stringSchema("Process id"), input: stringSchema("Input text") }, { readOnly: false, destructive: true, idempotent: false }),
+    tool("stop_process", "Stop a process started by this MCP session.", { processId: stringSchema("Process id") }, { readOnly: false, destructive: true, idempotent: true }),
   ] }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const name = request.params.name;
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
     try {
-      const result = name === "list_directory" ? await scheduler.read(() => listDirectory(workspace, args))
-        : name === "read_file" ? await scheduler.read(() => readTextFile(workspace, args))
-        : name === "search_files" ? await scheduler.read(() => searchFiles(workspace, args))
-        : name === "write_file" ? await scheduler.write(() => writeTextFile(workspace, args))
-        : name === "apply_patch" ? await scheduler.write(() => applyLinePatch(workspace, args))
-        : name === "run_command" ? await scheduler.write(() => runCommand(workspace, args))
-        : (() => { throw new Error(`Unknown tool: ${name}`); })();
+      const result = await dispatch(name, args, workspace, processes, scheduler);
       return { content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result) }] };
     } catch (error) {
       return { isError: true, content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Local tool failed." }] };
     }
   });
 
+  return server;
+}
+
+export async function startStdioMcp(workspaceInput: string): Promise<void> {
+  const server = await createMcpServer(workspaceInput);
   await server.connect(new StdioServerTransport());
 }
 
-function tool(name: string, description: string, properties: Record<string, unknown>, readOnly: boolean) {
-  return { name, description, inputSchema: { type: "object", additionalProperties: false, properties }, annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly } };
+async function dispatch(name: string, args: Record<string, unknown>, workspace: Workspace, processes: ProcessManager, scheduler: FairRwScheduler): Promise<unknown> {
+  if (name === "workspace_info") return scheduler.read(async () => workspace.info());
+  if (name === "list_directory") return scheduler.read(() => workspace.listDirectory(textArg(args, "path", ".")));
+  if (name === "stat_path") return scheduler.read(() => workspace.statPath(textArg(args, "path")));
+  if (name === "find_files") return scheduler.read(() => workspace.findFiles(textArg(args, "path", "."), textArg(args, "pattern"), intArg(args, "maxResults", 100, 1, 1000)));
+  if (name === "search_files") return scheduler.read(() => workspace.searchFiles(textArg(args, "path", "."), textArg(args, "query"), { regex: boolArg(args, "regex", false), caseSensitive: boolArg(args, "caseSensitive", false), maxResults: intArg(args, "maxResults", 100, 1, 500), contextLines: intArg(args, "contextLines", 0, 0, 10) }));
+  if (name === "read_file") return scheduler.read(() => workspace.readFile(textArg(args, "path")));
+  if (name === "read_file_lines") return scheduler.read(() => workspace.readFileLines(textArg(args, "path"), intArg(args, "startLine", 1, 1, Number.MAX_SAFE_INTEGER), optionalIntArg(args, "endLine", 1, Number.MAX_SAFE_INTEGER)));
+  if (name === "write_file") return scheduler.write(() => workspace.writeFile(textArg(args, "path"), textArg(args, "content"), boolArg(args, "overwrite", false)));
+  if (name === "apply_patch") return scheduler.write(() => workspace.applyPatch(textArg(args, "path"), arrayArg(args, "edits", 1, 100), optionalTextArg(args, "expectedSha256")));
+  if (name === "create_directory") return scheduler.write(() => workspace.createDirectory(textArg(args, "path")));
+  if (name === "delete_path") return scheduler.write(() => workspace.deletePath(textArg(args, "path"), boolArg(args, "recursive", false)));
+  if (name === "move_path") return scheduler.write(() => workspace.movePath(textArg(args, "from"), textArg(args, "to"), boolArg(args, "overwrite", false)));
+  if (name === "run_command") return scheduler.write(() => workspace.runCommand(textArg(args, "command"), textArg(args, "cwd", "."), intArg(args, "timeoutMs", 30000, 100, 120000)));
+  if (name === "start_process") return scheduler.write(async () => processes.start(textArg(args, "command"), await workspace.processCwd(textArg(args, "cwd", ".")), safeEnv()));
+  if (name === "list_processes") return scheduler.read(async () => processes.list());
+  if (name === "read_process") return scheduler.read(async () => processes.read(textArg(args, "processId"), intArg(args, "stdoutCursor", 0, 0, Number.MAX_SAFE_INTEGER), intArg(args, "stderrCursor", 0, 0, Number.MAX_SAFE_INTEGER)));
+  if (name === "write_process") return scheduler.write(async () => processes.write(textArg(args, "processId"), textArg(args, "input")));
+  if (name === "stop_process") return scheduler.write(() => processes.stop(textArg(args, "processId")));
+  throw new Error(`Unknown tool: ${name}`);
 }
+
+function tool(name: string, description: string, properties: Record<string, unknown>, flags: ToolFlags) {
+  return {
+    name,
+    description,
+    inputSchema: { type: "object", additionalProperties: false, properties },
+    annotations: {
+      readOnlyHint: flags.readOnly,
+      destructiveHint: flags.destructive ?? false,
+      idempotentHint: flags.idempotent ?? flags.readOnly,
+    },
+  };
+}
+
 function stringSchema(description: string, defaultValue?: string) { return { type: "string", description, ...(defaultValue === undefined ? {} : { default: defaultValue }) }; }
-function numberSchema(defaultValue: number) { return { type: "integer", minimum: 1, maximum: 500, default: defaultValue }; }
+function intSchema(defaultValue: number, minimum: number, maximum: number) { return { type: "integer", minimum, maximum, default: defaultValue }; }
+function boolSchema(defaultValue: boolean) { return { type: "boolean", default: defaultValue }; }
 function textArg(args: Record<string, unknown>, name: string, fallback?: string): string { const value = args[name] ?? fallback; if (typeof value !== "string") throw new Error(`${name} must be a string.`); return value; }
+function optionalTextArg(args: Record<string, unknown>, name: string): string | undefined { const value = args[name]; if (value === undefined) return undefined; if (typeof value !== "string") throw new Error(`${name} must be a string.`); return value; }
 function intArg(args: Record<string, unknown>, name: string, fallback: number, min: number, max: number): number { const value = args[name] ?? fallback; if (!Number.isSafeInteger(value) || Number(value) < min || Number(value) > max) throw new Error(`${name} is invalid.`); return Number(value); }
-
-async function safePath(root: string, input: string, parentOnly = false): Promise<string> {
-  if (input.includes("\0")) throw new Error("Invalid path.");
-  const target = resolve(root, input || ".");
-  assertInside(root, target);
-  if (parentOnly) await assertNearestExistingAncestorInside(root, dirname(target));
-  else {
-    const canonical = await realpath(target).catch(() => null);
-    if (canonical) assertInside(root, canonical);
-  }
-  return target;
-}
-
-async function assertNearestExistingAncestorInside(root: string, start: string): Promise<void> {
-  let cursor = start;
-  while (true) {
-    const canonical = await realpath(cursor).catch(() => null);
-    if (canonical) {
-      assertInside(root, canonical);
-      return;
-    }
-    const parent = dirname(cursor);
-    if (parent === cursor) throw new Error("Write parent is unavailable.");
-    cursor = parent;
-  }
-}
-
-function assertInside(root: string, target: string): void {
-  const rel = relative(root, target);
-  if (rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || resolve(target) === resolve("/")) throw new Error("Path escapes workspace.");
-}
-
-async function listDirectory(root: string, args: Record<string, unknown>) {
-  const path = await safePath(root, textArg(args, "path", "."));
-  const entries = await readdir(path, { withFileTypes: true });
-  return entries.slice(0, 500).map((entry) => ({ name: entry.name, type: entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other" }));
-}
-
-async function readTextFile(root: string, args: Record<string, unknown>): Promise<string> {
-  const path = await safePath(root, textArg(args, "path"));
-  const stat = await lstat(path);
-  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Only regular files are readable.");
-  if (stat.size > MAX_FILE_BYTES) throw new Error("File exceeds 1 MiB limit.");
-  return readFile(path, "utf8");
-}
-
-async function searchFiles(root: string, args: Record<string, unknown>) {
-  const base = await safePath(root, textArg(args, "path", "."));
-  const query = textArg(args, "query");
-  const maxResults = intArg(args, "maxResults", 100, 1, 500);
-  const results: Array<{ path: string; line: number; text: string }> = [];
-  async function walk(dir: string): Promise<void> {
-    if (results.length >= maxResults) return;
-    for (const entry of await readdir(dir, { withFileTypes: true })) {
-      if (results.length >= maxResults || entry.name === ".git" || entry.name === "node_modules") break;
-      const full = resolve(dir, entry.name);
-      if (entry.isDirectory()) await walk(full);
-      else if (entry.isFile()) {
-        const stat = await lstat(full);
-        if (stat.size > MAX_FILE_BYTES) continue;
-        const content = await readFile(full, "utf8").catch(() => null);
-        if (content === null) continue;
-        for (const [index, line] of content.split(/\r?\n/u).entries()) if (line.includes(query)) { results.push({ path: relative(root, full), line: index + 1, text: line }); if (results.length >= maxResults) break; }
-      }
-    }
-  }
-  await walk(base);
-  return results;
-}
-
-async function writeTextFile(root: string, args: Record<string, unknown>) {
-  const path = await safePath(root, textArg(args, "path"), true);
-  const content = textArg(args, "content");
-  if (Buffer.byteLength(content) > MAX_FILE_BYTES) throw new Error("Content exceeds 1 MiB limit.");
-  const overwrite = args.overwrite === true;
-  const existing = await lstat(path).catch(() => null);
-  if (existing?.isSymbolicLink()) throw new Error("Refusing to replace a symbolic link.");
-  if (existing && !overwrite) throw new Error("File exists; set overwrite=true.");
-  await mkdir(dirname(path), { recursive: true });
-  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tmp, content, { flag: "wx", mode: 0o600 });
-  await rename(tmp, path).catch(async (error) => { await rm(tmp, { force: true }); throw error; });
-  return { path: relative(root, path), bytes: Buffer.byteLength(content) };
-}
-
-async function applyLinePatch(root: string, args: Record<string, unknown>) {
-  const path = await safePath(root, textArg(args, "path"));
-  const edits = args.edits;
-  if (!Array.isArray(edits) || edits.length < 1 || edits.length > 100) throw new Error("edits must contain 1-100 entries.");
-  const content = await readTextFile(root, { path: relative(root, path) });
-  const lines = content.split("\n");
-  const parsed = edits.map((value) => { if (!value || typeof value !== "object") throw new Error("Invalid edit."); const item = value as Record<string, unknown>; const startLine = Number(item.startLine); const endLine = Number(item.endLine); if (!Number.isSafeInteger(startLine) || !Number.isSafeInteger(endLine) || startLine < 1 || endLine < startLine || endLine > lines.length) throw new Error("Invalid edit range."); if (typeof item.replacement !== "string") throw new Error("replacement must be a string."); return { startLine, endLine, replacement: item.replacement }; }).sort((a, b) => b.startLine - a.startLine);
-  for (const edit of parsed) lines.splice(edit.startLine - 1, edit.endLine - edit.startLine + 1, ...edit.replacement.split("\n"));
-  return writeTextFile(root, { path: relative(root, path), content: lines.join("\n"), overwrite: true });
-}
-
-async function runCommand(root: string, args: Record<string, unknown>) {
-  const command = textArg(args, "command");
-  if (!command.trim()) throw new Error("command is required.");
-  const cwd = await safePath(root, textArg(args, "cwd", "."));
-  const timeout = intArg(args, "timeoutMs", 30000, 100, 120000);
-  const { stdout, stderr } = await exec(command, { cwd, timeout, maxBuffer: MAX_OUTPUT_BYTES, env: safeEnv() });
-  return { stdout: truncate(stdout), stderr: truncate(stderr) };
-}
-function safeEnv(): NodeJS.ProcessEnv { const keys = ["PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "SHELL", "SystemRoot"]; return Object.fromEntries(keys.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]])) as NodeJS.ProcessEnv; }
-function truncate(value: string): string { return Buffer.byteLength(value) <= MAX_OUTPUT_BYTES ? value : `${value.slice(0, MAX_OUTPUT_BYTES)}\n[truncated]`; }
+function optionalIntArg(args: Record<string, unknown>, name: string, min: number, max: number): number | undefined { const value = args[name]; if (value === undefined) return undefined; if (!Number.isSafeInteger(value) || Number(value) < min || Number(value) > max) throw new Error(`${name} is invalid.`); return Number(value); }
+function boolArg(args: Record<string, unknown>, name: string, fallback: boolean): boolean { const value = args[name] ?? fallback; if (typeof value !== "boolean") throw new Error(`${name} must be a boolean.`); return value; }
+function arrayArg(args: Record<string, unknown>, name: string, min: number, max: number): unknown[] { const value = args[name]; if (!Array.isArray(value) || value.length < min || value.length > max) throw new Error(`${name} must contain ${min}-${max} entries.`); return value; }
