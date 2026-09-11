@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "@frely/cli",
+      "name": "frely-cli",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.18.1",
         "keytar": "^7.9.0",

@@ -12,13 +12,13 @@ There is no separate `friday-local` project. Local MCP execution belongs to `fre
 
 ## Quick install
 
-After `@frely/cli` is published, Frely can serve the repository `install.sh` as:
+After `frely-cli` is published, Frely can serve the repository `install.sh` as:
 
 ```sh
 curl -fsSL https://app.frely.cloud/install.sh | sh
 ```
 
-The installer requires Node.js 22 or newer and installs `@frely/cli@latest` through npm.
+The installer requires Node.js 22 or newer and installs `frely-cli@latest` through npm.
 
 ## Install from a local checkout
 

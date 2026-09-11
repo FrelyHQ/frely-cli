@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-PACKAGE="${FRELY_CLI_PACKAGE:-@frely/cli@${FRELY_CLI_VERSION:-latest}}"
+PACKAGE="${FRELY_CLI_PACKAGE:-frely-cli@${FRELY_CLI_VERSION:-latest}}"
 
 fail() {
   printf '%s\n' "frely-cli install failed: $*" >&2

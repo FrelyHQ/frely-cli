@@ -67,11 +67,11 @@ bun install --global "$PWD"
 curl -fsSL https://app.frely.cloud/install.sh | sh
 ```
 
-安装脚本检查本机 Node.js/npm 版本，然后从公共 npm registry 安装 `@frely/cli@latest` 并提供 `frely` 命令。可以通过 `FRELY_CLI_VERSION` 指定版本，或通过 `FRELY_CLI_PACKAGE` 覆盖完整 npm package spec：
+安装脚本检查本机 Node.js/npm 版本，然后从公共 npm registry 安装 `frely-cli@latest` 并提供 `frely` 命令。可以通过 `FRELY_CLI_VERSION` 指定版本，或通过 `FRELY_CLI_PACKAGE` 覆盖完整 npm package spec：
 
 ```bash
 curl -fsSL https://app.frely.cloud/install.sh | FRELY_CLI_VERSION=0.3.0 sh
-curl -fsSL https://app.frely.cloud/install.sh | FRELY_CLI_PACKAGE='@frely/cli@next' sh
+curl -fsSL https://app.frely.cloud/install.sh | FRELY_CLI_PACKAGE='frely-cli@next' sh
 ```
 
 ## 账号登录

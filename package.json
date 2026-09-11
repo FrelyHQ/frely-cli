@@ -1,5 +1,5 @@
 {
-  "name": "@frely/cli",
+  "name": "frely-cli",
   "version": "0.3.0",
   "description": "Frely account CLI and local MCP runtime",
   "repository": {
