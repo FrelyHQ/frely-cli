@@ -1,0 +1,13 @@
+{
+  "schema": "project-governance.release-workflow.v1",
+  "integration_branch": "main",
+  "version": { "kind": "package-json", "path": "package.json" },
+  "gates": [["npm", "run", "check"], ["npm", "test"]],
+  "artifact": { "freeze": ["node", "scripts/release-freeze.mjs"] },
+  "targets": {
+    "npm": {
+      "deploy": ["node", "scripts/release-publish.mjs"],
+      "verify": ["node", "scripts/release-verify.mjs"]
+    }
+  }
+}
