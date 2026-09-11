@@ -211,12 +211,21 @@ function parseUser(payload: unknown): PublicUser {
 
 function sessionCookie(headers: Headers): string | null {
   const extended = headers as Headers & { getSetCookie?: () => string[] };
-  const setCookies = extended.getSetCookie?.() ?? (headers.get("set-cookie") ? [headers.get("set-cookie")!] : []);
+  const setCookies = [
+    ...(extended.getSetCookie?.() ?? []),
+    ...(headers.get("set-cookie") ? [headers.get("set-cookie")!] : []),
+  ].flatMap(splitSetCookie);
   for (const value of setCookies) {
     const pair = value.split(";", 1)[0]?.trim();
     if (pair?.startsWith(`${SESSION_COOKIE_NAME}=`)) return pair;
   }
   return null;
+}
+
+function splitSetCookie(value: string | null): string[] {
+  return value
+    ? value.split(/,(?=\s*[^;,=]+=[^;,]+)/g).map((cookie) => cookie.trim()).filter(Boolean)
+    : [];
 }
 
 function publicError(payload: unknown, status: number): string {
