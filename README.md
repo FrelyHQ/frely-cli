@@ -1,5 +1,7 @@
 # frely-cli
 
+设计与 ChatGPT MCP 用户流程见 [`docs/chatgpt-mcp.md`](docs/chatgpt-mcp.md)。
+
 `frely-cli` is Frely's local command-line client and MCP runtime. The target flow is:
 
 ```text
@@ -86,7 +88,7 @@ Enrollment returns:
 }
 ```
 
-The public MCP URL must not contain credentials, query parameters, or fragments. ChatGPT authentication belongs to the Frely Relay MCP endpoint and is separate from the local device connection credential.
+The public MCP URL is a private bearer URL of the form `https://app.frely.cloud/mcp/<device-id>/<private-secret>`. The secret is high entropy, is only stored as a SHA-256 hash by the Relay, and must be treated as a credential. ChatGPT uses this URL with MCP Authentication set to `None`; no separate ChatGPT MCP OAuth flow is required.
 
 A Device Relay connection request uses the enrolled Ed25519 device key and returns a short-lived connection grant:
 
@@ -117,13 +119,13 @@ Filesystem tools are constrained to the selected workspace, reject symlink escap
 - Password input requires an interactive TTY and is not stored.
 - Frely account session credentials are stored through Keychain / Secret Service via `keytar`.
 - The device Ed25519 private key is stored in the OS credential store.
-- Device binding metadata contains only non-secret identifiers, the public key, and MCP URL.
+- Device binding metadata includes the private MCP bearer URL and therefore uses owner-only file permissions; the Relay stores only the MCP secret hash.
 - Device connection grants are short lived and stay in memory.
-- The MCP URL never carries the device private key, account session, or connection grant.
+- The MCP URL does not contain the device private key, account session, or connection grant, but the URL's private secret is itself a credential.
 - `doctor` never prints passwords, sessions, private keys, or connection grants.
 
 ## Current server dependency
 
 The CLI side of installation, account login, device enrollment, MCP URL discovery, background service lifecycle, Device Relay WebSocket transport, multiplexing, reconnection, and local MCP execution is implemented here.
 
-A Frely Relay deployment must implement the three provisioning endpoints, Device Relay WebSocket host, public MCP ingress, and ChatGPT-facing MCP authentication before `frely mcp setup` can produce a working ChatGPT connection.
+A Frely Relay deployment must implement the three provisioning endpoints, Device Relay WebSocket host, and public private-URL MCP ingress before `frely mcp setup` can produce a working ChatGPT connection. The private MCP URL is the ChatGPT-side bearer credential, so no separate ChatGPT MCP authentication service is required.

@@ -14,6 +14,8 @@ export interface ConnectionGrant {
 
 export async function ensureDevice(): Promise<DeviceBinding> {
   const auth = await requireLogin();
+  const existing = await readDeviceBinding();
+  if (existing && existing.relayUrl === auth.config.relayUrl && existing.userId === auth.user.id) return existing;
   const identity = await loadOrCreateDeviceIdentity(auth.config.relayUrl, auth.user.id);
   const response = await relayFetch(auth.config.relayUrl, auth.cookie, "/api/user/device-relay/enroll", {
     method: "POST",
@@ -123,7 +125,7 @@ async function relayFetch(relayUrl: string, cookie: string, path: string, init: 
 function validateMcpUrl(value: string): string {
   const url = new URL(value);
   if (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost", "::1"].includes(url.hostname))) throw new Error("Relay returned an invalid MCP URL.");
-  if (url.username || url.password || url.search || url.hash) throw new Error("MCP URL must not contain credentials, query parameters, or fragments.");
+  if (url.username || url.password || url.search || url.hash) throw new Error("MCP URL must not contain URL userinfo, query parameters, or fragments.");
   return url.toString();
 }
 

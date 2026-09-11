@@ -73,7 +73,7 @@ async function main(): Promise<void> {
     stdout.write(`MCP URL: ${device.mcpUrl}\n`);
     stdout.write(`Background service: ${service.active ? "running" : "installed"}\n`);
     stdout.write(`Workspace: ${service.workspace ?? workspace}\n`);
-    stdout.write("Add the MCP URL to ChatGPT and complete the Frely authentication flow.\n");
+    stdout.write("Add the MCP URL to ChatGPT with Authentication set to None. Keep the URL private.\n");
     return;
   }
 
@@ -87,11 +87,12 @@ async function main(): Promise<void> {
   if (command === "mcp" && args[1] === "status") {
     await requireLogin();
     const device = await currentDevice();
-    if (args.includes("--json")) stdout.write(`${JSON.stringify({ provisioned: Boolean(device), device }, null, 2)}\n`);
+    const safeDevice = device ? { deviceId: device.deviceId, keyThumbprint: device.keyThumbprint, provisioned: true } : null;
+    if (args.includes("--json")) stdout.write(`${JSON.stringify({ provisioned: Boolean(device), device: safeDevice }, null, 2)}\n`);
     else if (!device) stdout.write("MCP device is not provisioned. Run `frely mcp url`.\n");
     else {
       stdout.write(`Device: ${device.deviceId}\n`);
-      stdout.write(`MCP URL: ${device.mcpUrl}\n`);
+      stdout.write("MCP URL: private; run `frely mcp url` to reveal it.\n");
       stdout.write(`Key: ${device.keyThumbprint}\n`);
     }
     return;
@@ -105,8 +106,8 @@ async function main(): Promise<void> {
     stdout.write(`Background service: ${service?.active ? "running" : "not running"}\n\n`);
     if (!service?.active) stdout.write("Run `frely mcp setup --workspace <path>` before adding the server to ChatGPT.\n\n");
     stdout.write("1. Add the MCP URL above as a custom MCP server in ChatGPT.\n");
-    stdout.write("2. Complete the Frely authentication flow presented by the Relay.\n");
-    stdout.write("3. Do not append a token or credential to the MCP URL.\n");
+    stdout.write("2. Set MCP Authentication to None.\n");
+    stdout.write("3. Treat the full MCP URL as a private bearer credential and do not share it.\n");
     return;
   }
 

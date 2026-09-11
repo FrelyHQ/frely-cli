@@ -18,7 +18,7 @@ export async function statusSnapshot() {
     node: process.version,
     platform: process.platform,
     auth,
-    device: device ? { deviceId: device.deviceId, mcpUrl: device.mcpUrl, keyThumbprint: device.keyThumbprint } : null,
+    device: device ? { deviceId: device.deviceId, keyThumbprint: device.keyThumbprint, provisioned: true } : null,
     service,
   };
 }
@@ -48,7 +48,7 @@ export async function doctor(): Promise<{ ok: boolean; checks: DiagnosticCheck[]
       const user = await whoami();
       checks.push({ name: "relay_session", ok: true, detail: `${user.email} @ ${auth.relayUrl}` });
       const device = await currentDevice();
-      checks.push({ name: "mcp_device", ok: Boolean(device), detail: device ? `${device.deviceId} -> ${device.mcpUrl}` : "not provisioned; run frely mcp url" });
+      checks.push({ name: "mcp_device", ok: Boolean(device), detail: device ? `${device.deviceId} provisioned` : "not provisioned; run frely mcp url" });
     } catch (error) {
       checks.push({ name: "relay_session", ok: false, detail: message(error) });
       checks.push({ name: "mcp_device", ok: false, detail: "unavailable until login is valid" });

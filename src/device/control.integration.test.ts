@@ -62,6 +62,8 @@ test("account session enrolls device, gets a signed connection grant, and revoke
     const device = await ensureDevice();
     assert.equal(device.deviceId, "device_test");
     assert.equal(device.mcpUrl, `${origin}/mcp/device_test`);
+    const repeated = await ensureDevice();
+    assert.equal(repeated.mcpUrl, device.mcpUrl);
     const grant = await connectionGrant(device);
     assert.equal(grant.accessToken, "short-lived-grant");
     await revokeDevice();
