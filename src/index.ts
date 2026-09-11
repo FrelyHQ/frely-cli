@@ -7,8 +7,7 @@ import { currentDevice, ensureDevice, revokeDevice } from "./device/control.js";
 import { serveDeviceRelay } from "./device/relay-client.js";
 import { startStdioMcp } from "./runtime/mcp.js";
 import { installMcpService, serviceStatus, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
-
-const VERSION = "0.3.0";
+import { VERSION } from "./version.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);

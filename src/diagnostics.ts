@@ -1,6 +1,7 @@
 import { inspectAuth, probeCredentialStore, whoami } from "./auth.js";
 import { currentDevice } from "./device/control.js";
 import { serviceStatus } from "./service.js";
+import { VERSION } from "./version.js";
 
 export interface DiagnosticCheck {
   name: string;
@@ -14,7 +15,7 @@ export async function statusSnapshot() {
   if (auth.configured && auth.credentialStored) device = await currentDevice().catch(() => null);
   const service = await serviceStatus().catch(() => ({ installed: false, active: false, platform: process.platform }));
   return {
-    version: "0.3.0",
+    version: VERSION,
     node: process.version,
     platform: process.platform,
     auth,

@@ -2,8 +2,9 @@ import { hostname, platform } from "node:os";
 import { requireLogin } from "../auth.js";
 import { createConnectionProof, deleteDeviceIdentity, loadOrCreateDeviceIdentity } from "./identity.js";
 import { clearDeviceBinding, readDeviceBinding, writeDeviceBinding, type DeviceBinding } from "./state.js";
+import { VERSION } from "../version.js";
 
-const CLIENT_VERSION = "0.3.0";
+const CLIENT_VERSION = VERSION;
 const TIMEOUT_MS = 15_000;
 
 export interface ConnectionGrant {
