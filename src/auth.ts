@@ -209,6 +209,42 @@ export async function inspectAuth(): Promise<AuthSnapshot> {
   };
 }
 
+/**
+ * Return whether a local credential is configured for the selected Relay.
+ * This deliberately performs no expiry, scope, refresh, or remote validity
+ * check. It is the only signal the Skill invocation router uses to choose the
+ * remote Agent MCP path.
+ */
+export async function hasConfiguredLocalToken(relayInput?: string): Promise<boolean> {
+  const relayUrl = normalizeRelayUrl(relayInput);
+  const raw = await credentialStore.getPassword(SERVICE, accountKey(relayUrl));
+  return typeof raw === "string" && raw.length > 0;
+}
+
+/** Load a configured credential without refreshing or validating it remotely. */
+export async function readConfiguredLocalCredential(relayInput?: string): Promise<AuthCredential | null> {
+  const relayUrl = normalizeRelayUrl(relayInput);
+  const raw = await credentialStore.getPassword(SERVICE, accountKey(relayUrl));
+  if (!raw) return null;
+  if (raw.startsWith(`${SESSION_COOKIE_NAME}=`)) return { scheme: "cookie", value: raw };
+  try {
+    const stored = JSON.parse(raw) as Partial<StoredOAuthCredential>;
+    if (stored.version !== 1 || stored.type !== "oauth" || !isString(stored.accessToken)) {
+      return { scheme: "bearer", value: raw };
+    }
+    return {
+      scheme: "bearer",
+      value: stored.accessToken,
+      ...(isString(stored.refreshToken) ? { refreshToken: stored.refreshToken } : {}),
+      ...(typeof stored.expiresAt === "number" ? { expiresAt: stored.expiresAt } : {}),
+    };
+  } catch {
+    // Presence remains the routing signal. The remote adapter will surface a
+    // stable authorization failure for an unreadable configured credential.
+    return { scheme: "bearer", value: raw };
+  }
+}
+
 export async function probeCredentialStore(): Promise<void> {
   const account = `doctor:${randomUUID()}`;
   const value = randomUUID();
