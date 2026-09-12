@@ -22,7 +22,7 @@ test("account session enrolls device, gets a signed connection grant, and revoke
     const body = bodyText ? JSON.parse(bodyText) as Record<string, unknown> : undefined;
     requests.push({ method: request.method ?? "", path: request.url ?? "", ...(request.headers.cookie ? { cookie: request.headers.cookie } : {}), ...(body ? { body } : {}) });
     response.setHeader("content-type", "application/json");
-    if (request.method === "GET" && request.url === "/api/auth/get-session") {
+    if (request.method === "GET" && request.url === "/api/auth/me") {
       response.end(JSON.stringify({ user: { id: "user_test", email: "user@example.com" } }));
       return;
     }
