@@ -18,21 +18,35 @@ After `frely-cli` is published, Frely can serve the repository `install.sh` as:
 curl -fsSL https://app.frely.cloud/install.sh | sh
 ```
 
-The installer requires Node.js 22 or newer and installs `frely-cli@latest` through npm.
+The package requires Node.js 22 or newer. The installer installs `frely-cli@latest` through npm.
 
-## Update an existing installation
+## Install or update with npm
 
-To update an installation made with the official installer, run the installer again:
-
-```sh
-curl -fsSL https://app.frely.cloud/install.sh | sh
-```
-
-The installer replaces the global package with the latest `frely-cli` release. If you installed the package directly with npm, use:
+To install or update to the latest release, use:
 
 ```sh
 npm install --global frely-cli@latest
 ```
+
+To install or update to a specific release, replace `latest` with the release version. For example:
+
+```sh
+npm install --global frely-cli@0.3.6
+```
+
+## Update an existing installation
+
+If you installed `frely-cli` with the official installer, run the [Quick install](#quick-install) installer again. It replaces the global package with the latest `frely-cli` release. If you installed the package directly with npm, run one of the commands in [Install or update with npm](#install-or-update-with-npm) again.
+
+If multiple `frely` executables are installed, list the candidates and check the npm global installation:
+
+```sh
+type -a frely
+npm prefix --global
+"$(npm prefix --global)/bin/frely" --version
+```
+
+Your shell uses the first `frely` path in `PATH`. If that path is not the npm global bin directory, put `$(npm prefix --global)/bin` earlier in `PATH` and run `frely --version` again.
 
 If the background Device Relay service is running, restart it after the update so it loads the new CLI version:
 
@@ -50,7 +64,7 @@ frely doctor
 
 ## Install from a local checkout
 
-The package requires Node.js 22 or newer. To install the current source checkout with Bun:
+To install the current source checkout with Bun:
 
 ```sh
 cd /path/to/frely-cli

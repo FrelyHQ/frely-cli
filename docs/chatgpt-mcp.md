@@ -25,9 +25,25 @@
 
 ## 安装
 
+`frely-cli` 要求 Node.js 22 或更高版本。
+
+### 使用 npm 安装或更新
+
+要从 npm 安装或更新到最新版，请运行：
+
+```bash
+npm install --global frely-cli@latest
+```
+
+要安装或更新到指定版本，请将 `latest` 替换为版本号。例如，使用 `0.3.6`：
+
+```bash
+npm install --global frely-cli@0.3.6
+```
+
 ### 从本地源码安装（Bun）
 
-`frely-cli` 要求 Node.js 22 或更高版本。要从当前源码目录安装全局 `frely` 命令：
+要从当前源码目录安装全局 `frely` 命令：
 
 ```bash
 cd /path/to/frely-cli
@@ -76,17 +92,19 @@ curl -fsSL https://app.frely.cloud/install.sh | FRELY_CLI_PACKAGE='frely-cli@nex
 
 ### 更新已有安装
 
-如果已经通过官方安装脚本安装 `frely-cli`，再次运行该脚本即可更新到最新版本：
+如果已经通过官方安装脚本安装 `frely-cli`，请重新运行[安装脚本](#使用仓库安装脚本)中的命令，脚本会更新到最新版本。
+
+如果通过 npm 安装，请重新运行[使用 npm 安装或更新](#使用-npm-安装或更新)中的相应命令。
+
+如果本机安装了多个 `frely` 可执行文件，请先查看命令路径和 npm 全局安装位置：
 
 ```bash
-curl -fsSL https://app.frely.cloud/install.sh | sh
+type -a frely
+npm prefix --global
+"$(npm prefix --global)/bin/frely" --version
 ```
 
-如果通过 npm 直接安装，请运行：
-
-```bash
-npm install --global frely-cli@latest
-```
+终端会使用 `PATH` 中排在最前面的 `frely` 路径。如果该路径不是 npm 的全局 bin 目录，请将 `$(npm prefix --global)/bin` 放到 `PATH` 的前面，然后重新运行 `frely --version`。
 
 如果 Device Relay 后台服务正在运行，更新后重启服务，使服务加载新的 CLI 版本：
 
