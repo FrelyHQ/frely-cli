@@ -1,5 +1,5 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign } from "node:crypto";
-import keytar from "keytar";
+import { credentialStore } from "../credential-store.js";
 
 const SERVICE = "frely-cli-device";
 
@@ -15,17 +15,17 @@ function account(relayUrl: string, userId: string): string {
 
 export async function loadOrCreateDeviceIdentity(relayUrl: string, userId: string): Promise<DeviceIdentity> {
   const key = account(relayUrl, userId);
-  let privateKeyPem = await keytar.getPassword(SERVICE, key);
+  let privateKeyPem = await credentialStore.getPassword(SERVICE, key);
   if (!privateKeyPem) {
     const pair = generateKeyPairSync("ed25519");
     privateKeyPem = pair.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
-    await keytar.setPassword(SERVICE, key, privateKeyPem);
+    await credentialStore.setPassword(SERVICE, key, privateKeyPem);
   }
   return identityFromPrivateKey(privateKeyPem);
 }
 
 export async function deleteDeviceIdentity(relayUrl: string, userId: string): Promise<void> {
-  await keytar.deletePassword(SERVICE, account(relayUrl, userId)).catch(() => false);
+  await credentialStore.deletePassword(SERVICE, account(relayUrl, userId)).catch(() => false);
 }
 
 export function connectionProofMessage(deviceId: string, issuedAt: string, nonce: string): string {

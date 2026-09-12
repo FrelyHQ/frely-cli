@@ -2,6 +2,7 @@
   "name": "frely-cli",
   "version": "0.3.6",
   "description": "Frely account CLI and local MCP runtime",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/FrelyHQ/frely-cli.git"
@@ -16,12 +17,14 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "NOTICE",
+    "TRADEMARKS.md"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "build": "node scripts/clean.mjs dist && tsc -p tsconfig.build.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "rm -rf .test-dist && tsc -p tsconfig.test.json && node --test .test-dist/**/*.test.js && rm -rf .test-dist",
+    "test": "node scripts/test.mjs",
     "start": "node dist/index.js",
     "prepack": "npm run check && npm test && npm run build"
   },
