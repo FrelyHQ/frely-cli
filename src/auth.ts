@@ -291,7 +291,7 @@ async function fetchUser(relayUrl: string, credential: AuthCredential): Promise<
   const headers: Record<string, string> = { accept: "application/json" };
   if (credential.scheme === "cookie") headers.cookie = credential.value;
   else headers.authorization = `Bearer ${credential.value}`;
-  const response = await fetchWithTimeout(`${relayUrl}/api/auth/me`, { headers, redirect: "error" });
+  const response = await fetchWithTimeout(`${relayUrl}/api/auth/get-session`, { headers, redirect: "error" });
   const payload = await safeJson(response);
   debugAuth(`stage=profile status=${response.status} shape=${payloadShape(payload)}`);
   if (!response.ok) {
