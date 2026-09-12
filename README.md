@@ -20,6 +20,34 @@ curl -fsSL https://app.frely.cloud/install.sh | sh
 
 The installer requires Node.js 22 or newer and installs `frely-cli@latest` through npm.
 
+## Update an existing installation
+
+To update an installation made with the official installer, run the installer again:
+
+```sh
+curl -fsSL https://app.frely.cloud/install.sh | sh
+```
+
+The installer replaces the global package with the latest `frely-cli` release. If you installed the package directly with npm, use:
+
+```sh
+npm install --global frely-cli@latest
+```
+
+If the background Device Relay service is running, restart it after the update so it loads the new CLI version:
+
+```sh
+frely mcp service stop
+frely mcp service start
+```
+
+Verify the update:
+
+```sh
+frely --version
+frely doctor
+```
+
 ## Install from a local checkout
 
 The package requires Node.js 22 or newer. To install the current source checkout with Bun:

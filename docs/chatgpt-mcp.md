@@ -74,6 +74,34 @@ curl -fsSL https://app.frely.cloud/install.sh | FRELY_CLI_VERSION=0.3.0 sh
 curl -fsSL https://app.frely.cloud/install.sh | FRELY_CLI_PACKAGE='frely-cli@next' sh
 ```
 
+### 更新已有安装
+
+如果已经通过官方安装脚本安装 `frely-cli`，再次运行该脚本即可更新到最新版本：
+
+```bash
+curl -fsSL https://app.frely.cloud/install.sh | sh
+```
+
+如果通过 npm 直接安装，请运行：
+
+```bash
+npm install --global frely-cli@latest
+```
+
+如果 Device Relay 后台服务正在运行，更新后重启服务，使服务加载新的 CLI 版本：
+
+```bash
+frely mcp service stop
+frely mcp service start
+```
+
+检查更新结果：
+
+```bash
+frely --version
+frely doctor
+```
+
 ## 账号登录
 
 ```bash
