@@ -14,6 +14,10 @@ const OAUTH_SCOPE = "openid profile profile:read email offline_access device-rel
 const DEFAULT_RELAY = "https://app.frely.cloud";
 const REQUEST_TIMEOUT_MS = 15_000;
 
+function debugAuth(message: string): void {
+  if (process.env.FRELY_DEBUG === "1") process.stderr.write(`[debug] auth ${message}\n`);
+}
+
 export interface PublicUser {
   id: string;
   email: string;
@@ -240,6 +244,7 @@ async function requestDeviceCode(relayUrl: string): Promise<DeviceCodeResponse> 
     redirect: "error",
   });
   const payload = await safeJson(response);
+  debugAuth(`stage=device-code status=${response.status}`);
   if (!response.ok) throw new Error(publicError(payload, response.status));
   const record = objectPayload(payload, "device authorization");
   if (!isString(record.device_code) || !isString(record.user_code) || !isString(record.verification_uri) || !isString(record.verification_uri_complete)) throw new Error("Frely returned an invalid device authorization response.");
@@ -259,6 +264,7 @@ async function pollDeviceToken(relayUrl: string, device: DeviceCodeResponse): Pr
       redirect: "error",
     });
     const payload = await safeJson(response);
+    debugAuth(`stage=token status=${response.status}`);
     const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
     if (response.ok && isString(record.access_token) && (!record.token_type || String(record.token_type).toLowerCase() === "bearer")) {
       const expiresIn = numberPayload(record.expires_in, 1, 86_400);
@@ -287,6 +293,7 @@ async function fetchUser(relayUrl: string, credential: AuthCredential): Promise<
   else headers.authorization = `Bearer ${credential.value}`;
   const response = await fetchWithTimeout(`${relayUrl}/api/auth/me`, { headers, redirect: "error" });
   const payload = await safeJson(response);
+  debugAuth(`stage=profile status=${response.status} shape=${payloadShape(payload)}`);
   if (!response.ok) {
     if (response.status === 401) throw new Error("Frely login expired. Run `frely login`.");
     throw new Error(publicError(payload, response.status));
@@ -395,8 +402,17 @@ async function safeJson(response: Response): Promise<unknown> {
 function parseUser(payload: unknown): PublicUser {
   const root = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
   const candidate = root.user && typeof root.user === "object" ? root.user as Record<string, unknown> : root;
-  if (typeof candidate.id !== "string" || typeof candidate.email !== "string") throw new Error("Frely returned an invalid user profile.");
+  if (typeof candidate.id !== "string" || typeof candidate.email !== "string") {
+    const missing = [typeof candidate.id !== "string" ? "id" : null, typeof candidate.email !== "string" ? "email" : null].filter(Boolean).join(",");
+    debugAuth(`profile validation=failed missing=${missing}`);
+    throw new Error(`Frely returned an invalid user profile: missing ${missing}. Run with FRELY_DEBUG=1 for redacted diagnostics.`);
+  }
   return { id: candidate.id, email: candidate.email, ...(typeof candidate.name === "string" ? { name: candidate.name } : {}) };
+}
+
+function payloadShape(payload: unknown): string {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return typeof payload;
+  return Object.entries(payload as Record<string, unknown>).map(([key, value]) => `${key}:${value && typeof value === "object" ? "object" : typeof value}`).join(",") || "object";
 }
 
 function sessionCookie(headers: Headers): string | null {
