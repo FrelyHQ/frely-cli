@@ -10,6 +10,11 @@ install -> frely login -> frely mcp setup -> add MCP URL to ChatGPT
 
 There is no separate `friday-local` project. Local MCP execution belongs to `frely-cli`.
 
+This repository contains the open-source Frely client and local MCP runtime.
+The hosted Friday Relay control plane remains a separate service dependency.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development guidance and
+[`SECURITY.md`](SECURITY.md) for private vulnerability reporting.
+
 ## Quick install
 
 After `frely-cli` is published, Frely can serve the repository `install.sh` as:
@@ -86,7 +91,9 @@ bun pm trust keytar
 bun install
 ```
 
-The repository currently has an npm lockfile rather than a committed Bun lockfile. The first `bun install` may create `bun.lock`; handle that file according to the repository's lockfile policy.
+The repository uses npm as the canonical package manager for CI and releases
+and commits `package-lock.json`. Bun can be used for local development; keep
+the lockfiles synchronized when changing dependencies.
 
 ## First use
 
@@ -235,3 +242,9 @@ Filesystem tools are constrained to the selected workspace, reject symlink escap
 The CLI side of installation, account login, device enrollment, MCP URL discovery, background service lifecycle, Device Relay WebSocket transport, multiplexing, reconnection, local MCP execution, local model discovery, and loopback Provider forwarding is implemented here.
 
 A Frely Relay deployment must implement the device provisioning endpoints, Device Relay WebSocket host, private MCP ingress, local Provider ingress, and personal Provider control flow. The private MCP URL is the ChatGPT-side bearer credential. Local Provider credentials are device-key signatures stored by CPA.
+
+## License and trademarks
+
+`frely-cli` is licensed under the Apache License 2.0; see [`LICENSE`](LICENSE).
+The Frely name, logos, and product names are not licensed as trademarks; see
+[`TRADEMARKS.md`](TRADEMARKS.md).

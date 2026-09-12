@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createPublicKey, verify } from "node:crypto";
 import { deleteDeviceIdentity, loadOrCreateDeviceIdentity } from "./identity.js";
+import { useMemoryCredentialStore } from "../test-support.js";
 
 test("device identity is stable and signs with enrolled public key", async () => {
   const relay = "https://test.invalid";
   const userId = `test-${process.pid}-${Date.now()}`;
+  const restoreCredentialStore = useMemoryCredentialStore();
   try {
     const first = await loadOrCreateDeviceIdentity(relay, userId);
     const second = await loadOrCreateDeviceIdentity(relay, userId);
@@ -16,5 +18,6 @@ test("device identity is stable and signs with enrolled public key", async () =>
     assert.equal(verify(null, Buffer.from(message), publicKey, Buffer.from(first.signMessage(message), "base64url")), true);
   } finally {
     await deleteDeviceIdentity(relay, userId);
+    restoreCredentialStore();
   }
 });

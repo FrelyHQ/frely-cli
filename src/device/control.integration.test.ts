@@ -5,12 +5,12 @@ import { createPublicKey, verify } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import keytar from "keytar";
+import { credentialStore } from "../credential-store.js";
 import { connectionGrant, ensureDevice, revokeDevice } from "./control.js";
 import { connectionProofMessage } from "./identity.js";
+import { useMemoryCredentialStore } from "../test-support.js";
 
 const ACCOUNT_SERVICE = "frely-cli";
-const DEVICE_SERVICE = "frely-cli-device";
 
 test("account session enrolls device, gets a signed connection grant, and revokes", async () => {
   const requests: Array<{ method: string; path: string; cookie?: string; body?: Record<string, unknown> }> = [];
@@ -51,13 +51,13 @@ test("account session enrolls device, gets a signed connection grant, and revoke
   origin = `http://127.0.0.1:${address.port}`;
   const configRoot = await mkdtemp(join(tmpdir(), "frely-cli-control-"));
   const previousConfigHome = process.env.XDG_CONFIG_HOME;
+  const restoreCredentialStore = useMemoryCredentialStore();
   process.env.XDG_CONFIG_HOME = configRoot;
   const accountKey = origin;
-  const deviceKey = `${origin}|user_test`;
   try {
     await mkdir(join(configRoot, "frely"), { recursive: true });
     await writeFile(join(configRoot, "frely", "config.json"), JSON.stringify({ version: 1, relayUrl: origin, user: { id: "user_test", email: "user@example.com" } }), { mode: 0o600 });
-    await keytar.setPassword(ACCOUNT_SERVICE, accountKey, "friday_session_token=test-session");
+    await credentialStore.setPassword(ACCOUNT_SERVICE, accountKey, "friday_session_token=test-session");
 
     const device = await ensureDevice();
     assert.equal(device.deviceId, "device_test");
@@ -74,10 +74,9 @@ test("account session enrolls device, gets a signed connection grant, and revoke
     assert.equal(protectedCalls[0]?.body?.deviceId, undefined);
     assert.equal(protectedCalls[2]?.body?.deviceId, "device_test");
   } finally {
+    restoreCredentialStore();
     if (previousConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = previousConfigHome;
-    await keytar.deletePassword(ACCOUNT_SERVICE, accountKey).catch(() => false);
-    await keytar.deletePassword(DEVICE_SERVICE, deviceKey).catch(() => false);
     await rm(configRoot, { recursive: true, force: true });
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
