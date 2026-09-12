@@ -4,3 +4,4 @@ dist/
 *.log
 *.tgz
 .DS_Store
+.agents/.cache/
