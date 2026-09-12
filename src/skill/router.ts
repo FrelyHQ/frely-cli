@@ -71,7 +71,7 @@ export async function invokeSkill(options: SkillRouterOptions): Promise<SkillInv
   const tokenConfigured = await hasConfiguredLocalToken(relayUrl);
   if (!tokenConfigured) {
     if (capability?.level === "advanced") {
-      if (options.registrationUrl === undefined) {
+      if (options.registrationUrl === undefined || !isSafeRegistrationUrl(options.registrationUrl)) {
         throw new Error("registration_url_required");
       }
       throw new SkillInvocationError("payment_required", {
@@ -161,4 +161,13 @@ export const remoteAgentMcpInvoker: RemoteAgentMcpInvoker = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isSafeRegistrationUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password && !url.hash;
+  } catch {
+    return false;
+  }
 }

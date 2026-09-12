@@ -50,6 +50,26 @@ test("returns payment_required only when an advanced capability is reached", asy
   }
 });
 
+test("rejects an untrusted registration URL for an advanced capability", async () => {
+  const restore = memoryStore();
+  try {
+    await assert.rejects(
+      invokeSkill({
+        relayUrl,
+        modelId: "user/vm-agent/v1",
+        task: "advanced task",
+        capability: { id: "server-export", level: "advanced", entrypoints: ["model"] },
+        registrationUrl: "http://evil.example/register",
+        baseSkill: async () => ({ text: "must not execute" }),
+        remoteAgentMcp: { invoke: async () => ({ text: "must not execute" }) },
+      }),
+      (error: unknown) => error instanceof Error && error.message === "registration_url_required",
+    );
+  } finally {
+    restore();
+  }
+});
+
 test("configured but expired credentials still select remote MCP and never fall back", async () => {
   const restore = memoryStore();
   try {
