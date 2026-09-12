@@ -32,6 +32,15 @@ export function connectionProofMessage(deviceId: string, issuedAt: string, nonce
   return `frely.device-relay.connect.v1\n${deviceId}\n${issuedAt}\n${nonce}`;
 }
 
+export function localProviderTokenMessage(deviceId: string, userId: string, providerId: string): string {
+  return `frely.device-relay.provider.v1\n${deviceId}\n${userId}\n${providerId}`;
+}
+
+export function createLocalProviderToken(identity: DeviceIdentity, deviceId: string, userId: string, providerId: string): string {
+  if (!/^drd_[a-f0-9]{32}$/u.test(deviceId) || !/^[A-Za-z0-9_-]{1,128}$/u.test(userId) || !/^prv_[0-9a-f]{24}$/u.test(providerId)) throw new Error("Local Provider token target is invalid.");
+  return `flp_v1.${deviceId}.${userId}.${providerId}.${identity.signMessage(localProviderTokenMessage(deviceId, userId, providerId))}`;
+}
+
 export function createConnectionProof(identity: DeviceIdentity, deviceId: string): {
   deviceId: string;
   publicKeySpki: string;

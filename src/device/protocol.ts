@@ -6,7 +6,7 @@ export type DeviceRelayRequest = {
   protocol: typeof DEVICE_RELAY_PROTOCOL;
   type: "request";
   id: string;
-  method: "mcp";
+  method: "mcp" | "provider";
   payload: unknown;
 };
 
@@ -25,7 +25,28 @@ export type DeviceRelayCancel = {
   id: string;
 };
 
-export type DeviceRelayEnvelope = DeviceRelayRequest | DeviceRelayResponse | DeviceRelayCancel;
+export type DeviceRelayStreamStart = {
+  protocol: typeof DEVICE_RELAY_PROTOCOL;
+  type: "stream_start";
+  id: string;
+  status: number;
+  contentType: string;
+};
+
+export type DeviceRelayStreamChunk = {
+  protocol: typeof DEVICE_RELAY_PROTOCOL;
+  type: "stream_chunk";
+  id: string;
+  data: string;
+};
+
+export type DeviceRelayStreamEnd = {
+  protocol: typeof DEVICE_RELAY_PROTOCOL;
+  type: "stream_end";
+  id: string;
+};
+
+export type DeviceRelayEnvelope = DeviceRelayRequest | DeviceRelayResponse | DeviceRelayCancel | DeviceRelayStreamStart | DeviceRelayStreamChunk | DeviceRelayStreamEnd;
 
 export class DeviceRelayProtocolError extends Error {
   constructor(readonly code: "frame_invalid" | "frame_too_large" | "duplicate_request" | "inflight_limit") {
@@ -60,10 +81,24 @@ export function validateDeviceRelayEnvelope(value: unknown): asserts value is De
   assertRequestId(record.id);
   if (record.type === "request") {
     exactKeys(record, ["protocol", "type", "id", "method", "payload"]);
-    if (record.method !== "mcp") throw new DeviceRelayProtocolError("frame_invalid");
+    if (record.method !== "mcp" && record.method !== "provider") throw new DeviceRelayProtocolError("frame_invalid");
     return;
   }
   if (record.type === "cancel") {
+    exactKeys(record, ["protocol", "type", "id"]);
+    return;
+  }
+  if (record.type === "stream_start") {
+    exactKeys(record, ["protocol", "type", "id", "status", "contentType"]);
+    if (!Number.isSafeInteger(record.status) || Number(record.status) < 100 || Number(record.status) > 599 || typeof record.contentType !== "string" || record.contentType.length < 1 || record.contentType.length > 128 || !/^[\x20-\x7e]+$/u.test(record.contentType)) throw new DeviceRelayProtocolError("frame_invalid");
+    return;
+  }
+  if (record.type === "stream_chunk") {
+    exactKeys(record, ["protocol", "type", "id", "data"]);
+    if (typeof record.data !== "string" || record.data.length < 1 || record.data.length > 1024 * 1024) throw new DeviceRelayProtocolError("frame_invalid");
+    return;
+  }
+  if (record.type === "stream_end") {
     exactKeys(record, ["protocol", "type", "id"]);
     return;
   }

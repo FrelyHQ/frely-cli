@@ -4,9 +4,13 @@ import { stdin, stdout } from "node:process";
 import { loginDevice, logout, requireLogin, whoami } from "./auth.js";
 import { doctor, statusSnapshot } from "./diagnostics.js";
 import { currentDevice, ensureDevice, revokeDevice } from "./device/control.js";
+import { createLocalProviderToken, loadOrCreateDeviceIdentity } from "./device/identity.js";
 import { serveDeviceRelay } from "./device/relay-client.js";
 import { startStdioMcp } from "./runtime/mcp.js";
-import { installMcpService, serviceStatus, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
+import { installDeviceRelayService, installMcpService, serviceStatus, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
+import { discoverLocalModels } from "./provider/local.js";
+import { finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider, waitForLocalProviderRelay } from "./provider/control.js";
+import { getLocalProvider, isSupportedLocalModelName, listLocalProviders, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider } from "./provider/state.js";
 import { VERSION } from "./version.js";
 
 async function main(): Promise<void> {
@@ -66,6 +70,68 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "provider" && args[1] === "share") {
+    const driver = args[2] ?? "ollama";
+    if (driver !== "ollama" && driver !== "openai-compatible") throw new Error("Provider driver must be `ollama` or `openai-compatible`.");
+    const auth = await requireLogin();
+    const device = await ensureDevice();
+    const defaultUrl = driver === "ollama" ? "http://127.0.0.1:11434/v1" : "http://127.0.0.1:8080/v1";
+    const baseUrl = normalizeLoopbackOpenAiBaseUrl(option(args, "--url") ?? defaultUrl);
+    const selectedModels = option(args, "--models")?.split(",").map((value) => value.trim()).filter(Boolean);
+    const models = selectedModels?.length ? [...new Set(selectedModels)] : await discoverLocalModels(baseUrl);
+    if (models.length < 1 || models.length > 256 || models.some((model) => !isSupportedLocalModelName(model))) throw new Error("At least one valid model is required; model names cannot contain whitespace or `/`.");
+    const slots = await listPersonalProviderSlots();
+    const requestedSlot = option(args, "--slot");
+    const slot = requestedSlot ? slots.find((candidate) => candidate.id === requestedSlot) : slots.find((candidate) => candidate.lifecycle === "active" && candidate.provider === null);
+    if (!slot) throw new Error(requestedSlot ? "The requested personal Provider slot is unavailable." : "No empty active personal Provider slot is available.");
+    if (slot.lifecycle !== "active" || slot.provider !== null) throw new Error("The selected personal Provider slot is not empty and active.");
+    const name = (option(args, "--name") ?? `${driver === "ollama" ? "Ollama" : "Local"}: ${models[0]}`).slice(0, 128);
+    const prepared = await prepareLocalProvider({ deviceId: device.deviceId, slotId: slot.id, name, models });
+    await saveLocalProvider({ providerId: prepared.providerId, name, driver, baseUrl, providerBaseUrl: prepared.providerBaseUrl, models, createdAt: new Date().toISOString() });
+    const service = await installDeviceRelayService();
+    const identity = await loadOrCreateDeviceIdentity(auth.config.relayUrl, auth.user.id);
+    const token = createLocalProviderToken(identity, device.deviceId, auth.user.id, prepared.providerId);
+    try {
+      await waitForLocalProviderRelay(prepared.providerBaseUrl, token);
+      await finalizeLocalProvider({ providerId: prepared.providerId, token });
+    } catch (error) {
+      throw new Error(`Provider ${prepared.providerId} is prepared but not ready. Run \`frely provider finalize ${prepared.providerId}\`. ${error instanceof Error ? error.message : String(error)}`);
+    }
+    stdout.write(`Provider: ${prepared.providerId}\n`);
+    stdout.write(`Models: ${models.join(", ")}\n`);
+    stdout.write(`Device Relay: ${service.active ? "running" : "installed"}\n`);
+    stdout.write("The Provider is ready for Access Point creation in Frely.\n");
+    return;
+  }
+
+  if (command === "provider" && args[1] === "finalize") {
+    const providerId = args[2] ?? "";
+    if (!/^prv_[0-9a-f]{24}$/u.test(providerId)) throw new Error("Usage: frely provider finalize <provider-id>");
+    const auth = await requireLogin();
+    const device = await ensureDevice();
+    const provider = await getLocalProvider(providerId);
+    if (!provider) throw new Error("Local Provider is not configured on this device.");
+    const service = await installDeviceRelayService();
+    const identity = await loadOrCreateDeviceIdentity(auth.config.relayUrl, auth.user.id);
+    const token = createLocalProviderToken(identity, device.deviceId, auth.user.id, providerId);
+    await waitForLocalProviderRelay(provider.providerBaseUrl, token);
+    await finalizeLocalProvider({ providerId, token });
+    stdout.write(`Provider: ${providerId}\n`);
+    stdout.write(`Models: ${provider.models.join(", ")}\n`);
+    stdout.write(`Device Relay: ${service.active ? "running" : "installed"}\n`);
+    stdout.write("The Provider is ready for Access Point creation in Frely.\n");
+    return;
+  }
+
+  if (command === "provider" && args[1] === "list") {
+    await requireLogin();
+    const providers = await listLocalProviders();
+    if (args.includes("--json")) stdout.write(`${JSON.stringify({ providers }, null, 2)}\n`);
+    else if (providers.length === 0) stdout.write("No local Providers are configured on this device.\n");
+    else for (const provider of providers) stdout.write(`${provider.providerId}  ${provider.driver}  ${provider.name}  ${provider.models.join(", ")}\n`);
+    return;
+  }
+
   if (command === "mcp" && args[1] === "setup") {
     await requireLogin();
     const workspace = resolve(option(args, "--workspace") || process.cwd());
@@ -114,13 +180,14 @@ async function main(): Promise<void> {
 
   if (command === "mcp" && args[1] === "serve") {
     await requireLogin();
-    const workspace = resolve(option(args, "--workspace") || process.cwd());
+    const providerOnly = args.includes("--provider-only");
+    const workspace = providerOnly ? undefined : resolve(option(args, "--workspace") || process.cwd());
     const controller = new AbortController();
     const stop = () => controller.abort();
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     try {
-      await serveDeviceRelay({ workspace, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
+      await serveDeviceRelay({ ...(workspace ? { workspace } : {}), signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
     } finally {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
@@ -180,6 +247,9 @@ function usage(): void {
     "  frely whoami\n" +
     "  frely status [--json]\n" +
     "  frely doctor [--json]\n" +
+    "  frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]\n" +
+    "  frely provider list [--json]\n" +
+    "  frely provider finalize <provider-id>\n" +
     "  frely mcp setup [--workspace <path>]\n" +
     "  frely mcp url [--json]\n" +
     "  frely mcp status [--json]\n" +

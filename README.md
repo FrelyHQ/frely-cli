@@ -103,6 +103,39 @@ Or show ChatGPT-oriented instructions with:
 frely mcp chatgpt
 ```
 
+## Local model sharing
+
+`frely-cli` can publish a loopback OpenAI-compatible runtime as a Frely personal Provider. Ollama is the default driver.
+
+```sh
+frely provider share ollama
+```
+
+Default Ollama endpoint: `http://127.0.0.1:11434/v1`.
+
+Custom endpoint and model selection:
+
+```sh
+frely provider share openai-compatible \
+  --url http://127.0.0.1:8080/v1 \
+  --models model-a,model-b \
+  --slot <personal-provider-slot-id> \
+  --name "Local GPU"
+```
+
+Requirements: Frely login, one empty active personal Provider slot, loopback HTTP, OpenAI-compatible `/v1`. Model names cannot contain whitespace or `/`.
+
+The command creates a server-managed `openai-compatible` personal Provider, stores the local endpoint in owner-only CLI state, starts the Device Relay service, signs a Provider credential with the device Ed25519 key, configures CPA, and enables the declared models. Existing Frely Access Point and API-key flows consume the Provider.
+
+Provider inspection and recovery:
+
+```sh
+frely provider list
+frely provider finalize <provider-id>
+```
+
+`finalize` resumes CPA setup for a Provider left in a prepared state.
+
 ## Commands
 
 ```text
@@ -111,6 +144,9 @@ frely logout
 frely whoami
 frely status [--json]
 frely doctor [--json]
+frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]
+frely provider list [--json]
+frely provider finalize <provider-id>
 frely mcp setup [--workspace <path>]
 frely mcp url [--json]
 frely mcp status [--json]
@@ -182,6 +218,6 @@ Filesystem tools are constrained to the selected workspace, reject symlink escap
 
 ## Current server dependency
 
-The CLI side of installation, account login, device enrollment, MCP URL discovery, background service lifecycle, Device Relay WebSocket transport, multiplexing, reconnection, and local MCP execution is implemented here.
+The CLI side of installation, account login, device enrollment, MCP URL discovery, background service lifecycle, Device Relay WebSocket transport, multiplexing, reconnection, local MCP execution, local model discovery, and loopback Provider forwarding is implemented here.
 
-A Frely Relay deployment must implement the three provisioning endpoints, Device Relay WebSocket host, and public private-URL MCP ingress before `frely mcp setup` can produce a working ChatGPT connection. The private MCP URL is the ChatGPT-side bearer credential, so no separate ChatGPT MCP authentication service is required.
+A Frely Relay deployment must implement the device provisioning endpoints, Device Relay WebSocket host, private MCP ingress, local Provider ingress, and personal Provider control flow. The private MCP URL is the ChatGPT-side bearer credential. Local Provider credentials are device-key signatures stored by CPA.

@@ -16,7 +16,12 @@ export interface McpServiceInfo {
 }
 
 export async function installMcpService(workspaceInput: string): Promise<McpServiceInfo> {
-  const workspace = await realpath(resolve(workspaceInput));
+  return installDeviceRelayService(workspaceInput);
+}
+
+export async function installDeviceRelayService(workspaceInput?: string): Promise<McpServiceInfo> {
+  const existing = await readServiceConfig();
+  const workspace = workspaceInput ? await realpath(resolve(workspaceInput)) : existing?.workspace;
   const entry = await realpath(process.argv[1] ?? "");
   const stateDir = frelyStateDir();
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
@@ -127,18 +132,19 @@ function systemdUnitPath(): string {
   return join(frelyConfigDir(), "systemd", "user", "frely-mcp.service");
 }
 
-async function writeServiceConfig(workspace: string): Promise<void> {
+async function writeServiceConfig(workspace?: string): Promise<void> {
   const path = serviceConfigPath();
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await writeFile(path, `${JSON.stringify({ version: 1, workspace }, null, 2)}\n`, { mode: 0o600 });
+  await writeFile(path, `${JSON.stringify({ version: 2, ...(workspace ? { workspace } : {}) }, null, 2)}\n`, { mode: 0o600 });
 }
 
-async function readServiceConfig(): Promise<{ workspace: string } | null> {
+async function readServiceConfig(): Promise<{ workspace?: string } | null> {
   const raw = await readFile(serviceConfigPath(), "utf8").catch(() => null);
   if (!raw) return null;
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
-    return typeof value.workspace === "string" ? { workspace: value.workspace } : null;
+    if (value.version !== 1 && value.version !== 2) return null;
+    return typeof value.workspace === "string" ? { workspace: value.workspace } : {};
   } catch {
     return null;
   }
@@ -148,14 +154,17 @@ async function fileExists(path: string): Promise<boolean> {
   return readFile(path).then(() => true, () => false);
 }
 
-function launchAgentPlist(entry: string, workspace: string, stateDir: string): string {
+function launchAgentPlist(entry: string, workspace: string | undefined, stateDir: string): string {
   const path = process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${LABEL}</string>\n<key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>${xml(entry)}</string><string>mcp</string><string>serve</string><string>--workspace</string><string>${xml(workspace)}</string></array>\n<key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(path)}</string></dict>\n<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>\n<key>StandardOutPath</key><string>${xml(join(stateDir, "mcp.log"))}</string>\n<key>StandardErrorPath</key><string>${xml(join(stateDir, "mcp.log"))}</string>\n</dict></plist>\n`;
+  const args = [process.execPath, entry, "mcp", "serve", ...(workspace ? ["--workspace", workspace] : ["--provider-only"])];
+  const argumentsXml = args.map((value) => `<string>${xml(value)}</string>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${LABEL}</string>\n<key>ProgramArguments</key><array>${argumentsXml}</array>\n<key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(path)}</string></dict>\n<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>\n<key>StandardOutPath</key><string>${xml(join(stateDir, "mcp.log"))}</string>\n<key>StandardErrorPath</key><string>${xml(join(stateDir, "mcp.log"))}</string>\n</dict></plist>\n`;
 }
 
-function systemdUnit(entry: string, workspace: string): string {
+function systemdUnit(entry: string, workspace?: string): string {
   const path = process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
-  return `[Unit]\nDescription=Frely MCP Device Relay\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart=${systemdQuote(process.execPath)} ${systemdQuote(entry)} mcp serve --workspace ${systemdQuote(workspace)}\nRestart=always\nRestartSec=3\nEnvironment=${systemdQuote(`PATH=${path}`)}\n\n[Install]\nWantedBy=default.target\n`;
+  const args = [process.execPath, entry, "mcp", "serve", ...(workspace ? ["--workspace", workspace] : ["--provider-only"])].map(systemdQuote).join(" ");
+  return `[Unit]\nDescription=Frely Device Relay\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart=${args}\nRestart=always\nRestartSec=3\nEnvironment=${systemdQuote(`PATH=${path}`)}\n\n[Install]\nWantedBy=default.target\n`;
 }
 
 function xml(value: string): string {

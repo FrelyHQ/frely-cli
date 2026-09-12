@@ -25,3 +25,4 @@ fi
 command -v frely >/dev/null 2>&1 || fail "npm installed the package but the frely command is not on PATH."
 printf '%s\n' "Installed frely $(frely --version)."
 printf '%s\n' "Next: run 'frely login', then 'frely mcp setup --workspace <path>'."
+printf '%s\n' "Local model: frely provider share ollama"
