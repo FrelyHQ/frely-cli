@@ -87,8 +87,10 @@ async function serveConnection(
       if (signal.aborted) finish();
       else finish(new Error(`WebSocket closed (${code}${reason.length ? `: ${reason.toString()}` : ""})`));
     });
-    socket.on("message", (data, isBinary) => {
-      if (isBinary) { finish(new Error("Device Relay sent an unsupported binary control frame.")); return; }
+    socket.on("message", (data) => {
+      // WebSocket peers may deliver the same JSON envelope as either a text
+      // or a binary frame. `rawDataBuffer` normalizes both forms before the
+      // protocol validator parses the JSON.
       void handleFrame(rawDataBuffer(data), socket, inflight, cancelled, session).catch((error) => finish(error));
     });
   });
