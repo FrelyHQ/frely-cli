@@ -27,3 +27,16 @@ test("relay MCP session handles initialize and concurrent requests", async () =>
     await session.close();
   }
 });
+
+test("relay MCP session reports malformed initialize as Invalid Request", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "frely-relay-mcp-invalid-"));
+  const session = await RelayMcpSession.create(workspace);
+  try {
+    const response = await session.execute({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) as {
+      error?: { code?: number; message?: string };
+    };
+    assert.deepEqual(response.error, { code: -32600, message: "Invalid Request" });
+  } finally {
+    await session.close();
+  }
+});

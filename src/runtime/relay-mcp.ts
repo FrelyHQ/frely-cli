@@ -29,6 +29,9 @@ export class RelayMcpSession {
       this.transport.deliver(message);
       return null;
     }
+    if (isInvalidInitializeRequest(message)) {
+      return { jsonrpc: "2.0", id, error: { code: -32600, message: "Invalid Request" } };
+    }
     if (this.pending.has(id)) throw new Error("Duplicate MCP request id.");
     return new Promise<JSONRPCMessage | null>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
@@ -104,4 +107,18 @@ function requestId(message: JSONRPCMessage): RequestId | undefined {
   const record = message as unknown as Record<string, unknown>;
   const id = record.id;
   return typeof id === "string" || typeof id === "number" ? id : undefined;
+}
+
+function isInvalidInitializeRequest(message: JSONRPCMessage): boolean {
+  const record = message as unknown as Record<string, unknown>;
+  if (record.method !== "initialize") return false;
+  const params = record.params;
+  if (!params || typeof params !== "object" || Array.isArray(params)) return true;
+  const values = params as Record<string, unknown>;
+  if (typeof values.protocolVersion !== "string") return true;
+  if (!values.capabilities || typeof values.capabilities !== "object" || Array.isArray(values.capabilities)) return true;
+  const clientInfo = values.clientInfo;
+  if (!clientInfo || typeof clientInfo !== "object" || Array.isArray(clientInfo)) return true;
+  const metadata = clientInfo as Record<string, unknown>;
+  return typeof metadata.name !== "string" || typeof metadata.version !== "string";
 }
