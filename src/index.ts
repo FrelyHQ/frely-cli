@@ -12,6 +12,7 @@ import { discoverLocalModels } from "./provider/local.js";
 import { finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider, waitForLocalProviderRelay } from "./provider/control.js";
 import { getLocalProvider, isSupportedLocalModelName, listLocalProviders, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider } from "./provider/state.js";
 import { VERSION } from "./version.js";
+import { runNetwork, publicNetworkError } from "./network.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -21,6 +22,13 @@ async function main(): Promise<void> {
     return;
   }
   if (!command || command === "help" || command === "--help" || command === "-h") return usage();
+
+  if (command === "network") {
+    const value = await runNetwork(args);
+    if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
+    else stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+    return;
+  }
 
   if (command === "login") {
     if (!stdin.isTTY || !stdout.isTTY) throw new Error("`frely login` requires an interactive TTY.");
@@ -242,6 +250,7 @@ function option(args: string[], name: string): string | undefined {
 function usage(): void {
   stdout.write(
     "Usage:\n" +
+    "  frely network setup|status|find|use|logout [--json]\n" +
     "  frely login [--relay <url>]\n" +
     "  frely logout\n" +
     "  frely whoami\n" +
@@ -262,6 +271,8 @@ function usage(): void {
 }
 
 main().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  const message = error instanceof Error ? error.message : String(error);
+  if (process.argv.includes("--json") && process.argv[2] === "network") process.stdout.write(`${JSON.stringify(publicNetworkError(error))}\n`);
+  else process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });
