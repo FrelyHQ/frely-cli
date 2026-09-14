@@ -90,8 +90,8 @@ export async function runNetwork(args: string[], deps: NetworkDeps = {}): Promis
       if (!Array.isArray(value.capabilities)) throw new NetworkError("NETWORK_RESPONSE_INVALID");
       return { capabilities: value.capabilities, paymentMode: "platform_demo" };
     }
-    if (value.requestId !== id || value.status !== "succeeded" || !isRecord(value.result) || !isRecord(value.evidence) ||
-        value.result.scamProbability !== null || !Number.isSafeInteger(value.remainingCalls) || Number(value.remainingCalls) < 0) throw new NetworkError("NETWORK_RESPONSE_INVALID");
+    if (value.requestId !== id || value.status !== "succeeded" || !isRecord(value.evidence) ||
+        value.result === undefined || !Number.isSafeInteger(value.remainingCalls) || Number(value.remainingCalls) < 0) throw new NetworkError("NETWORK_RESPONSE_INVALID");
     return { requestId: id, status: "succeeded", paymentMode: "platform_demo", result: value.result, evidence: value.evidence, remainingCalls: value.remainingCalls };
   } catch (error) {
     const known = error instanceof NetworkError ? error : new NetworkError("NETWORK_CLIENT_FAILED");

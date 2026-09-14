@@ -58,16 +58,9 @@ bun install --global "$PWD"
 export PATH="$(bun pm bin -g):$PATH"
 ```
 
-如果 Bun 报告 `keytar` 的生命周期脚本被阻止，在源码目录执行以下命令，然后重新构建并安装：
+此源码版本移除 `keytar`，不需要原生模块编译或生命周期脚本授权。依赖安装支持 `npm ci --ignore-scripts` 与 `bun install --ignore-scripts`。
 
-```bash
-bun pm trust keytar
-bun install
-bun run build
-bun install --global "$PWD"
-```
-
-当前仓库使用 npm lockfile，没有提交 Bun lockfile。第一次执行 `bun install` 可能会生成 `bun.lock`，请按仓库的 lockfile 约定处理该文件。
+仓库提交 `package-lock.json` 与 `bun.lock`；CI 和发布使用 npm。凭证存储决策、Linux 无桌面模式与自动化边界见 [`credential-storage.md`](credential-storage.md)。Windows 的后台服务安装尚未实现，凭证支持不代表 `mcp setup` 服务步骤支持 Windows。
 
 ### 使用仓库安装脚本
 

@@ -25,7 +25,7 @@ export async function loadOrCreateDeviceIdentity(relayUrl: string, userId: strin
 }
 
 export async function deleteDeviceIdentity(relayUrl: string, userId: string): Promise<void> {
-  await credentialStore.deletePassword(SERVICE, account(relayUrl, userId)).catch(() => false);
+  await credentialStore.deletePassword(SERVICE, account(relayUrl, userId));
 }
 
 export function connectionProofMessage(deviceId: string, issuedAt: string, nonce: string): string {

@@ -14,13 +14,8 @@ command -v npm >/dev/null 2>&1 || fail "npm is required."
 NODE_MAJOR="$(node -p 'Number(process.versions.node.split(".")[0])')"
 [ "$NODE_MAJOR" -ge 22 ] || fail "Node.js 22 or newer is required; found $(node --version)."
 
-NPM_MAJOR="$(npm --version | cut -d. -f1)"
 printf 'Installing %s...\n' "$PACKAGE"
-if [ "$NPM_MAJOR" -ge 11 ]; then
-  npm install --global --allow-scripts=keytar "$PACKAGE"
-else
-  npm install --global "$PACKAGE"
-fi
+npm install --global --ignore-scripts "$PACKAGE"
 
 command -v frely >/dev/null 2>&1 || fail "npm installed the package but the frely command is not on PATH."
 printf '%s\n' "Installed frely $(frely --version)."

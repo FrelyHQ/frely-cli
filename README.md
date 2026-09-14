@@ -23,7 +23,7 @@ After `frely-cli` is published, Frely can serve the repository `install.sh` as:
 curl -fsSL https://app.frely.cloud/install.sh | sh
 ```
 
-The package requires Node.js 22 or newer. The installer installs `frely-cli@latest` through npm.
+The package requires Node.js 22 or newer. The installer installs `frely-cli@latest` through npm with lifecycle scripts disabled. This source revision removes the keytar dependency; publishing the package and deploying the installer are separate release steps.
 
 ## Install or update with npm
 
@@ -84,12 +84,7 @@ Use the absolute `$PWD` path in the global install command. Bun installs the `fr
 export PATH="$(bun pm bin -g):$PATH"
 ```
 
-If Bun reports that the `keytar` lifecycle script is blocked, trust the native dependency and reinstall:
-
-```sh
-bun pm trust keytar
-bun install
-```
+This source revision has no keytar dependency or native npm build step. Dependency installation supports `npm ci --ignore-scripts` and `bun install --ignore-scripts`. Do not add a lifecycle-script trust exception for an old keytar installation.
 
 The repository uses npm as the canonical package manager for CI and releases
 and commits `package-lock.json`. Bun can be used for local development; keep
@@ -102,7 +97,7 @@ frely login
 frely mcp setup --workspace /path/to/project
 ```
 
-`frely login` starts a Better Auth device-authorization flow, opens the Frely approval page in your browser, and waits for explicit approval. The resulting OAuth access/refresh tokens are stored in the operating-system credential store; they are never written to the CLI config file, command line, URL, or logs. The CLI keeps accepting an existing legacy session cookie during the transition.
+`frely login` starts a Better Auth device-authorization flow, opens the Frely approval page in your browser, and waits for explicit approval. The resulting OAuth access/refresh tokens use the encrypted credential vault. The operating-system credential store holds the vault master key; headless deployments can inject an external master key. The CLI does not write tokens to its public config, command arguments, authorization URL, or logs. The CLI keeps accepting an existing legacy session cookie during the transition.
 
 `mcp setup` performs three client-side steps:
 
@@ -110,7 +105,7 @@ frely mcp setup --workspace /path/to/project
 2. obtains the stable public MCP URL;
 3. installs and starts the user-level background Device Relay service.
 
-It prints the MCP URL to add to ChatGPT. The background service keeps the outbound connection alive, so no terminal window or inbound port is required.
+It prints the MCP URL to add to ChatGPT. The macOS/Linux background service keeps the outbound connection alive, so no terminal window or inbound port is required. Windows background-service installation is not implemented; use `frely mcp serve --workspace <path>` with a user-managed process supervisor.
 
 You can print the URL again with:
 
@@ -230,12 +225,15 @@ Filesystem tools are constrained to the selected workspace, reject symlink escap
 ## Authentication and secrets
 
 - Password input requires an interactive TTY and is not stored.
-- Frely account session credentials are stored through Keychain / Secret Service via `keytar`.
-- The device Ed25519 private key is stored in the OS credential store.
+- Account tokens and device Ed25519 private keys use AES-256-GCM credential files. The OS store holds a random master key: macOS Keychain, Windows Credential Manager, or Linux Secret Service.
+- Linux system mode requires `secret-tool` and an unlocked Secret Service. Headless deployments can inject a 32-byte random key through `FRELY_CREDENTIAL_KEY` and select `FRELY_CREDENTIAL_STORE=encrypted-file`. The CLI never writes that key next to the ciphertext.
+- OS access errors, missing master keys, and authentication failures stop credential operations. There is no plaintext fallback.
 - Device binding metadata includes the private MCP bearer URL and therefore uses owner-only file permissions; the Relay stores only the MCP secret hash.
 - Device connection grants are short lived and stay in memory.
 - The MCP URL does not contain the device private key, account session, or connection grant, but the URL's private secret is itself a credential.
 - `doctor` never prints passwords, sessions, private keys, or connection grants.
+
+Storage configuration, legacy migration, threat boundaries, and tradeoffs: [`docs/credential-storage.md`](docs/credential-storage.md). OS approval and first OAuth consent remain security requirements; credential support does not imply Windows background-service support.
 
 ## Current server dependency
 

@@ -1,6 +1,7 @@
 import { inspectAuth, probeCredentialStore, whoami } from "./auth.js";
 import { currentDevice } from "./device/control.js";
 import { serviceStatus } from "./service.js";
+import { credentialStoreBackend } from "./credential-store.js";
 import { VERSION } from "./version.js";
 
 export interface DiagnosticCheck {
@@ -31,7 +32,7 @@ export async function doctor(): Promise<{ ok: boolean; checks: DiagnosticCheck[]
 
   try {
     await probeCredentialStore();
-    checks.push({ name: "credential_store", ok: true, detail: "read/write/delete succeeded" });
+    checks.push({ name: "credential_store", ok: true, detail: `${credentialStoreBackend()}: read/write/delete succeeded` });
   } catch (error) {
     checks.push({ name: "credential_store", ok: false, detail: message(error) });
   }
@@ -39,10 +40,10 @@ export async function doctor(): Promise<{ ok: boolean; checks: DiagnosticCheck[]
   const auth = await inspectAuth();
   checks.push({
     name: "config",
-    ok: auth.configured && (auth.configMode === undefined || auth.configMode === 0o600),
+    ok: auth.configured && (process.platform === "win32" || auth.configMode === undefined || auth.configMode === 0o600),
     detail: auth.configured ? `${auth.configPath}${auth.configMode === undefined ? "" : ` mode=${auth.configMode.toString(8)}`}` : "not configured",
   });
-  checks.push({ name: "credential", ok: auth.credentialStored, detail: auth.credentialStored ? "stored" : "missing" });
+  checks.push({ name: "credential", ok: auth.credentialStored, detail: auth.credentialError ?? (auth.credentialStored ? "stored" : "missing") });
 
   if (auth.configured && auth.credentialStored) {
     try {

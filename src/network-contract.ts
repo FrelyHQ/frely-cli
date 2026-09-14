@@ -3,8 +3,8 @@ import { isRecord, UUID_PATTERN } from "./network-http.js";
 export const NETWORK_SERVICE = "frely-network";
 export const DEFAULT_NETWORK_ORIGIN = "https://network.frely.cloud";
 export const NETWORK_HOSTS = ["chatgpt", "claude-code", "opencode", "generic"] as const;
-export const CAPABILITIES = ["web3.address-risk", "web3.url-risk"] as const;
-export type Capability = typeof CAPABILITIES[number];
+const CAPABILITY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/u;
+export type Capability = string;
 export interface PendingGrant {
   version: 1; kind: "pending"; deviceCode: string; userCode: string;
   verificationUri: string; expiresAt: string; intervalSeconds: number;
@@ -38,10 +38,10 @@ export function parseNetworkArgs(args: string[]): { command: string; flags: Reco
 }
 export function parseCapability(flags: Record<string, string>): Capability {
   const value = flags["--capability"];
-  if (!CAPABILITIES.includes(value as Capability)) throw new NetworkError("CAPABILITY_NOT_SUPPORTED");
-  return value as Capability;
+  if (!value || !CAPABILITY_PATTERN.test(value)) throw new NetworkError("CAPABILITY_NOT_SUPPORTED");
+  return value;
 }
-export function parseUseInput(flags: Record<string, string>, cap: Capability): Record<string, string> {
+export function parseUseInput(flags: Record<string, string>, cap: Capability): Record<string, unknown> {
   const text = flags["--input-json"];
   if (!text || Buffer.byteLength(text) > 8192) throw new NetworkError("INPUT_JSON_INVALID");
   let value: unknown;
@@ -54,11 +54,14 @@ export function parseUseInput(flags: Record<string, string>, cap: Capability): R
     if (Object.keys(value).some((key) => !["address", "chainId"].includes(key))) throw new NetworkError("INPUT_JSON_INVALID");
     return { address: value.address.toLowerCase(), chainId: "1" };
   }
-  if (typeof value.url !== "string" || value.url.length > 2048 || Object.keys(value).some((key) => key !== "url")) throw new NetworkError("INVALID_URL");
-  let url: URL;
-  try { url = new URL(value.url); } catch { throw new NetworkError("INVALID_URL"); }
-  if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.hash) throw new NetworkError("INVALID_URL");
-  return { url: url.toString() };
+  if (cap === "web3.url-risk") {
+    if (typeof value.url !== "string" || value.url.length > 2048 || Object.keys(value).some((key) => key !== "url")) throw new NetworkError("INVALID_URL");
+    let url: URL;
+    try { url = new URL(value.url); } catch { throw new NetworkError("INVALID_URL"); }
+    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.hash) throw new NetworkError("INVALID_URL");
+    return { url: url.toString() };
+  }
+  return value;
 }
 export function parsePendingGrant(value: Record<string, unknown>, origin: string): PendingGrant {
   if (typeof value.deviceCode !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(value.deviceCode) || typeof value.userCode !== "string" ||

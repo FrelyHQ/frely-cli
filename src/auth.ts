@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { credentialStore } from "./credential-store.js";
+import { credentialStore, credentialStoreBackend } from "./credential-store.js";
 
 const SERVICE = "frely-cli";
 const SESSION_COOKIE_NAME = "friday_session_token";
@@ -59,6 +59,8 @@ export interface AuthSnapshot {
   relayUrl?: string;
   user?: PublicUser;
   credentialStored: boolean;
+  credentialBackend?: string;
+  credentialError?: string;
   configPath: string;
   configMode?: number;
   authMethod?: "bearer" | "cookie";
@@ -92,6 +94,7 @@ export async function login(relayOrEmail?: string, legacyPassword?: string, lega
 
 export async function loginDevice(relayInput?: string, notify?: (details: { verificationUri: string; userCode: string }) => void): Promise<{ user: PublicUser; verificationUri: string; userCode: string }> {
   const relayUrl = normalizeRelayUrl(relayInput);
+  await probeCredentialStore();
   const device = await requestDeviceCode(relayUrl);
   const verificationUri = validateVerificationUrl(device.verification_uri_complete || `${device.verification_uri}?user_code=${encodeURIComponent(device.user_code)}`, relayUrl);
   notify?.({ verificationUri, userCode: device.user_code });
@@ -118,6 +121,7 @@ export async function loginDevice(relayInput?: string, notify?: (details: { veri
 async function legacyPasswordLogin(email: string, password: string, relayInput?: string): Promise<PublicUser> {
   if (!email.trim() || !password) throw new Error("Email and password are required.");
   const relayUrl = normalizeRelayUrl(relayInput);
+  await probeCredentialStore();
   const response = await fetchWithTimeout(`${relayUrl}/api/auth/login`, {
     method: "POST",
     headers: {
@@ -187,22 +191,32 @@ export async function logout(): Promise<void> {
     await revoke(credential.value, "access_token");
     if (credential.refreshToken) await revoke(credential.refreshToken, "refresh_token");
   }
-  await credentialStore.deletePassword(SERVICE, key).catch(() => false);
+  await credentialStore.deletePassword(SERVICE, key);
   await unlink(authConfigPath()).catch(() => undefined);
 }
 
 export async function inspectAuth(): Promise<AuthSnapshot> {
   const path = authConfigPath();
+  let credentialBackend = "unavailable";
+  let credentialError: string | undefined;
+  try { credentialBackend = credentialStoreBackend(); }
+  catch (error) { credentialError = error instanceof Error ? error.message : "Credential store configuration failed."; }
   const config = await readConfig().catch(() => null);
-  if (!config) return { configured: false, credentialStored: false, configPath: path };
-  const credentialStored = Boolean(await credentialStore.getPassword(SERVICE, accountKey(config.relayUrl)));
+  if (!config) return { configured: false, credentialStored: false, configPath: path, credentialBackend, ...(credentialError ? { credentialError } : {}) };
+  const raw = await credentialStore.getPassword(SERVICE, accountKey(config.relayUrl)).catch((error: unknown) => {
+    credentialError = error instanceof Error ? error.message : "Credential store access failed.";
+    return null;
+  });
+  const credentialStored = Boolean(raw);
   const fileStat = await stat(path).catch(() => null);
-  const storedCredential = credentialStored ? await loadCredential(config, false) : null;
+  const storedCredential = credentialStored ? await loadCredential(config, false, raw) : null;
   return {
     configured: true,
     relayUrl: config.relayUrl,
     user: config.user,
     credentialStored,
+    credentialBackend,
+    ...(credentialError ? { credentialError } : {}),
     ...(storedCredential ? { authMethod: storedCredential.scheme } : {}),
     configPath: path,
     ...(fileStat ? { configMode: fileStat.mode & 0o777 } : {}),
@@ -252,7 +266,7 @@ export async function probeCredentialStore(): Promise<void> {
   try {
     if (await credentialStore.getPassword(SERVICE, account) !== value) throw new Error("Credential store readback failed.");
   } finally {
-    await credentialStore.deletePassword(SERVICE, account).catch(() => false);
+    if (!await credentialStore.deletePassword(SERVICE, account)) throw new Error("Credential store deletion failed.");
   }
 }
 
@@ -337,8 +351,8 @@ async function fetchUser(relayUrl: string, credential: AuthCredential): Promise<
   return parseUser(payload);
 }
 
-async function loadCredential(config: CliConfig, refresh: boolean): Promise<AuthCredential | null> {
-  const raw = await credentialStore.getPassword(SERVICE, accountKey(config.relayUrl));
+async function loadCredential(config: CliConfig, refresh: boolean, input?: string | null): Promise<AuthCredential | null> {
+  const raw = input === undefined ? await credentialStore.getPassword(SERVICE, accountKey(config.relayUrl)) : input;
   if (!raw) return null;
   if (raw.startsWith(`${SESSION_COOKIE_NAME}=`)) return { scheme: "cookie", value: raw };
   try {
@@ -370,9 +384,10 @@ async function refreshOAuthCredential(relayUrl: string, refreshToken: string): P
 
 function openVerificationUrl(url: string): void {
   if (process.env.FRELY_NO_BROWSER === "1") return;
-  const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
-  const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
-  const child = spawn(command, args, { detached: true, stdio: "ignore" });
+  const command = process.platform === "darwin" ? "/usr/bin/open" : process.platform === "win32" ? "rundll32.exe" : "xdg-open";
+  const args = process.platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url];
+  const child = spawn(command, args, { detached: true, stdio: "ignore", shell: false, windowsHide: true });
+  child.once("error", () => debugAuth("browser=unavailable; use the displayed verification URL"));
   child.unref();
 }
 
