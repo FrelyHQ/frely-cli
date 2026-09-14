@@ -3,14 +3,14 @@ import { chmod, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { credentialStore } from "./credential-store.js";
+import { basicCredentialStore as credentialStore, BASIC_CREDENTIAL_BACKEND } from "./credential-basic.js";
 
-const SERVICE = "frely-cli";
+const SERVICE = "frely-cli-basic-v1";
 const SESSION_COOKIE_NAME = "friday_session_token";
-const CONFIG_VERSION = 2;
+const CONFIG_VERSION = 3;
 const LEGACY_CONFIG_VERSION = 1;
-const OAUTH_CLIENT_ID = "frely-cli";
-const OAUTH_SCOPE = "openid profile profile:read email offline_access device-relay:enroll device-relay:connect device-relay:revoke";
+const OAUTH_CLIENT_ID = "frely-cli-basic";
+const OAUTH_SCOPE = "openid profile profile:read email offline_access device-relay:provider";
 const DEFAULT_RELAY = "https://app.frely.cloud";
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -48,7 +48,7 @@ interface DeviceCodeResponse {
 
 interface StoredOAuthCredential {
   version: 1;
-  type: "oauth";
+  type: "basic-oauth";
   accessToken: string;
   refreshToken?: string;
   expiresAt: number;
@@ -59,6 +59,8 @@ export interface AuthSnapshot {
   relayUrl?: string;
   user?: PublicUser;
   credentialStored: boolean;
+  credentialBackend?: string;
+  credentialError?: string;
   configPath: string;
   configMode?: number;
   authMethod?: "bearer" | "cookie";
@@ -86,12 +88,13 @@ export function normalizeRelayUrl(value?: string): string {
 
 /** Device authorization is the default. The 3-argument form remains only for old callers/tests. */
 export async function login(relayOrEmail?: string, legacyPassword?: string, legacyRelayInput?: string): Promise<PublicUser> {
-  if (legacyPassword !== undefined) return legacyPasswordLogin(relayOrEmail ?? "", legacyPassword, legacyRelayInput);
+  if (legacyPassword !== undefined) throw new Error("Password/cookie login is not supported by basic storage. Run `frely login` for a restricted session.");
   return (await loginDevice(relayOrEmail)).user;
 }
 
 export async function loginDevice(relayInput?: string, notify?: (details: { verificationUri: string; userCode: string }) => void): Promise<{ user: PublicUser; verificationUri: string; userCode: string }> {
   const relayUrl = normalizeRelayUrl(relayInput);
+  await probeCredentialStore();
   const device = await requestDeviceCode(relayUrl);
   const verificationUri = validateVerificationUrl(device.verification_uri_complete || `${device.verification_uri}?user_code=${encodeURIComponent(device.user_code)}`, relayUrl);
   notify?.({ verificationUri, userCode: device.user_code });
@@ -101,7 +104,7 @@ export async function loginDevice(relayInput?: string, notify?: (details: { veri
   const key = accountKey(relayUrl);
   await credentialStore.setPassword(SERVICE, key, JSON.stringify({
     version: 1,
-    type: "oauth",
+    type: "basic-oauth",
     accessToken: token.accessToken,
     ...(token.refreshToken ? { refreshToken: token.refreshToken } : {}),
     expiresAt: token.expiresAt,
@@ -113,35 +116,6 @@ export async function loginDevice(relayInput?: string, notify?: (details: { veri
     throw error;
   }
   return { user, verificationUri, userCode: device.user_code };
-}
-
-async function legacyPasswordLogin(email: string, password: string, relayInput?: string): Promise<PublicUser> {
-  if (!email.trim() || !password) throw new Error("Email and password are required.");
-  const relayUrl = normalizeRelayUrl(relayInput);
-  const response = await fetchWithTimeout(`${relayUrl}/api/auth/login`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "origin": relayUrl,
-      "accept": "application/json",
-    },
-    body: JSON.stringify({ email: email.trim(), password }),
-    redirect: "error",
-  });
-  const payload = await safeJson(response);
-  if (!response.ok) throw new Error(publicError(payload, response.status));
-  const user = parseUser(payload);
-  const cookie = sessionCookie(response.headers);
-  if (!cookie) throw new Error("Frely login succeeded without a usable session cookie.");
-  const key = accountKey(relayUrl);
-  await credentialStore.setPassword(SERVICE, key, cookie);
-  try {
-    await writeConfig({ version: CONFIG_VERSION, relayUrl, user });
-  } catch (error) {
-    await credentialStore.deletePassword(SERVICE, key).catch(() => false);
-    throw error;
-  }
-  return user;
 }
 
 export async function whoami(): Promise<PublicUser> {
@@ -187,22 +161,32 @@ export async function logout(): Promise<void> {
     await revoke(credential.value, "access_token");
     if (credential.refreshToken) await revoke(credential.refreshToken, "refresh_token");
   }
-  await credentialStore.deletePassword(SERVICE, key).catch(() => false);
+  await credentialStore.deletePassword(SERVICE, key);
   await unlink(authConfigPath()).catch(() => undefined);
 }
 
 export async function inspectAuth(): Promise<AuthSnapshot> {
   const path = authConfigPath();
+  let credentialBackend = "unavailable";
+  let credentialError: string | undefined;
+  try { credentialBackend = BASIC_CREDENTIAL_BACKEND; }
+  catch (error) { credentialError = error instanceof Error ? error.message : "Credential store configuration failed."; }
   const config = await readConfig().catch(() => null);
-  if (!config) return { configured: false, credentialStored: false, configPath: path };
-  const credentialStored = Boolean(await credentialStore.getPassword(SERVICE, accountKey(config.relayUrl)));
+  if (!config) return { configured: false, credentialStored: false, configPath: path, credentialBackend, ...(credentialError ? { credentialError } : {}) };
+  const raw = await credentialStore.getPassword(SERVICE, accountKey(config.relayUrl)).catch((error: unknown) => {
+    credentialError = error instanceof Error ? error.message : "Credential store access failed.";
+    return null;
+  });
+  const credentialStored = Boolean(raw);
   const fileStat = await stat(path).catch(() => null);
-  const storedCredential = credentialStored ? await loadCredential(config, false) : null;
+  const storedCredential = credentialStored ? await loadCredential(config, false, raw) : null;
   return {
     configured: true,
     relayUrl: config.relayUrl,
     user: config.user,
     credentialStored,
+    credentialBackend,
+    ...(credentialError ? { credentialError } : {}),
     ...(storedCredential ? { authMethod: storedCredential.scheme } : {}),
     configPath: path,
     ...(fileStat ? { configMode: fileStat.mode & 0o777 } : {}),
@@ -226,11 +210,11 @@ export async function readConfiguredLocalCredential(relayInput?: string): Promis
   const relayUrl = normalizeRelayUrl(relayInput);
   const raw = await credentialStore.getPassword(SERVICE, accountKey(relayUrl));
   if (!raw) return null;
-  if (raw.startsWith(`${SESSION_COOKIE_NAME}=`)) return { scheme: "cookie", value: raw };
+  if (raw.startsWith(`${SESSION_COOKIE_NAME}=`)) throw new Error("Legacy credentials require a new basic login.");
   try {
     const stored = JSON.parse(raw) as Partial<StoredOAuthCredential>;
-    if (stored.version !== 1 || stored.type !== "oauth" || !isString(stored.accessToken)) {
-      return { scheme: "bearer", value: raw };
+    if (stored.version !== 1 || stored.type !== "basic-oauth" || !isString(stored.accessToken)) {
+      throw new Error("Basic credential is invalid. Run `frely login`.");
     }
     return {
       scheme: "bearer",
@@ -241,7 +225,7 @@ export async function readConfiguredLocalCredential(relayInput?: string): Promis
   } catch {
     // Presence remains the routing signal. The remote adapter will surface a
     // stable authorization failure for an unreadable configured credential.
-    return { scheme: "bearer", value: raw };
+    throw new Error("Basic credential is invalid. Run `frely login`.");
   }
 }
 
@@ -252,7 +236,7 @@ export async function probeCredentialStore(): Promise<void> {
   try {
     if (await credentialStore.getPassword(SERVICE, account) !== value) throw new Error("Credential store readback failed.");
   } finally {
-    await credentialStore.deletePassword(SERVICE, account).catch(() => false);
+    if (!await credentialStore.deletePassword(SERVICE, account)) throw new Error("Credential store deletion failed.");
   }
 }
 
@@ -265,7 +249,7 @@ async function readConfig(): Promise<CliConfig> {
   } catch {
     throw new Error("Frely CLI configuration is invalid.");
   }
-  if (value.version !== CONFIG_VERSION && value.version !== LEGACY_CONFIG_VERSION) throw new Error("Frely CLI configuration is invalid.");
+  if (value.version !== CONFIG_VERSION && value.version !== 2 && value.version !== LEGACY_CONFIG_VERSION) throw new Error("Frely CLI configuration is invalid.");
   if (typeof value.relayUrl !== "string" || !value.user || typeof value.user.id !== "string" || typeof value.user.email !== "string") {
     throw new Error("Frely CLI configuration is invalid.");
   }
@@ -337,17 +321,17 @@ async function fetchUser(relayUrl: string, credential: AuthCredential): Promise<
   return parseUser(payload);
 }
 
-async function loadCredential(config: CliConfig, refresh: boolean): Promise<AuthCredential | null> {
-  const raw = await credentialStore.getPassword(SERVICE, accountKey(config.relayUrl));
+async function loadCredential(config: CliConfig, refresh: boolean, input?: string | null): Promise<AuthCredential | null> {
+  const raw = input === undefined ? await credentialStore.getPassword(SERVICE, accountKey(config.relayUrl)) : input;
   if (!raw) return null;
-  if (raw.startsWith(`${SESSION_COOKIE_NAME}=`)) return { scheme: "cookie", value: raw };
+  if (raw.startsWith(`${SESSION_COOKIE_NAME}=`)) throw new Error("Legacy credentials require a new basic login.");
   try {
     const stored = JSON.parse(raw) as Partial<StoredOAuthCredential>;
-    if (stored.version !== 1 || stored.type !== "oauth" || !isString(stored.accessToken) || typeof stored.expiresAt !== "number") return null;
+    if (stored.version !== 1 || stored.type !== "basic-oauth" || !isString(stored.accessToken) || typeof stored.expiresAt !== "number") return null;
     if (refresh && stored.refreshToken && stored.expiresAt <= Date.now() + 30_000) {
       const next = await refreshOAuthCredential(config.relayUrl, stored.refreshToken);
       if (next.expiresAt === undefined) return null;
-      await credentialStore.setPassword(SERVICE, accountKey(config.relayUrl), JSON.stringify({ version: 1, type: "oauth", accessToken: next.value, ...(next.refreshToken ? { refreshToken: next.refreshToken } : {}), expiresAt: next.expiresAt } satisfies StoredOAuthCredential));
+      await credentialStore.setPassword(SERVICE, accountKey(config.relayUrl), JSON.stringify({ version: 1, type: "basic-oauth", accessToken: next.value, ...(next.refreshToken ? { refreshToken: next.refreshToken } : {}), expiresAt: next.expiresAt } satisfies StoredOAuthCredential));
       return next;
     }
     return { scheme: "bearer", value: stored.accessToken, ...(stored.refreshToken ? { refreshToken: stored.refreshToken } : {}), expiresAt: stored.expiresAt };
@@ -368,11 +352,12 @@ async function refreshOAuthCredential(relayUrl: string, refreshToken: string): P
   return { scheme: "bearer", value: record.access_token, ...(isString(record.refresh_token) ? { refreshToken: record.refresh_token } : { refreshToken }), expiresAt: Date.now() + expiresIn * 1000 };
 }
 
-function openVerificationUrl(url: string): void {
+export function openVerificationUrl(url: string): void {
   if (process.env.FRELY_NO_BROWSER === "1") return;
-  const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
-  const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
-  const child = spawn(command, args, { detached: true, stdio: "ignore" });
+  const command = process.platform === "darwin" ? "/usr/bin/open" : process.platform === "win32" ? "rundll32.exe" : "xdg-open";
+  const args = process.platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url];
+  const child = spawn(command, args, { detached: true, stdio: "ignore", shell: false, windowsHide: true });
+  child.once("error", () => debugAuth("browser=unavailable; use the displayed verification URL"));
   child.unref();
 }
 

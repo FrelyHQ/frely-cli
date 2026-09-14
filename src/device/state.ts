@@ -3,19 +3,18 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 export interface DeviceBinding {
-  version: 1;
+  version: 2;
   relayUrl: string;
   userId: string;
   deviceId: string;
   publicKeySpki: string;
   keyThumbprint: string;
-  mcpUrl: string;
   updatedAt: string;
 }
 
 export function deviceStatePath(): string {
   const root = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-  return join(root, "frely", "device.json");
+  return join(root, "frely", "device-basic-v1.json");
 }
 
 export async function readDeviceBinding(): Promise<DeviceBinding | null> {
@@ -23,7 +22,7 @@ export async function readDeviceBinding(): Promise<DeviceBinding | null> {
   if (!raw) return null;
   try {
     const value = JSON.parse(raw) as Partial<DeviceBinding>;
-    if (value.version !== 1 || typeof value.relayUrl !== "string" || typeof value.userId !== "string" || typeof value.deviceId !== "string" || typeof value.publicKeySpki !== "string" || typeof value.keyThumbprint !== "string" || typeof value.mcpUrl !== "string") return null;
+    if (value.version !== 2 || typeof value.relayUrl !== "string" || typeof value.userId !== "string" || typeof value.deviceId !== "string" || typeof value.publicKeySpki !== "string" || typeof value.keyThumbprint !== "string") return null;
     return value as DeviceBinding;
   } catch {
     return null;

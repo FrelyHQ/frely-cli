@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { setupMcpAuthorization, requireMcpAuthorization, inspectMcpMetadata, revokeMcpAuthorization } from "./mcp-authorization.js";
+import { McpLease } from "./runtime/mcp-lease.js";
 import { resolve } from "node:path";
 import { stdin, stdout } from "node:process";
 import { loginDevice, logout, requireLogin, whoami } from "./auth.js";
@@ -17,6 +19,8 @@ import { runNetwork, publicNetworkError } from "./network.js";
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0];
+  if (command === "mcp" && ["--help", "help", "-h"].includes(args[1] ?? "")) return usage();
+  if (command === "mcp" && args.length === 1) args.push("setup");
   if (command === "--version" || command === "-v" || command === "version") {
     stdout.write(`${VERSION}\n`);
     return;
@@ -31,15 +35,12 @@ async function main(): Promise<void> {
   }
 
   if (command === "login") {
-    if (!stdin.isTTY || !stdout.isTTY) throw new Error("`frely login` requires an interactive TTY.");
     const relay = option(args, "--relay");
     const result = await loginDevice(relay, ({ verificationUri, userCode }) => {
       stdout.write(`Open this URL to authorize Frely CLI:\n${verificationUri}\n`);
       stdout.write(`Device code: ${userCode}\nWaiting for approval...\n`);
     });
     const user = result.user;
-    const service = await serviceStatus().catch(() => null);
-    if (service?.installed && !service.active) await startMcpService().catch(() => undefined);
     stdout.write(`Logged in as ${user.email}.\n`);
     stdout.write("Run `frely mcp setup --workspace <path>` to provision this machine and get the ChatGPT MCP address.\n");
     return;
@@ -71,7 +72,7 @@ async function main(): Promise<void> {
   }
 
   if (command === "doctor") {
-    const value = await doctor();
+    const value = await doctor({ mcp: args.includes("--mcp") });
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value, null, 2)}\n`);
     else for (const check of value.checks) stdout.write(`${check.ok ? "PASS" : "FAIL"} ${check.name}: ${check.detail}\n`);
     if (!value.ok) process.exitCode = 1;
@@ -140,53 +141,38 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === "mcp" && args[1] === "setup") {
-    await requireLogin();
-    const workspace = resolve(option(args, "--workspace") || process.cwd());
-    const device = await ensureDevice();
-    const service = await installMcpService(workspace);
-    stdout.write(`MCP URL: ${device.mcpUrl}\n`);
-    stdout.write(`Background service: ${service.active ? "running" : "installed"}\n`);
-    stdout.write(`Workspace: ${service.workspace ?? workspace}\n`);
-    stdout.write("Add the MCP URL to ChatGPT with Authentication set to None. Keep the URL private.\n");
+  if (command === "mcp" && (args[1] === "setup" || args[1] === "renew")) {
+    const old = await inspectMcpMetadata();
+    const workspace = option(args, "--workspace") ?? (args[1] === "renew" ? old?.grant.workspace : undefined) ?? process.cwd();
+    const authorization = await setupMcpAuthorization(workspace, option(args, "--days"), args[1] === "renew", ({ verificationUri, keyThumbprint, days }) => {
+      stdout.write(`MCP remote execution authorization: ${days} days\nMCP key: ${keyThumbprint}\nApprove: ${verificationUri}\n`);
+    });
+    const service = await installMcpService(authorization.grant.workspace);
+    stdout.write(`MCP URL: ${authorization.mcpUrl}\nExpires: ${authorization.grant.expiresAt}\nBackground service: ${service.active ? "running" : "installed"}\n`);
+    stdout.write("Keep the MCP URL private. Renewal rotates the URL; update the remote client after renewal.\n");
     return;
   }
 
-  if (command === "mcp" && args[1] === "url") {
-    const device = await ensureDevice();
-    if (args.includes("--json")) stdout.write(`${JSON.stringify({ deviceId: device.deviceId, mcpUrl: device.mcpUrl }, null, 2)}\n`);
-    else stdout.write(`${device.mcpUrl}\n`);
+  if (command === "mcp" && (args[1] === "url" || args[1] === "chatgpt")) {
+    const authorization = await requireMcpAuthorization();
+    if (args.includes("--json")) stdout.write(`${JSON.stringify({ deviceId: authorization.grant.deviceId, mcpUrl: authorization.mcpUrl, expiresAt: authorization.grant.expiresAt })}\n`);
+    else stdout.write(`${authorization.mcpUrl}\n`);
     return;
   }
 
   if (command === "mcp" && args[1] === "status") {
-    await requireLogin();
-    const device = await currentDevice();
-    const safeDevice = device ? { deviceId: device.deviceId, keyThumbprint: device.keyThumbprint, provisioned: true } : null;
-    if (args.includes("--json")) stdout.write(`${JSON.stringify({ provisioned: Boolean(device), device: safeDevice }, null, 2)}\n`);
-    else if (!device) stdout.write("MCP device is not provisioned. Run `frely mcp url`.\n");
-    else {
-      stdout.write(`Device: ${device.deviceId}\n`);
-      stdout.write("MCP URL: private; run `frely mcp url` to reveal it.\n");
-      stdout.write(`Key: ${device.keyThumbprint}\n`);
-    }
-    return;
-  }
-
-  if (command === "mcp" && args[1] === "chatgpt") {
-    const device = await ensureDevice();
-    const service = await serviceStatus().catch(() => null);
-    stdout.write("Frely MCP for ChatGPT\n\n");
-    stdout.write(`MCP URL: ${device.mcpUrl}\n`);
-    stdout.write(`Background service: ${service?.active ? "running" : "not running"}\n\n`);
-    if (!service?.active) stdout.write("Run `frely mcp setup --workspace <path>` before adding the server to ChatGPT.\n\n");
-    stdout.write("1. Add the MCP URL above as a custom MCP server in ChatGPT.\n");
-    stdout.write("2. Set MCP Authentication to None.\n");
-    stdout.write("3. Treat the full MCP URL as a private bearer credential and do not share it.\n");
+    const metadata = await inspectMcpMetadata();
+    const value = metadata ? { configured: true, deviceId: metadata.grant.deviceId, workspace: metadata.grant.workspace,
+      expiresAt: metadata.grant.expiresAt, expired: !metadata.grant.expiresAt || Date.parse(metadata.grant.expiresAt) <= Date.now() } : { configured: false };
+    stdout.write(`${JSON.stringify(value, null, 2)}\n`);
     return;
   }
 
   if (command === "mcp" && args[1] === "serve") {
+    const serviceConfigHome = option(args, "--service-config-home");
+    const serviceCredentialStore = option(args, "--service-credential-store");
+    if (serviceConfigHome) process.env.XDG_CONFIG_HOME = resolve(serviceConfigHome);
+    if (serviceCredentialStore) process.env.FRELY_CREDENTIAL_STORE = serviceCredentialStore;
     await requireLogin();
     const providerOnly = args.includes("--provider-only");
     const workspace = providerOnly ? undefined : resolve(option(args, "--workspace") || process.cwd());
@@ -222,16 +208,19 @@ async function main(): Promise<void> {
   }
 
   if (command === "mcp" && args[1] === "revoke") {
-    await uninstallMcpService().catch(() => undefined);
-    await revokeDevice();
-    stdout.write("Frely MCP device revoked, local device key removed, and background service uninstalled.\n");
+    await revokeMcpAuthorization();
+    stdout.write("MCP execution authorization revoked. The Provider device and service were retained.\n");
     return;
   }
 
   if (command === "mcp" && args[1] === "stdio") {
-    await requireLogin();
     const workspace = resolve(option(args, "--workspace") || process.cwd());
-    await startStdioMcp(workspace);
+    const authorization = await requireMcpAuthorization(workspace);
+    const lease = new McpLease(authorization.grant.id, Date.parse(authorization.grant.expiresAt!));
+    await startStdioMcp(workspace, { assertAuthorized: () => lease.assert(), signal: lease.controller.signal });
+    const verify = setInterval(() => { void requireMcpAuthorization(workspace).catch(() => lease.close()); }, 5000);
+    verify.unref?.();
+    lease.controller.signal.addEventListener("abort", () => clearInterval(verify), { once: true });
     return;
   }
 
@@ -255,11 +244,12 @@ function usage(): void {
     "  frely logout\n" +
     "  frely whoami\n" +
     "  frely status [--json]\n" +
-    "  frely doctor [--json]\n" +
+    "  frely doctor [--mcp] [--json]\n" +
     "  frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]\n" +
     "  frely provider list [--json]\n" +
     "  frely provider finalize <provider-id>\n" +
-    "  frely mcp setup [--workspace <path>]\n" +
+    "  frely mcp [setup] [--workspace <path>] [--days 1..360]\n" +
+    "  frely mcp renew [--days 1..360]\n" +
     "  frely mcp url [--json]\n" +
     "  frely mcp status [--json]\n" +
     "  frely mcp chatgpt\n" +

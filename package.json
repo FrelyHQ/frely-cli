@@ -26,7 +26,12 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "node scripts/test.mjs",
     "start": "node dist/index.js",
-    "prepack": "npm run check && npm test && npm run build"
+    "prepack": "npm run check && npm test && npm run build",
+    "test:credentials": "node scripts/credential-smoke.mjs",
+    "test:install": "node scripts/install-smoke.mjs",
+    "build:standalone": "node scripts/build-standalone.mjs",
+    "test:standalone": "node scripts/standalone-smoke.mjs",
+    "test:installer": "node scripts/installer-smoke.mjs"
   },
   "engines": {
     "node": ">=22"
@@ -36,15 +41,11 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.18.1",
-    "keytar": "^7.9.0",
     "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/node": "^22.18.1",
     "@types/ws": "^8.18.1",
     "typescript": "^5.9.2"
-  },
-  "allowScripts": {
-    "keytar@7.9.0": true
   }
 }

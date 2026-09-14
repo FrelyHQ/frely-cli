@@ -1,6 +1,6 @@
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { createMcpServer } from "./mcp.js";
+import { createMcpServer, type McpRuntimeOptions } from "./mcp.js";
 
 type RequestId = string | number;
 
@@ -13,11 +13,13 @@ export class RelayMcpSession {
   private readonly pending = new Map<RequestId, Pending>();
   private readonly transport = new RelayMcpTransport(this.pending);
 
+  private server: Awaited<ReturnType<typeof createMcpServer>> | undefined;
   private constructor() {}
 
-  static async create(workspace: string): Promise<RelayMcpSession> {
+  static async create(workspace: string, options: McpRuntimeOptions = {}): Promise<RelayMcpSession> {
     const session = new RelayMcpSession();
-    const server = await createMcpServer(workspace);
+    const server = await createMcpServer(workspace, options);
+    session.server = server;
     await server.connect(session.transport);
     return session;
   }
@@ -55,6 +57,7 @@ export class RelayMcpSession {
   }
 
   async close(): Promise<void> {
+    await this.server?.close();
     await this.transport.close();
   }
 }

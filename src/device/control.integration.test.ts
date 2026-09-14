@@ -5,22 +5,22 @@ import { createPublicKey, verify } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { credentialStore } from "../credential-store.js";
+import { basicCredentialStore as credentialStore } from "../credential-basic.js";
 import { connectionGrant, ensureDevice, revokeDevice } from "./control.js";
 import { connectionProofMessage } from "./identity.js";
 import { useMemoryCredentialStore } from "../test-support.js";
 
-const ACCOUNT_SERVICE = "frely-cli";
+const ACCOUNT_SERVICE = "frely-cli-basic-v1";
 
 test("account session enrolls device, gets a signed connection grant, and revokes", async () => {
-  const requests: Array<{ method: string; path: string; cookie?: string; body?: Record<string, unknown> }> = [];
+  const requests: Array<{ method: string; path: string; authorization?: string; body?: Record<string, unknown> }> = [];
   let origin = "";
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const bodyText = Buffer.concat(chunks).toString("utf8");
     const body = bodyText ? JSON.parse(bodyText) as Record<string, unknown> : undefined;
-    requests.push({ method: request.method ?? "", path: request.url ?? "", ...(request.headers.cookie ? { cookie: request.headers.cookie } : {}), ...(body ? { body } : {}) });
+    requests.push({ method: request.method ?? "", path: request.url ?? "", ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}), ...(body ? { body } : {}) });
     response.setHeader("content-type", "application/json");
     if (request.method === "GET" && request.url === "/api/auth/me") {
       response.end(JSON.stringify({ user: { id: "user_test", email: "user@example.com" } }));
@@ -56,21 +56,21 @@ test("account session enrolls device, gets a signed connection grant, and revoke
   const accountKey = origin;
   try {
     await mkdir(join(configRoot, "frely"), { recursive: true });
-    await writeFile(join(configRoot, "frely", "config.json"), JSON.stringify({ version: 1, relayUrl: origin, user: { id: "user_test", email: "user@example.com" } }), { mode: 0o600 });
-    await credentialStore.setPassword(ACCOUNT_SERVICE, accountKey, "friday_session_token=test-session");
+    await writeFile(join(configRoot, "frely", "config.json"), JSON.stringify({ version: 3, relayUrl: origin, user: { id: "user_test", email: "user@example.com" } }), { mode: 0o600 });
+    await credentialStore.setPassword(ACCOUNT_SERVICE, accountKey, JSON.stringify({ version: 1, type: "basic-oauth", accessToken: "synthetic-basic-session", expiresAt: Date.now() + 3600000 }));
 
     const device = await ensureDevice();
     assert.equal(device.deviceId, "device_test");
-    assert.equal(device.mcpUrl, `${origin}/mcp/device_test`);
+    assert.equal("mcpUrl" in device, false);
     const repeated = await ensureDevice();
-    assert.equal(repeated.mcpUrl, device.mcpUrl);
+    assert.equal(repeated.deviceId, device.deviceId);
     const grant = await connectionGrant(device);
     assert.equal(grant.accessToken, "short-lived-grant");
     await revokeDevice();
 
     const protectedCalls = requests.filter((request) => request.path.startsWith("/api/user/device-relay/"));
     assert.equal(protectedCalls.length, 3);
-    assert.ok(protectedCalls.every((request) => request.cookie === "friday_session_token=test-session"));
+    assert.ok(protectedCalls.every((request) => request.authorization === "Bearer synthetic-basic-session"));
     assert.equal(protectedCalls[0]?.body?.deviceId, undefined);
     assert.equal(protectedCalls[2]?.body?.deviceId, "device_test");
   } finally {

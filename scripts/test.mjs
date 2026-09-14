@@ -11,7 +11,7 @@ try {
   exitCode = await run(process.execPath, [tscPath, "-p", "tsconfig.test.json"]);
   if (exitCode === 0) {
     const files = await testFiles(testOutput);
-    exitCode = files.length === 0 ? 1 : await run(process.execPath, ["--test", ...files]);
+    exitCode = files.length === 0 ? 1 : await run(process.execPath, ["--test", "--test-timeout=30000", ...files]);
   }
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);

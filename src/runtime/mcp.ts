@@ -12,11 +12,19 @@ interface ToolFlags {
   idempotent?: boolean;
 }
 
-export async function createMcpServer(workspaceInput: string): Promise<Server> {
+export interface McpRuntimeOptions { assertAuthorized?: () => void | Promise<void>; signal?: AbortSignal }
+export async function createMcpServer(workspaceInput: string, options: McpRuntimeOptions = {}): Promise<Server> {
   const workspace = await Workspace.open(workspaceInput);
-  const scheduler = new FairRwScheduler(4);
+  const lifecycle = new AbortController();
+  const assertAuthorized = async () => { lifecycle.signal.throwIfAborted(); await options.assertAuthorized?.(); };
+  const scheduler = new FairRwScheduler(4, assertAuthorized);
   const processes = new ProcessManager();
   const server = new Server({ name: "frely-cli", version: VERSION }, { capabilities: { tools: {} } });
+
+  const stop = () => { lifecycle.abort(); void processes.close(); };
+  options.signal?.addEventListener("abort", stop, { once: true });
+  if (options.signal?.aborted) stop();
+  server.onclose = () => { options.signal?.removeEventListener("abort", stop); stop(); };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
     tool("workspace_info", "Return the active workspace root.", {}, { readOnly: true }),
@@ -43,7 +51,7 @@ export async function createMcpServer(workspaceInput: string): Promise<Server> {
     const name = request.params.name;
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
     try {
-      const result = await dispatch(name, args, workspace, processes, scheduler);
+      const result = await dispatch(name, args, workspace, processes, scheduler, lifecycle.signal);
       return { content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result) }] };
     } catch (error) {
       return { isError: true, content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Local tool failed." }] };
@@ -53,12 +61,12 @@ export async function createMcpServer(workspaceInput: string): Promise<Server> {
   return server;
 }
 
-export async function startStdioMcp(workspaceInput: string): Promise<void> {
-  const server = await createMcpServer(workspaceInput);
+export async function startStdioMcp(workspaceInput: string, options: McpRuntimeOptions = {}): Promise<void> {
+  const server = await createMcpServer(workspaceInput, options);
   await server.connect(new StdioServerTransport());
 }
 
-async function dispatch(name: string, args: Record<string, unknown>, workspace: Workspace, processes: ProcessManager, scheduler: FairRwScheduler): Promise<unknown> {
+async function dispatch(name: string, args: Record<string, unknown>, workspace: Workspace, processes: ProcessManager, scheduler: FairRwScheduler, signal: AbortSignal): Promise<unknown> {
   if (name === "workspace_info") return scheduler.read(async () => workspace.info());
   if (name === "list_directory") return scheduler.read(() => workspace.listDirectory(textArg(args, "path", ".")));
   if (name === "stat_path") return scheduler.read(() => workspace.statPath(textArg(args, "path")));
@@ -71,7 +79,7 @@ async function dispatch(name: string, args: Record<string, unknown>, workspace: 
   if (name === "create_directory") return scheduler.write(() => workspace.createDirectory(textArg(args, "path")));
   if (name === "delete_path") return scheduler.write(() => workspace.deletePath(textArg(args, "path"), boolArg(args, "recursive", false)));
   if (name === "move_path") return scheduler.write(() => workspace.movePath(textArg(args, "from"), textArg(args, "to"), boolArg(args, "overwrite", false)));
-  if (name === "run_command") return scheduler.write(() => workspace.runCommand(textArg(args, "command"), textArg(args, "cwd", "."), intArg(args, "timeoutMs", 30000, 100, 120000)));
+  if (name === "run_command") return scheduler.write(() => workspace.runCommand(textArg(args, "command"), textArg(args, "cwd", "."), intArg(args, "timeoutMs", 30000, 100, 120000), signal));
   if (name === "start_process") return scheduler.write(async () => processes.start(textArg(args, "command"), await workspace.processCwd(textArg(args, "cwd", ".")), safeEnv()));
   if (name === "list_processes") return scheduler.read(async () => processes.list());
   if (name === "read_process") return scheduler.read(async () => processes.read(textArg(args, "processId"), intArg(args, "stdoutCursor", 0, 0, Number.MAX_SAFE_INTEGER), intArg(args, "stderrCursor", 0, 0, Number.MAX_SAFE_INTEGER)));

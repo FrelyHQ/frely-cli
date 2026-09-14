@@ -33,15 +33,13 @@ export async function ensureDevice(): Promise<DeviceBinding> {
   if (!response.ok) throw new Error(publicError(payload, response.status));
   const record = object(payload);
   const deviceId = requiredString(record, "deviceId", 256);
-  const mcpUrl = validateMcpUrl(requiredString(record, "mcpUrl", 4096));
   const binding: DeviceBinding = {
-    version: 1,
+    version: 2,
     relayUrl: auth.config.relayUrl,
     userId: auth.user.id,
     deviceId,
     publicKeySpki: identity.publicKeySpki,
     keyThumbprint: identity.keyThumbprint,
-    mcpUrl,
     updatedAt: new Date().toISOString(),
   };
   await writeDeviceBinding(binding);
@@ -55,7 +53,7 @@ export async function currentDevice(): Promise<DeviceBinding | null> {
   return binding;
 }
 
-export async function connectionGrant(binding?: DeviceBinding): Promise<ConnectionGrant> {
+export async function connectionGrant(binding?: DeviceBinding, mcp?: { authorizationId: string; sign(message: string): string }): Promise<ConnectionGrant> {
   const auth = await requireLogin();
   const device = binding ?? await ensureDevice();
   if (device.relayUrl !== auth.config.relayUrl || device.userId !== auth.user.id) throw new Error("Device binding does not belong to the current Frely login.");
@@ -64,7 +62,10 @@ export async function connectionGrant(binding?: DeviceBinding): Promise<Connecti
   const proof = createConnectionProof(identity, device.deviceId);
   const response = await relayFetch(auth.config.relayUrl, auth.credential, "/api/user/device-relay/connect", {
     method: "POST",
-    body: JSON.stringify(proof),
+    body: JSON.stringify({ ...proof, ...(mcp ? {
+      mcpAuthorizationId: mcp.authorizationId,
+      mcpSignature: mcp.sign(["frely.mcp.connect.v1", device.deviceId, mcp.authorizationId, proof.issuedAt, proof.nonce].join("\n")),
+    } : {}) }),
   });
   if (response.status === 404 || response.status === 405) throw new Error("This Frely Relay does not provide Device Relay connections yet.");
   const payload = await responseJson(response);
@@ -98,7 +99,7 @@ export async function revokeDevice(): Promise<void> {
   await deleteDeviceIdentity(auth.config.relayUrl, auth.user.id);
 }
 
-async function relayFetch(relayUrl: string, credential: { scheme: "bearer" | "cookie"; value: string }, path: string, init: RequestInit): Promise<Response> {
+export async function relayFetch(relayUrl: string, credential: { scheme: "bearer" | "cookie"; value: string }, path: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   timer.unref?.();

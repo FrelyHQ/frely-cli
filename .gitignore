@@ -7,3 +7,5 @@ dist/
 .agents/.cache/
 # Worktree verification scratch files
 .local/
+
+artifacts/

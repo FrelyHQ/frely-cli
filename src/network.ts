@@ -41,7 +41,7 @@ export async function runNetwork(args: string[], deps: NetworkDeps = {}): Promis
       deps.allowLoopback ?? process.env.FRELY_NETWORK_ALLOW_LOOPBACK === "1");
     const host = flags["--host"] ?? config?.host ?? "generic";
     if (!(NETWORK_HOSTS as readonly string[]).includes(host)) throw new NetworkError("HOST_UNSUPPORTED");
-    const store = deps.store ?? (await import("./credential-store.js")).credentialStore;
+    const store = deps.store ?? (await import("./credential-basic.js")).basicCredentialStore;
     const now = deps.now ?? Date.now;
     const http = new NetworkHttp(deps.fetch ?? fetch, deps.timeoutMs ?? 30_000);
     const sessions = new NetworkSessions(origin, store, http, now);

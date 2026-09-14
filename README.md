@@ -17,20 +17,20 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development guidance and
 
 ## Quick install
 
-After `frely-cli` is published, Frely can serve the repository `install.sh` as:
+After the standalone artifacts and installer are released, Frely can serve `install.sh` as:
 
 ```sh
 curl -fsSL https://app.frely.cloud/install.sh | sh
 ```
 
-The package requires Node.js 22 or newer. The installer installs `frely-cli@latest` through npm.
+The standalone installers (`install.sh` and `install.ps1`) select a platform executable, verify its SHA-256 checksum and install in the user directory. They do not require Node.js, npm or a keyring. The npm package requires Node.js 22 or newer. Release signing and publication have not been performed by this source change. See [credential and installation boundaries](docs/credential-storage.md).
 
 ## Install or update with npm
 
 To install or update to the latest release, use:
 
 ```sh
-npm install --global frely-cli@latest
+npm install --global --ignore-scripts frely-cli@latest
 ```
 
 To install or update to a specific release, replace `latest` with the release version. For example:
@@ -84,12 +84,7 @@ Use the absolute `$PWD` path in the global install command. Bun installs the `fr
 export PATH="$(bun pm bin -g):$PATH"
 ```
 
-If Bun reports that the `keytar` lifecycle script is blocked, trust the native dependency and reinstall:
-
-```sh
-bun pm trust keytar
-bun install
-```
+This source revision has no keytar dependency or native npm build step. Dependency installation supports `npm ci --ignore-scripts` and `bun install --ignore-scripts`. Do not add a lifecycle-script trust exception for an old keytar installation.
 
 The repository uses npm as the canonical package manager for CI and releases
 and commits `package-lock.json`. Bun can be used for local development; keep
@@ -102,15 +97,11 @@ frely login
 frely mcp setup --workspace /path/to/project
 ```
 
-`frely login` starts a Better Auth device-authorization flow, opens the Frely approval page in your browser, and waits for explicit approval. The resulting OAuth access/refresh tokens are stored in the operating-system credential store; they are never written to the CLI config file, command line, URL, or logs. The CLI keeps accepting an existing legacy session cookie during the transition.
+`frely login` requests a restricted account session through browser device authorization. Basic sessions use private plaintext files, not the OS credential store. Legacy account cookies do not migrate to this store. Basic features and Network commands do not initialize MCP credentials.
 
-`mcp setup` performs three client-side steps:
+`frely mcp setup` initializes a separate secure MCP key, requests browser approval for this device and workspace, and installs the user-level Device Relay service. The default authorization is 180 days; `--days 1..360` selects a duration. `frely mcp renew --days 180` requires a new approval and rotates the caller URL. Login refresh, restart and repeated setup do not extend authorization.
 
-1. enrolls this machine with the logged-in Frely account;
-2. obtains the stable public MCP URL;
-3. installs and starts the user-level background Device Relay service.
-
-It prints the MCP URL to add to ChatGPT. The background service keeps the outbound connection alive, so no terminal window or inbound port is required.
+Services use macOS LaunchAgents, Linux systemd user units, or Windows Task Scheduler for the logged-on user. Windows implementation needs native acceptance testing. Linux MCP secure storage can require Secret Service or an injected key; basic installation does not.
 
 You can print the URL again with:
 
@@ -178,9 +169,9 @@ frely mcp revoke
 frely mcp stdio [--workspace <path>]
 ```
 
-`frely mcp serve` is the foreground/debug form of the same Device Relay client. `frely mcp setup` uses a LaunchAgent on macOS and a systemd user service on Linux.
+`frely mcp serve` is the foreground form of the Device Relay client. Remote execution requires the approved workspace and MCP lease. A Provider-only connection does not enable MCP.
 
-`frely logout` stops the background service before removing the account session. `frely mcp revoke` removes the background service, revokes the server-side device binding, and deletes the local device private key.
+`frely logout` removes the account session and attempts to stop the background service. `frely mcp revoke` revokes the MCP lease and removes its secure credential; it retains the Provider device and service.
 
 ## MCP provisioning contract
 
@@ -229,13 +220,15 @@ Filesystem tools are constrained to the selected workspace, reject symlink escap
 
 ## Authentication and secrets
 
-- Password input requires an interactive TTY and is not stored.
-- Frely account session credentials are stored through Keychain / Secret Service via `keytar`.
-- The device Ed25519 private key is stored in the OS credential store.
-- Device binding metadata includes the private MCP bearer URL and therefore uses owner-only file permissions; the Relay stores only the MCP secret hash.
-- Device connection grants are short lived and stay in memory.
-- The MCP URL does not contain the device private key, account session, or connection grant, but the URL's private secret is itself a credential.
-- `doctor` never prints passwords, sessions, private keys, or connection grants.
+Basic account and Network sessions use private plaintext files. They cannot approve MCP authorization or invoke account-management operations outside their explicit scopes. The Provider key is separate from the MCP execution key.
+
+MCP secrets use AES-256-GCM files with a master key in macOS Keychain, Windows Credential Manager or Linux Secret Service. Headless deployments can inject a 32-byte key through `FRELY_CREDENTIAL_KEY` and select `FRELY_CREDENTIAL_STORE=encrypted-file`. MCP has no plaintext fallback. Secure-store failure does not stop basic features.
+
+The private MCP URL is a credential. The Relay stores its hash and checks its lease; public device metadata contains no URL secret or private key. Expiry blocks requests and queued work and cancels managed execution. It does not undo writes or create a sandbox around arbitrary shell programs.
+
+`frely doctor` treats unconfigured MCP as optional. `frely doctor --mcp` checks the secure credential and server. `frely mcp status` displays local metadata; it is not server revocation proof.
+
+Storage, migration, service injection, release requirements and threat boundaries: [`docs/credential-storage.md`](docs/credential-storage.md).
 
 ## Current server dependency
 
@@ -251,7 +244,7 @@ The Frely name, logos, and product names are not licensed as trademarks; see
 
 ## Frely Network onboarding
 
-The Network commands are part of the unreleased 0.4.0 source version. Node.js 22 or newer is required. Package publication and server activation are separate release steps.
+The Network commands are part of the unreleased 0.4.0 source version. The npm distribution requires Node.js 22 or newer; the standalone distribution includes its runtime. Package publication and server activation are separate release steps.
 
 ```sh
 frely network setup --host chatgpt --json
@@ -265,7 +258,7 @@ frely network logout --json
 
 The examples contain placeholders. Host values are `chatgpt`, `claude-code`, `opencode` and `generic`. Setup returns a browser link and request code without waiting for a signature or requiring a TTY. The next status or capability call retrieves the authorization. ChatGPT requires an existing device-execution bridge and uses the instructions in its current conversation; setup does not add a ChatGPT connector or native Skill.
 
-`--network <HTTPS-origin>` selects a deployment. Credentials are scoped to that origin in the OS credential store under `frely-network`; they do not share Frely account or device-relay credentials. Tokens and private device codes are excluded from command output. `logout` affects the Network session, not the existing FrelyMCP service. An unconfirmed remote revocation is reported as an error.
+`--network <HTTPS-origin>` selects a deployment. Credentials are scoped to that origin in the basic private-file store under `frely-network`; they do not share Frely account or device-relay credentials. Tokens and private device codes are excluded from command output. `logout` affects the Network session, not the existing FrelyMCP service. An unconfirmed remote revocation is reported as an error.
 
 Skill installation manages its own files and hash metadata. An unmanaged file, user edit or symlink causes a failure rather than a configuration overwrite. Installation paths are `.claude/skills/frely-network`, `.config/opencode/skills/frely-network` or `.agents/skills/frely-network` under the user home.
 

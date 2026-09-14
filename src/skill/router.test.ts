@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { credentialStore } from "../credential-store.js";
+import { basicCredentialStore as credentialStore } from "../credential-basic.js";
 import { SkillInvocationError, invokeSkill } from "./router.js";
 
 const relayUrl = "http://127.0.0.1:43127";
@@ -73,9 +73,9 @@ test("rejects an untrusted registration URL for an advanced capability", async (
 test("configured but expired credentials still select remote MCP and never fall back", async () => {
   const restore = memoryStore();
   try {
-    await credentialStore.setPassword("frely-cli", account, JSON.stringify({
+    await credentialStore.setPassword("frely-cli-basic-v1", account, JSON.stringify({
       version: 1,
-      type: "oauth",
+      type: "basic-oauth",
       accessToken: "expired-token",
       expiresAt: 1,
     }));
@@ -98,25 +98,17 @@ test("configured but expired credentials still select remote MCP and never fall 
   }
 });
 
-test("configured legacy cookie credentials stay on the remote route", async () => {
+test("a legacy cookie injected into basic storage cannot authorize a remote Skill", async () => {
   const restore = memoryStore();
+  let calls = 0;
   try {
-    await credentialStore.setPassword("frely-cli", account, "friday_session_token=cookie-value");
-    let scheme = "";
-    let token = "";
-    const result = await invokeSkill({
-      relayUrl,
-      modelId: "user/vm-agent/v1",
-      task: "remote task",
-      baseSkill: async () => ({ text: "fallback" }),
-      remoteAgentMcp: { invoke: async ({ credential, token: value }) => { scheme = credential?.scheme ?? ""; token = value; return { text: "remote" }; } },
-    });
-    assert.equal(result.text, "remote");
-    assert.equal(scheme, "cookie");
-    assert.equal(token, "friday_session_token=cookie-value");
-  } finally {
-    restore();
-  }
+    await credentialStore.setPassword("frely-cli-basic-v1", account, "friday_session_token=synthetic");
+    await assert.rejects(invokeSkill({ relayUrl, modelId: "user/vm-agent/v1", task: "remote task",
+      baseSkill: async () => { calls++; return { text: "base" }; },
+      remoteAgentMcp: { invoke: async () => { calls++; return { text: "remote" }; } },
+    }));
+    assert.equal(calls, 0);
+  } finally { restore(); }
 });
 
 function memoryStore(): () => void {

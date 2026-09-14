@@ -1,3 +1,4 @@
+import { terminateProcessTree } from "./process-tree.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
@@ -40,14 +41,16 @@ export interface ProcessReadResult extends ProcessSnapshot {
 }
 
 export class ProcessManager {
+  private closed = false;
   private readonly processes = new Map<string, ManagedProcess>();
 
   start(command: string, cwd: string, env: NodeJS.ProcessEnv): ProcessSnapshot {
+    if (this.closed) throw new Error("MCP process manager is closed.");
     if (!command.trim()) throw new Error("command is required.");
     this.pruneExited();
     if (this.processes.size >= MAX_PROCESSES) throw new Error(`At most ${MAX_PROCESSES} managed processes may exist in one MCP session.`);
     const id = randomUUID();
-    const child = spawn(command, { cwd, env, shell: true, stdio: "pipe" });
+    const child = spawn(command, { cwd, env, shell: true, stdio: "pipe", detached: process.platform !== "win32", windowsHide: true });
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     const managed: ManagedProcess = {
@@ -66,6 +69,7 @@ export class ProcessManager {
     };
     child.stdout.on("data", (chunk: string) => this.append(managed, "stdout", chunk));
     child.stderr.on("data", (chunk: string) => this.append(managed, "stderr", chunk));
+    child.once("error", () => { managed.exitedAt = new Date().toISOString(); managed.exitCode = 1; });
     child.once("exit", (code, signal) => {
       managed.exitedAt = new Date().toISOString();
       managed.exitCode = code;
@@ -104,13 +108,13 @@ export class ProcessManager {
   async stop(id: string): Promise<ProcessSnapshot> {
     const managed = this.require(id);
     if (managed.exitedAt) return snapshot(managed);
-    managed.child.kill("SIGTERM");
-    await Promise.race([
-      new Promise<void>((resolve) => managed.child.once("exit", () => resolve())),
-      new Promise<void>((resolve) => setTimeout(resolve, 1500)),
-    ]);
-    if (!managed.exitedAt) managed.child.kill("SIGKILL");
+    await terminateProcessTree(managed.child);
     return snapshot(managed);
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    await Promise.all([...this.processes.values()].filter((item) => !item.exitedAt).map((item) => terminateProcessTree(item.child)));
   }
 
   private require(id: string): ManagedProcess {
