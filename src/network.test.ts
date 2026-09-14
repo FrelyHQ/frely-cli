@@ -112,7 +112,8 @@ test("Claude Code and OpenCode install only the managed Skill, preserving other 
     await mkdir(dirname(other), { recursive: true }); await writeFile(other, "unchanged");
     const result = await runNetwork(setupArgs(host), f.deps); assert.equal(result.instructionMode, "skill");
     const path = join(f.home, host === "claude-code" ? ".claude/skills" : host === "opencode" ? ".config/opencode/skills" : ".agents/skills", "frely-network", "SKILL.md");
-    assert.equal(await readFile(path, "utf8"), skill); assert.equal((await stat(path)).mode & 0o777, 0o600);
+    assert.equal(await readFile(path, "utf8"), skill);
+    if (process.platform !== "win32") assert.equal((await stat(path)).mode & 0o777, 0o600);
     await runNetwork(setupArgs(host), f.deps); assert.equal(await readFile(other, "utf8"), "unchanged");
   }
 });
