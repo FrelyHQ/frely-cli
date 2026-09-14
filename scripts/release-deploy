@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/release-deploy [--version <semver>] [--dry-run] [--no-wait]
+
+Prepare and publish frely-cli through the existing vX.Y.Z GitHub Actions npm workflow.
+If --version is omitted, the next patch version after the latest vX.Y.Z tag is used.
+EOF
+}
+
+version=""
+dry_run=0
+wait_for_ci=1
+while (($#)); do
+  case "$1" in
+    --version)
+      [[ $# -ge 2 ]] || { echo "missing value for --version" >&2; exit 2; }
+      version="$2"
+      shift 2
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    --no-wait)
+      wait_for_ci=0
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+semver_re='^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$'
+
+require_clean() {
+  local dirty
+  dirty="$(git status --porcelain --untracked-files=all)"
+  [[ -z "$dirty" ]] || {
+    echo "release requires a clean worktree:" >&2
+    printf '%s\n' "$dirty" >&2
+    exit 1
+  }
+}
+
+next_patch_version() {
+  local latest raw major minor patch
+  latest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
+  [[ -n "$latest" ]] || { echo "no vX.Y.Z npm release tag found; pass --version" >&2; exit 1; }
+  raw="${latest#v}"
+  [[ "$raw" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || {
+    echo "latest npm tag is not a stable SemVer: $latest; pass --version" >&2
+    exit 1
+  }
+  major="${BASH_REMATCH[1]}"
+  minor="${BASH_REMATCH[2]}"
+  patch="${BASH_REMATCH[3]}"
+  printf '%s.%s.%s\n' "$major" "$minor" "$((patch + 1))"
+}
+
+require_clean
+sha="$(git rev-parse HEAD)"
+[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "unable to resolve source SHA" >&2; exit 1; }
+
+if ((dry_run)); then
+  [[ -n "$version" ]] || version="$(next_patch_version)"
+  [[ "$version" =~ $semver_re ]] || { echo "invalid SemVer: $version" >&2; exit 2; }
+  printf 'dry-run: version=%s source_sha=%s tag=v%s workflow=.github/workflows/publish.yml\n' "$version" "$sha" "$version"
+  exit 0
+fi
+
+branch="$(git symbolic-ref --quiet --short HEAD || true)"
+[[ "$branch" == "main" ]] || { echo "npm release must run from main; current branch: ${branch:-detached}" >&2; exit 1; }
+
+git fetch origin main --tags
+remote_sha="$(git rev-parse origin/main)"
+git merge-base --is-ancestor "$remote_sha" "$sha" || {
+  echo "local main does not contain origin/main; update main before release" >&2
+  exit 1
+}
+
+[[ -n "$version" ]] || version="$(next_patch_version)"
+[[ "$version" =~ $semver_re ]] || { echo "invalid SemVer: $version" >&2; exit 2; }
+tag="v$version"
+if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+npm ci
+  exit 1
+fi
+
+changed_version_files=0
+cleanup() {
+  local status=$?
+  if ((status != 0 && changed_version_files)); then
+    git restore -- package.json package-lock.json
+  fi
+  exit "$status"
+}
+trap cleanup EXIT INT TERM
+
+current_version="$(node -p "require('./package.json').version")"
+if [[ "$current_version" != "$version" ]]; then
+  npm version "$version" --no-git-tag-version --allow-same-version >/dev/null
+  changed_version_files=1
+fi
+
+npm ci --ignore-scripts
+npm run check
+npm test
+npm run build
+npm pack --dry-run >/dev/null
+
+if ! git diff --quiet -- package.json package-lock.json; then
+  git add package.json package-lock.json
+  git commit -m "release: v$version"
+  changed_version_files=0
+fi
+release_sha="$(git rev-parse HEAD)"
+
+git push origin HEAD:main
+git tag -a "$tag" "$release_sha" -m "frely-cli $tag"
+git push origin "refs/tags/$tag"
+trap - EXIT INT TERM
+
+printf 'frely-cli release triggered: version=%s sha=%s tag=%s\n' "$version" "$release_sha" "$tag"
+
+if ((wait_for_ci)) && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  run_id=""
+  for _ in $(seq 1 30); do
+    run_id="$(gh run list --workflow publish.yml --commit "$release_sha" --limit 10 --json databaseId,headBranch --jq ".[] | select(.headBranch == \"$tag\") | .databaseId" | head -n 1)"
+    [[ -n "$run_id" ]] && break
+    sleep 2
+  done
+  if [[ -n "$run_id" ]]; then
+    gh run watch "$run_id" --exit-status
+  else
+    echo "publish workflow was not observed; the tag was pushed and can be checked in GitHub Actions" >&2
+  fi
+fi

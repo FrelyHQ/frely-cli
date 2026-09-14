@@ -241,10 +241,43 @@ The CLI side of installation, account login, device enrollment, MCP URL discover
 
 A Frely Relay deployment must implement the device provisioning endpoints, Device Relay WebSocket host, private MCP ingress, local Provider ingress, and personal Provider control flow. The private MCP URL is the ChatGPT-side bearer credential. Local Provider credentials are device-key signatures stored by CPA.
 
-## License and trademarks
+## Release npm package
 
-`frely-cli` is licensed under the Apache License 2.0; see [`LICENSE`](LICENSE).
-The Frely name, logos, and product names are not licensed as trademarks; see
+## Release npm package
+
+Entry:
+
+```bash
+./scripts/release-deploy --dry-run
+./scripts/release-deploy
+./scripts/release-deploy --version 0.5.0
+```
+
+Release fields:
+
+| Field | Value |
+| --- | --- |
+| Branch | `main` |
+| Version source | next patch from stable `vX.Y.Z` tags |
+| Version files | `package.json`, `package-lock.json` |
+| Verification | `npm ci`, check, test, build, pack dry-run |
+| Publish trigger | annotated `vX.Y.Z` tag |
+| Publisher | `.github/workflows/publish.yml` |
+| npm credential owner | GitHub Actions secret |
+
+Release flow:
+
+```text
+version files
+→ verification
+→ release commit
+→ origin/main
+→ vX.Y.Z tag
+→ GitHub Actions
+→ npm
+```
+
+`--no-wait` selects tag-trigger completion as the command result. The `gh` path selects workflow completion as the command result. A local gate failure restores script-owned version-file changes.
 [`TRADEMARKS.md`](TRADEMARKS.md).
 
 ## Frely Network onboarding
