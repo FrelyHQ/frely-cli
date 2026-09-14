@@ -67,13 +67,12 @@ try {
   $path = [Console]::In.ReadToEnd()
   $item = Get-Item -LiteralPath $path -Force
   if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'link' }
-  $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
-  $acl = New-Object Security.AccessControl.DirectorySecurity
-  $acl.SetOwner($sid)
-  $acl.SetAccessRuleProtection($true, $false)
-  $rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
-  $acl.AddAccessRule($rule)
-  Set-Acl -LiteralPath $path -AclObject $acl
+  $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
+  & $icacls $path '/reset' '/Q' | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'reset' }
+  & $icacls $path '/inheritance:r' '/grant:r' "*$($sid):(OI)(CI)(F)" '/Q' | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'protect' }
 } catch { exit 1 }
 `;
 

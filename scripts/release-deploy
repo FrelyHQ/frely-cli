@@ -5,12 +5,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 usage() {
-  cat <<'EOF'
+  cat <<'USAGE'
 Usage: ./scripts/release-deploy [--version <semver>] [--dry-run] [--no-wait]
 
 Prepare and publish frely-cli through the existing vX.Y.Z GitHub Actions npm workflow.
-If --version is omitted, the next patch version after the latest vX.Y.Z tag is used.
-EOF
+If --version is omitted, package.json wins when it is newer than the latest release tag;
+otherwise the next patch version is used.
+USAGE
 }
 
 version=""
@@ -55,28 +56,56 @@ require_clean() {
   }
 }
 
+latest_release_version() {
+  local tag
+  while IFS= read -r tag; do
+    if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      printf '%s\n' "${tag#v}"
+      return 0
+    fi
+  done < <(git tag --list 'v*' --sort=-v:refname)
+  return 1
+}
+
+semver_gt() {
+  local a_major a_minor a_patch b_major b_minor b_patch
+  IFS=. read -r a_major a_minor a_patch <<<"$1"
+  IFS=. read -r b_major b_minor b_patch <<<"$2"
+  (( 10#$a_major > 10#$b_major ||
+     (10#$a_major == 10#$b_major && 10#$a_minor > 10#$b_minor) ||
+     (10#$a_major == 10#$b_major && 10#$a_minor == 10#$b_minor && 10#$a_patch > 10#$b_patch) ))
+}
+
 next_patch_version() {
-  local latest raw major minor patch
-  latest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
-  [[ -n "$latest" ]] || { echo "no vX.Y.Z npm release tag found; pass --version" >&2; exit 1; }
-  raw="${latest#v}"
-  [[ "$raw" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || {
-    echo "latest npm tag is not a stable SemVer: $latest; pass --version" >&2
-    exit 1
-  }
-  major="${BASH_REMATCH[1]}"
-  minor="${BASH_REMATCH[2]}"
-  patch="${BASH_REMATCH[3]}"
-  printf '%s.%s.%s\n' "$major" "$minor" "$((patch + 1))"
+  local latest major minor patch
+  latest="$(latest_release_version || true)"
+  [[ -n "$latest" ]] || { echo "no stable vX.Y.Z npm release tag found; pass --version" >&2; exit 1; }
+  IFS=. read -r major minor patch <<<"$latest"
+  printf '%s.%s.%s\n' "$major" "$minor" "$((10#$patch + 1))"
+}
+
+auto_version() {
+  local package latest
+  package="$(node -p "require('./package.json').version")"
+  latest="$(latest_release_version || true)"
+  if [[ "$package" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    if [[ -z "$latest" ]] || semver_gt "$package" "$latest"; then
+      printf '%s\n' "$package"
+      return 0
+    fi
+  fi
+  next_patch_version
 }
 
 require_clean
 sha="$(git rev-parse HEAD)"
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "unable to resolve source SHA" >&2; exit 1; }
 
+git fetch origin --tags
+[[ -n "$version" ]] || version="$(auto_version)"
+[[ "$version" =~ $semver_re ]] || { echo "invalid SemVer: $version" >&2; exit 2; }
+
 if ((dry_run)); then
-  [[ -n "$version" ]] || version="$(next_patch_version)"
-  [[ "$version" =~ $semver_re ]] || { echo "invalid SemVer: $version" >&2; exit 2; }
   printf 'dry-run: version=%s source_sha=%s tag=v%s workflow=.github/workflows/publish.yml\n' "$version" "$sha" "$version"
   exit 0
 fi
@@ -84,18 +113,15 @@ fi
 branch="$(git symbolic-ref --quiet --short HEAD || true)"
 [[ "$branch" == "main" ]] || { echo "npm release must run from main; current branch: ${branch:-detached}" >&2; exit 1; }
 
-git fetch origin main --tags
 remote_sha="$(git rev-parse origin/main)"
 git merge-base --is-ancestor "$remote_sha" "$sha" || {
   echo "local main does not contain origin/main; update main before release" >&2
   exit 1
 }
 
-[[ -n "$version" ]] || version="$(next_patch_version)"
-[[ "$version" =~ $semver_re ]] || { echo "invalid SemVer: $version" >&2; exit 2; }
 tag="v$version"
 if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-npm ci
+  echo "release tag already exists: $tag" >&2
   exit 1
 fi
 
@@ -109,9 +135,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-current_version="$(node -p "require('./package.json').version")"
-if [[ "$current_version" != "$version" ]]; then
-  npm version "$version" --no-git-tag-version --allow-same-version >/dev/null
+npm version "$version" --no-git-tag-version --allow-same-version >/dev/null
+if ! git diff --quiet -- package.json package-lock.json; then
   changed_version_files=1
 fi
 
