@@ -1,0 +1,43 @@
+name: Standalone CLI verification
+
+on:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  standalone:
+    name: Standalone (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Install without dependency lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Type-check and test
+        run: npm test
+      - name: Build standalone executable
+        run: npm run build:standalone
+      - name: Run without Node or a configured secure store
+        run: npm run test:standalone
+      - name: Verify offline installer and checksum rejection
+        run: npm run test:installer
+      - name: Preserve unsigned verification artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-${{ matrix.os }}
+          path: artifacts/
+          if-no-files-found: error

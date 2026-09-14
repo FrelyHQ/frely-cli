@@ -1,11 +1,10 @@
-import { exec as execCallback } from "node:child_process";
+import { runShellCommand } from "./process-tree.js";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
-const exec = promisify(execCallback);
 export const MAX_FILE_BYTES = 1024 * 1024;
 export const MAX_OUTPUT_BYTES = 1024 * 1024;
 
@@ -202,10 +201,10 @@ export class Workspace {
     return { from: portableRelative(this.root, from), to: portableRelative(this.root, to) };
   }
 
-  async runCommand(command: string, cwdInput: string, timeoutMs: number) {
+  async runCommand(command: string, cwdInput: string, timeoutMs: number, signal?: AbortSignal) {
     if (!command.trim()) throw new Error("command is required.");
     const cwd = await this.existingPath(cwdInput || ".", "directory");
-    const { stdout, stderr } = await exec(command, { cwd, timeout: timeoutMs, maxBuffer: MAX_OUTPUT_BYTES, env: safeEnv() });
+    const { stdout, stderr } = await runShellCommand(command, cwd, safeEnv(), timeoutMs, MAX_OUTPUT_BYTES, signal);
     return { stdout: truncate(stdout), stderr: truncate(stderr) };
   }
 

@@ -1,160 +1,60 @@
 # Frely CLI 与 ChatGPT MCP
 
-状态：实施中。
+状态：两层授权工作树实现，未发布。
 
-## 产品目标
+## 产品边界
 
-`frely-cli` 提供 Frely 账号登录、本机 MCP runtime、设备身份、后台服务与 Device Relay 客户端。
+基础层包含账号会话、Network、Provider 与基础诊断，不依赖 MCP 凭证库。MCP 层提供本机文件、Shell、进程与工具执行能力，需要独立授权。调用云端服务不等于授权外部主体控制本机。
 
-目标用户路径：
-
-```text
-安装 frely-cli
-  -> frely login
-  -> frely mcp setup --workspace <path>
-  -> 获得私有 MCP URL
-  -> ChatGPT 添加 Custom MCP
-  -> ChatGPT MCP 请求进入 Friday Relay
-  -> Friday Relay 转发请求到 frely-cli
-  -> frely-cli 执行本机 MCP 工具
-```
-
-`friday-relay` 只承担中继、设备授权、连接管理和公网 MCP 入口。本机文件、Shell、进程和 MCP 工具属于 `frely-cli`。
-
-本方案没有独立 `friday-local` 项目或 runtime 产品。
+Relay 负责设备身份、MCP 授权、连接、请求转发和撤销。CLI 负责本机执行、工作目录、调度与进程生命周期。项目不创建独立 `friday-local` runtime。
 
 ## 安装
 
-`frely-cli` 要求 Node.js 22 或更高版本。
+仓库提供 `install.sh` 与 `install.ps1`。安装器下载独立程序，校验 SHA-256，写入用户目录，不要求 Node.js、npm、管理员权限或密钥配置。公开入口需要发布对应的程序、校验文件与安装脚本；本次代码修改不执行发布。
 
-### 使用 npm 安装或更新
+源码构建与验证：
 
-要从 npm 安装或更新到最新版，请运行：
-
-```bash
-npm install --global frely-cli@latest
+```sh
+npm ci --ignore-scripts
+npm run build:standalone
+npm run test:standalone
+npm run test:installer
 ```
 
-要安装或更新到指定版本，请将 `latest` 替换为版本号。例如，使用 `0.3.6`：
+开发者可使用 npm 分发，运行环境要求 Node.js 22 或更高版本。此源码不依赖 keytar。
 
-```bash
-npm install --global frely-cli@0.3.6
-```
+## 基础账号
 
-### 从本地源码安装（Bun）
-
-要从当前源码目录安装全局 `frely` 命令：
-
-```bash
-cd /path/to/frely-cli
-bun install
-bun run build
-bun install --global "$PWD"
-```
-
-全局安装时使用绝对路径 `$PWD`。如果终端找不到 `frely`，将 Bun 的全局 bin 目录加入当前 shell 的 `PATH`：
-
-```bash
-export PATH="$(bun pm bin -g):$PATH"
-```
-
-此源码版本移除 `keytar`，不需要原生模块编译或生命周期脚本授权。依赖安装支持 `npm ci --ignore-scripts` 与 `bun install --ignore-scripts`。
-
-仓库提交 `package-lock.json` 与 `bun.lock`；CI 和发布使用 npm。凭证存储决策、Linux 无桌面模式与自动化边界见 [`credential-storage.md`](credential-storage.md)。Windows 的后台服务安装尚未实现，凭证支持不代表 `mcp setup` 服务步骤支持 Windows。
-
-### 使用仓库安装脚本
-
-仓库安装脚本：
-
-```bash
-./install.sh
-```
-
-生产安装入口目标：
-
-```bash
-curl -fsSL https://app.frely.cloud/install.sh | sh
-```
-
-安装脚本检查本机 Node.js/npm 版本，然后从公共 npm registry 安装 `frely-cli@latest` 并提供 `frely` 命令。可以通过 `FRELY_CLI_VERSION` 指定版本，或通过 `FRELY_CLI_PACKAGE` 覆盖完整 npm package spec：
-
-```bash
-curl -fsSL https://app.frely.cloud/install.sh | FRELY_CLI_VERSION=0.3.0 sh
-curl -fsSL https://app.frely.cloud/install.sh | FRELY_CLI_PACKAGE='frely-cli@next' sh
-```
-
-### 更新已有安装
-
-如果已经通过官方安装脚本安装 `frely-cli`，请重新运行[安装脚本](#使用仓库安装脚本)中的命令，脚本会更新到最新版本。
-
-如果通过 npm 安装，请重新运行[使用 npm 安装或更新](#使用-npm-安装或更新)中的相应命令。
-
-如果本机安装了多个 `frely` 可执行文件，请先查看命令路径和 npm 全局安装位置：
-
-```bash
-type -a frely
-npm prefix --global
-"$(npm prefix --global)/bin/frely" --version
-```
-
-终端会使用 `PATH` 中排在最前面的 `frely` 路径。如果该路径不是 npm 的全局 bin 目录，请将 `$(npm prefix --global)/bin` 放到 `PATH` 的前面，然后重新运行 `frely --version`。
-
-如果 Device Relay 后台服务正在运行，更新后重启服务，使服务加载新的 CLI 版本：
-
-```bash
-frely mcp service stop
-frely mcp service start
-```
-
-检查更新结果：
-
-```bash
-frely --version
-frely doctor
-```
-
-## 账号登录
-
-```bash
+```sh
 frely login
+frely whoami
+frely doctor
+frely network status --json
 ```
 
-CLI 使用 Frely Web 账号。`frely login` 会启动 Better Auth Device Authorization，在浏览器中显示明确的授权页面并等待批准；密码只在浏览器登录流程中处理，不进入 CLI 的 argv、环境或日志。
+`login` 使用浏览器设备授权，客户端为 `frely-cli-basic`。会话存储采用用户私有目录中的明文文件。文件权限限制其他用户读取，不提供静态加密保护。基础令牌不具有 Owner、账号安全管理、密钥导出或 MCP 批准权限。
 
-授权完成后，CLI 将 OAuth access/refresh token 存入操作系统凭据库。令牌不会写入配置文件、URL 或日志；旧版 session cookie 仍可在迁移期间读取。
+旧 Cookie 和旧高权限会话不迁入基础文件。升级需要基础账号登录。旧设备、Provider 绑定可能需要重建；CLI 不把旧设备私钥复制到基础存储。
 
-Frely session 存储位置：
+## MCP 启用与续期
 
-- macOS：Keychain
-- Linux：Secret Service
-
-普通配置只保存 Relay origin 与公开用户信息。
-
-## MCP 初始化
-
-```bash
-frely mcp setup --workspace ~/project
+```sh
+frely mcp
+frely mcp setup --workspace /path/to/project --days 180
+frely mcp renew --days 360
 ```
 
-该命令负责：
+`frely mcp` 是启用入口，工作目录取当前目录。`setup` 保留兼容命令形式。
 
-1. 检查 Frely session。
-2. 创建 Ed25519 设备密钥。
-3. 向 Relay 注册账号所属设备。
-4. 获取私有 MCP URL。
-5. 安装用户级后台服务。
-6. 启动 Device Relay WebSocket 客户端。
+启用流程检查 MCP 安全存储，创建独立 MCP 密钥，保存密钥，再展示浏览器批准地址。批准页面显示设备、公钥指纹、工作目录、执行能力和授权天数。用户确认后，服务端记录批准时间与到期时间，CLI 配置用户级服务并输出私有 MCP URL。
 
-后台服务：
+默认期限为 180 天，允许 1—360 个整天。起算点是服务端批准时间，不是安装或首次调用时间。普通令牌刷新、服务重启、升级、重复批准和重复 setup 不延长期限。续期创建新授权，新期限从本次批准时间起算，不向旧期限叠加。
 
-- macOS：LaunchAgent
-- Linux：systemd user service
+Windows 服务使用当前登录用户的 Task Scheduler 任务；macOS 使用 LaunchAgent；Linux 使用 systemd user service。没有用户服务管理器的环境可由部署方托管前台进程。Windows 原生运行结果不由适配器单元测试替代。
 
-设备不开放公网监听端口。连接方向为设备到 Relay 的 outbound WebSocket。
+## 添加到远程客户端
 
-## MCP URL
-
-```bash
+```sh
 frely mcp url
 ```
 
@@ -164,137 +64,40 @@ URL 形态：
 https://app.frely.cloud/mcp/<device-id>/<private-secret>
 ```
 
-`private-secret` 使用 384-bit 随机值。Relay 数据库存储 SHA-256 hash，不存储明文 secret。
+当前兼容方案使用私有 URL，客户端 Authentication 选择 `None`。URL 本身是调用凭证，不得进入日志、截图、公开页面或共享配置。Relay 保存秘密的 SHA-256 hash，不保存原文。
 
-私有 MCP URL 本身属于 bearer credential。持有 URL 的主体拥有对应设备 MCP 访问权。URL 不进入普通日志、metrics、trace、audit metadata、Referer、公开页面或共享截图。
+持有 URL 只满足调用凭证条件；设备在线、授权有效、连接具有匹配的 MCP 证明也必须成立。续期轮换 URL，旧 URL 失效，远程客户端需要更新。固定地址加 MCP OAuth 不属于此补丁。
 
-该安全模型不要求 ChatGPT MCP OAuth。ChatGPT 的 MCP Authentication 使用 `None`。
+## 状态、撤销与故障
 
-设备撤销会使该 URL 失效：
-
-```bash
+```sh
+frely mcp status --json
+frely doctor --mcp
 frely mcp revoke
 ```
 
-设备重新 enrollment 会轮换 MCP secret，并使旧 URL 失效。
+`status` 读取本地公开元数据，不访问凭证库，不证明服务端尚未撤销授权。`doctor --mcp` 检查安全凭证和服务端状态。基础 `doctor` 将未启用 MCP 视为可选状态。
 
-## ChatGPT 配置
+授权到期后，Relay 拒绝新 MCP 请求；CLI 在排队任务开始前检查期限，取消 MCP 请求并关闭受管进程。Provider 身份与服务保留。MCP 存储不可用时，基础功能可用，连接可保留 Provider 能力。
 
-```bash
-frely mcp chatgpt
-```
+`revoke` 只撤销 MCP 授权，不撤销共享 Provider 设备，不卸载共享服务。账号 `logout` 删除基础会话并尝试停止服务；它不等于撤销服务器上的 MCP 授权记录。
 
-命令输出 MCP URL 与后台服务状态。
+批准请求有效期为 15 分钟，每个用户最多保留八个未到期请求。中断启用后可重试；当前实现不跨进程恢复未完成的批准轮询。
 
-ChatGPT 配置：
+## 存储与部署
 
-```text
-MCP URL: <frely mcp url 输出>
-Authentication: None
-```
+MCP 使用系统主密钥加 AES-256-GCM 文件。macOS 对接 Keychain，Windows 对接 Credential Manager，Linux 对接 Secret Service。无桌面环境可使用外部主密钥模式。基础功能不依赖这些组件。
 
-URL 需要私密保存。
+服务定义只保存配置目录和存储模式，不保存外部主密钥。部署方必须向服务进程注入 `FRELY_CREDENTIAL_KEY`；交互终端中的环境变量不等于后台服务凭证配置。密钥丢失不会触发明文回退或覆盖原密文。
 
-## Device Relay
+部署顺序是数据库迁移、Web 授权接口、Device Relay 强制校验、CLI。旧 MCP URL 不生成默认授权，混合版本不属于已验证部署。
 
-设备连接使用协议：
+## 本机执行边界
 
-```text
-frely.device-relay.v1
-```
+文件工具限制工作目录，拒绝链接逃逸，实施大小限制与原子写入。Shell 使用 CLI 所属系统用户权限；workspace 不是 Shell 沙箱。
 
-连接 grant 使用短期 bearer token。token 来自账号 session + Ed25519 device proof。WebSocket URL 不携带该 token；token 位于 `Authorization` header。
+到期与撤销不撤回完成的文件修改，不回滚外部副作用，也不承诺回收任意程序脱离受管进程集合后留下的进程。系统用户或管理员失陷不属于凭证存储的保护范围。
 
-数据路径：
+协议与并发保持 `frely.device-relay.v1`：独立请求 ID、有界 inflight、读取并发、写入队列、取消与背压。MCP 请求增加授权 ID；Provider 请求不需要该字段。执行结果未知的写入或命令不得重放。
 
-```text
-ChatGPT
-   |
-   | MCP JSON-RPC / HTTPS
-   v
-Friday Relay /mcp/<device>/<secret>
-   |
-   | frely.device-relay.v1
-   | request / response / cancel
-   v
-frely-cli
-   |
-   v
-local MCP runtime
-   |- workspace / files
-   |- shell
-   |- persistent processes
-```
-
-每个 Relay 请求拥有独立 request id。设备支持 64 个 inflight 请求窗口。只读工具支持有界并发。mutation 与 Shell 使用写队列。该模型不使用 LocalMCP 的 device-wide single-flight `429`。
-
-## 失败语义
-
-- 无效 MCP URL：HTTP 404。
-- 设备离线：HTTP 503。
-- inflight 窗口耗尽：HTTP 503。
-- 设备请求超时：HTTP 504。
-- mutation 超时或连接中断：结果可能未知；Relay 不做自动重放。
-- 设备撤销：MCP URL 拒绝请求，设备 WebSocket 关闭。
-
-## 本机安全边界
-
-文件工具限制在选定 workspace。实现包含 symlink escape 检查、`O_NOFOLLOW` 读取、hard-link 覆盖保护、原子文件替换和 stale patch hash。
-
-Shell 与 persistent process 使用运行 `frely-cli` 的 OS 用户权限。workspace 只约束工作目录，不构成 Shell sandbox。
-
-## 命令面
-
-```text
-frely login [--relay <url>]
-frely logout
-frely whoami
-frely status [--json]
-frely doctor [--json]
-
-frely mcp setup [--workspace <path>]
-frely mcp url [--json]
-frely mcp status [--json]
-frely mcp chatgpt
-frely mcp serve [--workspace <path>]
-frely mcp service status|start|stop|uninstall [--json]
-frely mcp revoke
-frely mcp stdio [--workspace <path>]
-```
-
-## 服务端合同
-
-`frely-cli` 使用以下 Friday Relay 控制接口：
-
-```text
-POST /api/user/device-relay/enroll
-POST /api/user/device-relay/connect
-POST /api/user/device-relay/revoke
-```
-
-公网数据入口：
-
-```text
-POST /mcp/<device-id>/<private-secret>
-GET  /device-relay/ws?deviceId=<device-id>   # WebSocket upgrade
-```
-
-`enroll` 返回 `deviceId` 与私有 `mcpUrl`。`connect` 返回 `websocketUrl`、短期 `accessToken` 与 `expiresAt`。`revoke` 终止设备授权。
-
-## 验收状态
-
-`frely-cli` 已覆盖：
-
-- npm package 构建与安装脚本
-- Frely 账号登录门禁
-- OS credential store
-- Ed25519 device identity
-- enroll/connect/revoke client
-- MCP URL client
-- LaunchAgent/systemd user service
-- Device Relay WebSocket client
-- MCP JSON-RPC bridge
-- 本地工具 runtime
-- 多请求 inflight 与读写调度
-
-Friday Relay 服务端承担剩余公网入口、持久设备事实与转发运行时。
+配置、发布签名、迁移限制和测试入口见 [credential-storage.md](credential-storage.md)。

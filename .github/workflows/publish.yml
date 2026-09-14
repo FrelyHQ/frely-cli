@@ -13,8 +13,11 @@ jobs:
   verify:
     uses: ./.github/workflows/ci.yml
 
+  standalone:
+    uses: ./.github/workflows/standalone.yml
+
   publish:
-    needs: verify
+    needs: [verify, standalone]
     # Cross-platform install and credential gates run in CI.
     runs-on: macos-latest
     permissions:

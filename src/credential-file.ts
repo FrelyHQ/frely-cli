@@ -121,7 +121,7 @@ function assertPrivate(info: Stats, directory: boolean): void {
   if (info.isSymbolicLink() || (directory ? !info.isDirectory() : !info.isFile()) || (!directory && info.nlink !== 1)) throw new Error("Credential vault paths must be regular owner-controlled files and directories, not links.");
   if (process.platform !== "win32" && ((info.mode & 0o077) !== 0 || (process.getuid && info.uid !== process.getuid()))) throw new Error("Credential vault permissions are unsafe. Use owner-only directories (0700) and files (0600).");
 }
-async function readPrivateFile(path: string): Promise<string | null> {
+export async function readPrivateFile(path: string): Promise<string | null> {
   let before: Stats;
   try { before = await lstat(path); }
   catch (error) { if (hasCode(error, "ENOENT")) return null; throw error; }
@@ -136,7 +136,7 @@ async function readPrivateFile(path: string): Promise<string | null> {
     return raw;
   } finally { await file.close(); }
 }
-async function writePrivateFile(path: string, content: string): Promise<void> {
+export async function writePrivateFile(path: string, content: string): Promise<void> {
   if (Buffer.byteLength(content) > MAX_FILE_SIZE) throw new Error("Credential exceeded the size limit.");
   const temporary = join(dirname(path), `.${randomUUID()}.tmp`);
   const file = await open(temporary, "wx", 0o600);

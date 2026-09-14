@@ -12,7 +12,7 @@ export class FairRwScheduler {
   private writer = false;
   private readonly queue: Job<unknown>[] = [];
 
-  constructor(private readonly maxReaders = 4) {
+  constructor(private readonly maxReaders = 4, private readonly beforeWork: () => void | Promise<void> = () => undefined) {
     if (!Number.isSafeInteger(maxReaders) || maxReaders < 1 || maxReaders > 64) {
       throw new Error("maxReaders must be an integer between 1 and 64.");
     }
@@ -42,7 +42,7 @@ export class FairRwScheduler {
       if (this.activeReaders > 0) return;
       this.writer = true;
       this.queue.shift();
-      void first.work().then(first.resolve, first.reject).finally(() => {
+      void Promise.resolve().then(() => this.beforeWork()).then(first.work).then(first.resolve, first.reject).finally(() => {
         this.writer = false;
         this.drain();
       });
@@ -52,7 +52,7 @@ export class FairRwScheduler {
     while (!this.writer && this.activeReaders < this.maxReaders && this.queue[0]?.mode === "read") {
       const job = this.queue.shift()!;
       this.activeReaders += 1;
-      void job.work().then(job.resolve, job.reject).finally(() => {
+      void Promise.resolve().then(() => this.beforeWork()).then(job.work).then(job.resolve, job.reject).finally(() => {
         this.activeReaders -= 1;
         this.drain();
       });

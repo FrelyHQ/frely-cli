@@ -1,3 +1,5 @@
+import { requireMcpAuthorization } from "../mcp-authorization.js";
+import { McpLease } from "../runtime/mcp-lease.js";
 import WebSocket, { type RawData } from "ws";
 import { connectionGrant, ensureDevice } from "./control.js";
 import {
@@ -26,24 +28,42 @@ interface InflightRequest {
 
 export async function serveDeviceRelay(options: RelayServeOptions): Promise<void> {
   const device = await ensureDevice();
-  const session = options.workspace ? await RelayMcpSession.create(options.workspace) : null;
   const log = options.log ?? (() => undefined);
   let delayMs = 1000;
-  try {
-    while (!options.signal.aborted) {
-      try {
-        const grant = await connectionGrant(device);
-        await serveConnection(grant.websocketUrl, grant.accessToken, device.deviceId, session, options.signal, log);
-        delayMs = 1000;
-      } catch (error) {
-        if (options.signal.aborted) break;
-        log(`Device Relay disconnected: ${safeMessage(error)}. Reconnecting.`);
-        await wait(delayMs, options.signal);
-        delayMs = Math.min(delayMs * 2, 15_000);
+  while (!options.signal.aborted) {
+    let session: RelayMcpSession | null = null;
+    let lease: McpLease | null = null;
+    try {
+      let authorization = null;
+      if (options.workspace) {
+        try {
+          authorization = await requireMcpAuthorization(options.workspace);
+          if (authorization.grant.deviceId !== device.deviceId) throw new Error("MCP device differs from the connected device.");
+          lease = new McpLease(authorization.grant.id, Date.parse(authorization.grant.expiresAt!));
+          const guard = lease;
+          session = await RelayMcpSession.create(options.workspace, { assertAuthorized: () => guard.assert(), signal: guard.controller.signal });
+          const activeSession = session;
+          guard.controller.signal.addEventListener("abort", () => { void activeSession.close(); }, { once: true });
+        } catch {
+          authorization = null;
+          lease?.close();
+          await session?.close();
+          session = null; lease = null;
+          log("MCP execution disabled: authorization unavailable. Provider relay remains enabled. Run frely mcp renew.");
+        }
       }
+      const grant = await connectionGrant(device, authorization ? { authorizationId: authorization.grant.id, sign: authorization.sign } : undefined);
+      await serveConnection(grant.websocketUrl, grant.accessToken, device.deviceId, session, lease, options.signal, log);
+      delayMs = 1000;
+    } catch (error) {
+      if (options.signal.aborted) break;
+      log(`Device Relay disconnected: ${safeMessage(error)}. Reconnecting.`);
+      await wait(delayMs, options.signal);
+      delayMs = Math.min(delayMs * 2, 15_000);
+    } finally {
+      lease?.close();
+      await session?.close();
     }
-  } finally {
-    await session?.close();
   }
 }
 
@@ -52,6 +72,7 @@ async function serveConnection(
   accessToken: string,
   deviceId: string,
   session: RelayMcpSession | null,
+  lease: McpLease | null,
   signal: AbortSignal,
   log: (message: string) => void,
 ): Promise<void> {
@@ -91,7 +112,7 @@ async function serveConnection(
       // WebSocket peers may deliver the same JSON envelope as either a text
       // or a binary frame. `rawDataBuffer` normalizes both forms before the
       // protocol validator parses the JSON.
-      void handleFrame(rawDataBuffer(data), socket, inflight, cancelled, session).catch((error) => finish(error));
+      void handleFrame(rawDataBuffer(data), socket, inflight, cancelled, session, lease).catch((error) => finish(error));
     });
   });
 }
@@ -102,8 +123,13 @@ async function handleFrame(
   inflight: Map<string, InflightRequest>,
   cancelled: Set<string>,
   session: RelayMcpSession | null,
+  lease: McpLease | null,
 ): Promise<void> {
   const envelope = decodeDeviceRelayEnvelope(data);
+  if (envelope.type === "mcp_disabled") {
+    if (lease?.authorizationId === envelope.id) { lease.close(); await session?.close(); }
+    return;
+  }
   if (envelope.type === "cancel") {
     const item = inflight.get(envelope.id);
     if (item) {
@@ -120,7 +146,7 @@ async function handleFrame(
   inflight.set(envelope.id, { request: envelope, controller });
   const operation = envelope.method === "provider"
     ? executeProviderRequest(envelope, socket, controller.signal, cancelled)
-    : executeMcpRequest(envelope, session).then((payload) => {
+    : executeMcpRequest(envelope, session, lease).then((payload) => {
         if (!cancelled.has(envelope.id)) send(socket, { protocol: DEVICE_RELAY_PROTOCOL, type: "response", id: envelope.id, ok: true, payload });
       });
   void operation.catch((error) => {
@@ -131,8 +157,9 @@ async function handleFrame(
   });
 }
 
-async function executeMcpRequest(request: DeviceRelayRequest, session: RelayMcpSession | null): Promise<unknown> {
-  if (!session) throw new Error("MCP workspace is not configured on this device.");
+async function executeMcpRequest(request: DeviceRelayRequest, session: RelayMcpSession | null, lease: McpLease | null): Promise<unknown> {
+  if (!session || !lease || request.authorizationId !== lease.authorizationId) throw new Error("MCP execution authorization is missing or mismatched.");
+  lease.assert();
   return session.execute(request.payload);
 }
 

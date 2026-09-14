@@ -7,6 +7,7 @@ export type DeviceRelayRequest = {
   type: "request";
   id: string;
   method: "mcp" | "provider";
+  authorizationId?: string;
   payload: unknown;
 };
 
@@ -46,7 +47,9 @@ export type DeviceRelayStreamEnd = {
   id: string;
 };
 
-export type DeviceRelayEnvelope = DeviceRelayRequest | DeviceRelayResponse | DeviceRelayCancel | DeviceRelayStreamStart | DeviceRelayStreamChunk | DeviceRelayStreamEnd;
+export type DeviceRelayMcpDisabled = { protocol: typeof DEVICE_RELAY_PROTOCOL; type: "mcp_disabled"; id: string };
+
+export type DeviceRelayEnvelope = DeviceRelayMcpDisabled | DeviceRelayRequest | DeviceRelayResponse | DeviceRelayCancel | DeviceRelayStreamStart | DeviceRelayStreamChunk | DeviceRelayStreamEnd;
 
 export class DeviceRelayProtocolError extends Error {
   constructor(readonly code: "frame_invalid" | "frame_too_large" | "duplicate_request" | "inflight_limit") {
@@ -80,8 +83,14 @@ export function validateDeviceRelayEnvelope(value: unknown): asserts value is De
   if (record.protocol !== DEVICE_RELAY_PROTOCOL || typeof record.type !== "string" || typeof record.id !== "string") throw new DeviceRelayProtocolError("frame_invalid");
   assertRequestId(record.id);
   if (record.type === "request") {
-    exactKeys(record, ["protocol", "type", "id", "method", "payload"]);
+    exactKeys(record, ["protocol", "type", "id", "method", "payload", ...(record.authorizationId !== undefined ? ["authorizationId"] : [])]);
+    if (record.authorizationId !== undefined && (record.method !== "mcp" || typeof record.authorizationId !== "string" || !/^mca_[a-f0-9]{32}$/u.test(record.authorizationId))) throw new DeviceRelayProtocolError("frame_invalid");
     if (record.method !== "mcp" && record.method !== "provider") throw new DeviceRelayProtocolError("frame_invalid");
+    return;
+  }
+  if (record.type === "mcp_disabled") {
+    exactKeys(record, ["protocol", "type", "id"]);
+    if (!/^mca_[a-f0-9]{32}$/u.test(record.id)) throw new DeviceRelayProtocolError("frame_invalid");
     return;
   }
   if (record.type === "cancel") {

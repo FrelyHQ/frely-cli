@@ -1,7 +1,7 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign } from "node:crypto";
-import { credentialStore } from "../credential-store.js";
+import { basicCredentialStore as credentialStore } from "../credential-basic.js";
 
-const SERVICE = "frely-cli-device";
+const SERVICE = "frely-cli-provider-device-v1";
 
 export interface DeviceIdentity {
   publicKeySpki: string;
@@ -62,7 +62,7 @@ export function createConnectionProof(identity: DeviceIdentity, deviceId: string
   };
 }
 
-function identityFromPrivateKey(privateKeyPem: string): DeviceIdentity {
+export function identityFromPrivateKey(privateKeyPem: string): DeviceIdentity {
   const privateKey = createPrivateKey(privateKeyPem);
   const publicDer = createPublicKey(privateKey).export({ type: "spki", format: "der" });
   const publicKeySpki = Buffer.from(publicDer).toString("base64url");

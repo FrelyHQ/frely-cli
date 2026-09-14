@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { authConfigPath, inspectAuth, loginDevice, logout, probeCredentialStore } from "./auth.js";
-import { credentialStore } from "./credential-store.js";
+import { basicCredentialStore as credentialStore } from "./credential-basic.js";
 import { useMemoryCredentialStore } from "./test-support.js";
 
 async function setup(t: TestContext, configured = false) {
@@ -60,7 +60,7 @@ test("auth inspection reports store errors instead of crashing diagnostics", asy
 
 test("logout retains configuration if credential deletion fails", async (t) => {
   await setup(t, true);
-  await credentialStore.setPassword("frely-cli", "https://test.invalid", "friday_session_token=synthetic");
+  await credentialStore.setPassword("frely-cli-basic-v1", "https://test.invalid", JSON.stringify({version:1,type:"basic-oauth",accessToken:"synthetic",expiresAt:Date.now()+3600000}));
   globalThis.fetch = async () => new Response("{}", { status: 200 });
   credentialStore.deletePassword = async () => { throw new Error("credential deletion denied"); };
   await assert.rejects(logout(), /credential deletion denied/);

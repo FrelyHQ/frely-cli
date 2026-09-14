@@ -1,75 +1,31 @@
 import { inspectAuth, probeCredentialStore, whoami } from "./auth.js";
-import { currentDevice } from "./device/control.js";
-import { serviceStatus } from "./service.js";
-import { credentialStoreBackend } from "./credential-store.js";
+import { inspectMcpMetadata, requireMcpAuthorization } from "./mcp-authorization.js";
 import { VERSION } from "./version.js";
 
-export interface DiagnosticCheck {
-  name: string;
-  ok: boolean;
-  detail: string;
-}
-
+export interface DiagnosticCheck { name: string; ok: boolean; detail: string }
 export async function statusSnapshot() {
   const auth = await inspectAuth();
-  let device = null;
-  if (auth.configured && auth.credentialStored) device = await currentDevice().catch(() => null);
-  const service = await serviceStatus().catch(() => ({ installed: false, active: false, platform: process.platform }));
-  return {
-    version: VERSION,
-    node: process.version,
-    platform: process.platform,
-    auth,
-    device: device ? { deviceId: device.deviceId, keyThumbprint: device.keyThumbprint, provisioned: true } : null,
-    service,
-  };
+  const metadata = await inspectMcpMetadata().catch(() => null);
+  return { version: VERSION, node: process.version, platform: process.platform, auth,
+    mcp: metadata ? { configured: true, authorizationId: metadata.grant.id, expiresAt: metadata.grant.expiresAt,
+      expired: !metadata.grant.expiresAt || Date.parse(metadata.grant.expiresAt) <= Date.now() } : { configured: false } };
 }
-
-export async function doctor(): Promise<{ ok: boolean; checks: DiagnosticCheck[] }> {
-  const checks: DiagnosticCheck[] = [];
-  const major = Number(process.versions.node.split(".", 1)[0]);
-  checks.push({ name: "node", ok: major >= 22, detail: process.version });
-
-  try {
-    await probeCredentialStore();
-    checks.push({ name: "credential_store", ok: true, detail: `${credentialStoreBackend()}: read/write/delete succeeded` });
-  } catch (error) {
-    checks.push({ name: "credential_store", ok: false, detail: message(error) });
-  }
-
+export async function doctor(options: { mcp?: boolean } = {}): Promise<{ ok: boolean; checks: DiagnosticCheck[] }> {
+  const checks: DiagnosticCheck[] = [{ name: "runtime", ok: Number(process.versions.node.split(".")[0]) >= 22, detail: process.version }];
+  try { await probeCredentialStore(); checks.push({ name: "basic_storage", ok: true, detail: "private session files; no OS keyring required" }); }
+  catch { checks.push({ name: "basic_storage", ok: false, detail: "User-private session directory is not writable." }); }
   const auth = await inspectAuth();
-  checks.push({
-    name: "config",
-    ok: auth.configured && (process.platform === "win32" || auth.configMode === undefined || auth.configMode === 0o600),
-    detail: auth.configured ? `${auth.configPath}${auth.configMode === undefined ? "" : ` mode=${auth.configMode.toString(8)}`}` : "not configured",
-  });
-  checks.push({ name: "credential", ok: auth.credentialStored, detail: auth.credentialError ?? (auth.credentialStored ? "stored" : "missing") });
-
-  if (auth.configured && auth.credentialStored) {
-    try {
-      const user = await whoami();
-      checks.push({ name: "relay_session", ok: true, detail: `${user.email} @ ${auth.relayUrl}` });
-      const device = await currentDevice();
-      checks.push({ name: "mcp_device", ok: Boolean(device), detail: device ? `${device.deviceId} provisioned` : "not provisioned; run frely mcp url" });
-    } catch (error) {
-      checks.push({ name: "relay_session", ok: false, detail: message(error) });
-      checks.push({ name: "mcp_device", ok: false, detail: "unavailable until login is valid" });
-    }
-  } else {
-    checks.push({ name: "relay_session", ok: false, detail: "login required" });
-    checks.push({ name: "mcp_device", ok: false, detail: "login required" });
+  checks.push({ name: "account", ok: !auth.credentialError, detail: auth.credentialError ?? (auth.credentialStored ? "configured" : "not logged in; account features require frely login") });
+  if (auth.credentialStored) {
+    try { await whoami(); checks.push({ name: "account_session", ok: true, detail: "valid" }); }
+    catch { checks.push({ name: "account_session", ok: false, detail: "Session unavailable; run frely login." }); }
   }
-
-  const service = await serviceStatus().catch((error) => ({ installed: false, active: false, platform: process.platform, error: message(error) }));
-  checks.push({
-    name: "mcp_service",
-    ok: service.installed && service.active,
-    detail: "error" in service ? service.error : service.active ? `running${service.workspace ? ` workspace=${service.workspace}` : ""}` : service.installed ? "installed but stopped" : "not installed; run frely mcp setup",
-  });
-
+  if (options.mcp) {
+    try { const authorization = await requireMcpAuthorization(); checks.push({ name: "mcp", ok: true, detail: `authorized until ${authorization.grant.expiresAt}` }); }
+    catch (error) { checks.push({ name: "mcp", ok: false, detail: error instanceof Error ? error.message : "MCP authorization unavailable." }); }
+  } else {
+    const metadata = await inspectMcpMetadata().catch(() => null);
+    checks.push({ name: "mcp", ok: true, detail: metadata ? "optional; use frely doctor --mcp for MCP checks" : "not enabled (optional)" });
+  }
   return { ok: checks.every((check) => check.ok), checks };
-}
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
