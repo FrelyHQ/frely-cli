@@ -36,7 +36,7 @@ export class Workspace {
     const path = await this.existingPath(input);
     const stat = await lstat(path);
     return {
-      path: relative(this.root, path) || ".",
+      path: portableRelative(this.root, path) || ".",
       type: stat.isDirectory() ? "directory" : stat.isFile() ? "file" : "other",
       size: stat.size,
       mode: stat.mode & 0o777,
@@ -52,7 +52,7 @@ export class Workspace {
     await this.walkFiles(base, async (full) => {
       const rel = relative(base, full);
       const candidate = pattern.includes("/") || pattern.includes("\\") ? rel.split(sep).join("/") : basename(full);
-      if (matcher.test(candidate)) results.push(relative(this.root, full));
+      if (matcher.test(candidate)) results.push(portableRelative(this.root, full));
       return results.length < maxResults;
     });
     return results;
@@ -75,7 +75,7 @@ export class Workspace {
         const haystack = options.caseSensitive ? line : line.toLocaleLowerCase();
         if (!(matcher ? matcher.test(line) : haystack.includes(needle))) continue;
         results.push({
-          path: relative(this.root, full),
+          path: portableRelative(this.root, full),
           line: index + 1,
           text: line,
           before: lines.slice(Math.max(0, index - options.contextLines), index),
@@ -140,7 +140,7 @@ export class Workspace {
       throw error;
     });
     await chmod(path, 0o600).catch(() => undefined);
-    return { path: relative(this.root, path), bytes: Buffer.byteLength(content) };
+    return { path: portableRelative(this.root, path), bytes: Buffer.byteLength(content) };
   }
 
   async applyPatch(input: string, edits: unknown[], expectedSha256?: string) {
@@ -174,7 +174,7 @@ export class Workspace {
     if (path === this.root) return { path: "." };
     await mkdir(path, { recursive: true, mode: 0o700 });
     await this.assertCanonicalInside(await realpath(path));
-    return { path: relative(this.root, path) };
+    return { path: portableRelative(this.root, path) };
   }
 
   async deletePath(input: string, recursive: boolean) {
@@ -185,7 +185,7 @@ export class Workspace {
       throw new Error("Directory is not empty; set recursive=true.");
     }
     await rm(path, { recursive, force: false });
-    return { path: relative(this.root, path), deleted: true };
+    return { path: portableRelative(this.root, path), deleted: true };
   }
 
   async movePath(fromInput: string, toInput: string, overwrite: boolean) {
@@ -199,7 +199,7 @@ export class Workspace {
     await this.assertCanonicalInside(await realpath(dirname(to)));
     if (target) await rm(to, { recursive: true, force: false });
     await rename(from, to);
-    return { from: relative(this.root, from), to: relative(this.root, to) };
+    return { from: portableRelative(this.root, from), to: portableRelative(this.root, to) };
   }
 
   async runCommand(command: string, cwdInput: string, timeoutMs: number) {
@@ -278,6 +278,10 @@ function truncate(value: string): string {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function portableRelative(from: string, to: string): string {
+  return relative(from, to).split(sep).join("/");
 }
 
 function globMatcher(pattern: string): RegExp {
