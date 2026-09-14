@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
 import { realpath, unlink } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -8,8 +8,8 @@ import { ensureCredentialDirectory, readPrivateFile, writePrivateFile } from "./
 import { ensureDevice, relayFetch } from "./device/control.js";
 import { identityFromPrivateKey } from "./device/identity.js";
 
-export const MCP_DEFAULT_DAYS = 180;
-export const MCP_MAX_DAYS = 360;
+export const MCP_DEFAULT_DAYS = 90;
+export const MCP_MAX_DAYS = 180;
 const SERVICE = "frely-cli-mcp-authorization-v1";
 const ENDPOINT = "/api/user/device-relay/mcp";
 export interface McpAuthorizationView {
@@ -18,11 +18,11 @@ export interface McpAuthorizationView {
   status: "pending" | "active" | "expired" | "revoked";
 }
 export interface McpMetadata { version: 1; relayUrl: string; userId: string; grant: McpAuthorizationView }
-interface McpSecret { version: 1; privateKeyPem: string; token: string; metadata: McpMetadata }
+interface McpSecret { version: 1; privateKeyPem: string; metadata: McpMetadata }
 export interface McpAuthorization extends McpMetadata { mcpUrl: string; sign(message: string): string }
 export function parseMcpDays(input?: string | number): number {
   const value = input === undefined ? MCP_DEFAULT_DAYS : typeof input === "string" && /^\d{1,3}$/u.test(input) ? Number(input) : input;
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > MCP_MAX_DAYS) throw new Error("MCP authorization must be 1 to 360 whole days.");
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > MCP_MAX_DAYS) throw new Error("MCP authorization must be 1 to 180 whole days.");
   return value;
 }
 export function mcpMetadataPath(): string { return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "frely", "mcp-v1", "authorization.json"); }
@@ -47,10 +47,10 @@ export async function loadMcpAuthorization(): Promise<McpAuthorization | null> {
   const raw = await credentialStore.getPassword(SERVICE, account(metadata));
   if (!raw) throw new Error("MCP secure credential is unavailable. Run frely mcp renew; no replacement key was generated.");
   const value = JSON.parse(raw) as McpSecret;
-  if (value.version !== 1 || JSON.stringify(value.metadata) !== JSON.stringify(metadata) || typeof value.privateKeyPem !== "string" || !/^[A-Za-z0-9_-]{64}$/u.test(value.token)) throw new Error("MCP credential does not match its authorization.");
+  if (value.version !== 1 || JSON.stringify(value.metadata) !== JSON.stringify(metadata) || typeof value.privateKeyPem !== "string") throw new Error("MCP credential does not match its authorization.");
   const identity = identityFromPrivateKey(value.privateKeyPem);
   if (identity.keyThumbprint !== metadata.grant.keyThumbprint) throw new Error("MCP private key does not match its authorization.");
-  return { ...metadata, mcpUrl: new URL(`/mcp/${metadata.grant.deviceId}/${value.token}`, metadata.relayUrl).toString(), sign: (message) => identity.signMessage(message) };
+  return { ...metadata, mcpUrl: new URL(`/mcp/${metadata.grant.deviceId}`, metadata.relayUrl).toString(), sign: (message) => identity.signMessage(message) };
 }
 
 export async function requireMcpAuthorization(workspace?: string): Promise<McpAuthorization> {
@@ -84,18 +84,16 @@ export async function setupMcpAuthorization(workspaceInput: string, daysInput?: 
   const device = await ensureDevice();
   const privateKeyPem = generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "pem" }).toString();
   const identity = identityFromPrivateKey(privateKeyPem);
-  const token = randomBytes(48).toString("base64url");
-  const mcpTokenHash = createHash("sha256").update(token).digest("hex");
   const issuedAt = new Date().toISOString();
   const nonce = randomBytes(24).toString("base64url");
-  const signature = identity.signMessage(JSON.stringify(["frely.mcp.request.v1", device.deviceId, mcpTokenHash, days, workspace, issuedAt, nonce]));
+  const signature = identity.signMessage(JSON.stringify(["frely.mcp.request.v2", device.deviceId, identity.keyThumbprint, days, workspace, issuedAt, nonce]));
   const response = await relayFetch(auth.config.relayUrl, auth.credential, ENDPOINT, { method: "POST", body: JSON.stringify({ action: "request",
     deviceId: device.deviceId, publicKeySpki: identity.publicKeySpki, keyThumbprint: identity.keyThumbprint,
-    mcpTokenHash, days, workspace, issuedAt, nonce, signature }) });
+    days, workspace, issuedAt, nonce, signature }) });
   const pending = await readView(response);
   if (pending.status !== "pending" || pending.days !== days || pending.workspace !== workspace || pending.deviceId !== device.deviceId || pending.keyThumbprint !== identity.keyThumbprint) throw new Error("MCP approval response does not match this request.");
   let metadata: McpMetadata = { version: 1, relayUrl: auth.config.relayUrl, userId: auth.user.id, grant: pending };
-  const save = () => credentialStore.setPassword(SERVICE, account(metadata), JSON.stringify({ version: 1, privateKeyPem, token, metadata } satisfies McpSecret));
+  const save = () => credentialStore.setPassword(SERVICE, account(metadata), JSON.stringify({ version: 1, privateKeyPem, metadata } satisfies McpSecret));
   await save(); // Preserve the generated key before asking the user to approve it.
   const verificationUri = new URL(`/device?mcp_request=${pending.id}`, auth.config.relayUrl).toString();
   await notify?.({ verificationUri, keyThumbprint: identity.keyThumbprint, days });

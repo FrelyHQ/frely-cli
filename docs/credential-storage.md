@@ -26,16 +26,16 @@ Old account cookies and old `frely-cli` secure-store records do not migrate to p
 
 | Rule | Value |
 | --- | --- |
-| Default authorization | 180 days |
-| Accepted duration | 1–360 whole days |
+| Default authorization | 90 days |
+| Accepted duration | 1–180 whole days |
 | Approval request window | 15 minutes |
 | Start time | Server approval time |
 | End time | Approval time + requested days × 24 hours |
 | Refresh, restart, reinstall | No extension |
 | Repeated approval | Same record and end time |
-| Renewal | New approval, key and caller URL; prior grant revoked |
+| Renewal | New approval and key; stable device MCP URL; prior grant revoked |
 
-The secure namespace is `frely-cli-mcp-authorization-v1`. It contains the MCP private key, caller secret and the authorization metadata binding. `frely/mcp-v1/authorization.json` contains the public projection; it contains neither the caller URL nor a private key. Changes to that projection cannot extend the protected grant.
+The secure namespace is `frely-cli-mcp-authorization-v1`. It contains the MCP execution private key and the authorization metadata binding. `frely/mcp-v1/authorization.json` contains the public projection; it contains no private key or remote OAuth token. Changes to that projection cannot extend the protected grant.
 
 MCP storage modes:
 
@@ -53,9 +53,9 @@ There is no plaintext fallback for MCP. Failure of this store does not affect la
 
 ## Enforcement and lifecycle
 
-The Relay checks the caller-secret hash, device ownership and active authorization before forwarding a request. A WebSocket connection requires a second signature from the MCP key to gain execution capability. A Provider signature does not grant that capability. Forwarded MCP requests carry the authorization ID, and the CLI checks it against the active local lease.
+The Relay checks the OAuth access token, exact MCP resource binding, device ownership and active execution authorization before forwarding a request. A WebSocket connection requires a second signature from the MCP execution key to gain execution capability. A Provider signature does not grant that capability. Forwarded MCP requests carry the authorization ID, and the CLI checks it against the active local lease.
 
-The CLI checks the lease before queued work starts. A running lease uses wall time and elapsed time; startup checks the server. Timers use bounded chunks rather than one 180-day timeout. Expiry cancels MCP requests and closes the managed process set. Relay revocation checks notify connected clients without removing Provider capability. The stdio entry point uses the same authorization gate and polls the server.
+The CLI checks the lease before queued work starts. A running lease uses wall time and elapsed time; startup checks the server. Timers use bounded chunks rather than one 90-day timeout. Expiry cancels MCP requests and closes the managed process set. Relay revocation checks notify connected clients without removing Provider capability. The stdio entry point uses the same authorization gate and polls the server.
 
 Completed writes are not rolled back. An arbitrary shell command can create effects or detached processes outside the managed process set. Workspace selection is not a shell sandbox. Same-user malware and administrators are outside this credential boundary.
 
@@ -67,7 +67,7 @@ Completed writes are not rolled back. An arbitrary shell command can create effe
 frely login
 frely doctor
 frely mcp setup --workspace /path/to/project
-frely mcp setup --workspace /path/to/project --days 360
+frely mcp setup --workspace /path/to/project --days 180
 frely mcp renew --days 180
 frely mcp status --json
 frely doctor --mcp
@@ -75,7 +75,7 @@ frely mcp url
 frely mcp revoke
 ```
 
-A valid setup without renewal does not extend the grant. Selecting another workspace requires a new approval. Renewal rotates the private URL, so the remote client must receive the new URL. A fixed-address OAuth MCP endpoint is not part of this patch.
+A valid setup without renewal does not extend the grant. Selecting another workspace requires a new approval. Renewal rotates the MCP execution key and preserves the device-bound MCP URL. Remote MCP OAuth credentials have a separate lifecycle and cannot extend the local execution grant.
 
 A failed or interrupted approval can be retried with setup. The server caps pending requests at eight per user and expires them after 15 minutes. Pending secure records are not a permission to execute. This implementation does not resume an interrupted pending request from another CLI invocation.
 
@@ -91,6 +91,6 @@ Services use macOS LaunchAgents, Linux systemd user units or a Windows Task Sche
 
 ## Rollout
 
-Deploy the additive database migration, matching Web authorization endpoints and matching Device Relay enforcement before making the new CLI the supported client. A mixed deployment is not an accepted authorization configuration. Old MCP URLs receive no implicit lease. Existing users perform a basic login and MCP approval; no automatic grant is created from a legacy cookie or device key.
+Deploy the additive database migration, matching Web authorization endpoints, OAuth Authorization Server, OAuth-protected MCP ingress and Device Relay enforcement before making the new CLI the supported client. A mixed deployment is not an accepted authorization configuration. Old private MCP URLs receive no implicit OAuth access. Existing users perform a basic login and MCP approval; no grant is created from a legacy cookie or device key.
 
 Standalone CI produces unsigned verification artifacts. Uploading signed, verified artifacts to the public release is a release task, not an effect of running the tests or this patch.

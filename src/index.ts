@@ -149,13 +149,15 @@ async function main(): Promise<void> {
     });
     const service = await installMcpService(authorization.grant.workspace);
     stdout.write(`MCP URL: ${authorization.mcpUrl}\nExpires: ${authorization.grant.expiresAt}\nBackground service: ${service.active ? "running" : "installed"}\n`);
-    stdout.write("Keep the MCP URL private. Renewal rotates the URL; update the remote client after renewal.\n");
+    stdout.write("MCP URL is stable. Configure the remote client with OAuth; renewal does not change the URL.\n");
     return;
   }
 
   if (command === "mcp" && (args[1] === "url" || args[1] === "chatgpt")) {
     const authorization = await requireMcpAuthorization();
-    if (args.includes("--json")) stdout.write(`${JSON.stringify({ deviceId: authorization.grant.deviceId, mcpUrl: authorization.mcpUrl, expiresAt: authorization.grant.expiresAt })}\n`);
+    const value = { deviceId: authorization.grant.deviceId, mcpUrl: authorization.mcpUrl, authentication: "oauth", expiresAt: authorization.grant.expiresAt };
+    if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
+    else if (args[1] === "chatgpt") stdout.write(`MCP URL: ${authorization.mcpUrl}\nAuthentication: OAuth\n`);
     else stdout.write(`${authorization.mcpUrl}\n`);
     return;
   }
@@ -248,8 +250,8 @@ function usage(): void {
     "  frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]\n" +
     "  frely provider list [--json]\n" +
     "  frely provider finalize <provider-id>\n" +
-    "  frely mcp [setup] [--workspace <path>] [--days 1..360]\n" +
-    "  frely mcp renew [--days 1..360]\n" +
+    "  frely mcp [setup] [--workspace <path>] [--days 1..180]\n" +
+    "  frely mcp renew [--days 1..180]\n" +
     "  frely mcp url [--json]\n" +
     "  frely mcp status [--json]\n" +
     "  frely mcp chatgpt\n" +

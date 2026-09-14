@@ -29,10 +29,10 @@ test("basic private files preserve values without a keyring or an external key",
 });
 
 test("MCP days validation accepts the product limits and rejects ambiguous values", () => {
-  assert.equal(parseMcpDays(), 180);
-  assert.equal(parseMcpDays("360"), 360);
+  assert.equal(parseMcpDays(), 90);
+  assert.equal(parseMcpDays("180"), 180);
   assert.equal(parseMcpDays(1), 1);
-  for (const value of [0, 361, -1, NaN, Infinity, 1.5, "180days", "1e2", "", " 180", "--json"]) assert.throws(() => parseMcpDays(value));
+  for (const value of [0, 181, -1, NaN, Infinity, 1.5, "180days", "1e2", "", " 180", "--json"]) assert.throws(() => parseMcpDays(value));
 });
 
 test("MCP activation and renewal keep basic credentials and Provider identity separate", async (t) => {
@@ -66,9 +66,9 @@ test("MCP activation and renewal keep basic credentials and Provider identity se
       if (body.action === "revoke") { current = null; return Response.json({ status: "revoked" }); }
       assert.equal(body.action, "request");
       const key = createPublicKey({ key: Buffer.from(body.publicKeySpki, "base64url"), type: "spki", format: "der" });
-      const message = JSON.stringify(["frely.mcp.request.v1", body.deviceId, body.mcpTokenHash, body.days, body.workspace, body.issuedAt, body.nonce]);
+      const message = JSON.stringify(["frely.mcp.request.v2", body.deviceId, body.keyThumbprint, body.days, body.workspace, body.issuedAt, body.nonce]);
       assert.equal(verify(null, Buffer.from(message), key, Buffer.from(body.signature, "base64url")), true);
-      assert.equal("token" in body, false); assert.equal("privateKeyPem" in body, false);
+      assert.equal("token" in body, false); assert.equal("mcpTokenHash" in body, false); assert.equal("privateKeyPem" in body, false);
       sequence++; approved = false;
       current = { id: `mca_${sequence.toString(16).padStart(32, "0")}`, deviceId, workspace: body.workspace, keyThumbprint: body.keyThumbprint,
         days: body.days, approvalDeadline: new Date(Date.now() + 900000).toISOString(), approvedAt: null, expiresAt: null, status: "pending" };
@@ -88,15 +88,18 @@ test("MCP activation and renewal keep basic credentials and Provider identity se
   };
   // Notification models a browser decision; it is not made by a basic API token.
   const first = await setupMcpAuthorization(directory, undefined, false, approve);
-  assert.equal(first.grant.days, 180);
+  assert.equal(first.grant.days, 90);
+  assert.equal(first.mcpUrl, `${relayUrl}/mcp/${deviceId}`);
   assert.equal(await basicCredentialStore.getPassword("frely-cli-basic-v1", relayUrl), basic);
+  const firstSecret = JSON.parse((await credentialStore.getPassword("frely-cli-mcp-authorization-v1", `${relayUrl}|${userId}|${first.grant.id}`))!);
+  assert.equal("token" in firstSecret, false);
   const metadata = await readFile(mcpMetadataPath(), "utf8");
   assert.equal(metadata.includes("PRIVATE KEY"), false); assert.equal(metadata.includes(first.mcpUrl), false);
   const repeated = await setupMcpAuthorization(directory);
   assert.equal(repeated.mcpUrl, first.mcpUrl); assert.equal(repeated.grant.expiresAt, first.grant.expiresAt);
   assert.equal(approvals, 1); assert.equal(sequence, 1);
-  const renewed = await setupMcpAuthorization(directory, 360, true, approve);
-  assert.equal(renewed.grant.days, 360); assert.notEqual(renewed.mcpUrl, first.mcpUrl);
+  const renewed = await setupMcpAuthorization(directory, 180, true, approve);
+  assert.equal(renewed.grant.days, 180); assert.equal(renewed.mcpUrl, first.mcpUrl);
   assert.notEqual(renewed.grant.keyThumbprint, first.grant.keyThumbprint);
   assert.equal(await credentialStore.getPassword("frely-cli-mcp-authorization-v1", `${relayUrl}|${userId}|${first.grant.id}`), null);
   await revokeMcpAuthorization();

@@ -124,13 +124,6 @@ export async function relayFetch(relayUrl: string, credential: { scheme: "bearer
   }
 }
 
-function validateMcpUrl(value: string): string {
-  const url = new URL(value);
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost", "::1"].includes(url.hostname))) throw new Error("Relay returned an invalid MCP URL.");
-  if (url.username || url.password || url.search || url.hash) throw new Error("MCP URL must not contain URL userinfo, query parameters, or fragments.");
-  return url.toString();
-}
-
 function validateWebSocketUrl(value: string): string {
   const url = new URL(value);
   if (url.protocol !== "wss:" && !(url.protocol === "ws:" && ["127.0.0.1", "localhost", "::1"].includes(url.hostname))) throw new Error("Relay returned an invalid Device Relay WebSocket URL.");

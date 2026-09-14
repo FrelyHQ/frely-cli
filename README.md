@@ -5,7 +5,7 @@
 `frely-cli` is Frely's local command-line client and MCP runtime. The target flow is:
 
 ```text
-install -> frely login -> frely mcp setup -> add MCP URL to ChatGPT
+install -> frely login -> frely mcp setup -> add stable MCP URL to ChatGPT -> OAuth authorize
 ```
 
 There is no separate `friday-local` project. Local MCP execution belongs to `frely-cli`.
@@ -99,7 +99,7 @@ frely mcp setup --workspace /path/to/project
 
 `frely login` requests a restricted account session through browser device authorization. Basic sessions use private plaintext files, not the OS credential store. Legacy account cookies do not migrate to this store. Basic features and Network commands do not initialize MCP credentials.
 
-`frely mcp setup` initializes a separate secure MCP key, requests browser approval for this device and workspace, and installs the user-level Device Relay service. The default authorization is 180 days; `--days 1..360` selects a duration. `frely mcp renew --days 180` requires a new approval and rotates the caller URL. Login refresh, restart and repeated setup do not extend authorization.
+`frely mcp setup` initializes a separate secure MCP key, requests browser approval for this device and workspace, and installs the user-level Device Relay service. The default authorization is 90 days; `--days 1..180` selects a duration. `frely mcp renew --days 180` requires a new approval and rotates the MCP execution key. The MCP URL remains bound to the device. Login refresh, OAuth refresh, restart and repeated setup do not extend authorization.
 
 Services use macOS LaunchAgents, Linux systemd user units, or Windows Task Scheduler for the logged-on user. Windows implementation needs native acceptance testing. Linux MCP secure storage can require Secret Service or an injected key; basic installation does not.
 
@@ -187,12 +187,11 @@ Enrollment returns:
 
 ```json
 {
-  "deviceId": "...",
-  "mcpUrl": "https://.../mcp/..."
+  "deviceId": "..."
 }
 ```
 
-The public MCP URL is a private bearer URL of the form `https://app.frely.cloud/mcp/<device-id>/<private-secret>`. The secret is high entropy, is only stored as a SHA-256 hash by the Relay, and must be treated as a credential. ChatGPT uses this URL with MCP Authentication set to `None`; no separate ChatGPT MCP OAuth flow is required.
+The public MCP URL has the stable form `https://app.frely.cloud/mcp/<device-id>`. The URL contains no bearer secret. Remote MCP clients use OAuth 2.1 Authorization Code + PKCE. OAuth access tokens bind to the exact MCP resource URL and do not extend the 90/180-day local execution authorization. Relay OAuth requirements are defined in [`docs/mcp-oauth-relay-contract.md`](docs/mcp-oauth-relay-contract.md).
 
 A Device Relay connection request uses the enrolled Ed25519 device key and returns a short-lived connection grant:
 
@@ -224,7 +223,7 @@ Basic account and Network sessions use private plaintext files. They cannot appr
 
 MCP secrets use AES-256-GCM files with a master key in macOS Keychain, Windows Credential Manager or Linux Secret Service. Headless deployments can inject a 32-byte key through `FRELY_CREDENTIAL_KEY` and select `FRELY_CREDENTIAL_STORE=encrypted-file`. MCP has no plaintext fallback. Secure-store failure does not stop basic features.
 
-The private MCP URL is a credential. The Relay stores its hash and checks its lease; public device metadata contains no URL secret or private key. Expiry blocks requests and queued work and cancels managed execution. It does not undo writes or create a sandbox around arbitrary shell programs.
+The stable MCP URL contains no credential. Remote clients hold OAuth credentials; the CLI holds the MCP execution private key. The Relay checks OAuth resource binding and the current MCP execution lease. Expiry blocks requests and queued work and cancels managed execution. It does not undo writes or create a sandbox around arbitrary shell programs.
 
 `frely doctor` treats unconfigured MCP as optional. `frely doctor --mcp` checks the secure credential and server. `frely mcp status` displays local metadata; it is not server revocation proof.
 
@@ -234,7 +233,7 @@ Storage, migration, service injection, release requirements and threat boundarie
 
 The CLI side of installation, account login, device enrollment, MCP URL discovery, background service lifecycle, Device Relay WebSocket transport, multiplexing, reconnection, local MCP execution, local model discovery, and loopback Provider forwarding is implemented here.
 
-A Frely Relay deployment must implement the device provisioning endpoints, Device Relay WebSocket host, private MCP ingress, local Provider ingress, and personal Provider control flow. The private MCP URL is the ChatGPT-side bearer credential. Local Provider credentials are device-key signatures stored by CPA.
+A Frely Relay deployment must implement the device provisioning endpoints, Device Relay WebSocket host, OAuth-protected MCP ingress, OAuth discovery/token endpoints, local Provider ingress, and personal Provider control flow. The MCP URL is a stable resource identifier. Local Provider credentials are device-key signatures stored by CPA. See [`docs/mcp-oauth-relay-contract.md`](docs/mcp-oauth-relay-contract.md).
 
 ## License and trademarks
 

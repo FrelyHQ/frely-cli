@@ -6,7 +6,7 @@ CLI 与 Relay 使用分支 `T-feat-two-tier-auth-20260914`。原始工作树保�
 
 ## 实现
 
-基础层使用受限 OAuth 客户端 `frely-cli-basic` 与私有会话文件。MCP 采用独立密钥、浏览器批准和服务端授权记录。期限默认 180 天，上限 360 天；刷新、重启与重复批准不延期。续期轮换 MCP URL，撤销保留 Provider 设备与服务。
+基础层使用受限 OAuth 客户端 `frely-cli-basic` 与私有会话文件。MCP 采用独立密钥、浏览器批准和服务端授权记录。期限默认 90 天，上限 180 天；刷新、重启与重复批准不延期。续期轮换 MCP 执行密钥，MCP URL 绑定设备。远程客户端使用 OAuth。撤销保留 Provider 设备与服务。
 
 独立程序、macOS/Linux 安装脚本、Windows 安装脚本、Windows 用户级服务适配器和三平台 CI 已加入源码。安装器不安装 Node.js/npm，不配置基础层密钥，不提升权限。MCP 存储检查属于启用流程。
 
@@ -23,13 +23,11 @@ Relay 配套新增 Web 授权页面、控制 API、授权数据库表、运行�
 | macOS ARM64 独立程序 | 通过；PATH 为空，MCP 存储配置无效，基础功能可用 |
 | macOS 离线安装器 | 通过；路径含空格，错误 checksum 不替换现有程序 |
 | Linux ARM64 独立程序 | 通过基础诊断；临时容器无网络、PATH 为空、无桌面凭证服务 |
-| Relay 领域、协议、数据面与授权边界测试 | 17 项通过 |
+| Relay OAuth/MCP 焦点测试 | 16 项通过 |
 | Relay Web、Backend、Device Relay、运行服务、DB Ops 类型检查 | 通过 |
 | PostgreSQL 迁移与授权约束 | 通过；使用本地临时 Docker 数据库，验证后清理 |
 | UI 边界、操作注册表、数据分类、Identity/Tenancy 边界、测试编写规则 | 通过 |
 | 两个工作树 git diff --check | 通过 |
-
-测试输出保存在对应工作树的 `.local/two-tier-auth/`，不进入提交。
 
 ## 未通过与未执行
 
@@ -41,7 +39,7 @@ Windows 原生安装、凭证和计划任务尚未实机验收。Linux Secret Se
 
 ## 应用约束
 
-发布需要协调数据库迁移、Web、Device Relay 与 CLI。旧 MCP URL 不获得默认授权，旧 Cookie 不迁入基础文件；用户需要登录并批准新 MCP 授权。旧 Provider 绑定可能需要重建。
+发布需要协调数据库迁移、Web、OAuth Authorization Server、MCP ingress、Device Relay 与 CLI。旧私有 MCP URL 不获得 OAuth 权限。旧 Cookie 不迁入基础文件；用户需要登录并批准新 MCP 授权。旧 Provider 绑定可能需要重建。
 
 MCP 授权到期不是副作用回滚，也不是 Shell 沙箱。任意程序脱离受管进程集合后的副作用不属于停止保证。
 

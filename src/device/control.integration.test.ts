@@ -27,7 +27,7 @@ test("account session enrolls device, gets a signed connection grant, and revoke
       return;
     }
     if (request.method === "POST" && request.url === "/api/user/device-relay/enroll") {
-      response.end(JSON.stringify({ deviceId: "device_test", mcpUrl: `${origin}/mcp/device_test` }));
+      response.end(JSON.stringify({ deviceId: "device_test" }));
       return;
     }
     if (request.method === "POST" && request.url === "/api/user/device-relay/connect") {
