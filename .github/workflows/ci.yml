@@ -60,29 +60,33 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          # Use a fresh HOME and let gnome-keyring create its own login keyring.
-          # Validate Secret Service read/write before running the CLI credential smoke test.
-          # shellcheck disable=SC2016
-          dbus-run-session -- bash -euo pipefail -c '
-            export HOME="${RUNNER_TEMP}/frely-keyring-home"
-            export XDG_DATA_HOME="$HOME/.local/share"
-            mkdir -p "$XDG_DATA_HOME/keyrings"
-            chmod 700 "$HOME" "$XDG_DATA_HOME" "$XDG_DATA_HOME/keyrings"
-            password="ci-synthetic-keyring-password"
-            eval "$(printf "%s" "$password" | gnome-keyring-daemon --unlock --components=secrets)"
-            export GNOME_KEYRING_CONTROL="${GNOME_KEYRING_CONTROL:-}"
+          set -euo pipefail
+          mkdir -p "$HOME/.local/share/keyrings"
+          now="$(date +%s)"
+          cat > "$HOME/.local/share/keyrings/login.keyring" <<KEYRING
+          [keyring]
+          display-name=login
+          ctime=$now
+          mtime=0
+          lock-on-idle=false
+          lock-after=false
+          KEYRING
+          chmod 600 "$HOME/.local/share/keyrings/login.keyring"
 
+          DBUS_SESSION_BUS_ADDRESS="$(dbus-daemon --session --print-address --fork)"
+          export DBUS_SESSION_BUS_ADDRESS
+          gnome-keyring-daemon --start --components=secrets >/dev/null
 
-            for _ in $(seq 1 50); do
-              if printf "%s" "probe-value" | timeout 5s secret-tool store \
-                  --label="frely-ci-probe" service frely-ci account probe >/dev/null 2>&1 &&
-                 test "$(timeout 5s secret-tool lookup service frely-ci account probe)" = "probe-value"; then
-                secret-tool clear service frely-ci account probe >/dev/null 2>&1 || true
-                node scripts/credential-smoke.mjs
-                exit 0
-              fi
-              sleep 0.1
-            done
-            echo "Secret Service did not become writable" >&2
-            exit 1
-          '
+          probe='{"version":1,"type":"oauth","accessToken":"synthetic-access"}'
+          for _ in $(seq 1 50); do
+            if printf '%s' "$probe" | timeout 5s secret-tool store \
+                --label='Frely CLI' service frely-ci account probe >/dev/null 2>&1 &&
+               test "$(timeout 5s secret-tool lookup service frely-ci account probe)" = "$probe"; then
+              secret-tool clear service frely-ci account probe >/dev/null 2>&1 || true
+              node scripts/credential-smoke.mjs
+              exit 0
+            fi
+            sleep 0.1
+          done
+          echo "Secret Service did not become writable" >&2
+          exit 1
