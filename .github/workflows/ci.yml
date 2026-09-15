@@ -68,9 +68,10 @@ jobs:
             export XDG_DATA_HOME="$HOME/.local/share"
             mkdir -p "$XDG_DATA_HOME/keyrings"
             chmod 700 "$HOME" "$XDG_DATA_HOME" "$XDG_DATA_HOME/keyrings"
-
             password="ci-synthetic-keyring-password"
-            printf "%s" "$password" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
+            eval "$(printf "%s" "$password" | gnome-keyring-daemon --unlock --components=secrets)"
+            export GNOME_KEYRING_CONTROL="${GNOME_KEYRING_CONTROL:-}"
+
 
             for _ in $(seq 1 50); do
               if printf "%s" "probe-value" | timeout 5s secret-tool store \

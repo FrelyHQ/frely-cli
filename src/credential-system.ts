@@ -26,7 +26,7 @@ export function createSystemCredentialStore(root: string, native: CredentialStor
     for (let attempt = 0; attempt < 100; attempt++) {
       try { await mkdir(lock, { mode: 0o700 }); locked = true; break; }
       catch (error) {
-        if (!(error && typeof error === "object" && "code" in error && error.code === "EEXIST")) throw error;
+        if (!directoryLockBusy(error)) throw error;
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
     }
@@ -69,4 +69,13 @@ export function createSystemCredentialStore(root: string, native: CredentialStor
       return legacyDeleted || fileDeleted;
     },
   };
+}
+
+function directoryLockBusy(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) return false;
+  const code = error.code;
+  if (code === "EEXIST") return true;
+  // Windows may surface directory-lock contention as a sharing/access error.
+  // Retry only inside the bounded initialization window; no fallback is used.
+  return process.platform === "win32" && (code === "EPERM" || code === "EBUSY" || code === "ENOTEMPTY");
 }

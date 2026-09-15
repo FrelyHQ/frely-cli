@@ -63,7 +63,7 @@ export function createEncryptedCredentialStore(root: string, keyHex: string): Cr
     for (let attempt = 0; attempt < 100; attempt++) {
       try { await mkdir(lock, { mode: 0o700 }); locked = true; break; }
       catch (error) {
-        if (!hasCode(error, "EEXIST")) throw error;
+        if (!directoryLockBusy(error)) throw error;
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
     }
@@ -152,4 +152,10 @@ export async function writePrivateFile(path: string, content: string): Promise<v
 }
 function hasCode(error: unknown, code: string): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+function directoryLockBusy(error: unknown): boolean {
+  if (hasCode(error, "EEXIST")) return true;
+  // Windows can report transient sharing/access errors while another caller owns
+  // or removes the directory lock. Retry within the bounded lock window only.
+  return process.platform === "win32" && ["EPERM", "EBUSY", "ENOTEMPTY"].some((code) => hasCode(error, code));
 }
