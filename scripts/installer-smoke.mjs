@@ -26,6 +26,13 @@ try {
   await run(executable, args, { env, timeout: 30000 });
   assert.equal(await hash(installed), await hash(join(releases, asset)));
   await run(installed, ["doctor", "--json"], { env, timeout: 10000 });
+  if (process.platform !== "win32") {
+    const profileDestination = join(directory, ".local", "bin");
+    const profileEnv = { ...env, FRELY_INSTALL_DIR: profileDestination, FRELY_INSTALL_NO_PROFILE: "0", SHELL: "/bin/zsh", PATH: "/usr/bin:/bin" };
+    await run(executable, args, { env: profileEnv, timeout: 30000 });
+    assert.match(await readFile(join(directory, ".zshrc"), "utf8"), /# Frely user bin/);
+    await assert.rejects(readFile(join(directory, ".profile"), "utf8"));
+  }
   const original = await hash(installed);
   await writeFile(join(releases, `${asset}.sha256`), `${"0".repeat(64)}  ${asset}\n`);
   await assert.rejects(run(executable, args, { env, timeout: 30000 }), /checksum mismatch/i);

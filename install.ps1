@@ -30,9 +30,13 @@ try {
     [IO.File]::Replace($download, $target, $null)
   } else { [IO.File]::Move($download, $target) }
   if ($env:FRELY_INSTALL_NO_PROFILE -ne '1') {
-    $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
-    if (($userPath -split ';') -notcontains $directory) {
-      [Environment]::SetEnvironmentVariable('PATH', "$directory;$userPath", 'User')
+    try {
+      $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+      if (($userPath -split ';') -notcontains $directory) {
+        [Environment]::SetEnvironmentVariable('PATH', "$directory;$userPath", 'User')
+      }
+    } catch {
+      Write-Warning "Frely was installed, but the user PATH could not be updated: $($_.Exception.Message)"
     }
   }
   if (($env:PATH -split ';') -notcontains $directory) { $env:PATH = "$directory;$env:PATH" }

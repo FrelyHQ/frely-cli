@@ -45,15 +45,35 @@ chmod 755 "$stage/$asset"
 [ ! -L "$install_dir/frely" ] || fail "Existing frely is a symbolic link; choose another FRELY_INSTALL_DIR."
 mv -f "$stage/$asset" "$install_dir/frely"
 
-# Default user bin becomes available in new login shells. Do not edit other users or system files.
+# Default user bin becomes available in new shells. Profile edits are best-effort: the
+# executable is already installed and a profile policy must not turn that into a failure.
+add_user_bin_to_profile() {
+  profile="$1"
+  if [ -L "$profile" ]; then
+    printf 'Frely: skipped symbolic-link shell profile: %s\n' "$profile" >&2
+    return 0
+  fi
+  if [ -e "$profile" ] && [ ! -f "$profile" ]; then
+    printf 'Frely: skipped non-file shell profile: %s\n' "$profile" >&2
+    return 0
+  fi
+  if grep -Fq '# Frely user bin' "$profile" 2>/dev/null; then return 0; fi
+  if ! printf '\n%s\n%s\n' '# Frely user bin' 'export PATH="$HOME/.local/bin:$PATH"' >> "$profile"; then
+    printf 'Frely: could not update shell profile: %s\n' "$profile" >&2
+  fi
+}
 if [ "$install_dir" = "$HOME/.local/bin" ] && [ "${FRELY_INSTALL_NO_PROFILE:-0}" != 1 ]; then
   case ":${PATH:-}:" in *":$install_dir:"*) ;; *)
-    for profile in "$HOME/.profile" "$HOME/.bashrc" "$HOME/.zprofile" "$HOME/.zshrc"; do
-      [ ! -L "$profile" ] || fail "Shell profile is a symbolic link; installation remains at $install_dir/frely."
-      if ! grep -Fq '# Frely user bin' "$profile" 2>/dev/null; then
-        printf '\n%s\n%s\n' '# Frely user bin' 'export PATH="$HOME/.local/bin:$PATH"' >> "$profile"
-      fi
-    done
+    case "${SHELL##*/}" in
+      zsh) add_user_bin_to_profile "$HOME/.zshrc" ;;
+      bash)
+        add_user_bin_to_profile "$HOME/.bashrc"
+        if [ -e "$HOME/.bash_profile" ]; then add_user_bin_to_profile "$HOME/.bash_profile"
+        elif [ -e "$HOME/.bash_login" ]; then add_user_bin_to_profile "$HOME/.bash_login"
+        else add_user_bin_to_profile "$HOME/.profile"; fi
+        ;;
+      *) add_user_bin_to_profile "$HOME/.profile" ;;
+    esac
   ;; esac
 fi
 printf 'Installed Frely %s at %s\n' "$("$install_dir/frely" --version)" "$install_dir/frely"
