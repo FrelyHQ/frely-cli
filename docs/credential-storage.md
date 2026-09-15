@@ -93,4 +93,4 @@ Services use macOS LaunchAgents, Linux systemd user units or a Windows Task Sche
 
 Deploy the additive database migration, matching Web authorization endpoints, OAuth Authorization Server, OAuth-protected MCP ingress and Device Relay enforcement before making the new CLI the supported client. A mixed deployment is not an accepted authorization configuration. Old private MCP URLs receive no implicit OAuth access. Existing users perform a basic login and MCP approval; no grant is created from a legacy cookie or device key.
 
-Standalone CI produces unsigned verification artifacts. Uploading signed, verified artifacts to the public release is a release task, not an effect of running the tests or this patch.
+Standalone CI produces unsigned verification artifacts. Tagged publication uploads the verified platform artifacts and SHA-256 manifests to a GitHub Release. Platform signing remains a separate release-hardening task.

@@ -1,4 +1,4 @@
-name: Publish npm package
+name: Publish npm package and standalone release
 
 on:
   push:
@@ -16,9 +16,56 @@ jobs:
   standalone:
     uses: ./.github/workflows/standalone.yml
 
-  publish:
+  release-assets:
     needs: [verify, standalone]
-    # Cross-platform install and credential gates run in CI.
+    name: Release asset (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - darwin-arm64
+          - darwin-x64
+          - linux-arm64
+          - linux-x64
+          - linux-arm64-musl
+          - linux-x64-musl
+          - windows-arm64
+          - windows-x64
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build standalone target
+        run: npm run build:standalone -- "${{ matrix.target }}"
+
+      - name: Upload release target
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: artifacts/frely-${{ matrix.target }}*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [verify, standalone, release-assets]
     runs-on: macos-latest
     permissions:
       contents: read
@@ -53,3 +100,50 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public
+
+  github-release:
+    needs: [publish, release-assets]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v5
+
+      - name: Download standalone artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: release-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Verify release asset set
+        shell: bash
+        run: |
+          set -euo pipefail
+          targets=(
+            darwin-arm64 darwin-x64
+            linux-arm64 linux-x64 linux-arm64-musl linux-x64-musl
+            windows-arm64 windows-x64
+          )
+          for target in "${targets[@]}"; do
+            suffix=""
+            [[ "$target" == windows-* ]] && suffix=".exe"
+            test -f "artifacts/frely-${target}${suffix}"
+            test -f "artifacts/frely-${target}${suffix}.sha256"
+          done
+          (cd artifacts && for checksum in frely-*.sha256; do sha256sum -c "$checksum"; done)
+          cp install.sh install.ps1 artifacts/
+          find artifacts -maxdepth 1 -type f -print | sort
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" artifacts/* \
+            --verify-tag \
+            --title "frely-cli $GITHUB_REF_NAME" \
+            --generate-notes

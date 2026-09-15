@@ -23,7 +23,7 @@ After the standalone artifacts and installer are released, Frely can serve `inst
 curl -fsSL https://app.frely.cloud/install.sh | sh
 ```
 
-The standalone installers (`install.sh` and `install.ps1`) select a platform executable, verify its SHA-256 checksum and install in the user directory. They do not require Node.js, npm or a keyring. The npm package requires Node.js 22 or newer. Release signing and publication have not been performed by this source change. See [credential and installation boundaries](docs/credential-storage.md).
+The standalone installers (`install.sh` and `install.ps1`) select a platform executable, verify its SHA-256 checksum and install in the user directory. They do not require Node.js, npm or a keyring. The npm package requires Node.js 22 or newer. Tagged releases publish the npm package and standalone GitHub Release assets after cross-platform verification. See [credential and installation boundaries](docs/credential-storage.md).
 
 ## Install or update with npm
 
