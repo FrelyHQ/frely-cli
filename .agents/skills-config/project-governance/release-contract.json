@@ -1,0 +1,41 @@
+{
+  "schema": "project-governance.release-contract.v1",
+  "project": "frely-cli",
+  "release_type": "publish",
+  "entrypoint": "./scripts/release",
+  "integration_branch": "main",
+  "version": {
+    "scheme": "semver",
+    "default": "next-patch-from-latest-formal-release",
+    "explicit": true
+  },
+  "source": {
+    "clean_worktree": true,
+    "branch_main": true,
+    "local_contains_origin_main": true,
+    "full_release_sha": true,
+    "allow_non_force_main_push": true
+  },
+  "tag_profile": {
+    "kind": "package",
+    "template": "v{version}"
+  },
+  "stages": [
+    "preflight",
+    "verify",
+    "build",
+    "publish",
+    "package verification",
+    "tag / release metadata"
+  ],
+  "target": {
+    "name": "npm/GitHub",
+    "environment": "production"
+  },
+  "artifact": "npm package + standalone binaries",
+  "destination": "npm registry + GitHub Releases",
+  "verification": [
+    "npm package version matches Git tag",
+    "GitHub Release standalone assets and checksums"
+  ]
+}

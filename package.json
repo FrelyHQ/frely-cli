@@ -26,6 +26,7 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "node scripts/test.mjs",
     "start": "node dist/index.js",
+    "release": "./scripts/release",
     "prepack": "npm run check && npm test && npm run build",
     "test:credentials": "node scripts/credential-smoke.mjs",
     "test:install": "node scripts/install-smoke.mjs",
