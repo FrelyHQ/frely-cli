@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, win32 } from "node:path";
 import { promisify } from "node:util";
@@ -30,8 +30,15 @@ try {
     const profileDestination = join(directory, ".local", "bin");
     const profileEnv = { ...env, FRELY_INSTALL_DIR: profileDestination, FRELY_INSTALL_NO_PROFILE: "0", SHELL: "/bin/zsh", PATH: "/usr/bin:/bin" };
     await run(executable, args, { env: profileEnv, timeout: 30000 });
-    assert.match(await readFile(join(directory, ".zshrc"), "utf8"), /# Frely user bin/);
+    const zshrc = join(directory, ".zshrc");
+    assert.match(await readFile(zshrc, "utf8"), /# Frely user bin/);
     await assert.rejects(readFile(join(directory, ".profile"), "utf8"));
+    await unlink(zshrc);
+    const protectedProfile = join(directory, "protected-profile");
+    await writeFile(protectedProfile, "keep\n");
+    await symlink(protectedProfile, zshrc);
+    await run(executable, args, { env: profileEnv, timeout: 30000 });
+    assert.equal(await readFile(protectedProfile, "utf8"), "keep\n", "profile symlinks must not be followed or turn a successful install into a failure");
   }
   const original = await hash(installed);
   await writeFile(join(releases, `${asset}.sha256`), `${"0".repeat(64)}  ${asset}\n`);
