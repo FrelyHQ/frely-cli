@@ -47,7 +47,9 @@ export function createNativeCredentialStore(platform = process.platform, run: Cr
       const result = await run("secret-tool", ["lookup", ...attributes(service, account)]);
       if (missing(result)) return null;
       if (result.code !== 0) throw unavailable();
-      return stripNewline(result.stdout);
+      // secret-tool writes the stored value verbatim when stdout is a pipe.
+      // Removing a trailing newline would corrupt legitimate multiline secrets.
+      return result.stdout;
     };
     return {
       getPassword: read,

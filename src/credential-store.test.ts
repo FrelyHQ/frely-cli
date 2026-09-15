@@ -282,7 +282,7 @@ test("Linux matches legacy attributes and distinguishes missing entries from loc
     if (locked) return { code: 1, stdout: "", stderr: "Secret Service locked" };
     if (args[0] === "store") stored = input!;
     if (args[0] === "clear") stored = null;
-    if (args[0] === "lookup") return stored === null ? { code: 1, stdout: "", stderr: "" } : { code: 0, stdout: stored + "\n", stderr: "" };
+    if (args[0] === "lookup") return stored === null ? { code: 1, stdout: "", stderr: "" } : { code: 0, stdout: stored, stderr: "" };
     return { code: 0, stdout: "", stderr: "" };
   });
   assert.equal(await native.getPassword("s", "a"), null);
