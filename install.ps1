@@ -20,8 +20,14 @@ try {
   $expected = ((Get-Content -LiteralPath (Join-Path $stage "$asset.sha256") -TotalCount 1) -split '\s+')[0]
   if ($expected -notmatch '^[0-9a-fA-F]{64}$') { throw 'Invalid release checksum.' }
   $download = Join-Path $stage $asset
-  $actual = (Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash
-  if ($expected -ne $actual) { throw 'Release checksum mismatch; installation was not changed.' }
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $stream = [IO.File]::OpenRead($download)
+    try { $actualBytes = $sha256.ComputeHash($stream) }
+    finally { $stream.Dispose() }
+  } finally { $sha256.Dispose() }
+  $actual = ([BitConverter]::ToString($actualBytes)).Replace('-', '').ToLowerInvariant()
+  if ($expected.ToLowerInvariant() -ne $actual) { throw 'Release checksum mismatch; installation was not changed.' }
   & $download --version | Out-Null
   if ($LASTEXITCODE -ne 0) { throw 'The downloaded executable could not run.' }
   $target = Join-Path $directory 'frely.exe'
