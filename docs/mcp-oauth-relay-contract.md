@@ -7,7 +7,7 @@
 MCP endpoint 使用设备绑定的稳定地址：
 
 ```text
-https://app.frely.cloud/mcp/<device-id>
+https://mcp.frely.cloud/mcp/<device-id>
 ```
 
 地址不包含凭证。远程客户端通过 OAuth 访问该 resource。MCP 本机执行授权保留 90 天默认期限和 180 天上限。
@@ -78,22 +78,22 @@ Relay 校验：
 MCP resource：
 
 ```text
-https://app.frely.cloud/mcp/drd_xxx
+https://mcp.frely.cloud/mcp/drd_xxx
 ```
 
 RFC 9728 metadata endpoint：
 
 ```text
-https://app.frely.cloud/.well-known/oauth-protected-resource/mcp/drd_xxx
+https://mcp.frely.cloud/.well-known/oauth-protected-resource/mcp/drd_xxx
 ```
 
 响应：
 
 ```json
 {
-  "resource": "https://app.frely.cloud/mcp/drd_xxx",
+  "resource": "https://mcp.frely.cloud/mcp/drd_xxx",
   "authorization_servers": [
-    "https://app.frely.cloud"
+    "https://app.frely.cloud/api/auth"
   ],
   "scopes_supported": [
     "mcp:invoke"
@@ -105,7 +105,7 @@ https://app.frely.cloud/.well-known/oauth-protected-resource/mcp/drd_xxx
 
 ```http
 HTTP/1.1 401 Unauthorized
-WWW-Authenticate: Bearer resource_metadata="https://app.frely.cloud/.well-known/oauth-protected-resource/mcp/drd_xxx"
+WWW-Authenticate: Bearer resource_metadata="https://mcp.frely.cloud/.well-known/oauth-protected-resource/mcp/drd_xxx"
 ```
 
 错误响应不得把 device execution authorization 误报为 OAuth 登录状态。
@@ -115,14 +115,14 @@ WWW-Authenticate: Bearer resource_metadata="https://app.frely.cloud/.well-known/
 Endpoint：
 
 ```text
-https://app.frely.cloud/.well-known/oauth-authorization-server
+https://app.frely.cloud/.well-known/oauth-authorization-server/api/auth
 ```
 
 最低 metadata：
 
 ```json
 {
-  "issuer": "https://app.frely.cloud",
+  "issuer": "https://app.frely.cloud/api/auth",
   "authorization_endpoint": "https://app.frely.cloud/api/auth/oauth2/authorize",
   "token_endpoint": "https://app.frely.cloud/api/auth/oauth2/token",
   "revocation_endpoint": "https://app.frely.cloud/api/auth/oauth2/revoke",
@@ -146,7 +146,7 @@ CIMD 获取需要 URL 校验、DNS/IP 边界、超时、响应大小上限、red
 
 - `response_type=code`；
 - `code_challenge_method=S256`；
-- `resource=https://app.frely.cloud/mcp/<device-id>`；
+- `resource=https://mcp.frely.cloud/mcp/<device-id>`；
 - `scope` 包含 `mcp:invoke`；
 - `offline_access` 用于 refresh token；
 - `state` 原样返回；

@@ -17,7 +17,7 @@ export interface McpAuthorizationView {
   approvalDeadline: string; approvedAt: string | null; expiresAt: string | null;
   status: "pending" | "active" | "expired" | "revoked";
 }
-export interface McpMetadata { version: 1; relayUrl: string; userId: string; grant: McpAuthorizationView }
+export interface McpMetadata { version: 1; relayUrl: string; mcpResource: string; userId: string; grant: McpAuthorizationView }
 interface McpSecret { version: 1; privateKeyPem: string; metadata: McpMetadata }
 export interface McpAuthorization extends McpMetadata { mcpUrl: string; sign(message: string): string }
 export function parseMcpDays(input?: string | number): number {
@@ -30,8 +30,9 @@ export async function inspectMcpMetadata(): Promise<McpMetadata | null> {
   const raw = await readPrivateFile(mcpMetadataPath());
   if (!raw) return null;
   const value = JSON.parse(raw) as McpMetadata;
-  if (value.version !== 1 || typeof value.relayUrl !== "string" || typeof value.userId !== "string") throw new Error("MCP configuration is invalid.");
+  if (value.version !== 1 || typeof value.relayUrl !== "string" || typeof value.mcpResource !== "string" || typeof value.userId !== "string") throw new Error("MCP configuration is invalid.");
   value.grant = validateView(value.grant);
+  value.mcpResource = validateMcpResource(value.mcpResource, value.grant.deviceId);
   return value;
 }
 async function writeMetadata(metadata: McpMetadata): Promise<void> {
@@ -50,7 +51,7 @@ export async function loadMcpAuthorization(): Promise<McpAuthorization | null> {
   if (value.version !== 1 || JSON.stringify(value.metadata) !== JSON.stringify(metadata) || typeof value.privateKeyPem !== "string") throw new Error("MCP credential does not match its authorization.");
   const identity = identityFromPrivateKey(value.privateKeyPem);
   if (identity.keyThumbprint !== metadata.grant.keyThumbprint) throw new Error("MCP private key does not match its authorization.");
-  return { ...metadata, mcpUrl: new URL(`/mcp/${metadata.grant.deviceId}`, metadata.relayUrl).toString(), sign: (message) => identity.signMessage(message) };
+  return { ...metadata, mcpUrl: metadata.mcpResource, sign: (message) => identity.signMessage(message) };
 }
 
 export async function requireMcpAuthorization(workspace?: string): Promise<McpAuthorization> {
@@ -90,9 +91,10 @@ export async function setupMcpAuthorization(workspaceInput: string, daysInput?: 
   const response = await relayFetch(auth.config.relayUrl, auth.credential, ENDPOINT, { method: "POST", body: JSON.stringify({ action: "request",
     deviceId: device.deviceId, publicKeySpki: identity.publicKeySpki, keyThumbprint: identity.keyThumbprint,
     days, workspace, issuedAt, nonce, signature }) });
-  const pending = await readView(response);
+  const requested = await readRequest(response);
+  const pending = requested.grant;
   if (pending.status !== "pending" || pending.days !== days || pending.workspace !== workspace || pending.deviceId !== device.deviceId || pending.keyThumbprint !== identity.keyThumbprint) throw new Error("MCP approval response does not match this request.");
-  let metadata: McpMetadata = { version: 1, relayUrl: auth.config.relayUrl, userId: auth.user.id, grant: pending };
+  let metadata: McpMetadata = { version: 1, relayUrl: auth.config.relayUrl, mcpResource: requested.mcpResource, userId: auth.user.id, grant: pending };
   const save = () => credentialStore.setPassword(SERVICE, account(metadata), JSON.stringify({ version: 1, privateKeyPem, metadata } satisfies McpSecret));
   await save(); // Preserve the generated key before asking the user to approve it.
   const verificationUri = new URL(`/device?mcp_request=${pending.id}`, auth.config.relayUrl).toString();
@@ -146,6 +148,23 @@ function validateView(input: unknown): McpAuthorizationView {
   }
   return { id: value.id, deviceId: value.deviceId, workspace: value.workspace, keyThumbprint: value.keyThumbprint,
     days: value.days, approvalDeadline: value.approvalDeadline, approvedAt: value.approvedAt, expiresAt: value.expiresAt, status: value.status };
+}
+function validateMcpResource(input: unknown, deviceId: string): string {
+  if (typeof input !== "string" || input.length > 4096) throw new Error("MCP resource URL is invalid.");
+  let url: URL;
+  try { url = new URL(input); } catch { throw new Error("MCP resource URL is invalid."); }
+  const loopbackHttp = url.protocol === "http:" && ["127.0.0.1", "localhost", "::1"].includes(url.hostname);
+  if ((url.protocol !== "https:" && !loopbackHttp) || url.username || url.password || url.search || url.hash || url.pathname !== `/mcp/${deviceId}`) {
+    throw new Error("MCP resource URL is invalid.");
+  }
+  return url.toString();
+}
+async function readRequest(response: Response): Promise<{ grant: McpAuthorizationView; mcpResource: string }> {
+  if (!response.ok) throw new Error(`MCP authorization request failed (HTTP ${response.status}).`);
+  const payload = await response.json();
+  const grant = validateView(payload);
+  const record = payload as Record<string, unknown>;
+  return { grant, mcpResource: validateMcpResource(record.mcpResource, grant.deviceId) };
 }
 async function readView(response: Response): Promise<McpAuthorizationView> {
   if (!response.ok) throw new Error(`MCP authorization request failed (HTTP ${response.status}).`);

@@ -49,6 +49,7 @@ test("MCP activation and renewal keep basic credentials and Provider identity se
   });
   assert.equal((await doctor()).ok, true);
   const relayUrl = "https://test.invalid", userId = "user_test", deviceId = `drd_${"1".repeat(32)}`;
+  const mcpResource = `https://mcp.test.invalid/mcp/${deviceId}`;
   await mkdir(join(directory, "frely"), { recursive: true, mode: 0o700 });
   await writeFile(join(directory, "frely", "config.json"), JSON.stringify({ version: 3, relayUrl, user: { id: userId, email: "user@example.com" } }), { mode: 0o600 });
   const basic = JSON.stringify({ version: 1, type: "basic-oauth", accessToken: "synthetic-basic", expiresAt: Date.now() + 3600000 });
@@ -72,7 +73,7 @@ test("MCP activation and renewal keep basic credentials and Provider identity se
       sequence++; approved = false;
       current = { id: `mca_${sequence.toString(16).padStart(32, "0")}`, deviceId, workspace: body.workspace, keyThumbprint: body.keyThumbprint,
         days: body.days, approvalDeadline: new Date(Date.now() + 900000).toISOString(), approvedAt: null, expiresAt: null, status: "pending" };
-      return Response.json(current, { status: 201 });
+      return Response.json({ ...current, mcpResource }, { status: 201 });
     }
     assert.ok(current);
     if (approved && current.status === "pending") {
@@ -89,12 +90,12 @@ test("MCP activation and renewal keep basic credentials and Provider identity se
   // Notification models a browser decision; it is not made by a basic API token.
   const first = await setupMcpAuthorization(directory, undefined, false, approve);
   assert.equal(first.grant.days, 90);
-  assert.equal(first.mcpUrl, `${relayUrl}/mcp/${deviceId}`);
+  assert.equal(first.mcpUrl, mcpResource);
   assert.equal(await basicCredentialStore.getPassword("frely-cli-basic-v1", relayUrl), basic);
   const firstSecret = JSON.parse((await credentialStore.getPassword("frely-cli-mcp-authorization-v1", `${relayUrl}|${userId}|${first.grant.id}`))!);
   assert.equal("token" in firstSecret, false);
   const metadata = await readFile(mcpMetadataPath(), "utf8");
-  assert.equal(metadata.includes("PRIVATE KEY"), false); assert.equal(metadata.includes(first.mcpUrl), false);
+  assert.equal(metadata.includes("PRIVATE KEY"), false); assert.equal(metadata.includes(first.mcpUrl), true);
   const repeated = await setupMcpAuthorization(directory);
   assert.equal(repeated.mcpUrl, first.mcpUrl); assert.equal(repeated.grant.expiresAt, first.grant.expiresAt);
   assert.equal(approvals, 1); assert.equal(sequence, 1);
