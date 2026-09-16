@@ -12,6 +12,7 @@ import {
   type DeviceRelayRequest,
   type DeviceRelayResponse,
 } from "./protocol.js";
+import { diagnostic, mcpDiagnosticContext, type DiagnosticLog } from "../runtime/diagnostics.js";
 import { RelayMcpSession } from "../runtime/relay-mcp.js";
 import { openLocalProviderRequest, readLocalProviderBody } from "../provider/local.js";
 
@@ -27,8 +28,9 @@ interface InflightRequest {
 }
 
 export async function serveDeviceRelay(options: RelayServeOptions): Promise<void> {
-  const device = await ensureDevice();
   const log = options.log ?? (() => undefined);
+  diagnostic(log, "relay.started");
+  const device = await ensureDevice();
   let delayMs = 1000;
   while (!options.signal.aborted) {
     let session: RelayMcpSession | null = null;
@@ -41,15 +43,15 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
           if (authorization.grant.deviceId !== device.deviceId) throw new Error("MCP device differs from the connected device.");
           lease = new McpLease(authorization.grant.id, Date.parse(authorization.grant.expiresAt!));
           const guard = lease;
-          session = await RelayMcpSession.create(options.workspace, { assertAuthorized: () => guard.assert(), signal: guard.controller.signal });
+          session = await RelayMcpSession.create(options.workspace, { assertAuthorized: () => guard.assert(), signal: guard.controller.signal, log });
           const activeSession = session;
           guard.controller.signal.addEventListener("abort", () => { void activeSession.close(); }, { once: true });
-        } catch {
+        } catch (error) {
+          diagnostic(log, "relay.authorization_unavailable", {}, error);
           authorization = null;
           lease?.close();
           await session?.close();
           session = null; lease = null;
-          log("MCP execution disabled: authorization unavailable. Provider relay remains enabled. Run frely mcp renew.");
         }
       }
       const grant = await connectionGrant(device, authorization ? { authorizationId: authorization.grant.id, sign: authorization.sign } : undefined);
@@ -57,7 +59,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
       delayMs = 1000;
     } catch (error) {
       if (options.signal.aborted) break;
-      log(`Device Relay disconnected: ${safeMessage(error)}. Reconnecting.`);
+      diagnostic(log, "relay.disconnected", {}, error);
       await wait(delayMs, options.signal);
       delayMs = Math.min(delayMs * 2, 15_000);
     } finally {
@@ -67,7 +69,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
   }
 }
 
-async function serveConnection(
+export async function serveConnection(
   websocketUrl: string,
   accessToken: string,
   deviceId: string,
@@ -93,7 +95,11 @@ async function serveConnection(
       if (finished) return;
       finished = true;
       clearInterval(heartbeat);
-      for (const item of inflight.values()) item.controller.abort();
+      for (const [id, item] of inflight) {
+        cancelled.add(id);
+        item.controller.abort();
+        if (item.request.method === "mcp") session?.cancel(id);
+      }
       signal.removeEventListener("abort", onAbort);
       socket.removeAllListeners();
       if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.terminate();
@@ -102,7 +108,7 @@ async function serveConnection(
     const onAbort = () => finish();
     signal.addEventListener("abort", onAbort, { once: true });
 
-    socket.once("open", () => log(`Device Relay connected for device ${deviceId}.`));
+    socket.once("open", () => diagnostic(log, "relay.connected"));
     socket.once("error", (error) => finish(error));
     socket.once("close", (code, reason) => {
       if (signal.aborted) finish();
@@ -112,7 +118,7 @@ async function serveConnection(
       // WebSocket peers may deliver the same JSON envelope as either a text
       // or a binary frame. `rawDataBuffer` normalizes both forms before the
       // protocol validator parses the JSON.
-      void handleFrame(rawDataBuffer(data), socket, inflight, cancelled, session, lease).catch((error) => finish(error));
+      void handleFrame(rawDataBuffer(data), socket, inflight, cancelled, session, lease, log).catch((error) => { diagnostic(log, "relay.frame_failed", {}, error); finish(error); });
     });
   });
 }
@@ -124,6 +130,7 @@ async function handleFrame(
   cancelled: Set<string>,
   session: RelayMcpSession | null,
   lease: McpLease | null,
+  log: DiagnosticLog,
 ): Promise<void> {
   const envelope = decodeDeviceRelayEnvelope(data);
   if (envelope.type === "mcp_disabled") {
@@ -135,22 +142,23 @@ async function handleFrame(
     if (item) {
       cancelled.add(envelope.id);
       item.controller.abort();
-      if (item.request.method === "mcp") session?.cancel(item.request.payload);
+      if (item.request.method === "mcp") session?.cancel(envelope.id);
     }
     return;
   }
   if (envelope.type !== "request") return;
-  if (inflight.has(envelope.id)) { send(socket, errorResponse(envelope.id, "duplicate_request", "Duplicate Device Relay request id.")); return; }
-  if (inflight.size >= DEVICE_RELAY_DEFAULT_MAX_INFLIGHT) { send(socket, errorResponse(envelope.id, "inflight_limit", "Device Relay request window is full.")); return; }
+  if (inflight.has(envelope.id)) { diagnostic(log, "relay.request_rejected", { requestId: envelope.id }, new Error("Duplicate Device Relay request id.")); send(socket, errorResponse(envelope.id, "duplicate_request", "Duplicate Device Relay request id."), log); return; }
+  if (inflight.size >= DEVICE_RELAY_DEFAULT_MAX_INFLIGHT) { diagnostic(log, "relay.request_rejected", { requestId: envelope.id }); send(socket, errorResponse(envelope.id, "inflight_limit", "Device Relay request window is full."), log); return; }
   const controller = new AbortController();
   inflight.set(envelope.id, { request: envelope, controller });
   const operation = envelope.method === "provider"
-    ? executeProviderRequest(envelope, socket, controller.signal, cancelled)
+    ? executeProviderRequest(envelope, socket, controller.signal, cancelled, log)
     : executeMcpRequest(envelope, session, lease).then((payload) => {
-        if (!cancelled.has(envelope.id)) send(socket, { protocol: DEVICE_RELAY_PROTOCOL, type: "response", id: envelope.id, ok: true, payload });
+        if (!cancelled.has(envelope.id)) send(socket, { protocol: DEVICE_RELAY_PROTOCOL, type: "response", id: envelope.id, ok: true, payload }, log);
       });
   void operation.catch((error) => {
-    if (!cancelled.has(envelope.id)) send(socket, errorResponse(envelope.id, envelope.method === "mcp" ? "mcp_execution_failed" : "provider_execution_failed", safeMessage(error)));
+    diagnostic(log, "relay.request_failed", { requestId: envelope.id, ...(envelope.method === "mcp" ? mcpDiagnosticContext(envelope.payload) : {}) }, error);
+    if (!cancelled.has(envelope.id)) send(socket, errorResponse(envelope.id, envelope.method === "mcp" ? "mcp_execution_failed" : "provider_execution_failed", safeMessage(error)), log);
   }).finally(() => {
     inflight.delete(envelope.id);
     cancelled.delete(envelope.id);
@@ -160,17 +168,17 @@ async function handleFrame(
 async function executeMcpRequest(request: DeviceRelayRequest, session: RelayMcpSession | null, lease: McpLease | null): Promise<unknown> {
   if (!session || !lease || request.authorizationId !== lease.authorizationId) throw new Error("MCP execution authorization is missing or mismatched.");
   lease.assert();
-  return session.execute(request.payload);
+  return session.execute(request.payload, request.id);
 }
 
-async function executeProviderRequest(request: DeviceRelayRequest, socket: WebSocket, signal: AbortSignal, cancelled: Set<string>): Promise<void> {
+async function executeProviderRequest(request: DeviceRelayRequest, socket: WebSocket, signal: AbortSignal, cancelled: Set<string>, log: DiagnosticLog): Promise<void> {
   const opened = await openLocalProviderRequest(request.payload, signal);
   if (opened.contentType !== "text/event-stream") {
     const body = await readLocalProviderBody(opened.response);
     if (!cancelled.has(request.id)) send(socket, {
       protocol: DEVICE_RELAY_PROTOCOL, type: "response", id: request.id, ok: true,
       payload: { status: opened.status, contentType: opened.contentType, body },
-    });
+    }, log);
     return;
   }
   if (cancelled.has(request.id)) return;
@@ -205,10 +213,11 @@ async function executeProviderRequest(request: DeviceRelayRequest, socket: WebSo
   }
 }
 
-function send(socket: WebSocket, envelope: DeviceRelayEnvelope): void {
+function send(socket: WebSocket, envelope: DeviceRelayEnvelope, log: DiagnosticLog): void {
   if (socket.readyState !== WebSocket.OPEN) return;
   try { socket.send(encodeDeviceRelayEnvelope(envelope)); }
-  catch {
+  catch (error) {
+    diagnostic(log, "relay.response_failed", { requestId: envelope.id }, error);
     if (envelope.type !== "response") return;
     const fallback = errorResponse(envelope.id, "response_too_large", "Device Relay response exceeds the frame limit.");
     socket.send(encodeDeviceRelayEnvelope(fallback));

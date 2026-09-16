@@ -16,6 +16,7 @@ export interface McpRuntimeOptions {
   assertAuthorized?: () => void | Promise<void>;
   signal?: AbortSignal;
   maxConcurrentCommands?: number;
+  onToolError?: (requestId: string | number, tool: string, error: unknown) => void;
 }
 export async function createMcpServer(workspaceInput: string, options: McpRuntimeOptions = {}): Promise<Server> {
   const workspace = await Workspace.open(workspaceInput);
@@ -67,13 +68,14 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
     tool("stop_process", "Stop a process started by this MCP session.", { processId: stringSchema("Process id") }, { readOnly: false, destructive: true, idempotent: true }),
   ] }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const name = request.params.name;
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
     try {
-      const result = await dispatch(name, args, workspace, processes, workspaceScheduler, commandScheduler, processScheduler, lifecycle.signal);
+      const result = await dispatch(name, args, workspace, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]));
       return { content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result) }] };
     } catch (error) {
+      try { options.onToolError?.(extra.requestId, name, error); } catch { /* Diagnostics cannot change tool results. */ }
       return { isError: true, content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Local tool failed." }] };
     }
   });
@@ -87,27 +89,35 @@ export async function startStdioMcp(workspaceInput: string, options: McpRuntimeO
 }
 
 async function dispatch(name: string, args: Record<string, unknown>, workspace: Workspace, processes: ProcessManager, workspaceScheduler: FairRwScheduler, commandScheduler: FairRwScheduler, processScheduler: FairRwScheduler, signal: AbortSignal): Promise<unknown> {
-  if (name === "workspace_info") return workspaceScheduler.read(async () => workspace.info());
-  if (name === "list_directory") return workspaceScheduler.read(() => workspace.listDirectory(textArg(args, "path", ".")));
-  if (name === "stat_path") return workspaceScheduler.read(() => workspace.statPath(textArg(args, "path")));
-  if (name === "find_files") return workspaceScheduler.read(() => workspace.findFiles(textArg(args, "path", "."), textArg(args, "pattern"), intArg(args, "maxResults", 100, 1, 1000)));
-  if (name === "search_files") return workspaceScheduler.read(() => workspace.searchFiles(textArg(args, "path", "."), textArg(args, "query"), { regex: boolArg(args, "regex", false), caseSensitive: boolArg(args, "caseSensitive", false), maxResults: intArg(args, "maxResults", 100, 1, 500), contextLines: intArg(args, "contextLines", 0, 0, 10) }));
-  if (name === "read_file") return workspaceScheduler.read(() => workspace.readFile(textArg(args, "path")));
-  if (name === "read_file_lines") return workspaceScheduler.read(() => workspace.readFileLines(textArg(args, "path"), intArg(args, "startLine", 1, 1, Number.MAX_SAFE_INTEGER), optionalIntArg(args, "endLine", 1, Number.MAX_SAFE_INTEGER)));
-  if (name === "write_file") return workspaceScheduler.write(() => workspace.writeFile(textArg(args, "path"), textArg(args, "content"), boolArg(args, "overwrite", false)));
-  if (name === "apply_patch") return workspaceScheduler.write(() => workspace.applyPatch(textArg(args, "path"), arrayArg(args, "edits", 1, 100), optionalTextArg(args, "expectedSha256")));
-  if (name === "create_directory") return workspaceScheduler.write(() => workspace.createDirectory(textArg(args, "path")));
-  if (name === "delete_path") return workspaceScheduler.write(() => workspace.deletePath(textArg(args, "path"), boolArg(args, "recursive", false)));
-  if (name === "move_path") return workspaceScheduler.write(() => workspace.movePath(textArg(args, "from"), textArg(args, "to"), boolArg(args, "overwrite", false)));
+  const guarded = <T>(work: () => Promise<T>) => async () => { signal.throwIfAborted(); return work(); };
+  const read = <T>(work: () => Promise<T>) => workspaceScheduler.read(guarded(work));
+  const write = <T>(work: () => Promise<T>) => workspaceScheduler.write(guarded(work));
+  const processRead = <T>(work: () => Promise<T>) => processScheduler.read(guarded(work));
+  if (name === "workspace_info") return read(async () => workspace.info());
+  if (name === "list_directory") return read(() => workspace.listDirectory(textArg(args, "path", ".")));
+  if (name === "stat_path") return read(() => workspace.statPath(textArg(args, "path")));
+  if (name === "find_files") return read(() => workspace.findFiles(textArg(args, "path", "."), textArg(args, "pattern"), intArg(args, "maxResults", 100, 1, 1000)));
+  if (name === "search_files") return read(() => workspace.searchFiles(textArg(args, "path", "."), textArg(args, "query"), { regex: boolArg(args, "regex", false), caseSensitive: boolArg(args, "caseSensitive", false), maxResults: intArg(args, "maxResults", 100, 1, 500), contextLines: intArg(args, "contextLines", 0, 0, 10) }));
+  if (name === "read_file") return read(() => workspace.readFile(textArg(args, "path")));
+  if (name === "read_file_lines") return read(() => workspace.readFileLines(textArg(args, "path"), intArg(args, "startLine", 1, 1, Number.MAX_SAFE_INTEGER), optionalIntArg(args, "endLine", 1, Number.MAX_SAFE_INTEGER)));
+  if (name === "write_file") return write(() => workspace.writeFile(textArg(args, "path"), textArg(args, "content"), boolArg(args, "overwrite", false)));
+  if (name === "apply_patch") return write(() => workspace.applyPatch(textArg(args, "path"), arrayArg(args, "edits", 1, 100), optionalTextArg(args, "expectedSha256")));
+  if (name === "create_directory") return write(() => workspace.createDirectory(textArg(args, "path")));
+  if (name === "delete_path") return write(() => workspace.deletePath(textArg(args, "path"), boolArg(args, "recursive", false)));
+  if (name === "move_path") return write(() => workspace.movePath(textArg(args, "from"), textArg(args, "to"), boolArg(args, "overwrite", false)));
   if (name === "run_command") {
     const work = () => workspace.runCommand(textArg(args, "command"), textArg(args, "cwd", "."), intArg(args, "timeoutMs", 30000, 100, 120000), signal);
-    return concurrencyArg(args) === "exclusive" ? commandScheduler.write(work) : commandScheduler.read(work);
+    return concurrencyArg(args) === "exclusive" ? commandScheduler.write(guarded(work)) : commandScheduler.read(guarded(work));
   }
-  if (name === "start_process") return processScheduler.read(async () => processes.start(textArg(args, "command"), await workspace.processCwd(textArg(args, "cwd", ".")), safeEnv()));
-  if (name === "list_processes") return processScheduler.read(async () => processes.list());
-  if (name === "read_process") return processScheduler.read(async () => processes.read(textArg(args, "processId"), intArg(args, "stdoutCursor", 0, 0, Number.MAX_SAFE_INTEGER), intArg(args, "stderrCursor", 0, 0, Number.MAX_SAFE_INTEGER)));
-  if (name === "write_process") return processScheduler.read(() => processes.write(textArg(args, "processId"), textArg(args, "input")));
-  if (name === "stop_process") return processScheduler.read(() => processes.stop(textArg(args, "processId")));
+  if (name === "start_process") return processRead(async () => {
+    const cwd = await workspace.processCwd(textArg(args, "cwd", "."));
+    signal.throwIfAborted();
+    return processes.start(textArg(args, "command"), cwd, safeEnv());
+  });
+  if (name === "list_processes") return processRead(async () => processes.list());
+  if (name === "read_process") return processRead(async () => processes.read(textArg(args, "processId"), intArg(args, "stdoutCursor", 0, 0, Number.MAX_SAFE_INTEGER), intArg(args, "stderrCursor", 0, 0, Number.MAX_SAFE_INTEGER)));
+  if (name === "write_process") return processRead(() => processes.write(textArg(args, "processId"), textArg(args, "input")));
+  if (name === "stop_process") return processRead(() => processes.stop(textArg(args, "processId")));
   throw new Error(`Unknown tool: ${name}`);
 }
 
