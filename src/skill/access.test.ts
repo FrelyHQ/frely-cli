@@ -3,7 +3,8 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { installSkillAdapter, removeSkillAdapter, skillAdapterStatus } from "./access.js";
+import type { CredentialStore } from "../credential-store.js";
+import { installSkillAdapter, invokeInstalledAgent, removeSkillAdapter, skillAdapterStatus } from "./access.js";
 
 const distributionId = "creator_distribution_0123456789abcdef01234567";
 const manifestUrl = `https://app.frely.cloud/api/public/virtual-models/${distributionId}`;
@@ -26,9 +27,28 @@ function manifest() {
     },
   };
 }
-
 function fetchManifest(payload = manifest()): typeof fetch {
   return (async () => new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+}
+
+function fetchManifestWithApiKey(expectedKey: string): typeof fetch {
+  return (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : input.toString());
+    if ((init?.method ?? "GET") === "GET") return Response.json(manifest());
+    assert.equal(url.toString(), `https://api.frely.cloud/mcp/${encodeURIComponent(modelId)}`);
+    assert.equal(new Headers(init?.headers).get("authorization"), `Bearer ${expectedKey}`);
+    return Response.json({ jsonrpc: "2.0", id: "frely-skill-auth-check", result: { tools: [{ name: "invoke" }] } });
+  }) as typeof fetch;
+}
+
+function memoryCredentialStore(): CredentialStore {
+  const values = new Map<string, string>();
+  const key = (service: string, account: string) => `${service}\u0000${account}`;
+  return {
+    async getPassword(service, account) { return values.get(key(service, account)) ?? null; },
+    async setPassword(service, account, password) { values.set(key(service, account), password); },
+    async deletePassword(service, account) { return values.delete(key(service, account)); },
+  };
 }
 
 async function tempRoot(): Promise<string> {
@@ -98,6 +118,77 @@ test("rejects an MCP URL that does not match the published model identity", asyn
       () => installSkillAdapter({ manifestUrl, host: "generic", scope: "global", home: root, fetchFn: fetchManifest(payload) }),
       /does not match/u,
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("stores a model-scoped API key outside the Skill and uses it for invocation", async () => {
+  const root = await tempRoot();
+  const store = memoryCredentialStore();
+  const apiKey = "frely_demo_model_key_123456789";
+  try {
+    const installed = await installSkillAdapter({
+      manifestUrl,
+      host: "chatgpt",
+      scope: "global",
+      home: root,
+      apiKey,
+      credentialStore: store,
+      fetchFn: fetchManifestWithApiKey(apiKey),
+    });
+    assert.equal(installed.authMode, "api-key");
+    const skillText = await readFile(installed.skillPath, "utf8");
+    assert.doesNotMatch(skillText, /frely_demo_model_key/u);
+    const status = await skillAdapterStatus(distributionId, root);
+    assert.equal(status.installed, true);
+    if (!status.installed) throw new Error("skill_status_missing");
+    assert.equal(status.authMode, "api-key");
+
+    let invokedToken = "";
+    const result = await invokeInstalledAgent({
+      distributionId,
+      task: "Plan my Tokyo trip.",
+      home: root,
+      credentialStore: store,
+      remoteInvoker: {
+        async invoke(input) {
+          invokedToken = input.token;
+          assert.equal(input.credential, undefined);
+          return { text: "ready" };
+        },
+      },
+    });
+    assert.equal(invokedToken, apiKey);
+    assert.equal(result.text, "ready");
+
+    const removed = await removeSkillAdapter(distributionId, root, store);
+    assert.equal(removed.removed, true);
+    await assert.rejects(
+      () => invokeInstalledAgent({ distributionId, task: "again", home: root, credentialStore: store }),
+      /not installed/u,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("failed API-key verification leaves no managed Skill or credential", async () => {
+  const root = await tempRoot();
+  const store = memoryCredentialStore();
+  const apiKey = "frely_demo_invalid_key_123456789";
+  const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
+    if ((init?.method ?? "GET") === "GET") return Response.json(manifest());
+    return Response.json({ jsonrpc: "2.0", id: "frely-skill-auth-check", error: { code: -32000, message: "denied" } });
+  }) as typeof fetch;
+  try {
+    await assert.rejects(
+      () => installSkillAdapter({ manifestUrl, host: "chatgpt", scope: "global", home: root, apiKey, credentialStore: store, fetchFn }),
+      /cannot access/u,
+    );
+    const status = await skillAdapterStatus(distributionId, root);
+    assert.equal(status.installed, false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

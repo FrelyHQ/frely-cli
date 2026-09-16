@@ -1,7 +1,8 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { requireLogin } from "../auth.js";
-import { remoteAgentMcpInvoker, SkillInvocationError } from "./router.js";
+import { credentialStore as secureCredentialStore, type CredentialStore } from "../credential-store.js";
+import { remoteAgentMcpInvoker, SkillInvocationError, type RemoteAgentMcpInvoker } from "./router.js";
 import {
   ManagedSkillError,
   managedSkillRoot,
@@ -18,6 +19,7 @@ const MANIFEST_SCHEMA = "frely.virtual-model.public.v1";
 const DISTRIBUTION_ID = /^creator_distribution_[a-f0-9]{24}$/u;
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_TASK_BYTES = 128 * 1024;
+const SKILL_API_KEY_SERVICE = "frely-cli-skill-api-key-v1";
 
 interface PublicCapability {
   readonly id: string;
@@ -39,10 +41,9 @@ interface PublicVirtualModelManifest {
     readonly mcp: string;
   };
 }
-
 export class SkillAccessError extends Error {
   constructor(
-    readonly code: "invalid_manifest_url" | "manifest_fetch_failed" | "manifest_invalid" | "target_not_installed" | "auth_required" | "remote_authorization_failed" | "entitlement_required" | "remote_call_failed" | "input_invalid" | "host_unsupported",
+    readonly code: "invalid_manifest_url" | "manifest_fetch_failed" | "manifest_invalid" | "target_not_installed" | "auth_required" | "remote_authorization_failed" | "entitlement_required" | "remote_call_failed" | "input_invalid" | "host_unsupported" | "credential_store_failed",
     message: string,
   ) {
     super(message);
@@ -54,33 +55,59 @@ export async function installSkillAdapter(input: {
   readonly manifestUrl: string;
   readonly host: SkillHost;
   readonly scope: SkillScope;
+  readonly apiKey?: string;
   readonly cwd?: string;
   readonly home?: string;
   readonly fetchFn?: typeof fetch;
+  readonly credentialStore?: CredentialStore;
 }) {
-  const manifest = await fetchManifest(input.manifestUrl, input.fetchFn ?? fetch);
+  const fetchFn = input.fetchFn ?? fetch;
+  const manifest = await fetchManifest(input.manifestUrl, fetchFn);
   const home = input.home ?? homedir();
   const existing = await readManagedSkill(manifest.id, home);
   const slug = existing?.slug ?? skillSlug(manifest.name, manifest.id);
   const root = managedSkillRoot(input.host, input.scope, input.cwd, home);
   const skillPath = existing?.skillPath ?? join(root, slug, "SKILL.md");
   const content = renderSkill(manifest, slug);
-  const record = await writeManagedSkill({
-    home,
-    content,
-    record: {
-      version: 1,
-      distributionId: manifest.id,
-      manifestUrl: manifest.urls.manifest,
-      modelId: manifest.modelId,
-      mcpUrl: manifest.urls.mcp,
-      name: manifest.name,
-      slug,
-      host: input.host,
-      scope: input.scope,
-      skillPath,
-    },
-  });
+  const authMode = input.apiKey !== undefined ? "api-key" as const : existing?.authMode ?? "account" as const;
+  const recordInput = {
+    version: 1 as const,
+    distributionId: manifest.id,
+    manifestUrl: manifest.urls.manifest,
+    modelId: manifest.modelId,
+    mcpUrl: manifest.urls.mcp,
+    name: manifest.name,
+    slug,
+    host: input.host,
+    scope: input.scope,
+    authMode,
+    skillPath,
+  };
+
+  let store: CredentialStore | undefined;
+  let previousApiKey: string | null = null;
+  if (input.apiKey !== undefined) {
+    assertApiKey(input.apiKey);
+    await verifyApiKey(manifest, input.apiKey, fetchFn);
+    store = input.credentialStore ?? secureCredentialStore;
+    try {
+      previousApiKey = await store.getPassword(SKILL_API_KEY_SERVICE, manifest.id);
+      await store.setPassword(SKILL_API_KEY_SERVICE, manifest.id, input.apiKey);
+    } catch (error) {
+      throw new SkillAccessError("credential_store_failed", error instanceof Error ? error.message : "Could not store the model-scoped API key securely.");
+    }
+  }
+
+  let record;
+  try {
+    record = await writeManagedSkill({ home, content, record: recordInput });
+  } catch (error) {
+    if (store) {
+      if (previousApiKey === null) await store.deletePassword(SKILL_API_KEY_SERVICE, manifest.id).catch(() => false);
+      else await store.setPassword(SKILL_API_KEY_SERVICE, manifest.id, previousApiKey).catch(() => undefined);
+    }
+    throw error;
+  }
   return Object.freeze({
     ok: true,
     distributionId: record.distributionId,
@@ -88,6 +115,7 @@ export async function installSkillAdapter(input: {
     name: record.name,
     host: record.host,
     scope: record.scope,
+    authMode: record.authMode,
     skillPath: record.skillPath,
     state: "host_reload_needed" as const,
     hostAction: hostAction(record.host),
@@ -107,15 +135,19 @@ export async function skillAdapterStatus(distributionId: string, home = homedir(
     name: record.name,
     host: record.host,
     scope: record.scope,
+    authMode: record.authMode,
     skillPath: record.skillPath,
     state,
   });
 }
 
-export async function removeSkillAdapter(distributionId: string, home = homedir()) {
+export async function removeSkillAdapter(distributionId: string, home = homedir(), store: CredentialStore = secureCredentialStore) {
   assertDistributionId(distributionId);
   const record = await readManagedSkill(distributionId, home);
   if (!record) return Object.freeze({ ok: true, removed: false, distributionId });
+  const state = await managedSkillState(record);
+  if (state === "modified") await removeManagedSkill(record, home);
+  if (record.authMode === "api-key") await store.deletePassword(SKILL_API_KEY_SERVICE, distributionId);
   await removeManagedSkill(record, home);
   return Object.freeze({ ok: true, removed: true, distributionId });
 }
@@ -125,28 +157,75 @@ export async function invokeInstalledAgent(input: {
   readonly task: string;
   readonly home?: string;
   readonly signal?: AbortSignal;
+  readonly credentialStore?: CredentialStore;
+  readonly remoteInvoker?: RemoteAgentMcpInvoker;
 }) {
   assertDistributionId(input.distributionId);
   if (!input.task.trim() || Buffer.byteLength(input.task, "utf8") > MAX_TASK_BYTES) throw new SkillAccessError("input_invalid", "Agent input must be non-empty and at most 128 KiB.");
   const record = await readManagedSkill(input.distributionId, input.home ?? homedir());
   if (!record) throw new SkillAccessError("target_not_installed", "The Frely Skill target is not installed.");
-  const login = await requireLogin().catch(() => { throw new SkillAccessError("auth_required", "Frely login is required. Run `frely login`."); });
+  let token: string;
+  let credential: Awaited<ReturnType<typeof requireLogin>>["credential"] | undefined;
+  if (record.authMode === "api-key") {
+    const store = input.credentialStore ?? secureCredentialStore;
+    token = await store.getPassword(SKILL_API_KEY_SERVICE, record.distributionId).catch(() => null) ?? "";
+    if (!token) throw new SkillAccessError("auth_required", "The model-scoped API key is unavailable. Reinstall this Skill with --api-key-stdin.");
+  } else {
+    const login = await requireLogin().catch(() => { throw new SkillAccessError("auth_required", "Frely login is required. Run `frely login`."); });
+    token = login.credential.value;
+    credential = login.credential;
+  }
   try {
-    const result = await remoteAgentMcpInvoker.invoke({
+    const result = await (input.remoteInvoker ?? remoteAgentMcpInvoker).invoke({
       relayUrl: new URL(record.mcpUrl).origin,
       modelId: record.modelId,
-      token: login.credential.value,
-      credential: login.credential,
+      token,
+      ...(credential ? { credential } : {}),
       task: input.task,
       ...(input.signal ? { signal: input.signal } : {}),
     });
     return Object.freeze({ ok: true, distributionId: record.distributionId, modelId: record.modelId, text: result.text, ...(result.usage ? { usage: result.usage } : {}) });
   } catch (error) {
-    if (error instanceof SkillInvocationError && error.code === "entitlement_required") throw new SkillAccessError("entitlement_required", "This Frely Agent is not available to the current account.");
-    if (error instanceof SkillInvocationError && error.code === "remote_authorization_failed") throw new SkillAccessError("remote_authorization_failed", "Frely authorization failed. Run `frely login` again.");
+    if (error instanceof SkillInvocationError && error.code === "entitlement_required") throw new SkillAccessError("entitlement_required", "This Frely Agent is not available to the configured credential.");
+    if (error instanceof SkillInvocationError && error.code === "remote_authorization_failed") throw new SkillAccessError("remote_authorization_failed", record.authMode === "api-key" ? "The model-scoped API key was rejected. Reinstall this Skill with a valid key." : "Frely authorization failed. Run `frely login` again.");
     throw new SkillAccessError("remote_call_failed", "The remote Frely Agent call failed.");
   }
 }
+
+function assertApiKey(value: string): void {
+  const bytes = Buffer.byteLength(value, "utf8");
+  if (bytes < 8 || bytes > 8192 || /[\x00-\x20\x7f]/u.test(value)) {
+    throw new SkillAccessError("input_invalid", "The model-scoped API key is invalid.");
+  }
+}
+
+async function verifyApiKey(manifest: PublicVirtualModelManifest, apiKey: string, fetchFn: typeof fetch): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetchFn(manifest.urls.mcp, {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: "frely-skill-auth-check", method: "tools/list" }),
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    throw new SkillAccessError("remote_authorization_failed", "Could not verify the model-scoped API key.");
+  }
+  const payload = await response.json().catch(() => null) as unknown;
+  const root = record(payload);
+  const result = record(root?.result);
+  const tools = Array.isArray(result?.tools) ? result.tools : [];
+  const hasInvoke = tools.some((tool) => record(tool)?.name === "invoke");
+  if (!response.ok || !root || root.error !== undefined || !hasInvoke) {
+    throw new SkillAccessError("remote_authorization_failed", "The model-scoped API key cannot access this Frely Agent.");
+  }
+}
+
 
 export function publicSkillAccessError(error: unknown): Readonly<Record<string, unknown>> {
   if (error instanceof SkillAccessError || error instanceof ManagedSkillError) return Object.freeze({ ok: false, error: Object.freeze({ code: error.code, message: error.message }) });

@@ -95,7 +95,7 @@ the lockfiles synchronized when changing dependencies.
 
 ## First use
 
-Sign in once:
+Sign in once when the consumer uses their own Frely account:
 
 ```sh
 frely login
@@ -110,11 +110,20 @@ frely skill install https://app.frely.cloud/api/public/virtual-models/<distribut
   --json
 ```
 
-The generated Skill calls the published Agent through Frely's model-scoped MCP endpoint. Invoke the installed Agent from automation with the full task on stdin:
+A Creator can also provide an existing model-scoped, quota-limited API key for a sponsored/demo invocation. Pass it only on stdin so it never appears in argv or the generated Skill:
 
 ```sh
-printf '%s' 'Prepare my Tokyo trip.' | \
-  frely agent invoke <distribution-id> --input-stdin --json
+printf '%s' "$FRELY_AGENT_KEY" | \
+  frely skill install https://app.frely.cloud/api/public/virtual-models/<distribution-id> \
+    --host chatgpt \
+    --scope global \
+    --api-key-stdin \
+    --json
+```
+
+The CLI verifies the key against the target model-scoped MCP `tools/list` endpoint, stores it in the secure credential store, and records only `authMode=api-key` in managed Skill metadata. Use short-lived, single-model keys with bounded quota for sharing; do not paste a Creator master key.
+
+The generated Skill calls the published Agent through Frely's model-scoped MCP endpoint. Invoke the installed Agent from automation with the full task on stdin:
 ```
 
 For local workspace, file, shell, and process sharing, enable the separate local MCP runtime:
@@ -182,7 +191,7 @@ frely logout
 frely whoami
 frely status [--json]
 frely doctor [--json]
-frely skill install <manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--json]
+frely skill install <manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--api-key-stdin] [--json]
 frely skill status <distribution-id> [--json]
 frely skill remove <distribution-id> [--json]
 frely agent invoke <distribution-id> (--input <text>|--input-stdin) [--json]
