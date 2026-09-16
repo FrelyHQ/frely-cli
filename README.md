@@ -2,11 +2,14 @@
 
 设计与 ChatGPT MCP 用户流程见 [`docs/chatgpt-mcp.md`](docs/chatgpt-mcp.md)。
 
-`frely-cli` is Frely's local command-line client and MCP runtime. The target flow is:
+`frely-cli` is Frely's local command-line client, remote Agent bridge, and local MCP runtime. Remote Agent use and local tool sharing are separate flows:
 
 ```text
-install -> frely login -> frely mcp setup -> add stable MCP URL to ChatGPT -> OAuth authorize
+Remote Agent Skill: install -> frely login -> frely skill install -> frely agent invoke
+Local tool sharing:  install -> frely login -> frely mcp setup -> add stable MCP URL -> OAuth authorize
 ```
+
+`frely skill install` installs a local trigger Skill. It does not install a model or change the user's current model Provider/Base URL. `frely mcp setup` provisions local file, shell, process, and workspace execution; consuming a remote Frely Agent does not require that local execution authorization.
 
 There is no separate `friday-local` project. Local MCP execution belongs to `frely-cli`.
 
@@ -92,8 +95,31 @@ the lockfiles synchronized when changing dependencies.
 
 ## First use
 
+Sign in once:
+
 ```sh
 frely login
+```
+
+To install a published Frely Agent as a local trigger Skill:
+
+```sh
+frely skill install https://app.frely.cloud/api/public/virtual-models/<distribution-id> \
+  --host pi \
+  --scope global \
+  --json
+```
+
+The generated Skill calls the published Agent through Frely's model-scoped MCP endpoint. Invoke the installed Agent from automation with the full task on stdin:
+
+```sh
+printf '%s' 'Prepare my Tokyo trip.' | \
+  frely agent invoke <distribution-id> --input-stdin --json
+```
+
+For local workspace, file, shell, and process sharing, enable the separate local MCP runtime:
+
+```sh
 frely mcp setup --workspace /path/to/project
 ```
 
@@ -156,6 +182,10 @@ frely logout
 frely whoami
 frely status [--json]
 frely doctor [--json]
+frely skill install <manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--json]
+frely skill status <distribution-id> [--json]
+frely skill remove <distribution-id> [--json]
+frely agent invoke <distribution-id> (--input <text>|--input-stdin) [--json]
 frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]
 frely provider list [--json]
 frely provider finalize <provider-id>

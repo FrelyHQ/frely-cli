@@ -15,6 +15,9 @@ import { finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider,
 import { getLocalProvider, isSupportedLocalModelName, listLocalProviders, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider } from "./provider/state.js";
 import { VERSION } from "./version.js";
 import { runNetwork, publicNetworkError } from "./network.js";
+import { installSkillAdapter, invokeInstalledAgent, publicSkillAccessError, removeSkillAdapter, skillAdapterStatus } from "./skill/access.js";
+import type { SkillHost, SkillScope } from "./skill/managed.js";
+
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -31,6 +34,48 @@ async function main(): Promise<void> {
     const value = await runNetwork(args);
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
     else stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+    return;
+  }
+
+  if (command === "skill") {
+    const action = args[1];
+    if (action === "install") {
+      const manifestUrl = args[2];
+      if (!manifestUrl) throw new Error("Usage: frely skill install <manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--json]");
+      const host = skillHost(option(args, "--host") ?? "generic");
+      const scope = skillScope(option(args, "--scope") ?? "global");
+      const value = await installSkillAdapter({ manifestUrl, host, scope });
+      if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
+      else stdout.write(`Skill: ${value.name}\nPath: ${value.skillPath}\nState: ${value.state}\n${value.hostAction ? `Host action: ${value.hostAction}\n` : ""}`);
+      return;
+    }
+    if (action === "status") {
+      const distributionId = args[2];
+      if (!distributionId) throw new Error("Usage: frely skill status <distribution-id> [--json]");
+      const value = await skillAdapterStatus(distributionId);
+      if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
+      else stdout.write(value.installed ? `Skill: ${value.name}\nState: ${value.state}\nPath: ${value.skillPath}\n` : "Skill is not installed.\n");
+      return;
+    }
+    if (action === "remove") {
+      const distributionId = args[2];
+      if (!distributionId) throw new Error("Usage: frely skill remove <distribution-id> [--json]");
+      const value = await removeSkillAdapter(distributionId);
+      if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
+      else stdout.write(value.removed ? "Skill removed.\n" : "Skill was not installed.\n");
+      return;
+    }
+    throw new Error("Usage: frely skill install|status|remove ...");
+  }
+
+  if (command === "agent" && args[1] === "invoke") {
+    const distributionId = args[2];
+    if (!distributionId) throw new Error("Usage: frely agent invoke <distribution-id> (--input <text>|--input-stdin) [--json]");
+    const task = args.includes("--input-stdin") ? await readStdinText(128 * 1024) : option(args, "--input");
+    if (!task) throw new Error("Agent input is required. Use --input or --input-stdin.");
+    const value = await invokeInstalledAgent({ distributionId, task });
+    if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
+    else stdout.write(`${value.text}\n`);
     return;
   }
 
@@ -238,10 +283,33 @@ function option(args: string[], name: string): string | undefined {
   return value;
 }
 
+function skillHost(value: string): SkillHost {
+  if (["chatgpt", "codex", "claude-code", "pi", "generic"].includes(value)) return value as SkillHost;
+  throw new Error("--host must be chatgpt, codex, claude-code, pi, or generic.");
+}
+
+function skillScope(value: string): SkillScope {
+  if (value === "global" || value === "project") return value;
+  throw new Error("--scope must be global or project.");
+}
+
+async function readStdinText(maxBytes: number): Promise<string> {
+  let value = "";
+  for await (const chunk of stdin) {
+    value += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+    if (Buffer.byteLength(value, "utf8") > maxBytes) throw new Error(`stdin exceeds ${maxBytes} bytes.`);
+  }
+  return value;
+}
+
 function usage(): void {
   stdout.write(
     "Usage:\n" +
     "  frely network setup|status|find|use|logout [--json]\n" +
+    "  frely skill install <manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--json]\n" +
+    "  frely skill status <distribution-id> [--json]\n" +
+    "  frely skill remove <distribution-id> [--json]\n" +
+    "  frely agent invoke <distribution-id> (--input <text>|--input-stdin) [--json]\n" +
     "  frely login [--relay <url>]\n" +
     "  frely logout\n" +
     "  frely whoami\n" +
@@ -264,7 +332,10 @@ function usage(): void {
 
 main().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
-  if (process.argv.includes("--json") && process.argv[2] === "network") process.stdout.write(`${JSON.stringify(publicNetworkError(error))}\n`);
+  const jsonMode = process.argv.includes("--json");
+  const command = process.argv[2];
+  if (jsonMode && command === "network") process.stdout.write(`${JSON.stringify(publicNetworkError(error))}\n`);
+  else if (jsonMode && (command === "skill" || command === "agent")) process.stdout.write(`${JSON.stringify(publicSkillAccessError(error))}\n`);
   else process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });
