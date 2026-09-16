@@ -43,6 +43,7 @@ export interface ProcessReadResult extends ProcessSnapshot {
 export class ProcessManager {
   private closed = false;
   private readonly processes = new Map<string, ManagedProcess>();
+  private readonly operations = new Map<string, Promise<unknown>>();
 
   start(command: string, cwd: string, env: NodeJS.ProcessEnv): ProcessSnapshot {
     if (this.closed) throw new Error("MCP process manager is closed.");
@@ -98,29 +99,52 @@ export class ProcessManager {
     };
   }
 
-  write(id: string, input: string): ProcessSnapshot {
-    const managed = this.require(id);
-    if (managed.exitedAt || !managed.child.stdin.writable) throw new Error("Process is not accepting input.");
-    managed.child.stdin.write(input);
-    return snapshot(managed);
+  write(id: string, input: string): Promise<ProcessSnapshot> {
+    return this.serialize(id, async () => {
+      const managed = this.require(id);
+      if (managed.exitedAt || !managed.child.stdin.writable) throw new Error("Process is not accepting input.");
+      await new Promise<void>((resolve, reject) => {
+        managed.child.stdin.write(input, (error) => error ? reject(error) : resolve());
+      });
+      return snapshot(managed);
+    });
   }
 
-  async stop(id: string): Promise<ProcessSnapshot> {
-    const managed = this.require(id);
-    if (managed.exitedAt) return snapshot(managed);
-    await terminateProcessTree(managed.child);
-    return snapshot(managed);
+  stop(id: string): Promise<ProcessSnapshot> {
+    return this.serialize(id, async () => {
+      const managed = this.require(id);
+      if (managed.exitedAt) return snapshot(managed);
+      await terminateProcessTree(managed.child);
+      return snapshot(managed);
+    });
   }
 
   async close(): Promise<void> {
     this.closed = true;
-    await Promise.all([...this.processes.values()].filter((item) => !item.exitedAt).map((item) => terminateProcessTree(item.child)));
+    await Promise.all(
+      [...this.processes.values()]
+        .filter((item) => !item.exitedAt)
+        .map((item) => this.serialize(item.id, async () => {
+          if (!item.exitedAt) await terminateProcessTree(item.child);
+        })),
+    );
   }
 
   private require(id: string): ManagedProcess {
     const managed = this.processes.get(id);
     if (!managed) throw new Error("Unknown process id.");
     return managed;
+  }
+
+  private serialize<T>(id: string, work: () => T | Promise<T>): Promise<T> {
+    const previous = this.operations.get(id) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(work);
+    this.operations.set(id, current);
+    const cleanup = () => {
+      if (this.operations.get(id) === current) this.operations.delete(id);
+    };
+    current.then(cleanup, cleanup);
+    return current;
   }
 
   private pruneExited(): void {

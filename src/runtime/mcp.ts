@@ -12,12 +12,22 @@ interface ToolFlags {
   idempotent?: boolean;
 }
 
-export interface McpRuntimeOptions { assertAuthorized?: () => void | Promise<void>; signal?: AbortSignal }
+export interface McpRuntimeOptions {
+  assertAuthorized?: () => void | Promise<void>;
+  signal?: AbortSignal;
+  maxConcurrentCommands?: number;
+}
 export async function createMcpServer(workspaceInput: string, options: McpRuntimeOptions = {}): Promise<Server> {
   const workspace = await Workspace.open(workspaceInput);
   const lifecycle = new AbortController();
   const assertAuthorized = async () => { lifecycle.signal.throwIfAborted(); await options.assertAuthorized?.(); };
-  const scheduler = new FairRwScheduler(4, assertAuthorized);
+  const maxConcurrentCommands = options.maxConcurrentCommands ?? 4;
+  if (!Number.isSafeInteger(maxConcurrentCommands) || maxConcurrentCommands < 1 || maxConcurrentCommands > 16) {
+    throw new Error("maxConcurrentCommands must be an integer between 1 and 16.");
+  }
+  const workspaceScheduler = new FairRwScheduler(4, assertAuthorized);
+  const commandScheduler = new FairRwScheduler(maxConcurrentCommands, assertAuthorized);
+  const processScheduler = new FairRwScheduler(64, assertAuthorized);
   const processes = new ProcessManager();
   const server = new Server({ name: "frely-cli", version: VERSION }, { capabilities: { tools: {} } });
 
@@ -39,7 +49,17 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
     tool("create_directory", "Create a workspace directory.", { path: stringSchema("Relative directory path") }, { readOnly: false, idempotent: true }),
     tool("delete_path", "Delete a workspace path. Recursive directory deletion requires recursive=true.", { path: stringSchema("Relative path"), recursive: boolSchema(false) }, { readOnly: false, destructive: true, idempotent: false }),
     tool("move_path", "Move or rename a workspace path.", { from: stringSchema("Source path"), to: stringSchema("Destination path"), overwrite: boolSchema(false) }, { readOnly: false, destructive: true, idempotent: false }),
-    tool("run_command", "Run a shell command as the current OS user. Workspace only constrains cwd; this is not a sandbox.", { command: stringSchema("Shell command"), cwd: stringSchema("Relative working directory", "."), timeoutMs: intSchema(30000, 100, 120000) }, { readOnly: false, destructive: true, idempotent: false }),
+    tool(
+      "run_command",
+      "Run a shell command as the current OS user. Workspace only constrains cwd; this is not a sandbox. Parallel mode allows bounded command concurrency; use exclusive for commands that mutate shared repository, dependency, build, migration, or release state.",
+      {
+        command: stringSchema("Shell command"),
+        cwd: stringSchema("Relative working directory", "."),
+        timeoutMs: intSchema(30000, 100, 120000),
+        concurrency: { type: "string", enum: ["parallel", "exclusive"], default: "parallel" },
+      },
+      { readOnly: false, destructive: true, idempotent: false },
+    ),
     tool("start_process", "Start a persistent shell process as the current OS user.", { command: stringSchema("Shell command"), cwd: stringSchema("Relative working directory", ".") }, { readOnly: false, destructive: true, idempotent: false }),
     tool("list_processes", "List processes started by this MCP session.", {}, { readOnly: true }),
     tool("read_process", "Read process output using absolute cursors.", { processId: stringSchema("Process id"), stdoutCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), stderrCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER) }, { readOnly: true }),
@@ -51,7 +71,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
     const name = request.params.name;
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
     try {
-      const result = await dispatch(name, args, workspace, processes, scheduler, lifecycle.signal);
+      const result = await dispatch(name, args, workspace, processes, workspaceScheduler, commandScheduler, processScheduler, lifecycle.signal);
       return { content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result) }] };
     } catch (error) {
       return { isError: true, content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Local tool failed." }] };
@@ -66,25 +86,28 @@ export async function startStdioMcp(workspaceInput: string, options: McpRuntimeO
   await server.connect(new StdioServerTransport());
 }
 
-async function dispatch(name: string, args: Record<string, unknown>, workspace: Workspace, processes: ProcessManager, scheduler: FairRwScheduler, signal: AbortSignal): Promise<unknown> {
-  if (name === "workspace_info") return scheduler.read(async () => workspace.info());
-  if (name === "list_directory") return scheduler.read(() => workspace.listDirectory(textArg(args, "path", ".")));
-  if (name === "stat_path") return scheduler.read(() => workspace.statPath(textArg(args, "path")));
-  if (name === "find_files") return scheduler.read(() => workspace.findFiles(textArg(args, "path", "."), textArg(args, "pattern"), intArg(args, "maxResults", 100, 1, 1000)));
-  if (name === "search_files") return scheduler.read(() => workspace.searchFiles(textArg(args, "path", "."), textArg(args, "query"), { regex: boolArg(args, "regex", false), caseSensitive: boolArg(args, "caseSensitive", false), maxResults: intArg(args, "maxResults", 100, 1, 500), contextLines: intArg(args, "contextLines", 0, 0, 10) }));
-  if (name === "read_file") return scheduler.read(() => workspace.readFile(textArg(args, "path")));
-  if (name === "read_file_lines") return scheduler.read(() => workspace.readFileLines(textArg(args, "path"), intArg(args, "startLine", 1, 1, Number.MAX_SAFE_INTEGER), optionalIntArg(args, "endLine", 1, Number.MAX_SAFE_INTEGER)));
-  if (name === "write_file") return scheduler.write(() => workspace.writeFile(textArg(args, "path"), textArg(args, "content"), boolArg(args, "overwrite", false)));
-  if (name === "apply_patch") return scheduler.write(() => workspace.applyPatch(textArg(args, "path"), arrayArg(args, "edits", 1, 100), optionalTextArg(args, "expectedSha256")));
-  if (name === "create_directory") return scheduler.write(() => workspace.createDirectory(textArg(args, "path")));
-  if (name === "delete_path") return scheduler.write(() => workspace.deletePath(textArg(args, "path"), boolArg(args, "recursive", false)));
-  if (name === "move_path") return scheduler.write(() => workspace.movePath(textArg(args, "from"), textArg(args, "to"), boolArg(args, "overwrite", false)));
-  if (name === "run_command") return scheduler.write(() => workspace.runCommand(textArg(args, "command"), textArg(args, "cwd", "."), intArg(args, "timeoutMs", 30000, 100, 120000), signal));
-  if (name === "start_process") return scheduler.write(async () => processes.start(textArg(args, "command"), await workspace.processCwd(textArg(args, "cwd", ".")), safeEnv()));
-  if (name === "list_processes") return scheduler.read(async () => processes.list());
-  if (name === "read_process") return scheduler.read(async () => processes.read(textArg(args, "processId"), intArg(args, "stdoutCursor", 0, 0, Number.MAX_SAFE_INTEGER), intArg(args, "stderrCursor", 0, 0, Number.MAX_SAFE_INTEGER)));
-  if (name === "write_process") return scheduler.write(async () => processes.write(textArg(args, "processId"), textArg(args, "input")));
-  if (name === "stop_process") return scheduler.write(() => processes.stop(textArg(args, "processId")));
+async function dispatch(name: string, args: Record<string, unknown>, workspace: Workspace, processes: ProcessManager, workspaceScheduler: FairRwScheduler, commandScheduler: FairRwScheduler, processScheduler: FairRwScheduler, signal: AbortSignal): Promise<unknown> {
+  if (name === "workspace_info") return workspaceScheduler.read(async () => workspace.info());
+  if (name === "list_directory") return workspaceScheduler.read(() => workspace.listDirectory(textArg(args, "path", ".")));
+  if (name === "stat_path") return workspaceScheduler.read(() => workspace.statPath(textArg(args, "path")));
+  if (name === "find_files") return workspaceScheduler.read(() => workspace.findFiles(textArg(args, "path", "."), textArg(args, "pattern"), intArg(args, "maxResults", 100, 1, 1000)));
+  if (name === "search_files") return workspaceScheduler.read(() => workspace.searchFiles(textArg(args, "path", "."), textArg(args, "query"), { regex: boolArg(args, "regex", false), caseSensitive: boolArg(args, "caseSensitive", false), maxResults: intArg(args, "maxResults", 100, 1, 500), contextLines: intArg(args, "contextLines", 0, 0, 10) }));
+  if (name === "read_file") return workspaceScheduler.read(() => workspace.readFile(textArg(args, "path")));
+  if (name === "read_file_lines") return workspaceScheduler.read(() => workspace.readFileLines(textArg(args, "path"), intArg(args, "startLine", 1, 1, Number.MAX_SAFE_INTEGER), optionalIntArg(args, "endLine", 1, Number.MAX_SAFE_INTEGER)));
+  if (name === "write_file") return workspaceScheduler.write(() => workspace.writeFile(textArg(args, "path"), textArg(args, "content"), boolArg(args, "overwrite", false)));
+  if (name === "apply_patch") return workspaceScheduler.write(() => workspace.applyPatch(textArg(args, "path"), arrayArg(args, "edits", 1, 100), optionalTextArg(args, "expectedSha256")));
+  if (name === "create_directory") return workspaceScheduler.write(() => workspace.createDirectory(textArg(args, "path")));
+  if (name === "delete_path") return workspaceScheduler.write(() => workspace.deletePath(textArg(args, "path"), boolArg(args, "recursive", false)));
+  if (name === "move_path") return workspaceScheduler.write(() => workspace.movePath(textArg(args, "from"), textArg(args, "to"), boolArg(args, "overwrite", false)));
+  if (name === "run_command") {
+    const work = () => workspace.runCommand(textArg(args, "command"), textArg(args, "cwd", "."), intArg(args, "timeoutMs", 30000, 100, 120000), signal);
+    return concurrencyArg(args) === "exclusive" ? commandScheduler.write(work) : commandScheduler.read(work);
+  }
+  if (name === "start_process") return processScheduler.read(async () => processes.start(textArg(args, "command"), await workspace.processCwd(textArg(args, "cwd", ".")), safeEnv()));
+  if (name === "list_processes") return processScheduler.read(async () => processes.list());
+  if (name === "read_process") return processScheduler.read(async () => processes.read(textArg(args, "processId"), intArg(args, "stdoutCursor", 0, 0, Number.MAX_SAFE_INTEGER), intArg(args, "stderrCursor", 0, 0, Number.MAX_SAFE_INTEGER)));
+  if (name === "write_process") return processScheduler.read(() => processes.write(textArg(args, "processId"), textArg(args, "input")));
+  if (name === "stop_process") return processScheduler.read(() => processes.stop(textArg(args, "processId")));
   throw new Error(`Unknown tool: ${name}`);
 }
 
@@ -110,3 +133,4 @@ function intArg(args: Record<string, unknown>, name: string, fallback: number, m
 function optionalIntArg(args: Record<string, unknown>, name: string, min: number, max: number): number | undefined { const value = args[name]; if (value === undefined) return undefined; if (!Number.isSafeInteger(value) || Number(value) < min || Number(value) > max) throw new Error(`${name} is invalid.`); return Number(value); }
 function boolArg(args: Record<string, unknown>, name: string, fallback: boolean): boolean { const value = args[name] ?? fallback; if (typeof value !== "boolean") throw new Error(`${name} must be a boolean.`); return value; }
 function arrayArg(args: Record<string, unknown>, name: string, min: number, max: number): unknown[] { const value = args[name]; if (!Array.isArray(value) || value.length < min || value.length > max) throw new Error(`${name} must contain ${min}-${max} entries.`); return value; }
+function concurrencyArg(args: Record<string, unknown>): "parallel" | "exclusive" { const value = args.concurrency ?? "parallel"; if (value !== "parallel" && value !== "exclusive") throw new Error("concurrency must be parallel or exclusive."); return value; }
