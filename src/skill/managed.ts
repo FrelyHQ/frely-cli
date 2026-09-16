@@ -17,6 +17,7 @@ export interface ManagedSkillRecord {
   readonly slug: string;
   readonly host: SkillHost;
   readonly scope: SkillScope;
+  readonly authMode: "account" | "api-key";
   readonly skillPath: string;
   readonly sha256: string;
   readonly installedAt: string;
@@ -78,10 +79,11 @@ export async function readManagedSkill(distributionId: string, home = homedir())
   let value: unknown;
   try { value = JSON.parse(text); } catch { throw new ManagedSkillError("local_state_invalid", "Installed Frely Skill metadata is invalid."); }
   const item = recordValue(value);
-  if (!item || item.version !== 1 || item.distributionId !== distributionId || typeof item.manifestUrl !== "string" || typeof item.modelId !== "string" || typeof item.mcpUrl !== "string" || typeof item.name !== "string" || typeof item.slug !== "string" || typeof item.skillPath !== "string" || typeof item.sha256 !== "string" || typeof item.installedAt !== "string" || !["chatgpt", "codex", "claude-code", "pi", "generic"].includes(String(item.host)) || !["global", "project"].includes(String(item.scope))) {
+  const authMode = item?.authMode === undefined ? "account" : item.authMode;
+  if (!item || item.version !== 1 || item.distributionId !== distributionId || typeof item.manifestUrl !== "string" || typeof item.modelId !== "string" || typeof item.mcpUrl !== "string" || typeof item.name !== "string" || typeof item.slug !== "string" || typeof item.skillPath !== "string" || typeof item.sha256 !== "string" || typeof item.installedAt !== "string" || !["chatgpt", "codex", "claude-code", "pi", "generic"].includes(String(item.host)) || !["global", "project"].includes(String(item.scope)) || !["account", "api-key"].includes(String(authMode))) {
     throw new ManagedSkillError("local_state_invalid", "Installed Frely Skill metadata is invalid.");
   }
-  return item as unknown as ManagedSkillRecord;
+  return Object.freeze({ ...item, authMode }) as unknown as ManagedSkillRecord;
 }
 
 export async function managedSkillState(record: ManagedSkillRecord): Promise<"managed" | "modified" | "missing"> {

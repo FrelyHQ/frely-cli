@@ -4,7 +4,7 @@
 
 ## 产品边界
 
-基础层包含账号会话、Network、Provider、远程 Agent Skill 与基础诊断，不依赖 MCP 凭证库。`frely skill install` 生成用户 Agent 的触发 Skill；`frely agent invoke` 使用 Frely 发布的 model-scoped MCP 调远程 Agent。这条路径不修改宿主的模型 Provider/Base URL，也不启用本机文件、Shell 或进程权限。
+基础层包含账号会话、Network、Provider、远程 Agent Skill 与基础诊断，不依赖本机 MCP 执行授权。`frely skill install` 生成用户 Agent 的触发 Skill；`frely agent invoke` 使用 Frely 发布的 model-scoped MCP 调远程 Agent。这条路径不修改宿主的模型 Provider/Base URL，也不启用本机文件、Shell 或进程权限。消费者可以使用 `frely login` 的账号会话，也可以在安装时用 `--api-key-stdin` 导入 Creator 提供的单模型受限 API Key；该 Key 经目标 MCP `tools/list` 校验后进入系统安全凭据库，不写入 Skill、argv 或普通配置。
 
 本文件其余 `frely mcp setup` 内容只描述本机工具共享。MCP 层提供本机文件、Shell、进程与工具执行能力，需要独立授权。调用云端 Agent/MCP 服务不等于授权外部主体控制本机。
 
