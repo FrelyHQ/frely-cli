@@ -81,11 +81,17 @@ async function main(): Promise<void> {
   }
 
   if (command === "login") {
+    if (args.includes("--help") || args.includes("-h")) return usage();
     const relay = option(args, "--relay");
+    const noBrowser = args.includes("--no-browser") || process.env.FRELY_NO_BROWSER === "1";
     const result = await loginDevice(relay, ({ verificationUri, userCode }) => {
       stdout.write(`Open this URL to authorize Frely CLI:\n${verificationUri}\n`);
-      stdout.write(`Device code: ${userCode}\nWaiting for approval...\n`);
-    });
+      stdout.write(`Device code: ${userCode}\n`);
+      stdout.write(noBrowser
+        ? "Automatic browser opening is disabled. Open this new URL only in the browser signed in to the account you want to use.\n"
+        : "Opening your default browser. To use another account or browser, press Ctrl+C and run `frely login --no-browser` for a new URL.\n");
+      stdout.write("Waiting for approval...\n");
+    }, { openBrowser: !noBrowser });
     const user = result.user;
     stdout.write(`Logged in as ${user.email}.\n`);
     stdout.write("Run `frely mcp setup --workspace <path>` to provision this machine and get the ChatGPT MCP address.\n");
@@ -316,7 +322,7 @@ function usage(): void {
     "  frely skill status <distribution-id> [--json]\n" +
     "  frely skill remove <distribution-id> [--json]\n" +
     "  frely agent invoke <distribution-id> (--input <text>|--input-stdin) [--json]\n" +
-    "  frely login [--relay <url>]\n" +
+    "  frely login [--relay <url>] [--no-browser]\n" +
     "  frely logout\n" +
     "  frely whoami\n" +
     "  frely status [--json]\n" +

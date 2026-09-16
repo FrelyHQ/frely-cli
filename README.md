@@ -101,6 +101,16 @@ Sign in once when the consumer uses their own Frely account:
 frely login
 ```
 
+To choose another browser or Frely account, disable automatic browser opening:
+
+```sh
+frely login --no-browser
+```
+
+Open the printed URL only in the browser signed in to the account you want to use. Visiting a device authorization URL while signed in can bind that code to the account before you click Approve. If the default browser already opened it with another account, press Ctrl+C, run `frely login --no-browser` again, and use the **new URL**. Signing in again or reusing the old URL does not switch its account. Keep `--relay <url>` when using a custom Relay.
+
+`FRELY_NO_BROWSER=1` remains supported for scripts and existing setups. `frely login --help` lists the available options.
+
 To install a published Frely Agent as a local trigger Skill:
 
 ```sh
@@ -186,7 +196,7 @@ frely provider finalize <provider-id>
 ## Commands
 
 ```text
-frely login [--relay <https-url>]
+frely login [--relay <https-url>] [--no-browser]
 frely logout
 frely whoami
 frely status [--json]
