@@ -19,7 +19,7 @@ const MANIFEST_SCHEMA = "frely.virtual-model.public.v1";
 const DISTRIBUTION_ID = /^creator_distribution_[a-f0-9]{24}$/u;
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_TASK_BYTES = 128 * 1024;
-const SKILL_API_KEY_SERVICE = "frely-cli-skill-api-key-v1";
+export const SKILL_API_KEY_SERVICE = "frely-cli-skill-api-key-v1";
 
 interface PublicCapability {
   readonly id: string;
@@ -36,6 +36,7 @@ interface PublicVirtualModelManifest {
   readonly name: string;
   readonly description: string | null;
   readonly capabilities: readonly PublicCapability[];
+  readonly clientTrigger?: { readonly description: string; readonly when: readonly string[] };
   readonly urls: {
     readonly manifest: string;
     readonly mcp: string;
@@ -274,6 +275,7 @@ function parseManifest(value: unknown, sourceUrl: URL): PublicVirtualModelManife
     name: root.name,
     description: root.description as string | null,
     capabilities,
+    ...(root.clientTrigger === undefined ? {} : { clientTrigger: parseClientTrigger(root.clientTrigger) }),
     urls: Object.freeze({ manifest: canonical.toString(), mcp: mcp.toString() }),
   });
 }
@@ -286,10 +288,20 @@ function parseCapability(value: unknown): PublicCapability {
   return Object.freeze({ id: item.id, level: item.level, entrypoints: Object.freeze(item.entrypoints as ("model" | "mcp" | "a2a")[]), ...(typeof item.description === "string" ? { description: item.description } : {}) });
 }
 
+function parseClientTrigger(value: unknown): { readonly description: string; readonly when: readonly string[] } {
+  const item = record(value);
+  const validText = (text: unknown, max: number): text is string => typeof text === "string" && text.trim().length > 0 && text.length <= max && !/[\x00-\x1f\x7f]/u.test(text);
+  if (!item || !validText(item.description, 900) || !Array.isArray(item.when) || item.when.length < 1 || item.when.length > 12 || !item.when.every((text) => validText(text, 300))) {
+    throw new SkillAccessError("manifest_invalid", "Frely client trigger metadata is invalid.");
+  }
+  return Object.freeze({ description: item.description, when: Object.freeze(item.when as string[]) });
+}
+
 function renderSkill(manifest: PublicVirtualModelManifest, slug: string): string {
-  const description = oneLine(manifest.description ?? `Use ${manifest.name} through Frely when the user's task matches this Agent.`).slice(0, 900);
+  const description = oneLine(manifest.clientTrigger?.description ?? manifest.description ?? `Use ${manifest.name} through Frely when the user's task matches this Agent.`).slice(0, 900);
   const capabilities = manifest.capabilities.length === 0 ? "- Use the published Agent for tasks described by this Skill." : manifest.capabilities.map((capability) => `- ${capability.id}${capability.description ? `: ${oneLine(capability.description)}` : ""}`).join("\n");
-  return `---\nname: ${slug}\ndescription: ${JSON.stringify(description)}\ncompatibility: ${JSON.stringify("Requires frely-cli and network access to Frely.")}\nmetadata:\n  frely-distribution-id: ${JSON.stringify(manifest.id)}\n  frely-model-id: ${JSON.stringify(manifest.modelId)}\n---\n\n# ${manifest.name}\n\nUse this Skill when the user's task matches ${manifest.name}. The Agent runs remotely on Frely; this Skill contains only trigger and invocation instructions.\n\n## Public capabilities\n\n${capabilities}\n\n## Execute\n\nPass the user's complete task to stdin of:\n\n\`frely agent invoke ${manifest.id} --input-stdin --json\`\n\nDo not put credentials in the command and do not replace the user's current model provider. If the remote call fails, surface the returned state instead of inventing current external facts.\n`;
+  const triggers = manifest.clientTrigger?.when.map((condition) => `- ${oneLine(condition)}`).join("\n") ?? `- The user explicitly asks for ${oneLine(manifest.name)} or their task matches its published capabilities.`;
+  return `---\nname: ${slug}\ndescription: ${JSON.stringify(description)}\ncompatibility: ${JSON.stringify("Requires frely-cli and network access to Frely.")}\nmetadata:\n  frely-distribution-id: ${JSON.stringify(manifest.id)}\n  frely-model-id: ${JSON.stringify(manifest.modelId)}\n---\n\n# ${oneLine(manifest.name)}\n\nThe Agent runs remotely on Frely; this Skill contains only trigger and invocation instructions.\n\n## When to use\n\n${triggers}\n\n## Public capabilities\n\n${capabilities}\n\n## Execute\n\nPass the user's complete relevant request to stdin of:\n\n\`frely agent invoke ${manifest.id} --input-stdin --json\`\n\nDo not put credentials in the command and do not replace the user's current model provider. Return the remote Agent's result to the user. If the remote call fails, surface the returned state instead of inventing current external facts.\n`;
 }
 
 function hostAction(host: SkillHost): string {

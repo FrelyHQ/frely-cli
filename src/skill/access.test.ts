@@ -193,3 +193,32 @@ test("failed API-key verification leaves no managed Skill or credential", async 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("published client trigger metadata drives Skill discovery and invocation", async () => {
+  const home = await tempRoot();
+  try {
+    const trigger = { description: "Ask GPT-800 for specialist help.", when: ["The user explicitly requests GPT-800.", "A difficult reasoning task needs GPT-800's help."] };
+    const payload = { ...manifest(), name: "GPT-800", clientTrigger: trigger };
+    const installed = await installSkillAdapter({ manifestUrl, host: "generic", scope: "global", home, fetchFn: fetchManifest(payload) });
+    const text = await readFile(installed.skillPath, "utf8");
+    const frontmatter = text.split("---")[1]!;
+    assert.ok(frontmatter.includes(JSON.stringify(trigger.description)));
+    for (const condition of trigger.when) assert.ok(text.includes(condition));
+    assert.ok(text.includes("frely agent invoke " + distributionId + " --input-stdin --json"));
+    assert.ok(!text.includes(payload.urls.mcp));
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test("invalid client triggers fail before installing a Skill", async () => {
+  const home = await tempRoot();
+  try {
+    for (const trigger of [
+      { description: "", when: ["Use when asked."] },
+      { description: "valid", when: [] },
+      { description: "valid", when: ["line one\nline two"] },
+    ]) {
+      await assert.rejects(installSkillAdapter({ manifestUrl, host: "generic", scope: "global", home, fetchFn: fetchManifest({ ...manifest(), ...{ clientTrigger: trigger } }) }), /trigger metadata is invalid/u);
+    }
+    assert.equal((await skillAdapterStatus(distributionId, home)).installed, false);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});

@@ -19,7 +19,8 @@
     "dist",
     "README.md",
     "NOTICE",
-    "TRADEMARKS.md"
+    "TRADEMARKS.md",
+    "skills"
   ],
   "scripts": {
     "build": "node scripts/clean.mjs dist && tsc -p tsconfig.build.json",
