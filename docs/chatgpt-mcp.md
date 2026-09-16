@@ -4,9 +4,9 @@
 
 ## 产品边界
 
-基础层包含账号会话、Network、Provider、远程 Agent Skill 与基础诊断，不依赖本机 MCP 执行授权。`frely skill install` 生成用户 Agent 的触发 Skill；`frely agent invoke` 使用 Frely 发布的 model-scoped MCP 调远程 Agent。这条路径不修改宿主的模型 Provider/Base URL，也不启用本机文件、Shell 或进程权限。消费者可以使用 `frely login` 的账号会话，也可以在安装时用 `--api-key-stdin` 导入 Creator 提供的单模型受限 API Key；该 Key 经目标 MCP `tools/list` 校验后进入系统安全凭据库，不写入 Skill、argv 或普通配置。
+基础层包含账号会话、Network、Provider、远程 Agent Skill 与基础诊断，不依赖本机 MCP 执行授权。当前 CLI 版本如果提供 `frely skill install`、`frely agent invoke` 等命令，它们属于**当前实现 surface**，不是 Agent Skill 永久硬编码的协议。Creator Agent 的长期机器自描述入口固定为 `frely help --agent --json`：Client Skill Adapter 应先读取该 JSON，再使用当前版本声明的 exact-version Agent lookup/install/invoke、认证、key/budget、login/topup/authorization 等能力。这条路径不修改宿主的模型 Provider/Base URL，也不启用本机文件、Shell 或进程权限。消费者可以使用账号会话，也可以使用 Creator/用户提供的 Agent Delegated Key；Delegated Key 的目标限制由 Agent AP + 受限 Plan source + API-key Plan-source restriction 表达，`$10` 等金额是 direct Key 的最大累计服务消费 hard limit，不是 prepaid balance，也不要求新增 `allowedModel`。Raw caller key 若由 CLI 导入必须进入系统安全凭据库，不写入 Skill、argv 或普通配置；Agent Runtime Key 永远只存在于 Frely/Swarm 服务端，不能被 CLI 导入、显示或覆盖。
 
-本文件其余 `frely mcp setup` 内容只描述本机工具共享。MCP 层提供本机文件、Shell、进程与工具执行能力，需要独立授权。调用云端 Agent/MCP 服务不等于授权外部主体控制本机。
+本文件其余 `frely mcp setup` 内容只描述本机工具共享。MCP 层提供本机文件、Shell、进程与工具执行能力，需要独立授权。调用云端 Agent/MCP 服务不等于授权外部主体控制本机。远程 Agent 的 trigger metadata 和 manifest 绑定精确 Agent version；创建 Agent 后不再要求 Creator 走第二条独立 Create Skill 产品主链。
 
 Relay 负责设备身份、MCP 授权、OAuth、连接、请求转发和撤销。CLI 负责本机执行、工作目录、调度与进程生命周期。项目不创建独立 `friday-local` runtime。
 
