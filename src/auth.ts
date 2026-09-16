@@ -92,13 +92,17 @@ export async function login(relayOrEmail?: string, legacyPassword?: string, lega
   return (await loginDevice(relayOrEmail)).user;
 }
 
-export async function loginDevice(relayInput?: string, notify?: (details: { verificationUri: string; userCode: string }) => void): Promise<{ user: PublicUser; verificationUri: string; userCode: string }> {
+export async function loginDevice(
+  relayInput?: string,
+  notify?: (details: { verificationUri: string; userCode: string }) => void,
+  options: { openBrowser?: boolean } = {},
+): Promise<{ user: PublicUser; verificationUri: string; userCode: string }> {
   const relayUrl = normalizeRelayUrl(relayInput);
   await probeCredentialStore();
   const device = await requestDeviceCode(relayUrl);
   const verificationUri = validateVerificationUrl(device.verification_uri_complete || `${device.verification_uri}?user_code=${encodeURIComponent(device.user_code)}`, relayUrl);
   notify?.({ verificationUri, userCode: device.user_code });
-  openVerificationUrl(verificationUri);
+  if (options.openBrowser !== false) openVerificationUrl(verificationUri);
   const token = await pollDeviceToken(relayUrl, device);
   const user = await fetchUser(relayUrl, { scheme: "bearer", value: token.accessToken, ...(token.refreshToken ? { refreshToken: token.refreshToken } : {}), expiresAt: token.expiresAt });
   const key = accountKey(relayUrl);
