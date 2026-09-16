@@ -14,6 +14,8 @@ import { discoverLocalModels } from "./provider/local.js";
 import { finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider, waitForLocalProviderRelay } from "./provider/control.js";
 import { getLocalProvider, isSupportedLocalModelName, listLocalProviders, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider } from "./provider/state.js";
 import { VERSION } from "./version.js";
+import { agentHelp, cliUsage } from "./agent-help.js";
+import { getKeyBudget, KeyBudgetError, publicKeyBudgetError } from "./key-budget.js";
 import { runNetwork, publicNetworkError } from "./network.js";
 import { installSkillAdapter, invokeInstalledAgent, publicSkillAccessError, removeSkillAdapter, skillAdapterStatus } from "./skill/access.js";
 import type { SkillHost, SkillScope } from "./skill/managed.js";
@@ -26,6 +28,24 @@ async function main(): Promise<void> {
   if (command === "mcp" && args.length === 1) args.push("setup");
   if (command === "--version" || command === "-v" || command === "version") {
     stdout.write(`${VERSION}\n`);
+    return;
+  }
+  if ((command === "help" || command === "--help") && args.includes("--agent")) {
+    stdout.write(JSON.stringify(agentHelp(), null, args.includes("--json") ? undefined : 2) + "\n");
+    return;
+  }
+  if (command === "key") {
+    if (args[1] !== "budget") throw new KeyBudgetError("input_invalid", "Usage: frely key budget (--api-key-stdin|--distribution <distribution-id>) [--json]");
+    const distributionId = option(args, "--distribution");
+    const relayUrl = option(args, "--relay");
+    if (args.includes("--api-key-stdin") === (distributionId !== undefined)) throw new KeyBudgetError("input_invalid", "Use exactly one of --api-key-stdin or --distribution <distribution-id>.");
+    const apiKey = args.includes("--api-key-stdin") ? await readStdinSecret(8192) : undefined;
+    const value = await getKeyBudget({
+      ...(apiKey === undefined ? {} : { apiKey }),
+      ...(distributionId === undefined ? {} : { distributionId }),
+      ...(relayUrl === undefined ? {} : { relayUrl }),
+    });
+    stdout.write(JSON.stringify(value, null, args.includes("--json") ? undefined : 2) + "\n");
     return;
   }
   if (!command || command === "help" || command === "--help" || command === "-h") return usage();
@@ -315,31 +335,7 @@ async function readStdinSecret(maxBytes: number): Promise<string> {
 }
 
 function usage(): void {
-  stdout.write(
-    "Usage:\n" +
-    "  frely network setup|status|find|use|logout [--json]\n" +
-    "  frely skill install <manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--api-key-stdin] [--json]\n" +
-    "  frely skill status <distribution-id> [--json]\n" +
-    "  frely skill remove <distribution-id> [--json]\n" +
-    "  frely agent invoke <distribution-id> (--input <text>|--input-stdin) [--json]\n" +
-    "  frely login [--relay <url>] [--no-browser]\n" +
-    "  frely logout\n" +
-    "  frely whoami\n" +
-    "  frely status [--json]\n" +
-    "  frely doctor [--mcp] [--json]\n" +
-    "  frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]\n" +
-    "  frely provider list [--json]\n" +
-    "  frely provider finalize <provider-id>\n" +
-    "  frely mcp [setup] [--workspace <path>] [--days 1..180]\n" +
-    "  frely mcp renew [--days 1..180]\n" +
-    "  frely mcp url [--json]\n" +
-    "  frely mcp status [--json]\n" +
-    "  frely mcp chatgpt\n" +
-    "  frely mcp serve [--workspace <path>]\n" +
-    "  frely mcp service status|start|stop|uninstall [--json]\n" +
-    "  frely mcp revoke\n" +
-    "  frely mcp stdio [--workspace <path>]\n"
-  );
+  stdout.write(cliUsage());
 }
 
 main().catch((error) => {
@@ -347,6 +343,11 @@ main().catch((error) => {
   const jsonMode = process.argv.includes("--json");
   const command = process.argv[2];
   if (jsonMode && command === "network") process.stdout.write(`${JSON.stringify(publicNetworkError(error))}\n`);
+  else if (command === "key") {
+    const value = publicKeyBudgetError(error);
+    if (jsonMode) process.stdout.write(JSON.stringify(value) + "\n");
+    else process.stderr.write(value.error.message + "\n");
+  }
   else if (jsonMode && (command === "skill" || command === "agent")) process.stdout.write(`${JSON.stringify(publicSkillAccessError(error))}\n`);
   else process.stderr.write(`${message}\n`);
   process.exitCode = 1;
