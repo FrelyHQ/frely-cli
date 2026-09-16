@@ -1,10 +1,12 @@
-# Frely CLI 与 ChatGPT MCP
+# Frely CLI 本机 MCP 与 ChatGPT
 
 状态：两层授权 + 稳定 MCP URL + OAuth 契约，未发布。
 
 ## 产品边界
 
-基础层包含账号会话、Network、Provider 与基础诊断，不依赖 MCP 凭证库。MCP 层提供本机文件、Shell、进程与工具执行能力，需要独立授权。调用云端服务不等于授权外部主体控制本机。
+基础层包含账号会话、Network、Provider、远程 Agent Skill 与基础诊断，不依赖 MCP 凭证库。`frely skill install` 生成用户 Agent 的触发 Skill；`frely agent invoke` 使用 Frely 发布的 model-scoped MCP 调远程 Agent。这条路径不修改宿主的模型 Provider/Base URL，也不启用本机文件、Shell 或进程权限。
+
+本文件其余 `frely mcp setup` 内容只描述本机工具共享。MCP 层提供本机文件、Shell、进程与工具执行能力，需要独立授权。调用云端 Agent/MCP 服务不等于授权外部主体控制本机。
 
 Relay 负责设备身份、MCP 授权、OAuth、连接、请求转发和撤销。CLI 负责本机执行、工作目录、调度与进程生命周期。项目不创建独立 `friday-local` runtime。
 
