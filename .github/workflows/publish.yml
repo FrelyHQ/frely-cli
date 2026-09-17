@@ -19,6 +19,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          # Keep the annotated tag object; the default event-SHA fallback peels it.
+          ref: ${{ github.ref }}
           fetch-depth: 0
       - uses: actions/setup-node@v5
         with:

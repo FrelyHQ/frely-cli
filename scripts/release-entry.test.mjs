@@ -15,7 +15,7 @@ function fixture(t, packageVersion = "1.2.3") {
   t.after(() => rmSync(temp, { recursive: true, force: true }));
   const repo = join(temp, "repo"), remote = join(temp, "origin.git");
   mkdirSync(repo);
-  const env = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null", GITHUB_ACTIONS: "", GITHUB_OUTPUT: "", GITHUB_WORKFLOW_REF: "" };
+  const env = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null", GITHUB_ACTIONS: "", GITHUB_OUTPUT: "", GITHUB_WORKFLOW_REF: "", GITHUB_EVENT_NAME: "", GITHUB_SHA: "" };
   const git = (...args) => execFileSync("git", args, { cwd: repo, env, encoding: "utf8", stdio: ["ignore","pipe","pipe"] }).trim();
   git("init", "--bare", remote); git("init", "-b", "main");
   git("config", "user.name", "Release Test"); git("config", "user.email", "test@example.invalid");
@@ -126,4 +126,45 @@ test("an existing version cannot be rebound to a different source through anothe
   const tag=artifact.tagPrefix+"1.2.3";
   f.git("tag","-a",tag,"-m","conflicting request"); f.git("push","origin","refs/tags/"+tag);
   assert.notEqual(f.invoke(["--validate-tag",tag]).status,0);
+});
+
+test("tag-ref fetch preserves annotated identity after a peeled-commit checkout", t => {
+  const f = fixture(t);
+  const ref = "refs/tags/" + f.tag;
+  f.git("tag", "-a", f.tag, "-m", "release");
+  f.git("push", "origin", ref);
+  const object = f.git("rev-parse", ref);
+  // actions/checkout's default event-SHA fallback replaces the local tag ref.
+  f.git("fetch", "--no-tags", "origin", "+" + f.sha + ":" + ref);
+  f.git("checkout", "--detach", ref);
+  assert.equal(f.git("cat-file", "-t", ref), "commit");
+  const broken = f.invoke(["--validate-tag", f.tag]);
+  assert.notEqual(broken.status, 0);
+  assert.match(broken.stderr, /Release tag must be annotated/);
+  // Explicit checkout ref fetches the tag ref without mapping the event SHA to it.
+  f.git("fetch", "--no-tags", "origin", "+" + ref + ":" + ref);
+  assert.equal(f.git("rev-parse", ref), object);
+  const fixed = f.invoke(["--validate-tag", f.tag]);
+  assert.equal(fixed.status, 0, fixed.stderr);
+  assert.equal(f.git("rev-parse", "HEAD"), f.sha);
+  assert.ok(f.git("ls-remote", "origin", ref).startsWith(object));
+});
+
+test("push admission binds an explicit tag checkout to the triggering commit", t => {
+  const f = fixture(t);
+  f.git("tag", "-a", f.tag, "-m", "release");
+  f.git("push", "origin", "refs/tags/" + f.tag);
+  const event = {
+    GITHUB_ACTIONS: "true",
+    GITHUB_EVENT_NAME: "push",
+    GITHUB_WORKFLOW_REF: "owner/repo/.github/workflows/" + catalog.artifacts[0].workflow + "@refs/tags/" + f.tag,
+    GITHUB_SHA: f.sha,
+  };
+  const valid = f.invoke(["--validate-tag", f.tag], event);
+  assert.equal(valid.status, 0, valid.stderr);
+  for (const sha of ["0".repeat(40), ""]) {
+    const invalid = f.invoke(["--validate-tag", f.tag], { ...event, GITHUB_SHA: sha });
+    assert.notEqual(invalid.status, 0);
+    assert.match(invalid.stderr, /Release tag must match the triggering commit/);
+  }
 });

@@ -79,6 +79,8 @@ function validateTag(tag) {
   if (git("cat-file", "-t", ref) !== "tag") fail("Release tag must be annotated");
   const object = git("rev-parse", ref);
   const sha = git("rev-parse", ref + "^{commit}");
+  if (process.env.GITHUB_ACTIONS === "true" && process.env.GITHUB_EVENT_NAME === "push" && sha !== process.env.GITHUB_SHA)
+    fail("Release tag must match the triggering commit");
   if (object !== remoteRef(ref) || sha !== remoteRef(ref + "^{}")) fail("Local and remote tag identity differ");
   if (sha !== git("rev-parse", "HEAD")) fail("Checkout must match the tagged commit");
   assertClean();

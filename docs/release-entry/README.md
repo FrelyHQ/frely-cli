@@ -116,3 +116,9 @@ CLI 的 github-pages environment 已添加 landing/v* tag 规则并保留原 mai
 验证 tag 路由、dry-run、main 归属、annotated identity 和工作流边界，不连接生产。
 `release-entry.yml` 在相关 PR/main 变更时运行这些维护测试。
 实际构建、部署、npm 发布和公网 marker 验证由对应发布工作流执行。
+
+## 附注标签的检出
+
+发布校验的 `actions/checkout` 必须显式设置 `ref: ${{ github.ref }}`（手动重试使用对应 tag 输入），并保留 `fetch-depth: 0`。默认检出会携带事件 commit SHA；在附注标签校验不匹配时，其后续 fetch 会把本地 tag ref 指向 commit，造成 `Release tag must be annotated` 误报。push 发布还会校验标签对应提交与 `GITHUB_SHA` 一致。
+
+已经失败的 tag 不重绑到修复提交。发布工作流有修改时使用新版本标签；直接 rerun 旧工作流仍使用旧配置。
