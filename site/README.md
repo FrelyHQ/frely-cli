@@ -18,13 +18,15 @@ the template or translation catalogs. Generated `_site/` files are ignored by Gi
 ## Content and entry paths
 
 The homepage uses the approved headline “云端AI, 连上你的电脑” / “Cloud AI,
-connected to your computer”. Installation has a place in the hero: a copyable npm command and standalone download link appear
-in the hero, and the full install/login/connection guide precedes the feature tour.
-The Install navigation link stays visible on mobile.
+connected to your computer”. The hero pairs the product description with an
+installation card: one copyable npm command, runtime requirements, standalone
+download and a link to connection setup. Login, diagnostics and workflow selection
+follow the hero. The Install navigation link stays visible on mobile.
 
 Frely's main site can link to `/zh/#install` or `/en/#install`.
 The neutral `/#install` entry selects a language and preserves the anchor.
-The hero and full guide use distinct copy targets for the same installation command.
+The installation command has one copy target. Setup has separate targets for login
+and diagnostics. Client connection steps remain in the local-tools workflow.
 
 ## Copy style
 
@@ -48,8 +50,8 @@ The content decisions are recorded in the revision document linked below.
   does not prevent navigation. With JavaScript disabled, both languages and the
   language links still work; automatic selection and preference storage are unavailable.
 
-Edit `template.html` for shared markup and `locales/en.json` / `locales/zh-CN.json`
-for copy. Keep the same keys in both catalogs. `{{key}}` values are HTML-escaped;
+Edit `template.html` for the document shell, `components/*.html` for section
+markup, and `locales/en.json` / `locales/zh-CN.json` for copy. Keep the same keys in both catalogs. `{{key}}` values are HTML-escaped;
 put markup in the template, never in translation values. The build rejects missing,
 empty and unused translations. CLI commands, flags, manifest placeholders and
 product identifiers remain unchanged between languages. Documentation links still
@@ -59,6 +61,29 @@ Each language has its own canonical URL, `hreflang` alternatives and Open Graph
 metadata. The generated `sitemap.xml` lists both canonical pages. Relative asset and
 language URLs also support GitHub Pages project paths.
 
+## Source structure
+
+- `template.html`: metadata, asset references and section order.
+- `components/header.html`, `hero.html`, `setup.html`, `workflows.html`,
+  `open-source.html`, `footer.html`: page sections.
+- `commands.json`: canonical CLI command strings; referenced as `{{command.name}}`.
+- `locales/*.json`: public copy, labels and status messages.
+- `styles.css`: foundations, navigation, installation, setup, workflows, footer
+  and responsive/accessibility rules, in that order.
+- `build.mjs`: compose sections, validate values, escape content and emit static pages.
+
+The shell includes named sections with `{{> hero}}`. Includes have a flat structure;
+nested or malformed includes fail the build. Section placeholders use the same
+translation and command lookup rules as the shell. Commands and translations are
+HTML-escaped; missing translations, empty commands and missing components fail
+before the previous build is replaced. Source components and command catalogs are
+excluded from deployment output.
+
+The desktop hero uses two columns. The installation card follows the product
+description on screens up to 800px wide. Setup steps and workflow panels stack
+at that breakpoint. Navigation wraps on narrow screens, copy controls have a
+44px minimum height, and reduced-motion preferences disable smooth scrolling.
+
 ## Deploy
 
 The `Deploy CLI landing` GitHub Actions workflow publishes changes to `site/`
@@ -66,7 +91,7 @@ on `main`. It can also be run manually. GitHub Pages must use **GitHub Actions**
 as its publishing source. No separate deployment branch or application server
 is needed.
 
-The workflow validates the scripts, runs language, interaction and asset-version checks and builds the
+The workflow validates the scripts, runs language, interaction, component-validation and asset-version checks and builds the
 static pages. It publishes only the generated HTML pages, `styles.css`, `app.js`,
 `locale.js`, `sitemap.xml`, `.nojekyll`, the repository license and trademark notices,
 and a generated `release.json` containing the source commit SHA. It does not publish
