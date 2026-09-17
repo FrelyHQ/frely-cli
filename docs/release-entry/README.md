@@ -2,7 +2,7 @@
 
 每个独立发版单元使用独立命令。命令入口与执行位置分开：
 服务默认在开发机执行；CLI、MCP 包及独立 Landing 的命令默认提交 tag，由 Actions 执行。
-`./script/` 与 `./scripts/` 下的同名入口等价。
+本仓库统一使用 `./scripts/`，不保留旧目录兼容入口。脚本用途见 [脚本目录](../../scripts/README.md)。
 
 | 仓库 / 发版单元 | 命令 | 默认执行 | Actions 请求 tag |
 | --- | --- | --- | --- |
@@ -19,6 +19,9 @@ Frely 服务包含 cliproxy-egress、cliproxy-control、gateway-srv、web、admi
 CLI 包、八个平台二进制、各自 SHA-256 与 install.sh / install.ps1 使用同一个版本。
 Network 的 apps/site 当前随服务 Docker 镜像构建与部署，尚无独立静态站点部署目标；
 Explorer 与开发示例也没有生产发布目标。它们不能被计为已经具备独立部署能力的 Landing。
+
+以上为跨仓库发布单元概览；本仓库仅包含 CLI 与 CLI Landing。
+本仓库通过 `--validate-tag` 校验发布身份，实际发布由 Actions 完成，不提供 `--from-tag` 本地执行入口。
 
 ## 从命令发版
 
@@ -49,8 +52,7 @@ Frely Landing 保留开发机备用执行：
 ./scripts/release-landing --executor local --version 1.2.3
 ```
 
-原 `release-deploy` 保持兼容并转发到主发布入口。主服务和 Frely Landing 的原执行脚本保留在
-`release-local` / `release-landing-local`，操作者使用上面的入口。
+本仓库 CLI 与 Landing 只支持 Actions 执行。其他仓库的本地执行入口见各自文档。
 CLI 包命令继续使用原有的版本更新、检查、提交、推送和等待 Actions 的流程。
 `--no-wait` 可关闭 CLI 包的工作流等待。
 

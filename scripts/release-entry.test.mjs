@@ -35,7 +35,7 @@ function fixture(t, packageVersion = "1.2.3") {
 test("commands reject artifact flags, duplicate options and tag identity overrides", () => {
   for (const args of [
     ["--artifact","landing"], ["--executor","actions","--executor","local"],
-    ["--from-tag","v1.2.3","--version","1.2.4"], ["--validate-tag","v1.2.3","--dry-run"],
+    ["--from-tag","v1.2.3"], ["--validate-tag","v1.2.3","--version","1.2.4"], ["--validate-tag","v1.2.3","--dry-run"],
     ["--version","1.2.3+build"], ["--version","1.2.3-01"], ["--version","$(touch marker)"],
   ]) assert.throws(() => parseArguments(args));
 });

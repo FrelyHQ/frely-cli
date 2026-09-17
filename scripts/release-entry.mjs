@@ -18,7 +18,7 @@ function fail(message) { throw new Error(message); }
 export function parseArguments(args) {
   const options = {};
   const flags = new Set(["dry-run", "purge-cache", "no-wait", "help", "list"]);
-  const values = new Set(["executor", "version", "from-tag", "validate-tag"]);
+  const values = new Set(["executor", "version", "validate-tag"]);
   for (let i = 0; i < args.length; i++) {
     const key = args[i] === "-h" ? "help" : args[i].replace(/^--/, "");
     if (!args[i].startsWith("--") && args[i] !== "-h") fail("Unexpected argument: " + args[i]);
@@ -28,8 +28,7 @@ export function parseArguments(args) {
     else fail("Unknown option or missing value: " + args[i]);
   }
   if (options.version && !semver.test(options.version)) fail("Version must be SemVer without build metadata");
-  if (options["from-tag"] && options["validate-tag"]) fail("Choose one tag operation");
-  if ((options["from-tag"] || options["validate-tag"]) &&
+  if (options["validate-tag"] &&
       ["executor", "version", "purge-cache", "no-wait", "dry-run"].some(k => options[k] !== undefined)) {
     fail("Tag input determines artifact, version and executor; overrides are forbidden");
   }
@@ -43,9 +42,9 @@ export function selectTag(tag) {
 }
 function help(entryArtifact) {
   const command = entryArtifact === catalog.defaultArtifact ? "./scripts/release" : "./scripts/release-" + entryArtifact;
-  console.log("Usage: " + command + " [--executor local|actions] [--version <semver>] [--dry-run]");
+  console.log("Usage: " + command + " [--executor actions] [--version <semver>] [--dry-run]");
   console.log("       ./scripts/release --list");
-  console.log("       ./scripts/release --validate-tag <tag> | --from-tag <tag>");
+  console.log("       ./scripts/release --validate-tag <tag>");
   console.log("Command\tDefault executor\tActions tag\tContents");
   for (const item of catalog.artifacts) console.log([item.id === catalog.defaultArtifact ? "./scripts/release" : "./scripts/release-" + item.id, item.defaultExecutor, item.tagPrefix + "X.Y.Z", item.description].join("\t"));
   console.log("Command invocation and execution location are separate. CLI/package/Pages commands submit tags to Actions.");
@@ -122,10 +121,9 @@ function legacyCommand(artifact, executor, options) {
 export function main(args = process.argv.slice(2), entryArtifact = catalog.defaultArtifact) {
   const options = parseArguments(args);
   if (options.help || options.list) return help(entryArtifact);
-  const tagInput = options["validate-tag"] || options["from-tag"];
+  const tagInput = options["validate-tag"];
   if (tagInput) {
-    const plan = validateTag(tagInput);
-    if (options["from-tag"]) run(process.execPath, ["scripts/release-execute.mjs", plan.artifact, plan.version, plan.source_sha]);
+    validateTag(tagInput);
     return;
   }
   const artifact = catalog.artifacts.find(item => item.id === entryArtifact);
