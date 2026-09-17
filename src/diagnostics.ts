@@ -81,8 +81,11 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
   const update = await upgradePromise;
   add("installation", "info", `${update.installation.method}: ${update.installation.entry}`);
   add("upgrade", update.state === "current" ? "pass" : "info", update.message);
-  if (connection?.cliVersion && connection.cliVersion !== VERSION && service?.active) {
-    add("service_version", "info", `Running ${connection.cliVersion}; installed ${VERSION}. Finish running tasks and restart the service from a local terminal.`);
+  const refreshGuidance = connection?.autoRefresh && connection.pid === service?.pid
+    ? "The service will switch after active work finishes and the installation passes its startup check."
+    : "Finish running tasks and restart the service from a local terminal.";
+  if (connection?.cliVersion && connection.cliVersion !== VERSION && service?.active && connection.pid === service.pid) {
+    add("service_version", "info", `Running ${connection.cliVersion}; installed ${VERSION}. ${refreshGuidance}`);
   }
 
   if (verbose) {
@@ -110,7 +113,7 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
       mcp: metadataError ? "Configuration unreadable" : !metadata ? "Not enabled" : expired ? "Expired or inactive"
         : !mcpMatches ? "Account/device mismatch" : "Configured (local); expires " + metadata.grant.expiresAt,
       service: !metadata && !binding ? "Not configured" : !service ? "Unknown" : service.active ? (connection?.cliVersion && connection.pid === service.pid && connection.cliVersion !== VERSION
-          ? `Running ${connection.cliVersion}; installed ${VERSION}. Restart after tasks finish.` : "Running")
+          ? `Running ${connection.cliVersion}; installed ${VERSION}. ${refreshGuidance}` : "Running")
         : service.installed ? "Stopped" : "Not installed",
       connection: connectionState === "not_configured" ? "Not configured"
         : live ? metadata && !mcpReady ? "Relay connected; MCP unavailable" : "Connected (recent heartbeat)"

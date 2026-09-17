@@ -11,6 +11,7 @@ export const HEARTBEAT_MAX_AGE_MS = 75_000;
 export interface ConnectionStatus {
   version: 1;
   cliVersion?: string;
+  autoRefresh?: boolean;
   entry?: string;
   startedAt?: string;
   pid: number;
@@ -27,6 +28,7 @@ export interface ConnectionStatus {
   lastError?: string;
 }
 export type ConnectionEvent =
+  | { type: "upgrade_watch"; enabled: boolean }
   | { type: "connecting"; authorizationId?: string | undefined; mcpEnabled: boolean }
   | { type: "connected" | "heartbeat" | "mcp_disabled" | "stopped" }
   | { type: "disconnected" | "authorization_unavailable"; error: unknown };
@@ -47,7 +49,9 @@ export function connectionReporter(binding: DeviceBinding, workspace?: string) {
   const report = (event: ConnectionEvent) => {
     const now = new Date().toISOString();
     current = { ...current, updatedAt: now };
-    if (event.type === "connecting") {
+    if (event.type === "upgrade_watch") {
+      current = { ...current, autoRefresh: event.enabled };
+    } else if (event.type === "connecting") {
       current = { ...current, state: "connecting", mcpEnabled: event.mcpEnabled,
         authorizationId: event.authorizationId, heartbeatAt: undefined, connectedAt: undefined };
     } else if (event.type === "connected") {
@@ -91,6 +95,7 @@ export async function readConnectionStatus(binding: DeviceBinding): Promise<Conn
     || (value.authorizationId !== undefined && !/^mca_[a-f0-9]{32}$/u.test(value.authorizationId))) return null;
   // Return only known fields; never print arbitrary content from a diagnostic file.
   return { version: 1,
+    ...(typeof value.autoRefresh === "boolean" ? { autoRefresh: value.autoRefresh } : {}),
     ...(typeof value.cliVersion === "string" ? { cliVersion: value.cliVersion.slice(0, 80) } : {}),
     ...(typeof value.entry === "string" ? { entry: value.entry } : {}),
     ...(typeof value.startedAt === "string" ? { startedAt: value.startedAt } : {}),

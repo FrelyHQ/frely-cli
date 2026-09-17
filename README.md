@@ -86,17 +86,24 @@ On Windows, `upgrade` prints a PowerShell command for the detected installation.
 Run it in a local terminal after finishing Frely tasks, then run `frely doctor`.
 The CLI does not launch an update helper or schedule a background replacement.
 
-Versions predating this command need one update using their original installer.
-A running service predating maintenance support must also be restarted from a
-local terminal after its tasks finish:
+For an already-running macOS/Linux service with automatic refresh support,
+updating the same installation with npm, Bun or the standalone installer also
+loads the new version without manual service commands. The service checks local
+installation files every five seconds, waits for two stable observations and
+checks that the new CLI starts. Active calls, managed processes and buffered
+responses defer the switch; calls remain available while work finishes.
+It uses the existing service supervisor and does not download updates itself.
+The MCP address, credentials, workspace and authorization expiry stay unchanged.
 
-```sh
-frely mcp service stop
-frely mcp service start
-```
+A service that is stopped or not installed is never started by this watcher.
+Foreground sessions, source/link installs, changes of installation path and
+Windows replacement remain outside automatic refresh. A short reconnection
+window is possible; failed or outcome-unknown calls are not replayed.
 
-Those service commands remain available for maintenance and troubleshooting.
-Normal upgrades of a service with maintenance support handle its restart.
+Versions predating the upgrade/refresh support require a one-time transition;
+see [service maintenance and legacy upgrades](docs/service-maintenance.md).
+Manual pause/resume commands remain in maintenance help.
+
 If more than one `frely` is installed, check the path shown by `doctor` before
 upgrading. The CLI does not remove other installations or choose one by changing
 shell configuration. See [the self-upgrade contract](docs/self-upgrade.md).

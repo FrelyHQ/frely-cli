@@ -51,8 +51,9 @@ export async function serveMaintenance(gate: MaintenanceGate, path = maintenance
       if (input.length > 32 || owner === socket) { socket.destroy(); return; }
       if (!input.includes("\n")) return;
       if (input !== "drain\n" || owner) { socket.end("busy\n"); return; }
+      // The runtime may own maintenance for an external installation refresh.
+      try { gate.pause(); } catch { socket.end("busy\n"); return; }
       owner = socket;
-      gate.pause();
       socket.setTimeout(0);
       const deadline = Date.now() + 3000;
       const interval = setInterval(() => {

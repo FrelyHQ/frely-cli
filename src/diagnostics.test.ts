@@ -129,3 +129,19 @@ test("doctor exposes version checks as informational when an update is available
     assert.equal(result.summary.installation, "npm: /test/npm/frely");
   }
 });
+
+test("doctor distinguishes automatic activation from legacy service maintenance without accepting another process", async () => {
+  const f = fixture();
+  f.connection.cliVersion = "0.0.1";
+  f.dependencies.serviceStatus = async () => ({ installed: true, active: true, platform: process.platform, pid: process.pid });
+  f.connection.autoRefresh = true;
+  const automatic = await doctor({}, f.dependencies);
+  assert.match(automatic.summary.service, /will switch after active work/);
+  assert.doesNotMatch(automatic.summary.service, /restart.*local terminal/i);
+  f.connection.autoRefresh = false;
+  assert.match((await doctor({}, f.dependencies)).summary.service, /restart.*local terminal/i);
+  f.connection.autoRefresh = true;
+  f.dependencies.serviceStatus = async () => ({ installed: true, active: true, platform: process.platform, pid: process.pid + 1 });
+  const other = await doctor({}, f.dependencies);
+  assert.equal(other.checks.some((check) => check.name === "service_version"), false);
+});

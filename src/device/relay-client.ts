@@ -1,3 +1,4 @@
+import { watchServiceInstallation } from "../upgrade/service-refresh.js";
 import { MaintenanceGate, serveMaintenance } from "../upgrade/maintenance.js";
 import { requireMcpAuthorization } from "../mcp-authorization.js";
 import { McpLease } from "../runtime/mcp-lease.js";
@@ -22,6 +23,7 @@ import { openLocalProviderRequest, readLocalProviderBody } from "../provider/loc
 export interface RelayServeOptions {
   workspace?: string;
   managedService?: boolean;
+  restartForUpgrade?: () => void;
   signal: AbortSignal;
   log?: (message: string) => void;
 }
@@ -38,6 +40,11 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
   const reporter = connectionReporter(device, options.workspace);
   const maintenance = options.managedService && process.platform !== "win32" ? new MaintenanceGate() : undefined;
   const closeMaintenance = maintenance ? await serveMaintenance(maintenance) : undefined;
+  // Watch the current installation from the existing runtime, without an updater daemon.
+  const closeRefresh = maintenance && options.restartForUpgrade
+    ? watchServiceInstallation({ gate: maintenance, signal: options.signal, restart: options.restartForUpgrade, log, onEnabled: () => reporter.report({ type: "upgrade_watch", enabled: true }) })
+      .catch((error) => { diagnostic(log, "relay.upgrade_watch_unavailable", {}, error); return () => {}; })
+    : Promise.resolve(() => {});
   let delayMs = 1000;
   try {
     while (!options.signal.aborted) {
@@ -80,7 +87,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
     }
     reporter.report({ type: "stopped" });
     await reporter.flush();
-  } finally { await closeMaintenance?.(); }
+  } finally { (await closeRefresh)(); await closeMaintenance?.(); }
 }
 
 export async function serveConnection(
@@ -102,6 +109,8 @@ export async function serveConnection(
       perMessageDeflate: false,
       handshakeTimeout: 15_000,
     });
+    // Do not switch while completed responses are still buffered for the relay.
+    const unregisterOutput = maintenance?.registerProcesses(() => socket.bufferedAmount);
     const inflight = new Map<string, InflightRequest>();
     const cancelled = new Set<string>();
     let finished = false;
@@ -115,6 +124,7 @@ export async function serveConnection(
     const finish = (error?: unknown) => {
       if (finished) return;
       finished = true;
+      unregisterOutput?.();
       clearInterval(heartbeat);
       for (const [id, item] of inflight) {
         cancelled.add(id);

@@ -265,7 +265,7 @@ async function main(): Promise<void> {
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     try {
-      await serveDeviceRelay({ ...(workspace ? { workspace } : {}), managedService: Boolean(serviceConfigHome), signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
+      await serveDeviceRelay({ ...(workspace ? { workspace } : {}), managedService: Boolean(serviceConfigHome), restartForUpgrade: stop, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
     } finally {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
