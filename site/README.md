@@ -1,6 +1,6 @@
 # Frely CLI landing page
 
-Static landing page prepared for https://cli.frely.cloud/.
+Static landing page for https://cli.frely.cloud/, hosted on GitHub Pages.
 
 ## Develop
 
@@ -14,15 +14,31 @@ Open http://localhost:8080. Any static HTTP server works.
 
 ## Deploy
 
-Publish `index.html`, `styles.css` and `app.js` together from this directory
-with any static host, with no build command. The website does not use the CLI's
-root `dist/` directory; `npm run build` builds the CLI, not the website. Configure
-cli.frely.cloud using that host's custom-domain setup and the DNS records it
-provides. A source commit does not configure DNS or make the domain live.
+The `Deploy CLI landing` GitHub Actions workflow publishes changes to `site/`
+on `main`. It can also be run manually. GitHub Pages must use **GitHub Actions**
+as its publishing source. No separate deployment branch or application server
+is needed.
+
+The workflow publishes only `index.html`, `styles.css`, `app.js`, the repository
+license and trademark notices, and a generated `release.json` containing the
+source commit SHA. It does not publish the repository or CLI build output.
+The root `npm run build` still builds only the CLI.
+
+Set the repository's Pages custom domain to `cli.frely.cloud`. In the
+`frely.cloud` DNS zone, configure:
+
+| Type | Name | Target | Proxy |
+| --- | --- | --- | --- |
+| CNAME | cli | frelyhq.github.io | DNS only |
+
+Replace any conflicting A, AAAA, or CNAME record at that exact hostname.
+Wait for GitHub Pages domain validation and certificate issuance, then enable
+**Enforce HTTPS** in Pages settings. DNS configuration and certificate issuance
+are separate from a successful workflow deployment. GitHub Actions deployments
+use the custom domain in repository settings; a source `CNAME` file is not needed.
 
 The site needs no backend, secrets, analytics, third-party fonts, or environment
-variables. Keep this directory as the canonical source and copy the same assets
-when deploying. Provider account configuration does not belong in source control.
+variables. Keep this directory as the canonical source.
 
 ## Maintain
 
