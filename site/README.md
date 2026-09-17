@@ -17,14 +17,22 @@ the template or translation catalogs. Generated `_site/` files are ignored by Gi
 
 ## Content and entry paths
 
-The homepage introduces cloud AI access to local tools. Installation remains
-immediately available: a copyable npm command and standalone download link appear
+The homepage uses the approved headline “云端AI, 连上你的电脑” / “Cloud AI,
+connected to your computer”. Installation has a place in the hero: a copyable npm command and standalone download link appear
 in the hero, and the full install/login/connection guide precedes the feature tour.
 The Install navigation link stays visible on mobile.
 
-Frely's main site can link directly to `/zh/#install` or `/en/#install`.
+Frely's main site can link to `/zh/#install` or `/en/#install`.
 The neutral `/#install` entry selects a language and preserves the anchor.
 The hero and full guide use distinct copy targets for the same installation command.
+
+## Copy style
+
+Avoid adverbs in English and Chinese page copy, including metadata, labels and
+status messages. Name actions, objects, conditions and results. Preserve release
+availability, permission boundaries and failure meanings when rewriting sentences.
+Keep commands, flags, product names and URLs faithful to the implementation.
+The content decisions are recorded in the revision document linked below.
 
 ## Languages
 
