@@ -43,15 +43,15 @@ for (const button of document.querySelectorAll('[data-copy]')) {
   });
 }
 
-// A direct workflow link must reveal its panel, including after changing language.
-function selectLinkedWorkflow() {
+// A direct client link must reveal its panel, including after changing language.
+function selectLinkedClient() {
   const linked = tabs.find((tab) => '#' + tab.getAttribute('aria-controls') === window.location.hash);
   if (linked) {
     selectTab(linked);
     document.getElementById(linked.getAttribute('aria-controls')).scrollIntoView({ block: 'start' });
   }
 }
-selectLinkedWorkflow();
+selectLinkedClient();
 
 // Real links keep language switching available without JavaScript.
 for (const link of document.querySelectorAll('[data-language]')) {
@@ -64,7 +64,7 @@ for (const link of document.querySelectorAll('[data-language]')) {
   });
 }
 window.addEventListener('hashchange', () => {
-  selectLinkedWorkflow();
+  selectLinkedClient();
   for (const link of document.querySelectorAll('[data-language]')) {
     const target = new URL(link.href);
     target.hash = window.location.hash;

@@ -4,7 +4,7 @@
   "doctor": "frely doctor",
   "mcpSetup": "frely mcp",
   "mcpUrl": "frely mcp url",
-  "providerShare": "frely provider share ollama",
-  "providerList": "frely provider list",
-  "claudeConnect": "claude mcp add --transport http frely-computer \"<MCP_URL>\""
+  "claudeConnect": "claude mcp add --transport http frely-computer \"<MCP_URL>\"",
+  "codexConnect": "codex mcp add frely-computer --url \"<MCP_URL>\"",
+  "codexAuthorize": "codex mcp login frely-computer"
 }

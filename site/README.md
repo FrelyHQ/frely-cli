@@ -17,11 +17,11 @@ the template or translation catalogs. Generated `_site/` files are ignored by Gi
 
 ## Content and entry paths
 
-The homepage leads with “让你的 AI，连上你的电脑” / “Your AI, connected to your computer”. Device MCP is the primary product: connect ChatGPT in a browser, Claude Code on another computer, or another remote HTTP MCP client with OAuth to the computer running Frely CLI.
+The homepage leads with “让 Agent 从任何地方访问你的设备” / “Let agents access your device from any location”. FrelyMCP lets external agents access the user's device: browser agents and command-line agents such as Codex and Claude Code are client examples. The computer running Frely CLI provides files, shell commands and processes through remote HTTP MCP with OAuth. Install Frely CLI on the target computer; the calling device uses its MCP client.
 
-The page order is installation hero, two device-MCP use cases, target-computer setup, client connection details and secondary CLI workflows, then open source. The setup sequence is install → login → `frely mcp` → `frely mcp url` → client OAuth → a real tool call. Diagnostics use `frely doctor` with `-v` for details.
+The page order is installation hero, target-computer setup, client connection choices, device-access use cases, optional CLI feature links, then open source. Client tabs are alternatives; local model sharing and hosted Agent invocation are independent optional features, not steps in device setup. Section and feature headings have no sequential numbers. The setup sequence is install → login → `frely mcp` → `frely mcp url` → client OAuth → a real tool call. Diagnostics use `frely doctor` with `-v` for details.
 
-Frely's main site can link to `/zh/#install` or `/en/#install`. The neutral `/#install` entry selects a language and preserves the anchor. Copy targets for install, login, MCP setup, URL and diagnostics are independent. The static Claude Code example labels the URL placeholder; the signed-in Frely Device MCP page provides a device-specific copy command.
+Frely's main site can link to `/zh/#install` or `/en/#install`. The neutral `/#install` entry selects a language and preserves the anchor. Copy targets for install, login, MCP setup, URL and diagnostics are independent. Codex and Claude Code examples label the URL placeholder. Codex command syntax was checked with the installed CLI's `mcp add --help` and `mcp login --help`; this is not a client OAuth acceptance test. The signed-in Frely Device MCP page provides a device-specific copy command.
 
 ## Copy style
 
@@ -60,7 +60,7 @@ language URLs also support GitHub Pages project paths.
 
 - `template.html`: metadata, asset references and section order.
 - `components/header.html`, `hero.html`, `device-mcp.html`, `setup.html`, `workflows.html`,
-  `open-source.html`, `footer.html`: page sections.
+  `more.html`, `open-source.html`, `footer.html`: page sections.
 - `commands.json`: canonical CLI command strings; referenced as `{{command.name}}`.
 - `locales/*.json`: public copy, labels and status messages.
 - `styles.css`: foundations, navigation, installation, setup, workflows, footer
@@ -75,7 +75,7 @@ before the previous build is replaced. Source components and command catalogs ar
 excluded from deployment output.
 
 The desktop hero uses two columns. The installation card follows the product
-description on screens up to 800px wide. Use-case cards, setup steps and workflow panels stack
+description on screens up to 800px wide. Use-case cards, setup steps and client panels stack
 at that breakpoint. Navigation wraps on narrow screens, copy controls have a
 44px minimum height, and reduced-motion preferences disable smooth scrolling.
 
@@ -115,14 +115,19 @@ variables. Keep this directory as the canonical source.
 
 ## Maintain
 
-Keep examples aligned with the actual published npm package, not only the root
-README or main branch. The release baseline checked on 2026-09-17 is npm 0.6.1:
-bare `frely mcp`, MCP URL and Provider commands are present; remote Agent install/invoke commands
-are not. The Agent panel is explicitly in development and contains no executable
-installation example. Recheck the published package before changing that status.
+Public page copy has no product version or release-status snapshot. Installation
+uses `frely-cli@latest`; the download link points to the latest release. Node.js
+requirements describe the installation prerequisite, not the Frely release.
+On 2026-09-17, registry metadata and the npm 0.6.2 tarball were checked: device
+MCP, Provider, Agent install and Agent invoke commands are included. The optional
+Agent card describes invoking Frely-hosted Agents and links to the README guide.
+This outbound workflow is distinct from external agents accessing the user's
+device through FrelyMCP. Package inspection is not a substitute for service and
+client verification.
 
-The main install path ends with client OAuth and a real read-only device tool result. Provider sharing keeps its own model-response check. `frely doctor` alone is not connection success. Links to workflow
-panels select the correct tab on entry and after a language switch.
+The main install path ends with client OAuth and a real read-only device tool result. Provider setup is documented in its linked guide. `frely doctor` alone is not connection success. Links to client panels select the correct tab on entry and after a language
+switch. Legacy `#panel-tools`, `#panel-models` and `#panel-agents` anchors lead to
+visible device-connection and optional-feature sections.
 
 The revision decisions and pending positioning questions live in
 [`docs/landing/cli/revision-20260917.md`](../docs/landing/cli/revision-20260917.md).

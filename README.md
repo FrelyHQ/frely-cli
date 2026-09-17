@@ -2,13 +2,13 @@
 
 设备 MCP 的产品定义与通用客户端接入见 [`docs/device-mcp.md`](docs/device-mcp.md)。
 
-`frely-cli` is Frely's local command-line client, remote Agent bridge, and local MCP runtime. Remote Agent use and local tool sharing are separate flows.
+`frely-cli` includes FrelyMCP: let agents access your device from any location. Browser agents and command-line agents such as Codex and Claude Code use MCP to access the files, commands and processes on the computer you authorize. Invoking Frely-hosted Agents and sharing local model Providers are optional CLI features with their own setup and authorization.
 
 **Release boundary (checked 2026-09-17):** npm `frely-cli@latest` resolves to
-`0.6.1`. That published package includes local MCP and Provider commands but does
-not include `frely skill install` or `frely agent invoke`. Remote Agent examples
-below describe the source implementation and are not an onboarding path for that
-release. Check the installed version and published release before following them.
+`0.6.2`. The published tarball includes device MCP, Provider commands,
+`frely skill install` and `frely agent invoke`. Agent examples below apply to that
+release. Package contents establish command availability; service deployment,
+account or API-key access and client connections need their own verification.
 
 ```text
 Remote Agent Skill: install -> frely login -> frely skill install -> frely agent invoke
@@ -124,12 +124,12 @@ Open the printed URL only in the browser signed in to the account you want to us
 
 `FRELY_NO_BROWSER=1` remains supported for scripts and existing setups. `frely login --help` lists the available options.
 
-### Remote Agent source preview
+### Invoke a Frely-hosted Agent
 
-The following Agent commands are not included in the verified npm release
-`0.6.1`; installing that version does not enable this workflow.
+The verified npm release `0.6.2` includes the Agent installation and invocation
+commands below. Use a published Agent with account or restricted API-key access.
 
-To install a published Frely Agent as a local trigger Skill from a supporting build:
+To install a published Frely Agent as a local trigger Skill:
 
 ```sh
 frely skill install https://app.frely.cloud/api/public/virtual-models/<distribution-id> \

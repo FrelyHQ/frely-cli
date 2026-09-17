@@ -1,6 +1,6 @@
 # Frely 设备 MCP 服务
 
-状态：本文描述当前源码的两层授权、稳定 MCP URL 与 OAuth 契约。2026-09-17 核验的 npm 最新版为 0.6.1，已包含本机 MCP 命令，尚未包含远程 Agent 的 install/invoke 命令。CLI 命令发布与服务端部署、真实调用验收分别判断。
+状态：本文描述当前源码的两层授权、稳定 MCP URL 与 OAuth 契约。2026-09-17 核验 npm registry 与 0.6.2 发行包：设备 MCP、Provider、Agent install/invoke 命令均包含在发行包中。CLI 命令发布与服务端部署、真实调用验收分别判断。
 
 <a id="first-connection"></a>
 
@@ -16,15 +16,33 @@
 
 ## 产品定义与入口
 
-Frely 设备 MCP 是平台提供的个人远程 MCP 服务。用户将自己的电脑接入 Frely，由支持远程 HTTP MCP 和 OAuth 的客户端调用文件、Shell 和进程工具。设备通过出站连接接入 Relay，不需要开放公网端口；执行发生在被控电脑。
+FrelyMCP 的产品定位是：**让 Agent 从任何地方访问你的设备。** 用户在目标电脑运行 Frely CLI，由网页中的 Agent，或另一台电脑上的 Codex、Claude Code 等命令行 Agent，通过远程 HTTP MCP 和 OAuth 访问文件、Shell 和进程工具。设备通过出站连接接入 Relay，无需开放公网端口；执行发生在目标电脑。调用端无需安装 Frely CLI。
+
+这里的 Agent 是访问设备的外部客户端。CLI 调用 Frely 托管 Agent 是另一条调用方向，其 install/invoke 命令包含在 npm 0.6.2 中。设备访问无需配置托管 Agent 调用或 Provider 模型共享。
 
 - Web：Frely → **Device MCP**，路径保持 `/user/account/connections`。展示设备、工作区、执行权限与到期时间，复制连接 URL 或 Claude Code 命令，撤销设备或 MCP 权限。
 - CLI：`frely mcp` 启用，`frely mcp url` 获取地址，`frely mcp renew` 续期，`frely mcp revoke` 撤销。状态和诊断统一使用 `frely doctor [-v]`。
-- Landing：设备 MCP 为核心卖点，分别说明浏览器客户端和另一台电脑上的 Agent 两种使用场景；中英文保持同一能力边界。
+- Landing：以 Agent 从外部访问用户设备为主线，网页 Agent 与命令行 Agent 是接入场景；主标题为“让 Agent 从任何地方访问你的设备”。中英文保持同一能力边界，避免副词。独立功能无步骤编号；页面不展示写死的产品版本或发行状态。
 - 兼容：`frely mcp setup` 和 `frely mcp chatgpt` 保留；后者只展示同一服务的 URL/OAuth 信息，不是独立通道。
 - `frely mcp url --json` 返回 `deviceId`、`mcpUrl`、`transport=http`、`authentication=oauth`、`workspace` 和 `expiresAt`；新增字段不改变原 URL。
 
 设备列表的 Last connected 是历史时间，不代表当前在线。在线状态在被控电脑用 `frely doctor` 检查；客户端 OAuth 与真实工具调用需要单独验证。
+
+## Codex 跨电脑接入
+
+在目标电脑安装并启用设备 MCP，运行 `frely mcp url`。在运行 Codex 的另一台电脑中添加该地址：
+
+```sh
+codex mcp add frely-computer --url "<MCP_URL>"
+```
+
+按提示完成 OAuth 授权；需要发起授权时执行：
+
+```sh
+codex mcp login frely-computer
+```
+
+以上命令语法由本机 Codex 的 `mcp add --help` 和 `mcp login --help` 核对。每台目标设备使用不同的服务名称。让 Agent 使用 Frely 的 `workspace_info` 与 `list_directory` 核对目标设备；命令行 Agent 自带 Shell 在调用端电脑执行。本次配置文档核对不等于新建 OAuth 连接或真实调用验收。
 
 ## Claude Code 跨电脑接入
 

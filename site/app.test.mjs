@@ -21,7 +21,7 @@ function fixture({ url = 'https://cli.frely.cloud/zh/?ref=docs#install', lang = 
     focus() { this.focused = true; },
     scrollIntoView() { this.scrolled = true; },
   });
-  const tabs = ['tools', 'models', 'agents'].map((name) => element({ 'aria-controls': 'panel-' + name, 'aria-selected': String(name === 'tools') }));
+  const tabs = ['codex', 'claude', 'web'].map((name) => element({ 'aria-controls': 'client-' + name, 'aria-selected': String(name === 'codex') }));
   const panels = Object.fromEntries(tabs.map((tab, index) => [tab.getAttribute('aria-controls'), element({}, { hidden: index !== 0 })]));
   const links = ['en', 'zh'].map((language) => element({}, { href: new URL('../' + language + '/', location).href, dataset: { language } }));
   const command = { textContent: ' frely doctor ' };
@@ -60,17 +60,22 @@ test('language links retain queries and updated anchors on project paths even wi
   assert.deepEqual(enabled.saved, [['frely-cli-language', 'en']]);
 });
 
-test('direct workflow links reveal the right panel on load, hash changes and language switches', () => {
-  const f = fixture({ url: 'https://cli.frely.cloud/en/?ref=docs#panel-models' });
-  assert.equal(f.panels['panel-models'].hidden, false);
-  assert.equal(f.panels['panel-tools'].hidden, true);
-  assert.equal(f.panels['panel-models'].scrolled, true);
+test('client links select the right option across languages; optional features keep the client choice', () => {
+  const f = fixture({ url: 'https://cli.frely.cloud/en/?ref=docs#client-claude' });
+  assert.equal(f.panels['client-claude'].hidden, false);
+  assert.equal(f.panels['client-codex'].hidden, true);
+  assert.equal(f.panels['client-claude'].scrolled, true);
   assert.equal(f.tabs[1].attrs['aria-selected'], 'true');
   const translated = fixture({ url: f.links[1].href });
-  assert.equal(translated.panels['panel-models'].hidden, false);
-  f.hash('#panel-tools');
-  assert.equal(f.panels['panel-tools'].hidden, false);
-  assert.equal(f.panels['panel-models'].hidden, true);
+  assert.equal(translated.panels['client-claude'].hidden, false);
+  f.hash('#client-web');
+  assert.equal(f.panels['client-web'].hidden, false);
+  assert.equal(f.panels['client-claude'].hidden, true);
+  f.hash('#panel-models');
+  assert.equal(f.panels['client-web'].hidden, false);
+  assert.equal(f.links[0].href.endsWith('#panel-models'), true);
+  f.hash('#panel-agents');
+  assert.equal(f.panels['client-web'].hidden, false);
 });
 
 for (const lang of ['en', 'zh-CN']) {
