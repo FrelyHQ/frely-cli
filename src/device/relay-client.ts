@@ -2,6 +2,8 @@ import { requireMcpAuthorization } from "../mcp-authorization.js";
 import { McpLease } from "../runtime/mcp-lease.js";
 import WebSocket, { type RawData } from "ws";
 import { connectionGrant, ensureDevice } from "./control.js";
+import { connectionReporter, type ConnectionEvent } from "./connection-status.js";
+import { randomBytes } from "node:crypto";
 import {
   DEVICE_RELAY_DEFAULT_MAX_INFLIGHT,
   DEVICE_RELAY_MAX_FRAME_BYTES,
@@ -31,6 +33,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
   const log = options.log ?? (() => undefined);
   diagnostic(log, "relay.started");
   const device = await ensureDevice();
+  const reporter = connectionReporter(device, options.workspace);
   let delayMs = 1000;
   while (!options.signal.aborted) {
     let session: RelayMcpSession | null = null;
@@ -48,18 +51,21 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
           guard.controller.signal.addEventListener("abort", () => { void activeSession.close(); }, { once: true });
         } catch (error) {
           diagnostic(log, "relay.authorization_unavailable", {}, error);
+          reporter.report({ type: "authorization_unavailable", error });
           authorization = null;
           lease?.close();
           await session?.close();
           session = null; lease = null;
         }
       }
+      reporter.report({ type: "connecting", mcpEnabled: Boolean(authorization), authorizationId: authorization?.grant.id });
       const grant = await connectionGrant(device, authorization ? { authorizationId: authorization.grant.id, sign: authorization.sign } : undefined);
-      await serveConnection(grant.websocketUrl, grant.accessToken, device.deviceId, session, lease, options.signal, log);
+      await serveConnection(grant.websocketUrl, grant.accessToken, device.deviceId, session, lease, options.signal, log, reporter.report);
       delayMs = 1000;
     } catch (error) {
       if (options.signal.aborted) break;
       diagnostic(log, "relay.disconnected", {}, error);
+      reporter.report({ type: "disconnected", error });
       await wait(delayMs, options.signal);
       delayMs = Math.min(delayMs * 2, 15_000);
     } finally {
@@ -67,6 +73,8 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
       await session?.close();
     }
   }
+  reporter.report({ type: "stopped" });
+  await reporter.flush();
 }
 
 export async function serveConnection(
@@ -77,7 +85,9 @@ export async function serveConnection(
   lease: McpLease | null,
   signal: AbortSignal,
   log: (message: string) => void,
+  report: (event: ConnectionEvent) => void = () => undefined,
 ): Promise<void> {
+  if (signal.aborted) return;
   await new Promise<void>((resolve, reject) => {
     const socket = new WebSocket(websocketUrl, DEVICE_RELAY_PROTOCOL, {
       headers: { authorization: `Bearer ${accessToken}`, "x-frely-device-id": deviceId },
@@ -88,7 +98,11 @@ export async function serveConnection(
     const inflight = new Map<string, InflightRequest>();
     const cancelled = new Set<string>();
     let finished = false;
-    const heartbeat = setInterval(() => { if (socket.readyState === WebSocket.OPEN) socket.ping(); }, 30_000);
+    let heartbeatNonce: Buffer | undefined;
+    const ping = () => {
+      if (socket.readyState === WebSocket.OPEN) { heartbeatNonce = randomBytes(16); socket.ping(heartbeatNonce); }
+    };
+    const heartbeat = setInterval(ping, 30_000);
     heartbeat.unref?.();
 
     const finish = (error?: unknown) => {
@@ -101,6 +115,7 @@ export async function serveConnection(
         if (item.request.method === "mcp") session?.cancel(id);
       }
       signal.removeEventListener("abort", onAbort);
+      lease?.controller.signal.removeEventListener("abort", onLeaseAbort);
       socket.removeAllListeners();
       if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.terminate();
       if (error) reject(error); else resolve();
@@ -108,7 +123,17 @@ export async function serveConnection(
     const onAbort = () => finish();
     signal.addEventListener("abort", onAbort, { once: true });
 
-    socket.once("open", () => diagnostic(log, "relay.connected"));
+    const onLeaseAbort = () => report({ type: "mcp_disabled" });
+    lease?.controller.signal.addEventListener("abort", onLeaseAbort, { once: true });
+    socket.once("open", () => {
+      diagnostic(log, "relay.connected");
+      report({ type: "connected" });
+      if (lease?.controller.signal.aborted) report({ type: "mcp_disabled" });
+      ping();
+    });
+    socket.on("pong", (data: Buffer) => {
+      if (heartbeatNonce && data.equals(heartbeatNonce)) { heartbeatNonce = undefined; report({ type: "heartbeat" }); }
+    });
     socket.once("error", (error) => finish(error));
     socket.once("close", (code, reason) => {
       if (signal.aborted) finish();

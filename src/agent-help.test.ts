@@ -16,6 +16,9 @@ test("Agent help runs offline without authentication or credential-store access"
   assert.equal(help.cliVersion, VERSION);
   assert.ok(help.commands.some(command => command.id === "key.budget"));
   assert.ok(help.commands.some(command => command.id === "agent.invoke"));
+  assert.equal(help.commands.find(command => command.id === "doctor")?.usage, "frely doctor [-v] [--json]");
+  assert.ok(!help.commands.some(command => ["status", "mcp.status"].includes(command.id)));
+  assert.ok(!help.commands.find(command => command.id === "mcp.service")?.usage.includes("status"));
   const ordinary = await execute(process.execPath, [fileURLToPath(new URL("./index.js", import.meta.url)), "--help"]);
   assert.ok(ordinary.stdout.includes("frely help --agent --json"));
   assert.ok(ordinary.stdout.includes("frely key budget"));

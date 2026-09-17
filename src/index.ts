@@ -4,7 +4,7 @@ import { McpLease } from "./runtime/mcp-lease.js";
 import { resolve } from "node:path";
 import { stdin, stdout } from "node:process";
 import { loginDevice, logout, requireLogin, whoami } from "./auth.js";
-import { doctor, statusSnapshot } from "./diagnostics.js";
+import { doctor, formatDoctor, statusSnapshot } from "./diagnostics.js";
 import { currentDevice, ensureDevice, revokeDevice } from "./device/control.js";
 import { createLocalProviderToken, loadOrCreateDeviceIdentity } from "./device/identity.js";
 import { serveDeviceRelay } from "./device/relay-client.js";
@@ -144,9 +144,9 @@ async function main(): Promise<void> {
   }
 
   if (command === "doctor") {
-    const value = await doctor({ mcp: args.includes("--mcp") });
+    const value = await doctor({ verbose: args.includes("-v") || args.includes("--verbose"), mcp: args.includes("--mcp") });
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value, null, 2)}\n`);
-    else for (const check of value.checks) stdout.write(`${check.ok ? "PASS" : "FAIL"} ${check.name}: ${check.detail}\n`);
+    else stdout.write(formatDoctor(value));
     if (!value.ok) process.exitCode = 1;
     return;
   }

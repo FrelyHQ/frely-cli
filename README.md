@@ -182,9 +182,9 @@ Add the exact printed URL to a remote MCP client with OAuth support, choose
 OAuth and complete authorization. Keep the computer online. Ask the client to
 list the top-level names in your selected workspace, without writing files or
 running shell commands. A returned result that matches the folder verifies the
-first connection. `frely doctor` alone does not verify this path.
+first connection. `frely doctor` shows whether the running relay has a recent heartbeat; it does not test ChatGPT OAuth or execute a tool through ChatGPT.
 
-If a call fails, check `frely doctor --mcp` and `frely mcp service status`.
+Use `frely doctor` for a quick overview. If a call fails, run `frely doctor -v` for detailed diagnostics.
 
 Or show ChatGPT-oriented connection details with:
 
@@ -231,8 +231,7 @@ frely provider finalize <provider-id>
 frely login [--relay <https-url>] [--no-browser]
 frely logout
 frely whoami
-frely status [--json]
-frely doctor [--json]
+frely doctor [-v] [--json]
 frely skill install <manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--api-key-stdin] [--json]
 frely skill status <distribution-id> [--json]
 frely skill remove <distribution-id> [--json]
@@ -242,10 +241,9 @@ frely provider list [--json]
 frely provider finalize <provider-id>
 frely mcp setup [--workspace <path>]
 frely mcp url [--json]
-frely mcp status [--json]
 frely mcp chatgpt
 frely mcp serve [--workspace <path>]
-frely mcp service status|start|stop|uninstall [--json]
+frely mcp service start|stop|uninstall
 frely mcp revoke
 frely mcp stdio [--workspace <path>]
 ```
@@ -308,7 +306,30 @@ MCP secrets use AES-256-GCM files with a master key in macOS Keychain, Windows C
 
 The stable MCP URL contains no credential. Remote clients hold OAuth credentials; the CLI holds the MCP execution private key. The Relay checks OAuth resource binding and the current MCP execution lease. Expiry blocks requests and queued work and cancels managed execution. It does not undo writes or create a sandbox around arbitrary shell programs.
 
-`frely doctor` treats unconfigured MCP as optional. `frely doctor --mcp` checks the secure credential and server. `frely mcp status` displays local metadata; it is not server revocation proof.
+`frely doctor` is the single diagnostic entry point. By default it reads local
+state and prints the CLI version, account, MCP authorization, background service
+and connection overview. It does not access the MCP keyring or wait for remote
+requests. Unconfigured account/MCP features remain optional.
+
+`frely doctor -v` (also `--verbose`) adds configuration paths, runtime details,
+service state, authorization expiry, last received heartbeat and sanitized last
+connection error. It also checks session storage, the account session and any
+configured MCP secure key/server authorization. Add `--json` to either view for
+structured output. Confirmed failures and unknown connectivity for a configured
+relay return a nonzero exit code.
+
+A running process is not proof of connectivity. Connected means the matching
+account/device process has received a WebSocket heartbeat within 75 seconds.
+The MCP authorization and workspace must also match the running relay. Missing,
+stale or old-runtime observations are reported as unknown. After upgrading,
+restart the background service to enable heartbeat reporting. Diagnostics never
+restart it automatically or open a second relay connection. Neither mode claims
+to test ChatGPT OAuth or an end-to-end tool call.
+
+Legacy `frely status`, `frely mcp status`, `frely mcp service status` and
+`frely doctor --mcp` remain compatible for existing scripts, but are no longer
+listed as recommended diagnostic entry points. The legacy status output shapes
+are unchanged; `doctor --mcp` requests verbose checks and requires MCP setup.
 
 Storage, migration, service injection, release requirements and threat boundaries: [`docs/credential-storage.md`](docs/credential-storage.md).
 
