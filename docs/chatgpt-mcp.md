@@ -1,6 +1,18 @@
 # Frely CLI 本机 MCP 与 ChatGPT
 
-状态：两层授权 + 稳定 MCP URL + OAuth 契约，未发布。
+状态：本文描述当前源码的两层授权、稳定 MCP URL 与 OAuth 契约。2026-09-17 核验的 npm 最新版为 0.6.1，已包含本机 MCP 命令，尚未包含远程 Agent 的 install/invoke 命令。CLI 命令发布与服务端部署、真实调用验收分别判断。
+
+<a id="first-connection"></a>
+
+## 完成首次本地工具连接
+
+1. 安装 CLI 并执行 `frely login`。npm 安装需要 Node.js 22 或更新版本，独立发行版自带运行时。
+2. 在准备共享的文件夹中执行 `frely mcp setup --workspace .`，在浏览器中确认设备、工作区和授权期限。Shell 使用当前系统用户权限，工作区不是 Shell 沙箱。
+3. 执行 `frely mcp url`，将输出的完整地址添加到支持 OAuth 的远程 MCP 客户端。选择 OAuth，完成客户端授权；不要自行拼接地址。
+4. 保持电脑运行和联网。在客户端中请求：“请使用 Frely 工具列出这个工作区的顶层文件与目录名称，不写文件，不执行 Shell。”
+5. 收到真实工具结果，并与所选文件夹核对一致，才算完成首次连接。`frely doctor` 通过、显示 MCP URL 或保存连接记录都不能替代这一步。
+
+调用失败时检查 `frely doctor --mcp` 和 `frely mcp service status`；同时确认客户端 OAuth 授权已经完成、设备在线。授权到期按下文续期。没有合适的远程客户端时，可以先阅读代码与文档，不把“安装完成”记录成“连接成功”。
 
 ## 产品边界
 

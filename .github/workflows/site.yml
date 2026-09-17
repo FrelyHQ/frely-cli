@@ -42,7 +42,7 @@ jobs:
         run: |
           node --check site/app.js
           node --check site/locale.js
-          node --test site/locale.test.mjs
+          node --test site/*.test.mjs
           node site/build.mjs
           node -e 'require("node:fs").writeFileSync("_site/release.json", JSON.stringify({sourceSha: process.env.GITHUB_SHA}) + "\n")'
 

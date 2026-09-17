@@ -47,12 +47,16 @@ on `main`. It can also be run manually. GitHub Pages must use **GitHub Actions**
 as its publishing source. No separate deployment branch or application server
 is needed.
 
-The workflow validates the scripts, runs language routing checks and builds the
+The workflow validates the scripts, runs language, interaction and asset-version checks and builds the
 static pages. It publishes only the generated HTML pages, `styles.css`, `app.js`,
 `locale.js`, `sitemap.xml`, `.nojekyll`, the repository license and trademark notices,
 and a generated `release.json` containing the source commit SHA. It does not publish
 the template, translation catalogs, repository or CLI build output.
 The root `npm run build` still builds only the CLI.
+
+Asset URLs include a build-generated content hash in their query string. New HTML
+therefore requests the matching scripts and styles instead of reusing a previous
+deployment's cached bytes. Stable filenames remain available to cached HTML.
 
 Set the repository's Pages custom domain to `cli.frely.cloud`. In the
 `frely.cloud` DNS zone, configure:
@@ -72,13 +76,24 @@ variables. Keep this directory as the canonical source.
 
 ## Maintain
 
-Keep examples aligned with released CLI functionality and the root README.
+Keep examples aligned with the actual published npm package, not only the root
+README or main branch. The release baseline checked on 2026-09-17 is npm 0.6.1:
+local MCP and Provider commands are present; remote Agent install/invoke commands
+are not. The Agent panel is explicitly in development and contains no executable
+installation example. Recheck the published package before changing that status.
+
+The install path ends with a selected workflow and a real read-only tool result or
+model response. `frely doctor` alone is not connection success. Links to workflow
+panels select the correct tab on entry and after a language switch.
+
+The revision decisions and pending positioning questions live in
+[`docs/landing/cli/revision-20260917.md`](../docs/landing/cli/revision-20260917.md).
 The npm package requires Node.js 22 or newer; standalone releases contain their
 runtime. Remote Agent use, local MCP authorization and Provider sharing have
 separate setup flows. Never describe the workspace as a shell sandbox.
 
 Run `node --check site/app.js`, `node --check site/locale.js`,
-`node --test site/locale.test.mjs` and `node site/build.mjs`. Review keyboard tab
+`node --test site/*.test.mjs` and `node site/build.mjs`. Review keyboard tab
 navigation, copy controls, mobile layouts and text enlargement after changes.
 The page remains readable without JavaScript and respects reduced motion.
 

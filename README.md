@@ -2,7 +2,13 @@
 
 设计与 ChatGPT MCP 用户流程见 [`docs/chatgpt-mcp.md`](docs/chatgpt-mcp.md)。
 
-`frely-cli` is Frely's local command-line client, remote Agent bridge, and local MCP runtime. Remote Agent use and local tool sharing are separate flows:
+`frely-cli` is Frely's local command-line client, remote Agent bridge, and local MCP runtime. Remote Agent use and local tool sharing are separate flows.
+
+**Release boundary (checked 2026-09-17):** npm `frely-cli@latest` resolves to
+`0.6.1`. That published package includes local MCP and Provider commands but does
+not include `frely skill install` or `frely agent invoke`. Remote Agent examples
+below describe the source implementation and are not an onboarding path for that
+release. Check the installed version and published release before following them.
 
 ```text
 Remote Agent Skill: install -> frely login -> frely skill install -> frely agent invoke
@@ -118,7 +124,12 @@ Open the printed URL only in the browser signed in to the account you want to us
 
 `FRELY_NO_BROWSER=1` remains supported for scripts and existing setups. `frely login --help` lists the available options.
 
-To install a published Frely Agent as a local trigger Skill:
+### Remote Agent source preview
+
+The following Agent commands are not included in the verified npm release
+`0.6.1`; installing that version does not enable this workflow.
+
+To install a published Frely Agent as a local trigger Skill from a supporting build:
 
 ```sh
 frely skill install https://app.frely.cloud/api/public/virtual-models/<distribution-id> \
@@ -147,6 +158,8 @@ printf '%s' 'Your complete task' | \
   frely agent invoke '<distribution-id>' --input-stdin --json
 ```
 
+### Local MCP connection
+
 For local workspace, file, shell, and process sharing, enable the separate local MCP runtime:
 
 ```sh
@@ -165,7 +178,15 @@ You can print the URL again with:
 frely mcp url
 ```
 
-Or show ChatGPT-oriented instructions with:
+Add the exact printed URL to a remote MCP client with OAuth support, choose
+OAuth and complete authorization. Keep the computer online. Ask the client to
+list the top-level names in your selected workspace, without writing files or
+running shell commands. A returned result that matches the folder verifies the
+first connection. `frely doctor` alone does not verify this path.
+
+If a call fails, check `frely doctor --mcp` and `frely mcp service status`.
+
+Or show ChatGPT-oriented connection details with:
 
 ```sh
 frely mcp chatgpt
@@ -251,7 +272,9 @@ Enrollment returns:
 }
 ```
 
-The public MCP URL has the stable form `https://app.frely.cloud/mcp/<device-id>`. The URL contains no bearer secret. Remote MCP clients use OAuth 2.1 Authorization Code + PKCE. OAuth access tokens bind to the exact MCP resource URL and do not extend the 90/180-day local execution authorization. Relay OAuth requirements are defined in [`docs/mcp-oauth-relay-contract.md`](docs/mcp-oauth-relay-contract.md).
+The public MCP URL is the canonical resource returned by Relay, for example
+`https://mcp.frely.cloud/mcp/<device-id>`. Use `frely mcp url`; do not derive the URL
+from the control-plane hostname. The URL contains no bearer secret. Remote MCP clients use OAuth 2.1 Authorization Code + PKCE. OAuth access tokens bind to the exact MCP resource URL and do not extend the 90/180-day local execution authorization. Relay OAuth requirements are defined in [`docs/mcp-oauth-relay-contract.md`](docs/mcp-oauth-relay-contract.md).
 
 A Device Relay connection request uses the enrolled Ed25519 device key and returns a short-lived connection grant:
 

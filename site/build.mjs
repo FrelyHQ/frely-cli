@@ -2,6 +2,7 @@
 import { readFile, writeFile, mkdir, rm, copyFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = resolve(root, '_site');
@@ -14,6 +15,13 @@ const locales = [
   { lang: 'zh-CN', route: 'zh', ogLocale: 'zh_CN', ogAlternate: 'en_US' },
 ];
 
+// New HTML must not reuse a cached script or stylesheet from an older deployment.
+// Keep stable filenames for cached HTML; the content version changes the cache key.
+const assetVersions = {};
+for (const [key, asset] of Object.entries({ stylesVersion: 'styles.css', appVersion: 'app.js', localeVersion: 'locale.js' })) {
+  assetVersions[key] = createHash('sha256').update(await readFile(new URL(asset, import.meta.url))).digest('hex').slice(0, 16);
+}
+
 // Validate every catalog before replacing the previous build.
 const pages = [];
 for (const locale of locales) {
@@ -24,7 +32,7 @@ for (const locale of locales) {
     throw new Error(`${locale.lang}: missing/empty translations [${missing.join(', ')}]; unknown keys [${extra.join(', ')}]`);
   }
   for (const entry of locale.lang === 'en' ? [false, true] : [false]) {
-    const page = { ...locale, entry: String(entry), base: entry ? './' : '../', enCurrent: locale.lang === 'en' ? 'page' : 'false', zhCurrent: locale.lang === 'zh-CN' ? 'page' : 'false' };
+    const page = { ...locale, ...assetVersions, entry: String(entry), base: entry ? './' : '../', enCurrent: locale.lang === 'en' ? 'page' : 'false', zhCurrent: locale.lang === 'zh-CN' ? 'page' : 'false' };
     const html = template.replace(token, (_, key) => {
       const value = key.startsWith('page.') ? page[key.slice(5)] : messages[key];
       if (typeof value !== 'string') throw new Error(`Unknown template key: ${key}`);
