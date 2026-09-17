@@ -1,6 +1,6 @@
 {
   "name": "frely-cli",
-  "version": "0.6.2",
+  "version": "0.6.4",
   "description": "Frely account CLI and local MCP runtime",
   "license": "Apache-2.0",
   "repository": {
