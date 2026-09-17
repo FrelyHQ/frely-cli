@@ -1,5 +1,7 @@
 # Frely 设备 MCP 服务
 
+新地址使用 `connect.frely.cloud`；旧 `mcp.frely.cloud` 暂时继续服务，旧 URL、OAuth resource 与 token audience 保持原值，不重定向、不自动改写。
+
 状态：本文描述当前源码的两层授权、稳定 MCP URL 与 OAuth 契约。2026-09-17 核验 npm registry 与 0.6.2 发行包：设备 MCP、Provider、Agent install/invoke 命令均包含在发行包中。CLI 命令发布与服务端部署、真实调用验收分别判断。
 
 <a id="first-connection"></a>
@@ -129,7 +131,7 @@ frely mcp url
 URL 形态：
 
 ```text
-https://mcp.frely.cloud/mcp/<device-id>
+https://connect.frely.cloud/mcp/<device-id>
 ```
 
 URL 是 Relay 返回的 canonical MCP resource，不从 `app.frely.cloud` 或其他控制面地址推导，也不包含 bearer secret。客户端 Authentication 选择 `OAuth`。

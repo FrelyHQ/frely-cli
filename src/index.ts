@@ -13,6 +13,7 @@ import { installDeviceRelayService, installMcpService, serviceStatus, startMcpSe
 import { discoverLocalModels } from "./provider/local.js";
 import { finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider, waitForLocalProviderRelay } from "./provider/control.js";
 import { getLocalProvider, isSupportedLocalModelName, listLocalProviders, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider } from "./provider/state.js";
+import { runCloud } from "./cloud.js";
 import { VERSION } from "./version.js";
 import { agentHelp, cliUsage, mcpUsage } from "./agent-help.js";
 import { normalizeMcpArgs } from "./mcp-command.js";
@@ -49,6 +50,13 @@ async function main(): Promise<void> {
     return;
   }
   if (!command || command === "help" || command === "--help" || command === "-h") return usage();
+
+  if (command === "cloud") {
+    const result = await runCloud(args);
+    stdout.write(result.text ?? JSON.stringify(result.value, null, 2) + "\n");
+    if (result.failed) process.exitCode = 2;
+    return;
+  }
 
   if (command === "network") {
     const value = await runNetwork(args);

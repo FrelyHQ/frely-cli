@@ -233,6 +233,10 @@ frely provider finalize <provider-id>
 
 `finalize` resumes CPA setup for a Provider left in a prepared state.
 
+## Frely Cloud
+
+Use `frely cloud` to discover and call cloud business operations. See [Cloud commands and authorization](docs/cloud.md).
+
 ## Commands
 
 ```text
@@ -279,7 +283,7 @@ Enrollment returns:
 ```
 
 The public MCP URL is the canonical resource returned by Relay, for example
-`https://mcp.frely.cloud/mcp/<device-id>`. Use `frely mcp url`; do not derive the URL
+`https://connect.frely.cloud/mcp/<device-id>`. Use `frely mcp url`; do not derive the URL
 from the control-plane hostname. The URL contains no bearer secret. Remote MCP clients use OAuth 2.1 Authorization Code + PKCE. OAuth access tokens bind to the exact MCP resource URL and do not extend the 90/180-day local execution authorization. Relay OAuth requirements are defined in [`docs/mcp-oauth-relay-contract.md`](docs/mcp-oauth-relay-contract.md).
 
 A Device Relay connection request uses the enrolled Ed25519 device key and returns a short-lived connection grant:
