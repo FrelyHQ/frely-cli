@@ -9,11 +9,31 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: publish-frely-cli
+  cancel-in-progress: false
+
 jobs:
+  identity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Validate annotated tag, package version and source on main
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: ./scripts/release --validate-tag "$RELEASE_TAG"
+
   verify:
+    needs: identity
     uses: ./.github/workflows/ci.yml
 
   standalone:
+    needs: identity
     uses: ./.github/workflows/standalone.yml
 
   release-assets:
@@ -99,7 +119,9 @@ jobs:
       - name: Publish package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        run: |
+          npm_tag="$(node -p "require('./package.json').version.includes('-') ? 'next' : 'latest'")"
+          npm publish --access public --tag "$npm_tag"
 
   github-release:
     needs: [publish, release-assets]

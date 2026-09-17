@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+PROJECT="frely-cli"
+TARGET="npm/GitHub"
+ENVIRONMENT="production"
+ARTIFACT="npm package + standalone binaries"
+DESTINATION="npm registry + GitHub Releases"
+WAIT_FOR_CI="${FRELY_RELEASE_WAIT_FOR_CI:-1}"
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/release [--version <semver>] [--dry-run]
+
+Publish frely-cli through the existing vX.Y.Z GitHub Actions workflow.
+If --version is omitted, the next patch after the latest formal vX.Y.Z release is used.
+EOF
+}
+
+version=""
+dry_run=0
+while (($#)); do
+  case "$1" in
+    --version)
+      [[ $# -ge 2 ]] || { echo "missing value for --version" >&2; exit 2; }
+      version="$2"
+      shift 2
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+
+require_clean_main() {
+  local dirty branch
+  dirty="$(git status --porcelain --untracked-files=all)"
+  [[ -z "$dirty" ]] || {
+    echo "release requires a clean worktree:" >&2
+    printf '%s\n' "$dirty" >&2
+    exit 1
+  }
+  branch="$(git symbolic-ref --quiet --short HEAD || true)"
+  [[ "$branch" == "main" ]] || {
+    echo "package release must run from main; current branch: ${branch:-detached}" >&2
+    exit 1
+  }
+}
+
+latest_release_version() {
+  local tag raw
+  while IFS= read -r tag; do
+    raw="${tag#v}"
+    if [[ "$raw" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+      printf '%s\n' "$raw"
+      return 0
+    fi
+  done < <(git tag --list 'v*' --sort=-v:refname)
+  return 1
+}
+
+next_patch_version() {
+  local latest major minor patch
+  latest="$(latest_release_version || true)"
+  [[ -n "$latest" ]] || { echo "no stable vX.Y.Z release tag found; pass --version" >&2; exit 1; }
+  IFS=. read -r major minor patch <<<"$latest"
+  printf '%s.%s.%s\n' "$major" "$minor" "$((10#$patch + 1))"
+}
+
+json_plan() {
+  node - "$version" "$sha" "$tag" "$main_push_required" <<'NODE'
+const [version, sourceSha, tag, mainPushRequired] = process.argv.slice(2);
+const plan = {
+  schema: "project-governance.release-plan.v1",
+  project: "frely-cli",
+  release_type: "publish",
+  version,
+  source_sha: sourceSha,
+  target: "npm/GitHub",
+  environment: "production",
+  artifact: "npm package + standalone binaries",
+  destination: "npm registry + GitHub Releases",
+  verification: ["npm package version matches Git tag", "GitHub Release standalone assets and checksums"],
+  tag,
+  workflow: ".github/workflows/publish.yml",
+  main_push_required: mainPushRequired === "1",
+};
+process.stdout.write(JSON.stringify(plan));
+NODE
+}
+
+print_plan() {
+  printf '%s\n' "Release plan"
+  printf 'project: %s\n' "$PROJECT"
+  printf 'release type: publish\n'
+  printf 'version: %s\n' "$version"
+  printf 'source SHA: %s\n' "$sha"
+  printf 'target: %s\n' "$TARGET"
+  printf 'environment: %s\n' "$ENVIRONMENT"
+  printf 'build artifact/image: %s\n' "$ARTIFACT"
+  printf 'publish destination: %s\n' "$DESTINATION"
+  printf 'verification endpoints: %s\n' 'npm package/tag match; GitHub Release assets/checksums'
+  printf 'tag: %s\n' "$tag"
+  printf 'RELEASE_PLAN_JSON=%s\n' "$(json_plan)"
+}
+
+require_clean_main
+git fetch origin main --tags
+sha="$(git rev-parse HEAD)"
+[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "unable to resolve source SHA" >&2; exit 1; }
+remote_sha="$(git rev-parse origin/main)"
+git merge-base --is-ancestor "$remote_sha" "$sha" || {
+  echo "local main does not contain origin/main; update main before release" >&2
+  exit 1
+}
+main_push_required=0
+[[ "$remote_sha" == "$sha" ]] || main_push_required=1
+
+[[ -n "$version" ]] || version="$(next_patch_version)"
+[[ "$version" =~ $semver_re ]] || { echo "invalid SemVer: $version" >&2; exit 2; }
+tag="v$version"
+
+if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+  echo "release tag already exists: $tag" >&2
+  exit 1
+fi
+if [[ -n "$(git ls-remote origin "refs/tags/$tag")" ]]; then
+  echo "release tag already exists on origin: $tag" >&2
+  exit 1
+fi
+
+if ((dry_run)); then
+  print_plan
+  exit 0
+fi
+
+changed_version_files=0
+cleanup() {
+  local status=$?
+  if ((status != 0 && changed_version_files)); then
+    git restore -- package.json package-lock.json
+  fi
+  exit "$status"
+}
+trap cleanup EXIT INT TERM
+
+npm version "$version" --no-git-tag-version --allow-same-version >/dev/null
+if ! git diff --quiet -- package.json package-lock.json; then
+  changed_version_files=1
+fi
+
+npm ci --ignore-scripts
+npm run check
+npm test
+npm run build
+npm pack --dry-run >/dev/null
+
+if ! git diff --quiet -- package.json package-lock.json; then
+  git add package.json package-lock.json
+  git commit -m "release: v$version"
+  changed_version_files=0
+fi
+sha="$(git rev-parse HEAD)"
+[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "unable to resolve release SHA" >&2; exit 1; }
+[[ -z "$(git status --porcelain --untracked-files=all)" ]] || {
+  echo "release preparation left an unexpected dirty worktree" >&2
+  git status --short >&2
+  exit 1
+}
+main_push_required=1
+print_plan
+
+git push origin HEAD:main
+git tag -a "$tag" "$sha" -m "frely-cli $tag"
+git push origin "refs/tags/$tag"
+trap - EXIT INT TERM
+
+printf 'frely-cli publish workflow triggered: version=%s sha=%s tag=%s\n' "$version" "$sha" "$tag"
+
+if [[ "$WAIT_FOR_CI" == "1" ]] && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  run_id=""
+  for _ in $(seq 1 30); do
+    run_id="$(gh run list --workflow publish.yml --commit "$sha" --limit 10 --json databaseId,headBranch --jq ".[] | select(.headBranch == \"$tag\") | .databaseId" | head -n 1)"
+    [[ -n "$run_id" ]] && break
+    sleep 2
+  done
+  if [[ -n "$run_id" ]]; then
+    gh run watch "$run_id" --exit-status
+  else
+    echo "publish workflow was not observed; tag is pushed and GitHub Actions owns publish verification" >&2
+  fi
+fi
