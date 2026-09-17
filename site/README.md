@@ -17,16 +17,11 @@ the template or translation catalogs. Generated `_site/` files are ignored by Gi
 
 ## Content and entry paths
 
-The homepage uses the approved headline “云端AI, 连上你的电脑” / “Cloud AI,
-connected to your computer”. The hero pairs the product description with an
-installation card: one copyable npm command, runtime requirements, standalone
-download and a link to connection setup. Login, diagnostics and workflow selection
-follow the hero. The Install navigation link stays visible on mobile.
+The homepage leads with “让你的 AI，连上你的电脑” / “Your AI, connected to your computer”. Device MCP is the primary product: connect ChatGPT in a browser, Claude Code on another computer, or another remote HTTP MCP client with OAuth to the computer running Frely CLI.
 
-Frely's main site can link to `/zh/#install` or `/en/#install`.
-The neutral `/#install` entry selects a language and preserves the anchor.
-The installation command has one copy target. Setup has separate targets for login
-and diagnostics. Client connection steps remain in the local-tools workflow.
+The page order is installation hero, two device-MCP use cases, target-computer setup, client connection details and secondary CLI workflows, then open source. The setup sequence is install → login → `frely mcp` → `frely mcp url` → client OAuth → a real tool call. Diagnostics use `frely doctor` with `-v` for details.
+
+Frely's main site can link to `/zh/#install` or `/en/#install`. The neutral `/#install` entry selects a language and preserves the anchor. Copy targets for install, login, MCP setup, URL and diagnostics are independent. The static Claude Code example labels the URL placeholder; the signed-in Frely Device MCP page provides a device-specific copy command.
 
 ## Copy style
 
@@ -34,7 +29,7 @@ Avoid adverbs in English and Chinese page copy, including metadata, labels and
 status messages. Name actions, objects, conditions and results. Preserve release
 availability, permission boundaries and failure meanings when rewriting sentences.
 Keep commands, flags, product names and URLs faithful to the implementation.
-The content decisions are recorded in the revision document linked below.
+The content decisions are recorded in the revision document linked below; the device MCP contract is in [`docs/device-mcp.md`](../docs/device-mcp.md).
 
 ## Languages
 
@@ -64,7 +59,7 @@ language URLs also support GitHub Pages project paths.
 ## Source structure
 
 - `template.html`: metadata, asset references and section order.
-- `components/header.html`, `hero.html`, `setup.html`, `workflows.html`,
+- `components/header.html`, `hero.html`, `device-mcp.html`, `setup.html`, `workflows.html`,
   `open-source.html`, `footer.html`: page sections.
 - `commands.json`: canonical CLI command strings; referenced as `{{command.name}}`.
 - `locales/*.json`: public copy, labels and status messages.
@@ -80,7 +75,7 @@ before the previous build is replaced. Source components and command catalogs ar
 excluded from deployment output.
 
 The desktop hero uses two columns. The installation card follows the product
-description on screens up to 800px wide. Setup steps and workflow panels stack
+description on screens up to 800px wide. Use-case cards, setup steps and workflow panels stack
 at that breakpoint. Navigation wraps on narrow screens, copy controls have a
 44px minimum height, and reduced-motion preferences disable smooth scrolling.
 
@@ -122,12 +117,11 @@ variables. Keep this directory as the canonical source.
 
 Keep examples aligned with the actual published npm package, not only the root
 README or main branch. The release baseline checked on 2026-09-17 is npm 0.6.1:
-local MCP and Provider commands are present; remote Agent install/invoke commands
+bare `frely mcp`, MCP URL and Provider commands are present; remote Agent install/invoke commands
 are not. The Agent panel is explicitly in development and contains no executable
 installation example. Recheck the published package before changing that status.
 
-The install path ends with a selected workflow and a real read-only tool result or
-model response. `frely doctor` alone is not connection success. Links to workflow
+The main install path ends with client OAuth and a real read-only device tool result. Provider sharing keeps its own model-response check. `frely doctor` alone is not connection success. Links to workflow
 panels select the correct tab on entry and after a language switch.
 
 The revision decisions and pending positioning questions live in

@@ -186,6 +186,26 @@ h1 em { font-style:normal; color:var(--accent); }
 }
 .copy-button:hover { color:var(--accent); border-color:var(--accent); }
 
+/* Device MCP use cases */
+.device-mcp { border-bottom:1px solid var(--line); }
+.device-scenarios { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1.5rem; }
+.device-scenario { padding:2rem; border:1px solid var(--line); border-radius:8px; background:var(--surface); min-width:0; }
+.scenario-tag { display:block; color:var(--accent); font:.75rem/1.6 var(--mono); letter-spacing:.04em; margin-bottom:1.2rem; }
+.device-scenario h3 { font-size:1.5rem; line-height:1.3; margin-bottom:1rem; }
+.device-scenario p { color:var(--muted); }
+.device-scenario .scenario-example { margin:1.5rem 0 0; padding-left:1rem; border-left:2px solid var(--accent); color:var(--text); font-size:.9375rem; }
+.device-destination { display:flex; align-items:center; flex-wrap:wrap; gap:1rem 1.5rem; padding:1.5rem 0; margin-top:.5rem; }
+.destination-icon { display:flex; align-items:center; justify-content:center; width:3rem; height:3rem; border:1px solid var(--line); border-radius:8px; color:var(--accent); font:1.5rem var(--mono); }
+.device-destination > div { flex:1; min-width:200px; }
+.device-destination p { margin:.3rem 0 0; color:var(--muted); font-size:.875rem; }
+.device-compatibility { margin-bottom:0; }
+.setup-diagnostics { display:flex; align-items:center; gap:1.5rem; margin-top:2rem; border-top:1px solid var(--line); padding-top:1.5rem; }
+.setup-diagnostics > p { flex:1; margin:0; }
+.setup-diagnostics .command { min-width:240px; }
+.client-instructions { border-block:1px solid var(--line); padding-block:1rem; margin-block:1.5rem; }
+.client-instructions h4 { color:var(--text); font-size:.9375rem; margin:1rem 0 .5rem; }
+.client-instructions p { color:var(--muted); font-size:.875rem; }
+
 /* Setup sequence */
 .setup-section { background:var(--surface); border-block:1px solid var(--line); }
 .setup-steps { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1.5rem; list-style:none; padding:0; margin:0; }
@@ -266,6 +286,9 @@ pre { padding:1rem 1.2rem; margin:1.4rem 0; border:1px solid var(--line); border
   .footer-note { display:none; }
 }
 @media(max-width:800px) {
+  .device-scenarios { grid-template-columns:1fr; }
+  .device-scenario { padding:1.5rem; }
+  .setup-diagnostics { align-items:stretch; flex-direction:column; }
   .hero { grid-template-columns:1fr; align-items:start; gap:2rem; padding-block:2.5rem; }
   .hero-description { max-width:38rem; }
   h1 { font-size:clamp(2.6rem,7vw,4rem); }

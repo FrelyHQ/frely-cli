@@ -2,8 +2,9 @@
   "install": "npm install --global --ignore-scripts frely-cli@latest",
   "login": "frely login",
   "doctor": "frely doctor",
-  "mcpSetup": "frely mcp setup --workspace .",
+  "mcpSetup": "frely mcp",
   "mcpUrl": "frely mcp url",
   "providerShare": "frely provider share ollama",
-  "providerList": "frely provider list"
+  "providerList": "frely provider list",
+  "claudeConnect": "claude mcp add --transport http frely-computer \"<MCP_URL>\""
 }

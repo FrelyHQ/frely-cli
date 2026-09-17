@@ -43,9 +43,17 @@
           <li>{{tools.connect}}</li>
           <li>{{tools.verify}}</li>
         </ol>
+        <div class="client-instructions">
+          <h4>ChatGPT</h4>
+          <p>{{tools.chatgpt}}</p>
+          <h4>Claude Code</h4>
+          <p>{{tools.claudePrepare}}</p>
+          <pre><code>{{command.claudeConnect}}</code></pre>
+          <p>{{tools.claudeAuthorize}}</p>
+        </div>
         <p class="fineprint">{{tools.diagnostics}}</p>
         <p class="fineprint">{{tools.note}}</p>
-        <a class="text-link" href="https://github.com/FrelyHQ/frely-cli/blob/main/docs/chatgpt-mcp.md#first-connection">{{tools.guide}} <span aria-hidden="true">↗</span></a>
+        <a class="text-link" href="https://github.com/FrelyHQ/frely-cli/blob/main/docs/device-mcp.md#first-connection">{{tools.guide}} <span aria-hidden="true">↗</span></a>
       </div>
       <div class="workflow-panel" id="panel-models" role="tabpanel" aria-labelledby="tab-models" tabindex="0" hidden>
         <p class="panel-label">{{models.label}}</p>

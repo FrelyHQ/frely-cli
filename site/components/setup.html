@@ -18,19 +18,27 @@
       <li class="setup-step">
         <div class="step-heading"><span aria-hidden="true">03</span><h3>{{install.step3}}</h3></div>
         <div class="command">
-          <code id="doctor-command">{{command.doctor}}</code>
-          <button class="copy-button" data-copy="doctor-command" aria-label="{{copy.doctor}}">{{copy.idle}}</button>
+          <code id="mcp-command">{{command.mcpSetup}}</code>
+          <button class="copy-button" data-copy="mcp-command" aria-label="{{copy.mcp}}">{{copy.idle}}</button>
         </div>
-        <p class="fineprint">{{install.diagnostics}}</p>
+        <p class="fineprint">{{install.approval}}</p>
       </li>
       <li class="setup-step">
         <div class="step-heading"><span aria-hidden="true">04</span><h3>{{install.step4}}</h3></div>
-        <p class="fineprint">{{install.next}}</p>
-        <div class="workflow-choices">
-          <a class="text-link" href="#panel-tools">{{install.tools}} <span aria-hidden="true">↗</span></a>
-          <a class="text-link" href="#panel-models">{{install.models}} <span aria-hidden="true">↗</span></a>
+        <div class="command">
+          <code id="url-command">{{command.mcpUrl}}</code>
+          <button class="copy-button" data-copy="url-command" aria-label="{{copy.url}}">{{copy.idle}}</button>
         </div>
+        <p class="fineprint">{{install.next}}</p>
+        <a class="text-link" href="#panel-tools">{{install.tools}} <span aria-hidden="true">↗</span></a>
       </li>
     </ol>
+    <div class="setup-diagnostics">
+      <p class="fineprint">{{install.diagnostics}}</p>
+      <div class="command">
+        <code id="doctor-command">{{command.doctor}}</code>
+        <button class="copy-button" data-copy="doctor-command" aria-label="{{copy.doctor}}">{{copy.idle}}</button>
+      </div>
+    </div>
   </div>
 </section>
