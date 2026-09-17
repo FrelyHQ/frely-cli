@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -31,6 +31,10 @@ try {
   assert.ok(version.stdout.includes(packageInfo.version));
   const help = await run(process.execPath, [entry, "--help"], { env, timeout: 10_000 });
   assert.ok(help.stdout.includes("frely"));
+  const diagnostic = JSON.parse((await run(process.execPath, [entry, "doctor", "--json"], { env, timeout: 20000 })).stdout);
+  assert.equal(diagnostic.update.installation.method, "npm");
+  assert.equal(await realpath(diagnostic.update.installation.prefix), await realpath(prefix));
+  assert.ok(help.stdout.includes("frely upgrade"));
   console.log(`Packed install passed (${process.platform}): global wrapper, --ignore-scripts, --version, --help, no credential backend.`);
 } finally {
   await rm(directory, { recursive: true, force: true });

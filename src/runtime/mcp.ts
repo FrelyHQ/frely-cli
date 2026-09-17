@@ -1,3 +1,4 @@
+import type { MaintenanceGate } from "../upgrade/maintenance.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -13,6 +14,7 @@ interface ToolFlags {
 }
 
 export interface McpRuntimeOptions {
+  maintenance?: MaintenanceGate;
   assertAuthorized?: () => void | Promise<void>;
   signal?: AbortSignal;
   maxConcurrentCommands?: number;
@@ -30,9 +32,10 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
   const commandScheduler = new FairRwScheduler(maxConcurrentCommands, assertAuthorized);
   const processScheduler = new FairRwScheduler(64, assertAuthorized);
   const processes = new ProcessManager();
+  const unregister = options.maintenance?.registerProcesses(() => processes.list().filter((p) => p.running).length);
   const server = new Server({ name: "frely-cli", version: VERSION }, { capabilities: { tools: {} } });
 
-  const stop = () => { lifecycle.abort(); void processes.close(); };
+  const stop = () => { lifecycle.abort(); void processes.close().finally(() => unregister?.()); };
   options.signal?.addEventListener("abort", stop, { once: true });
   if (options.signal?.aborted) stop();
   server.onclose = () => { options.signal?.removeEventListener("abort", stop); stop(); };
@@ -69,6 +72,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
   ] }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+    const finish = options.maintenance?.track();
     const name = request.params.name;
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
     try {
@@ -77,7 +81,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
     } catch (error) {
       try { options.onToolError?.(extra.requestId, name, error); } catch { /* Diagnostics cannot change tool results. */ }
       return { isError: true, content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Local tool failed." }] };
-    }
+    } finally { finish?.(); }
   });
 
   return server;

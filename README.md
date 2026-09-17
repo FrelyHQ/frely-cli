@@ -57,31 +57,49 @@ npm install --global frely-cli@0.3.6
 
 ## Update an existing installation
 
-If you installed `frely-cli` with the official installer, run the [Quick install](#quick-install) installer again. It replaces the global package with the latest `frely-cli` release. If you installed the package directly with npm, run one of the commands in [Install or update with npm](#install-or-update-with-npm) again.
-
-If multiple `frely` executables are installed, list the candidates and check the npm global installation:
-
 ```sh
-type -a frely
-npm prefix --global
-"$(npm prefix --global)/bin/frely" --version
+frely doctor
+frely upgrade
 ```
 
-Your shell uses the first `frely` path in `PATH`. If that path is not the npm global bin directory, put `$(npm prefix --global)/bin` earlier in `PATH` and run `frely --version` again.
+`doctor` reports the installation path, distribution and latest stable version.
+Release lookup has a timeout; offline version checks do not fail other diagnostics.
+Use `doctor --json` for structured results. `upgrade` has no options and never
+changes to a different installer, edits PATH or downgrades a newer installation.
 
-If the background Device Relay service is running, restart it after the update so it loads the new CLI version:
+On macOS/Linux, `upgrade` updates the current standalone, npm-global or Bun-global
+installation. Standalone downloads are checksum-checked and tested before the
+installed executable is replaced. npm/Bun keep their original global directory
+and run with `--ignore-scripts`. Unknown installations, local links, source
+checkouts and temporary runners are left unchanged.
+
+A matching, running Device Relay service is paused for maintenance, restarted
+and checked after installation. Credentials, device identity, MCP URL, workspace
+and authorization expiry are preserved. Stopped or uninstalled services stay
+that way. If requests or managed processes are still running, the upgrade exits
+without stopping them. Finish those tasks and run the command in a local terminal;
+an upgrade invoked inside the MCP service being upgraded is itself active work.
+The connection may disconnect during the service restart. Installation, runtime
+version and Relay connectivity are reported separately.
+
+On Windows, `upgrade` prints a PowerShell command for the detected installation.
+Run it in a local terminal after finishing Frely tasks, then run `frely doctor`.
+The CLI does not launch an update helper or schedule a background replacement.
+
+Versions predating this command need one update using their original installer.
+A running service predating maintenance support must also be restarted from a
+local terminal after its tasks finish:
 
 ```sh
 frely mcp service stop
 frely mcp service start
 ```
 
-Verify the update:
-
-```sh
-frely --version
-frely doctor
-```
+Those service commands remain available for maintenance and troubleshooting.
+Normal upgrades of a service with maintenance support handle its restart.
+If more than one `frely` is installed, check the path shown by `doctor` before
+upgrading. The CLI does not remove other installations or choose one by changing
+shell configuration. See [the self-upgrade contract](docs/self-upgrade.md).
 
 ## Install from a local checkout
 
@@ -240,6 +258,7 @@ frely login [--relay <https-url>] [--no-browser]
 frely logout
 frely whoami
 frely doctor [-v] [--json]
+frely upgrade
 frely skill install <manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--api-key-stdin] [--json]
 frely skill status <distribution-id> [--json]
 frely skill remove <distribution-id> [--json]
@@ -314,10 +333,11 @@ MCP secrets use AES-256-GCM files with a master key in macOS Keychain, Windows C
 
 The stable MCP URL contains no credential. Remote clients hold OAuth credentials; the CLI holds the MCP execution private key. The Relay checks OAuth resource binding and the current MCP execution lease. Expiry blocks requests and queued work and cancels managed execution. It does not undo writes or create a sandbox around arbitrary shell programs.
 
-`frely doctor` is the single diagnostic entry point. By default it reads local
-state and prints the CLI version, account, MCP authorization, background service
-and connection overview. It does not access the MCP keyring or wait for remote
-requests. Unconfigured account/MCP features remain optional.
+`frely doctor` is the single diagnostic entry point. It reports the installation
+path and distribution, checks the latest stable release with a deadline, and reads
+local account, MCP authorization, service and connection state. It does not access
+the MCP keyring in summary mode. An unavailable release source is informational;
+unconfigured account/MCP features remain optional.
 
 `frely doctor -v` (also `--verbose`) adds configuration paths, runtime details,
 service state, authorization expiry, last received heartbeat and sanitized last
@@ -329,9 +349,9 @@ relay return a nonzero exit code.
 A running process is not proof of connectivity. Connected means the matching
 account/device process has received a WebSocket heartbeat within 75 seconds.
 The MCP authorization and workspace must also match the running relay. Missing,
-stale or old-runtime observations are reported as unknown. After upgrading,
-restart the background service to enable heartbeat reporting. Diagnostics never
-restart it automatically or open a second relay connection. Neither mode claims
+stale or old-runtime observations are reported as unknown. Verbose diagnostics
+include the running CLI version, entry path and start time. Diagnostics never
+restart the service or open a second relay connection. Neither mode claims
 to test client OAuth or an end-to-end tool call.
 
 Legacy `frely status`, `frely mcp status`, `frely mcp service status` and

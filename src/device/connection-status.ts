@@ -1,3 +1,6 @@
+import { VERSION } from "../version.js";
+import { IS_STANDALONE } from "../cli-launch.js";
+import { realpathSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -7,6 +10,9 @@ import { diagnosticError } from "../runtime/diagnostics.js";
 export const HEARTBEAT_MAX_AGE_MS = 75_000;
 export interface ConnectionStatus {
   version: 1;
+  cliVersion?: string;
+  entry?: string;
+  startedAt?: string;
   pid: number;
   relayUrl: string;
   userId: string;
@@ -32,7 +38,7 @@ export function connectionStatusPath(): string {
 /** Observability must never interrupt tool execution or serialize credentials/errors verbatim. */
 export function connectionReporter(binding: DeviceBinding, workspace?: string) {
   let current: ConnectionStatus = {
-    version: 1, pid: process.pid, relayUrl: binding.relayUrl, userId: binding.userId,
+    version: 1, cliVersion: VERSION, entry: realpathSync(IS_STANDALONE ? process.execPath : process.argv[1]!), startedAt: new Date().toISOString(), pid: process.pid, relayUrl: binding.relayUrl, userId: binding.userId,
     deviceId: binding.deviceId, ...(workspace ? { workspace } : {}),
     mcpEnabled: false, state: "connecting", updatedAt: new Date().toISOString(),
   };
@@ -84,7 +90,11 @@ export async function readConnectionStatus(binding: DeviceBinding): Promise<Conn
     || (value.workspace !== undefined && typeof value.workspace !== "string")
     || (value.authorizationId !== undefined && !/^mca_[a-f0-9]{32}$/u.test(value.authorizationId))) return null;
   // Return only known fields; never print arbitrary content from a diagnostic file.
-  return { version: 1, pid: value.pid, relayUrl: binding.relayUrl, userId: binding.userId, deviceId: binding.deviceId,
+  return { version: 1,
+    ...(typeof value.cliVersion === "string" ? { cliVersion: value.cliVersion.slice(0, 80) } : {}),
+    ...(typeof value.entry === "string" ? { entry: value.entry } : {}),
+    ...(typeof value.startedAt === "string" ? { startedAt: value.startedAt } : {}),
+    pid: value.pid, relayUrl: binding.relayUrl, userId: binding.userId, deviceId: binding.deviceId,
     state: value.state, mcpEnabled: value.mcpEnabled, updatedAt: value.updatedAt,
     ...(value.workspace ? { workspace: value.workspace } : {}),
     ...(value.authorizationId ? { authorizationId: value.authorizationId } : {}),

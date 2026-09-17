@@ -20,7 +20,7 @@ try {
   assert.match((await run(executable, ["--help"], { env, cwd: directory, timeout: 10000 })).stdout, /frely mcp/);
   const diagnostic = JSON.parse((await run(executable, ["doctor", "--json"], { env, cwd: directory, timeout: 10000 })).stdout);
   assert.equal(diagnostic.ok, true);
-  assert.ok(diagnostic.checks.some((check) => check.name === "mcp" && check.ok && /not enabled/.test(check.detail)));
+  assert.ok(diagnostic.checks.some((check) => check.name === "mcp" && check.ok && /not enabled/i.test(check.detail)));
   const status = JSON.parse((await run(executable, ["mcp", "status", "--json"], { env, cwd: directory, timeout: 10000 })).stdout);
   assert.equal(status.configured, false);
   console.log(`Standalone smoke passed (${process.platform}/${process.arch}): no Node/npm/Bun on PATH, no keyring, no config autoload.`);

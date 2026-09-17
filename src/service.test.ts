@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { cliLaunchArguments } from "./cli-launch.js";
 import { windowsArgument, windowsService } from "./service-windows.js";
-import { systemdUnit, launchAgentPlist, serviceLaunchArguments, systemdUnitPath } from "./service.js";
+import { systemdUnit, launchAgentPlist, serviceLaunchArguments, systemdUnitPath, parseServiceCommand } from "./service.js";
 import { join } from "node:path";
 
 test("standalone and npm services invoke the intended executable", () => {
@@ -43,4 +43,12 @@ test("Windows task requests carry paths as stdin data, not PowerShell code", asy
   assert.deepEqual(result, { installed: true, active: true });
   assert.equal(windowsArgument('a"b'), '"a\\"b"');
   assert.throws(() => windowsArgument("bad\nargument"));
+});
+
+
+test("upgrade reads the existing service command without changing escaped paths", () => {
+  const command = ["/bin/node", '/odd path/quote"slash\\%$&<name>/index.js', "mcp", "serve", "--workspace", "/workspace"];
+  assert.deepEqual(parseServiceCommand("darwin", launchAgentPlist(command, "/state")), command);
+  assert.deepEqual(parseServiceCommand("linux", systemdUnit(command)), command);
+  assert.equal(parseServiceCommand("linux", "ExecStart=/custom/unrecognized-format"), null);
 });

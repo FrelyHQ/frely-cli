@@ -1,6 +1,6 @@
 # CLI self-upgrade
 
-Status: implementation in progress. Approved 2026-09-17.
+Status: implemented and verified on macOS 2026-09-17. Approved command simplification and Windows manual-upgrade scope are included.
 
 ## User contract
 
@@ -24,3 +24,11 @@ Report installation, service startup/version, and Relay connectivity separately.
 ## Verification
 
 Cover installation ownership and custom prefixes; source/link/npx protection; pinned version resolution; checksum failure; startup failure and standalone restore; package-manager failures; maintenance admission and busy processes; active/stopped service restoration; doctor offline behavior; CLI argument rejection. Run type checks, tests and build. Native Windows replacement is outside scope because Windows emits commands only.
+
+## Verification results
+
+- TypeScript check/build and 124 tests passed.
+- macOS arm64: packed npm installation, custom-prefix detection, standalone build/startup, and installer checksum rejection passed.
+- Windows: generated PowerShell command, original package manager/prefix, quoting and no-mutation behavior tested; commands were not executed on a Windows host.
+- Linux: service-command parsing and maintenance behavior covered by tests; native systemd lifecycle remains a platform acceptance check.
+- No production installation or live Device Relay service was upgraded during verification. No release was published.

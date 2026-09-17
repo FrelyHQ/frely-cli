@@ -1,6 +1,7 @@
 import { VERSION } from "./version.js";
 
 export const COMMANDS = [
+  { id: "upgrade", usage: "frely upgrade", auth: "none", effect: "local-write", purpose: "Upgrade the current installation to the latest stable release. Windows prints a manual command; doctor checks versions." },
   { id: "help", usage: "frely help --agent --json", auth: "none", effect: "read", purpose: "Read this installed CLI's current Agent instructions." },
   { id: "key.budget", usage: "frely key budget (--api-key-stdin [--relay <url>]|--distribution <distribution-id>) [--json]", auth: "api-key", effect: "read", purpose: "Read the Key's self usage and each funding source's limits without account login." },
   { id: "skill.install", usage: "frely skill install <manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--api-key-stdin] [--json]", auth: "optional-api-key", effect: "local-write", purpose: "Install the public Agent's trigger Skill; an API key goes only through stdin to secure storage." },
@@ -10,7 +11,7 @@ export const COMMANDS = [
   { id: "login", usage: "frely login [--relay <url>] [--no-browser]", auth: "browser", effect: "authorization", purpose: "Authorize the CLI for the user's Frely account." },
   { id: "logout", usage: "frely logout", auth: "none", effect: "local-write", purpose: "Remove login and stop the MCP background service." },
   { id: "whoami", usage: "frely whoami", auth: "account", effect: "read", purpose: "Read the signed-in account." },
-  { id: "doctor", usage: "frely doctor [-v] [--json]", auth: "optional-account", effect: "diagnostic", purpose: "Show a quick account, MCP and connection overview; -v runs detailed diagnostics." },
+  { id: "doctor", usage: "frely doctor [-v] [--json]", auth: "optional-account", effect: "diagnostic", purpose: "Show installation, available upgrades, account, MCP and connection status; -v runs detailed diagnostics." },
   { id: "provider.share", usage: "frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]", auth: "account", effect: "remote-write", purpose: "Publish a local model Provider." },
   { id: "provider.list", usage: "frely provider list [--json]", auth: "account", effect: "read", purpose: "List configured local Providers." },
   { id: "provider.finalize", usage: "frely provider finalize <provider-id>", auth: "account", effect: "remote-write", purpose: "Finish a prepared local Provider." },

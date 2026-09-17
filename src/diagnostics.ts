@@ -1,3 +1,4 @@
+import { inspectUpgrade } from "./upgrade/update.js";
 import { authConfigPath, inspectAuth, probeCredentialStore, whoami, type AuthSnapshot } from "./auth.js";
 import { inspectMcpMetadata, requireMcpAuthorization } from "./mcp-authorization.js";
 import { readDeviceBinding } from "./device/state.js";
@@ -8,7 +9,7 @@ import { VERSION } from "./version.js";
 export interface DiagnosticCheck { name: string; ok: boolean; detail: string; status: "pass" | "fail" | "info" }
 export interface DoctorOptions { verbose?: boolean; /** Compatibility with doctor --mcp. */ mcp?: boolean }
 const defaultDependencies = { inspectAuth, probeCredentialStore, whoami, inspectMcpMetadata, requireMcpAuthorization,
-  readDeviceBinding, readConnectionStatus, serviceStatus };
+  readDeviceBinding, readConnectionStatus, serviceStatus, inspectUpgrade };
 type DoctorDependencies = typeof defaultDependencies;
 
 export async function statusSnapshot() {
@@ -19,8 +20,9 @@ export async function statusSnapshot() {
       expired: !metadata.grant.expiresAt || Date.parse(metadata.grant.expiresAt) <= Date.now() } : { configured: false } };
 }
 
-/** The default snapshot is local; verbose also validates account and MCP authorization online. */
+/** Release checks are bounded and informational; verbose also validates account/MCP online. */
 export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDependencies = defaultDependencies) {
+  const upgradePromise = dependencies.inspectUpgrade();
   const verbose = options.verbose === true || options.mcp === true;
   const checks: DiagnosticCheck[] = [];
   const add = (name: string, status: DiagnosticCheck["status"], detail: string) =>
@@ -76,6 +78,13 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
       : connectionState === "stopped" ? "Relay stopped. Run frely mcp service start."
       : "Unknown: no recent heartbeat for this account/device. Run frely doctor -v.");
 
+  const update = await upgradePromise;
+  add("installation", "info", `${update.installation.method}: ${update.installation.entry}`);
+  add("upgrade", update.state === "current" ? "pass" : "info", update.message);
+  if (connection?.cliVersion && connection.cliVersion !== VERSION && service?.active) {
+    add("service_version", "info", `Running ${connection.cliVersion}; installed ${VERSION}. Finish running tasks and restart the service from a local terminal.`);
+  }
+
   if (verbose) {
     try { await dependencies.probeCredentialStore(); add("basic_storage", "pass", "Private session storage read/write/delete verified."); }
     catch { add("basic_storage", "fail", "Private session storage is unavailable or not writable."); }
@@ -92,12 +101,16 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
   return {
     schemaVersion: "frely.cli.doctor.v1", version: VERSION, mode: verbose ? "verbose" : "summary",
     checkedAt: new Date().toISOString(), ok: checks.every((check) => check.ok),
+    update,
     summary: {
+      installation: `${update.installation.method}: ${update.installation.entry}`,
+      upgrade: update.message,
       account: auth.credentialError ? "Configuration unreadable" : auth.credentialStored
         ? (auth.user?.email ?? "Configured") + " (stored)" : "Not logged in",
       mcp: metadataError ? "Configuration unreadable" : !metadata ? "Not enabled" : expired ? "Expired or inactive"
         : !mcpMatches ? "Account/device mismatch" : "Configured (local); expires " + metadata.grant.expiresAt,
-      service: !metadata && !binding ? "Not configured" : !service ? "Unknown" : service.active ? "Running"
+      service: !metadata && !binding ? "Not configured" : !service ? "Unknown" : service.active ? (connection?.cliVersion && connection.pid === service.pid && connection.cliVersion !== VERSION
+          ? `Running ${connection.cliVersion}; installed ${VERSION}. Restart after tasks finish.` : "Running")
         : service.installed ? "Stopped" : "Not installed",
       connection: connectionState === "not_configured" ? "Not configured"
         : live ? metadata && !mcpReady ? "Relay connected; MCP unavailable" : "Connected (recent heartbeat)"
@@ -110,6 +123,7 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
       configPath: auth.configPath, relayStatusPath: connectionStatusPath(), relayUrl: auth.relayUrl,
       credentialBackend: auth.credentialBackend, deviceId: binding?.deviceId, workspace: metadata?.grant.workspace,
       expiresAt: metadata?.grant.expiresAt, service,
+      runningVersion: connection?.cliVersion, runningEntry: connection?.entry, startedAt: connection?.startedAt,
       connection: { state: connectionState, live, mcpReady, observation: connection },
       coverage: "Heartbeat verifies the device-to-relay transport. ChatGPT OAuth and end-to-end tool calls are not tested.",
     } } : {}),
