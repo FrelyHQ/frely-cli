@@ -27,7 +27,8 @@
   <header class="header wrap">
     <a class="brand" href="#" aria-label="{{nav.home}}"><span class="brand-symbol" aria-hidden="true">›_</span>frely<span class="brand-label">CLI</span></a>
     <nav aria-label="{{nav.main}}">
-      <a href="#workflows">{{nav.workflows}}</a>
+      <a class="nav-install" href="#install">{{nav.install}}</a>
+      <a class="nav-workflows" href="#workflows">{{nav.workflows}}</a>
       <a href="https://github.com/FrelyHQ/frely-cli#readme">{{nav.docs}}</a>
       <a class="github-link" href="https://github.com/FrelyHQ/frely-cli">GitHub <span aria-hidden="true">↗</span></a>
       <span class="language-switch" role="group" aria-label="{{nav.language}}">
@@ -42,7 +43,14 @@
         <a class="release" href="https://github.com/FrelyHQ/frely-cli/releases/latest"><span>{{hero.openSource}}</span> {{hero.release}} <span aria-hidden="true">↗</span></a>
         <h1 id="hero-title">{{hero.line1}}<br>{{hero.line2}}<em>{{hero.accent}}</em></h1>
         <p class="hero-description">{{hero.description}}</p>
-        <a class="button primary" href="#install">{{hero.install}} <span aria-hidden="true">↓</span></a>
+        <div class="hero-install">
+          <div class="command"><code id="hero-install-command">npm install --global --ignore-scripts frely-cli@latest</code><button class="copy-button" data-copy="hero-install-command" aria-label="{{copy.install}}">{{copy.idle}}</button></div>
+          <p class="fineprint">{{install.node}}</p>
+        </div>
+        <div class="hero-actions">
+          <a class="button primary" href="#install">{{hero.install}} <span aria-hidden="true">↓</span></a>
+          <a class="text-link" href="https://github.com/FrelyHQ/frely-cli/releases/latest">{{hero.download}} <span aria-hidden="true">↗</span></a>
+        </div>
         <p class="platform-note">macOS · Linux · Windows</p>
       </div>
       <div class="terminal" aria-label="{{terminal.label}}">
@@ -55,14 +63,23 @@
           <div class="terminal-line"><span class="line-number">05</span><code><span class="prompt">$</span> frely mcp setup <span class="flag">--workspace</span> .</code></div>
           <div class="terminal-line"><span class="line-number">06</span><code><span class="prompt">$</span> frely mcp url</code></div>
           <div class="terminal-line spacer"><span class="line-number">07</span></div>
-          <div class="terminal-line"><span class="line-number">08</span><span class="comment">{{terminal.models}}</span></div>
-          <div class="terminal-line"><span class="line-number">09</span><code><span class="prompt">$</span> frely provider share <span class="flag">ollama</span></code></div>
+          <div class="terminal-line"><span class="line-number">08</span><span class="comment">{{terminal.connect}}</span></div>
+          <div class="terminal-line"><span class="line-number">09</span><span class="comment">{{terminal.oauth}}</span></div>
           <div class="terminal-line spacer"><span class="line-number">10</span></div>
           <div class="terminal-line"><span class="line-number">11</span><code><span class="prompt">$</span> <span class="cursor" aria-hidden="true"></span></code></div>
         </div>
         <div class="terminal-footer"><span>{{terminal.footer}}</span><span aria-hidden="true">⌘</span></div>
       </div>
     </section>
+    <section class="install-section" id="install" aria-labelledby="install-title"><div class="wrap install-layout">
+      <div><p class="eyebrow">{{install.eyebrow}}</p><h2 id="install-title">{{install.line1}}<br>{{install.line2}}</h2><p>{{install.description}}</p><a class="text-link" href="https://github.com/FrelyHQ/frely-cli/releases/latest">{{install.standalone}} <span aria-hidden="true">↗</span></a><p class="fineprint">{{install.runtime}}<br>{{install.node}}</p></div>
+      <ol class="install-steps">
+        <li><div class="step-heading"><span>01</span><h3>{{install.step1}}</h3><span class="step-meta">npm</span></div><div class="command"><code id="install-command">npm install --global --ignore-scripts frely-cli@latest</code><button class="copy-button" data-copy="install-command" aria-label="{{copy.install}}">{{copy.idle}}</button></div></li>
+        <li><div class="step-heading"><span>02</span><h3>{{install.step2}}</h3></div><div class="command"><code id="login-command">frely login</code><button class="copy-button" data-copy="login-command" aria-label="{{copy.login}}">{{copy.idle}}</button></div></li>
+        <li><div class="step-heading"><span>03</span><h3>{{install.step3}}</h3></div><div class="command"><code id="doctor-command">frely doctor</code><button class="copy-button" data-copy="doctor-command" aria-label="{{copy.doctor}}">{{copy.idle}}</button></div><p class="fineprint">{{install.diagnostics}}</p></li>
+        <li><div class="step-heading"><span>04</span><h3>{{install.step4}}</h3></div><p>{{install.next}}</p><div class="workflow-choices"><a class="text-link" href="#panel-tools">{{install.tools}}</a><a class="text-link" href="#panel-models">{{install.models}}</a></div></li>
+      </ol>
+    </div></section>
     <div class="principles wrap" aria-label="{{principles.label}}"><span>{{principles.mcp}}</span><span>{{principles.local}}</span><span>{{principles.models}}</span><a href="https://github.com/FrelyHQ/frely-cli/blob/main/LICENSE">{{principles.license}} <span aria-hidden="true">↗</span></a></div>
     <section class="workflows wrap section" id="workflows" aria-labelledby="workflows-title">
       <div class="section-heading"><p class="eyebrow">{{workflows.eyebrow}}</p><h2 id="workflows-title">{{workflows.line1}}<br>{{workflows.line2}}</h2><p>{{workflows.description}}</p></div>
@@ -104,15 +121,6 @@ frely provider list</code></pre>
         </div>
       </div>
     </section>
-    <section class="install-section" id="install" aria-labelledby="install-title"><div class="wrap install-layout">
-      <div><p class="eyebrow">{{install.eyebrow}}</p><h2 id="install-title">{{install.line1}}<br>{{install.line2}}</h2><p>{{install.description}}</p><a class="text-link" href="https://github.com/FrelyHQ/frely-cli/releases/latest">{{install.standalone}} <span aria-hidden="true">↗</span></a><p class="fineprint">{{install.runtime}}<br>{{install.node}}</p></div>
-      <ol class="install-steps">
-        <li><div class="step-heading"><span>01</span><h3>{{install.step1}}</h3><span class="step-meta">npm</span></div><div class="command"><code id="install-command">npm install --global --ignore-scripts frely-cli@latest</code><button class="copy-button" data-copy="install-command" aria-label="{{copy.install}}">{{copy.idle}}</button></div></li>
-        <li><div class="step-heading"><span>02</span><h3>{{install.step2}}</h3></div><div class="command"><code id="login-command">frely login</code><button class="copy-button" data-copy="login-command" aria-label="{{copy.login}}">{{copy.idle}}</button></div></li>
-        <li><div class="step-heading"><span>03</span><h3>{{install.step3}}</h3></div><div class="command"><code id="doctor-command">frely doctor</code><button class="copy-button" data-copy="doctor-command" aria-label="{{copy.doctor}}">{{copy.idle}}</button></div><p class="fineprint">{{install.diagnostics}}</p></li>
-        <li><div class="step-heading"><span>04</span><h3>{{install.step4}}</h3></div><p>{{install.next}}</p><div class="workflow-choices"><a class="text-link" href="#panel-tools">{{install.tools}}</a><a class="text-link" href="#panel-models">{{install.models}}</a></div></li>
-      </ol>
-    </div></section>
     <section class="open-source wrap section" aria-labelledby="source-title"><div><p class="eyebrow">{{source.eyebrow}}</p><h2 id="source-title">{{source.line1}}<br>{{source.line2}}</h2><p>{{source.description}}</p><p class="fineprint">{{source.note}}</p></div><div class="source-actions"><a class="button secondary" href="https://github.com/FrelyHQ/frely-cli">{{source.explore}} <span aria-hidden="true">↗</span></a><a class="text-link" href="https://github.com/FrelyHQ/frely-cli/blob/main/CONTRIBUTING.md">{{source.contribute}} <span aria-hidden="true">↗</span></a></div></section>
   </main>
   <footer class="footer wrap"><a class="brand" href="#" aria-label="{{nav.home}}"><span class="brand-symbol" aria-hidden="true">›_</span>frely<span class="brand-label">CLI</span></a><span class="footer-note">{{footer.note}}</span><nav aria-label="{{footer.navigation}}"><a href="https://app.frely.cloud">Frely</a><a href="https://github.com/FrelyHQ/frely-cli/blob/main/SECURITY.md">{{footer.security}}</a><a href="https://github.com/FrelyHQ/frely-cli/blob/main/TRADEMARKS.md">{{footer.trademarks}}</a></nav></footer>

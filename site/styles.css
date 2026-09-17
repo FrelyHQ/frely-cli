@@ -872,7 +872,7 @@ code {
     gap:1rem;
     font-size:.8125rem;
   }
-  .header nav>a:first-child {
+  .header nav>.nav-workflows {
     display:none;
   }
   .github-link {
@@ -1006,4 +1006,52 @@ code {
   display:flex;
   flex-wrap:wrap;
   gap:.5rem 1.5rem;
+}
+
+/* Installation remains available before the product tour, on every viewport. */
+.hero {
+  align-items:start;
+  padding-block:4rem;
+}
+.hero-copy h1 {
+  font-size:clamp(2.75rem,4.6vw,4.3rem);
+}
+.hero-description {
+  margin-bottom:1.4rem;
+  max-width:32rem;
+}
+.hero-install {
+  margin-bottom:1.5rem;
+}
+.hero-install .fineprint {
+  margin:.6rem 0 0;
+  font-size:.8125rem;
+}
+.hero-actions {
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:1rem 1.5rem;
+}
+.nav-install {
+  font-weight:650;
+  color:var(--accent);
+}
+:lang(zh-CN) .hero-copy h1 {
+  font-size:clamp(2.25rem,3.9vw,3.9rem);
+}
+@media(max-width:800px) {
+  .hero {
+    padding-block:3rem;
+    gap:2.5rem;
+  }
+  .hero-copy {
+    max-width:none;
+  }
+  .hero-copy h1 {
+    font-size:clamp(2.5rem,7.3vw,4.3rem);
+  }
+  :lang(zh-CN) .hero-copy h1 {
+    font-size:clamp(2rem,8.8vw,3.5rem);
+  }
 }

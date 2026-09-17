@@ -15,6 +15,17 @@ python3 -m http.server 8080 --bind 127.0.0.1 --directory _site
 Open http://localhost:8080. Any static HTTP server works. Rebuild after editing
 the template or translation catalogs. Generated `_site/` files are ignored by Git.
 
+## Content and entry paths
+
+The homepage introduces cloud AI access to local tools. Installation remains
+immediately available: a copyable npm command and standalone download link appear
+in the hero, and the full install/login/connection guide precedes the feature tour.
+The Install navigation link stays visible on mobile.
+
+Frely's main site can link directly to `/zh/#install` or `/en/#install`.
+The neutral `/#install` entry selects a language and preserves the anchor.
+The hero and full guide use distinct copy targets for the same installation command.
+
 ## Languages
 
 - `/en/`: English; `/zh/`: Simplified Chinese. Both are complete static pages,
