@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { upgrade } from "./upgrade/update.js";
 import { setupMcpAuthorization, requireMcpAuthorization, inspectMcpMetadata, revokeMcpAuthorization } from "./mcp-authorization.js";
 import { McpLease } from "./runtime/mcp-lease.js";
 import { resolve } from "node:path";
@@ -26,6 +27,12 @@ import type { SkillHost, SkillScope } from "./skill/managed.js";
 async function main(): Promise<void> {
   const args = normalizeMcpArgs(process.argv.slice(2));
   const command = args[0];
+  if (command === "upgrade") {
+    if (args.length !== 1) throw new Error("Usage: frely upgrade. Version checks are available in frely doctor.");
+    const result = await upgrade((message) => process.stderr.write(message));
+    stdout.write(result.message + "\n");
+    return;
+  }
   if (command === "mcp" && args[1] === "help") { stdout.write(mcpUsage()); return; }
   if (command === "--version" || command === "-v" || command === "version") {
     stdout.write(`${VERSION}\n`);
@@ -266,7 +273,7 @@ async function main(): Promise<void> {
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     try {
-      await serveDeviceRelay({ ...(workspace ? { workspace } : {}), signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
+      await serveDeviceRelay({ ...(workspace ? { workspace } : {}), managedService: Boolean(serviceConfigHome), restartForUpgrade: stop, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
     } finally {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);

@@ -8,7 +8,7 @@ import { windowsService } from "./service-windows.js";
 
 const execFile = promisify(execFileCallback);
 const LABEL = "cloud.frely.cli-mcp";
-export interface McpServiceInfo { installed: boolean; active: boolean; platform: string; workspace?: string; definitionPath?: string }
+export interface McpServiceInfo { installed: boolean; active: boolean; platform: string; workspace?: string; definitionPath?: string; pid?: number }
 
 export async function installMcpService(workspaceInput: string): Promise<McpServiceInfo> {
   return installDeviceRelayService(workspaceInput);
@@ -76,14 +76,16 @@ export async function serviceStatus(): Promise<McpServiceInfo> {
   if (process.platform === "win32") return { ...common, ...await windowsService("status") };
   if (process.platform === "darwin") {
     const path = launchAgentPath(), installed = await fileExists(path);
-    const active = installed && await execFile("launchctl", ["print", `gui/${process.getuid?.() ?? 0}/${LABEL}`])
-      .then(({ stdout }) => /\bpid = \d+|\bstate = running/u.test(stdout), () => false);
-    return { ...common, installed, active, ...(installed ? { definitionPath: path } : {}) };
+    const output = installed ? await execFile("launchctl", ["print", `gui/${process.getuid?.() ?? 0}/${LABEL}`]).then(({ stdout }) => stdout, () => "") : "";
+    const pid = Number(/\bpid = (\d+)/u.exec(output)?.[1]) || undefined;
+    const active = Boolean(pid || /\bstate = running/u.test(output));
+    return { ...common, installed, active, ...(pid ? { pid } : {}), ...(installed ? { definitionPath: path } : {}) };
   }
   if (process.platform === "linux") {
     const path = systemdUnitPath(), installed = await fileExists(path);
     const active = installed && await execFile("systemctl", ["--user", "is-active", "--quiet", "frely-mcp.service"]).then(() => true, () => false);
-    return { ...common, installed, active, ...(installed ? { definitionPath: path } : {}) };
+    const pid = active ? await execFile("systemctl", ["--user", "show", "--property=MainPID", "--value", "frely-mcp.service"]).then(({ stdout }) => Number(stdout.trim()) || undefined, () => undefined) : undefined;
+    return { ...common, installed, active, ...(pid ? { pid } : {}), ...(installed ? { definitionPath: path } : {}) };
   }
   return { ...common, installed: false, active: false };
 }
@@ -130,4 +132,26 @@ function xml(value: string): string {
 function systemdQuote(value: string): string {
   if (/[\x00-\x1f\x7f]/u.test(value)) throw new Error("Service arguments contain control characters.");
   return '"' + value.replace(/%/gu, "%%").replace(/\$/gu, () => "$$").replace(/\\/gu, "\\\\").replace(/"/gu, '\\"') + '"';
+}
+
+/** Read our existing launch definition without rewriting environment, workspace or credentials. */
+export async function serviceCommand(): Promise<string[] | null> {
+  const path = process.platform === "darwin" ? launchAgentPath() : process.platform === "linux" ? systemdUnitPath() : null;
+  return path ? parseServiceCommand(process.platform, await readFile(path, "utf8")) : null;
+}
+
+export function parseServiceCommand(platform: string, text: string): string[] | null {
+  if (platform === "darwin") {
+    const array = /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/u.exec(text)?.[1];
+    if (!array) return null;
+    return [...array.matchAll(/<string>([\s\S]*?)<\/string>/gu)].map((m) => m[1]!
+      .replace(/&apos;/gu, "'").replace(/&quot;/gu, '\"').replace(/&lt;/gu, "<").replace(/&gt;/gu, ">").replace(/&amp;/gu, "&"));
+  }
+  if (platform === "linux") {
+    const line = /^ExecStart=(.*)$/mu.exec(text)?.[1];
+    if (!line || !/^(?:"(?:\\.|[^"\\])*"\s*)+$/u.test(line)) return null;
+    return [...line.matchAll(/"((?:\\.|[^"\\])*)"/gu)].map((m) => m[1]!
+      .replace(/\\(["\\])/gu, "$1").replace(/%%/gu, "%").replace(/\$\$/gu, "$"));
+  }
+  return null;
 }

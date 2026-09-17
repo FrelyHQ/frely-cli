@@ -13,7 +13,7 @@ await mkdir("artifacts", { recursive: true });
 await new Promise((resolve, reject) => {
   const child = spawn("bun", ["build", "src/index.ts", "--compile", `--target=bun-${target}`, "--minify",
     "--no-compile-autoload-dotenv", "--no-compile-autoload-bunfig", "--no-compile-autoload-tsconfig", "--no-compile-autoload-package-json",
-    "--define", `FRELY_BUILD_VERSION=${JSON.stringify(metadata.version)}`, "--define", "FRELY_STANDALONE=true", "--outfile", output], { stdio: "inherit" });
+    "--define", `FRELY_BUILD_VERSION=${JSON.stringify(metadata.version)}`, "--define", "FRELY_STANDALONE=true", "--define", `FRELY_BUILD_TARGET=${JSON.stringify(target)}`, "--outfile", output], { stdio: "inherit" });
   child.once("error", reject);
   child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`Standalone compilation failed: ${code}`)));
 });

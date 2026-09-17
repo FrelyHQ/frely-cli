@@ -18,6 +18,7 @@ function fixture() {
     state: "connected", mcpEnabled: true, updatedAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() };
   const calls = { session: 0, mcp: 0, storage: 0 };
   const dependencies: NonNullable<Parameters<typeof doctor>[1]> = {
+    inspectUpgrade: async () => ({ currentVersion: "0.6.2", latestVersion: "0.6.2", state: "current" as const, message: "Up to date.", installation: { method: "npm" as const, entry: "/test/npm/frely", platform: process.platform } }),
     inspectAuth: async () => ({ configured: true, credentialStored: true, relayUrl: binding.relayUrl,
       user: { id: binding.userId, email: "user@example.com" }, configPath: "/test/config.json" }),
     inspectMcpMetadata: async () => metadata, readDeviceBinding: async () => binding,
@@ -30,14 +31,14 @@ function fixture() {
   return { binding, metadata, connection, calls, dependencies };
 }
 
-test("doctor summary is concise and performs no remote, keyring or write probes", async () => {
+test("doctor summary is concise and performs no account, keyring or write probes", async () => {
   const f = fixture(), report = await doctor({}, f.dependencies);
   assert.equal(report.ok, true);
   assert.deepEqual(f.calls, { session: 0, mcp: 0, storage: 0 });
   assert.equal(report.details, undefined);
   assert.match(report.summary.connection, /recent heartbeat/);
   const output = formatDoctor(report);
-  assert.equal(output.trim().split("\n").length, 6);
+  assert.equal(output.trim().split("\n").length, 8);
   assert.doesNotMatch(output, /\/test\/config|\/test\/workspace|mca_/);
   assert.match(output, /frely doctor -v/);
 });
@@ -112,4 +113,35 @@ test("invalid MCP metadata is a failure, not silently treated as optional", asyn
   const report = await doctor({}, f.dependencies);
   assert.equal(report.ok, false);
   assert.doesNotMatch(JSON.stringify(report), /synthetic-secret/);
+});
+
+
+test("doctor exposes version checks as informational when an update is available or the registry is offline", async () => {
+  for (const state of ["available", "unavailable"] as const) {
+    const f = fixture();
+    f.dependencies.inspectUpgrade = async () => ({ currentVersion: "0.6.2", state,
+      message: state === "available" ? "0.6.2 → 0.7.0. Run frely upgrade." : "Version lookup unavailable.",
+      installation: { method: "npm", entry: "/test/npm/frely", platform: process.platform } });
+    const result = await doctor({}, f.dependencies);
+    assert.equal(result.ok, true);
+    assert.equal(result.update.state, state);
+    assert.equal(result.checks.find((check) => check.name === "upgrade")?.status, "info");
+    assert.equal(result.summary.installation, "npm: /test/npm/frely");
+  }
+});
+
+test("doctor distinguishes automatic activation from legacy service maintenance without accepting another process", async () => {
+  const f = fixture();
+  f.connection.cliVersion = "0.0.1";
+  f.dependencies.serviceStatus = async () => ({ installed: true, active: true, platform: process.platform, pid: process.pid });
+  f.connection.autoRefresh = true;
+  const automatic = await doctor({}, f.dependencies);
+  assert.match(automatic.summary.service, /will switch after active work/);
+  assert.doesNotMatch(automatic.summary.service, /restart.*local terminal/i);
+  f.connection.autoRefresh = false;
+  assert.match((await doctor({}, f.dependencies)).summary.service, /restart.*local terminal/i);
+  f.connection.autoRefresh = true;
+  f.dependencies.serviceStatus = async () => ({ installed: true, active: true, platform: process.platform, pid: process.pid + 1 });
+  const other = await doctor({}, f.dependencies);
+  assert.equal(other.checks.some((check) => check.name === "service_version"), false);
 });

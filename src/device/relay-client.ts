@@ -1,3 +1,5 @@
+import { watchServiceInstallation } from "../upgrade/service-refresh.js";
+import { MaintenanceGate, serveMaintenance } from "../upgrade/maintenance.js";
 import { requireMcpAuthorization } from "../mcp-authorization.js";
 import { McpLease } from "../runtime/mcp-lease.js";
 import WebSocket, { type RawData } from "ws";
@@ -20,6 +22,8 @@ import { openLocalProviderRequest, readLocalProviderBody } from "../provider/loc
 
 export interface RelayServeOptions {
   workspace?: string;
+  managedService?: boolean;
+  restartForUpgrade?: () => void;
   signal: AbortSignal;
   log?: (message: string) => void;
 }
@@ -34,47 +38,56 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
   diagnostic(log, "relay.started");
   const device = await ensureDevice();
   const reporter = connectionReporter(device, options.workspace);
+  const maintenance = options.managedService && process.platform !== "win32" ? new MaintenanceGate() : undefined;
+  const closeMaintenance = maintenance ? await serveMaintenance(maintenance) : undefined;
+  // Watch the current installation from the existing runtime, without an updater daemon.
+  const closeRefresh = maintenance && options.restartForUpgrade
+    ? watchServiceInstallation({ gate: maintenance, signal: options.signal, restart: options.restartForUpgrade, log, onEnabled: () => reporter.report({ type: "upgrade_watch", enabled: true }) })
+      .catch((error) => { diagnostic(log, "relay.upgrade_watch_unavailable", {}, error); return () => {}; })
+    : Promise.resolve(() => {});
   let delayMs = 1000;
-  while (!options.signal.aborted) {
-    let session: RelayMcpSession | null = null;
-    let lease: McpLease | null = null;
-    try {
-      let authorization = null;
-      if (options.workspace) {
-        try {
-          authorization = await requireMcpAuthorization(options.workspace);
-          if (authorization.grant.deviceId !== device.deviceId) throw new Error("MCP device differs from the connected device.");
-          lease = new McpLease(authorization.grant.id, Date.parse(authorization.grant.expiresAt!));
-          const guard = lease;
-          session = await RelayMcpSession.create(options.workspace, { assertAuthorized: () => guard.assert(), signal: guard.controller.signal, log });
-          const activeSession = session;
-          guard.controller.signal.addEventListener("abort", () => { void activeSession.close(); }, { once: true });
-        } catch (error) {
-          diagnostic(log, "relay.authorization_unavailable", {}, error);
-          reporter.report({ type: "authorization_unavailable", error });
-          authorization = null;
-          lease?.close();
-          await session?.close();
-          session = null; lease = null;
+  try {
+    while (!options.signal.aborted) {
+      let session: RelayMcpSession | null = null;
+      let lease: McpLease | null = null;
+      try {
+        let authorization = null;
+        if (options.workspace) {
+          try {
+            authorization = await requireMcpAuthorization(options.workspace);
+            if (authorization.grant.deviceId !== device.deviceId) throw new Error("MCP device differs from the connected device.");
+            lease = new McpLease(authorization.grant.id, Date.parse(authorization.grant.expiresAt!));
+            const guard = lease;
+            session = await RelayMcpSession.create(options.workspace, { assertAuthorized: () => guard.assert(), signal: guard.controller.signal, log, ...(maintenance ? { maintenance } : {}) });
+            const activeSession = session;
+            guard.controller.signal.addEventListener("abort", () => { void activeSession.close(); }, { once: true });
+          } catch (error) {
+            diagnostic(log, "relay.authorization_unavailable", {}, error);
+            reporter.report({ type: "authorization_unavailable", error });
+            authorization = null;
+            lease?.close();
+            await session?.close();
+            session = null; lease = null;
+          }
         }
+        reporter.report({ type: "connecting", mcpEnabled: Boolean(authorization), authorizationId: authorization?.grant.id });
+        const grant = await connectionGrant(device, authorization ? { authorizationId: authorization.grant.id, sign: authorization.sign } : undefined);
+        await serveConnection(grant.websocketUrl, grant.accessToken, device.deviceId, session, lease, options.signal, log, reporter.report, maintenance);
+        delayMs = 1000;
+      } catch (error) {
+        if (options.signal.aborted) break;
+        diagnostic(log, "relay.disconnected", {}, error);
+        reporter.report({ type: "disconnected", error });
+        await wait(delayMs, options.signal);
+        delayMs = Math.min(delayMs * 2, 15_000);
+      } finally {
+        lease?.close();
+        await session?.close();
       }
-      reporter.report({ type: "connecting", mcpEnabled: Boolean(authorization), authorizationId: authorization?.grant.id });
-      const grant = await connectionGrant(device, authorization ? { authorizationId: authorization.grant.id, sign: authorization.sign } : undefined);
-      await serveConnection(grant.websocketUrl, grant.accessToken, device.deviceId, session, lease, options.signal, log, reporter.report);
-      delayMs = 1000;
-    } catch (error) {
-      if (options.signal.aborted) break;
-      diagnostic(log, "relay.disconnected", {}, error);
-      reporter.report({ type: "disconnected", error });
-      await wait(delayMs, options.signal);
-      delayMs = Math.min(delayMs * 2, 15_000);
-    } finally {
-      lease?.close();
-      await session?.close();
     }
-  }
-  reporter.report({ type: "stopped" });
-  await reporter.flush();
+    reporter.report({ type: "stopped" });
+    await reporter.flush();
+  } finally { (await closeRefresh)(); await closeMaintenance?.(); }
 }
 
 export async function serveConnection(
@@ -86,6 +99,7 @@ export async function serveConnection(
   signal: AbortSignal,
   log: (message: string) => void,
   report: (event: ConnectionEvent) => void = () => undefined,
+  maintenance?: MaintenanceGate,
 ): Promise<void> {
   if (signal.aborted) return;
   await new Promise<void>((resolve, reject) => {
@@ -95,6 +109,8 @@ export async function serveConnection(
       perMessageDeflate: false,
       handshakeTimeout: 15_000,
     });
+    // Do not switch while completed responses are still buffered for the relay.
+    const unregisterOutput = maintenance?.registerProcesses(() => socket.bufferedAmount);
     const inflight = new Map<string, InflightRequest>();
     const cancelled = new Set<string>();
     let finished = false;
@@ -108,6 +124,7 @@ export async function serveConnection(
     const finish = (error?: unknown) => {
       if (finished) return;
       finished = true;
+      unregisterOutput?.();
       clearInterval(heartbeat);
       for (const [id, item] of inflight) {
         cancelled.add(id);
@@ -143,7 +160,7 @@ export async function serveConnection(
       // WebSocket peers may deliver the same JSON envelope as either a text
       // or a binary frame. `rawDataBuffer` normalizes both forms before the
       // protocol validator parses the JSON.
-      void handleFrame(rawDataBuffer(data), socket, inflight, cancelled, session, lease, log).catch((error) => { diagnostic(log, "relay.frame_failed", {}, error); finish(error); });
+      void handleFrame(rawDataBuffer(data), socket, inflight, cancelled, session, lease, log, maintenance).catch((error) => { diagnostic(log, "relay.frame_failed", {}, error); finish(error); });
     });
   });
 }
@@ -156,6 +173,7 @@ async function handleFrame(
   session: RelayMcpSession | null,
   lease: McpLease | null,
   log: DiagnosticLog,
+  maintenance?: MaintenanceGate,
 ): Promise<void> {
   const envelope = decodeDeviceRelayEnvelope(data);
   if (envelope.type === "mcp_disabled") {
@@ -174,6 +192,9 @@ async function handleFrame(
   if (envelope.type !== "request") return;
   if (inflight.has(envelope.id)) { diagnostic(log, "relay.request_rejected", { requestId: envelope.id }, new Error("Duplicate Device Relay request id.")); send(socket, errorResponse(envelope.id, "duplicate_request", "Duplicate Device Relay request id."), log); return; }
   if (inflight.size >= DEVICE_RELAY_DEFAULT_MAX_INFLIGHT) { diagnostic(log, "relay.request_rejected", { requestId: envelope.id }); send(socket, errorResponse(envelope.id, "inflight_limit", "Device Relay request window is full."), log); return; }
+  let release: (() => void) | undefined;
+  try { release = maintenance?.enter(); }
+  catch { send(socket, errorResponse(envelope.id, "upgrade_in_progress", "Frely is preparing an upgrade. Retry after it completes."), log); return; }
   const controller = new AbortController();
   inflight.set(envelope.id, { request: envelope, controller });
   const operation = envelope.method === "provider"
@@ -185,6 +206,7 @@ async function handleFrame(
     diagnostic(log, "relay.request_failed", { requestId: envelope.id, ...(envelope.method === "mcp" ? mcpDiagnosticContext(envelope.payload) : {}) }, error);
     if (!cancelled.has(envelope.id)) send(socket, errorResponse(envelope.id, envelope.method === "mcp" ? "mcp_execution_failed" : "provider_execution_failed", safeMessage(error)), log);
   }).finally(() => {
+    release?.();
     inflight.delete(envelope.id);
     cancelled.delete(envelope.id);
   });
