@@ -4,13 +4,41 @@ Static landing page for https://cli.frely.cloud/, hosted on GitHub Pages.
 
 ## Develop
 
-No build step or package installation is required. From the repository root:
+The dependency-free static generator requires Node.js 22 or newer. No package
+installation is required. From the repository root:
 
 ```sh
-python3 -m http.server 8080 --bind 127.0.0.1 --directory site
+node site/build.mjs
+python3 -m http.server 8080 --bind 127.0.0.1 --directory _site
 ```
 
-Open http://localhost:8080. Any static HTTP server works.
+Open http://localhost:8080. Any static HTTP server works. Rebuild after editing
+the template or translation catalogs. Generated `_site/` files are ignored by Git.
+
+## Languages
+
+- `/en/`: English; `/zh/`: Simplified Chinese. Both are complete static pages,
+  including translated metadata, navigation, accessibility labels and copy feedback.
+- `/`: an English fallback page that selects the first supported browser language
+  when JavaScript is available. Chinese language variants select Simplified Chinese;
+  unsupported language lists fall back to English.
+- The header's **English / 中文** links remember an explicit selection locally.
+  That preference wins on later visits to `/`. Direct language URLs always keep
+  their language, regardless of browser settings or the saved preference.
+- Switching preserves the query string and section anchor. Disabled browser storage
+  does not prevent navigation. With JavaScript disabled, both languages and the
+  language links still work; automatic selection and preference storage are unavailable.
+
+Edit `template.html` for shared markup and `locales/en.json` / `locales/zh-CN.json`
+for copy. Keep the same keys in both catalogs. `{{key}}` values are HTML-escaped;
+put markup in the template, never in translation values. The build rejects missing,
+empty and unused translations. CLI commands, flags, manifest placeholders and
+product identifiers remain unchanged between languages. Documentation links still
+point to the existing repository documentation.
+
+Each language has its own canonical URL, `hreflang` alternatives and Open Graph
+metadata. The generated `sitemap.xml` lists both canonical pages. Relative asset and
+language URLs also support GitHub Pages project paths.
 
 ## Deploy
 
@@ -19,9 +47,11 @@ on `main`. It can also be run manually. GitHub Pages must use **GitHub Actions**
 as its publishing source. No separate deployment branch or application server
 is needed.
 
-The workflow publishes only `index.html`, `styles.css`, `app.js`, the repository
-license and trademark notices, and a generated `release.json` containing the
-source commit SHA. It does not publish the repository or CLI build output.
+The workflow validates the scripts, runs language routing checks and builds the
+static pages. It publishes only the generated HTML pages, `styles.css`, `app.js`,
+`locale.js`, `sitemap.xml`, `.nojekyll`, the repository license and trademark notices,
+and a generated `release.json` containing the source commit SHA. It does not publish
+the template, translation catalogs, repository or CLI build output.
 The root `npm run build` still builds only the CLI.
 
 Set the repository's Pages custom domain to `cli.frely.cloud`. In the
@@ -47,7 +77,8 @@ The npm package requires Node.js 22 or newer; standalone releases contain their
 runtime. Remote Agent use, local MCP authorization and Provider sharing have
 separate setup flows. Never describe the workspace as a shell sandbox.
 
-Check JavaScript syntax with `node --check site/app.js`. Review keyboard tab
+Run `node --check site/app.js`, `node --check site/locale.js`,
+`node --test site/locale.test.mjs` and `node site/build.mjs`. Review keyboard tab
 navigation, copy controls, mobile layouts and text enlargement after changes.
 The page remains readable without JavaScript and respects reduced motion.
 

@@ -28,17 +28,35 @@ for (const button of document.querySelectorAll('[data-copy]')) {
     const status = document.getElementById('copy-status');
     try {
       await navigator.clipboard.writeText(command.textContent.trim());
-      button.textContent = 'Copied';
-      status.textContent = 'Command copied to clipboard.';
+      button.textContent = status.dataset.copied;
+      status.textContent = status.dataset.success;
     } catch {
       const range = document.createRange();
       range.selectNodeContents(command);
       const selection = window.getSelection();
       selection.removeAllRanges();
       selection.addRange(range);
-      button.textContent = 'Selected';
-      status.textContent = 'Copy unavailable. The command is selected; use your device’s copy action.';
+      button.textContent = status.dataset.selected;
+      status.textContent = status.dataset.failure;
     }
-    window.setTimeout(() => { button.textContent = 'Copy'; }, 2200);
+    window.setTimeout(() => { button.textContent = status.dataset.idle; }, 2200);
   });
 }
+
+// Real links keep language switching available without JavaScript.
+for (const link of document.querySelectorAll('[data-language]')) {
+  const target = new URL(link.href);
+  target.search = window.location.search;
+  target.hash = window.location.hash;
+  link.href = target.href;
+  link.addEventListener('click', () => {
+    try { window.localStorage.setItem('frely-cli-language', link.dataset.language); } catch { /* Storage may be disabled. */ }
+  });
+}
+window.addEventListener('hashchange', () => {
+  for (const link of document.querySelectorAll('[data-language]')) {
+    const target = new URL(link.href);
+    target.hash = window.location.hash;
+    link.href = target.href;
+  }
+});
