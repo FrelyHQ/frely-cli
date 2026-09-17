@@ -386,3 +386,8 @@ node dist/index.js network help --json
 ```
 
 CLI unit tests use a fake credential store and temporary home directories. They do not verify the user's OS credential-store permissions or a deployed Network.
+
+The planned unified MCP entry will support wallet-funded capability use without
+a Frely account. Current device MCP authorization and demo Network calls do not
+implement that complete flow. See [Wallet access plan](docs/mcp-wallet-access-plan.md)
+for the accepted product boundary and remaining work.
