@@ -1,0 +1,9 @@
+{
+  "install": "npm install --global --ignore-scripts frely-cli@latest",
+  "login": "frely login",
+  "doctor": "frely doctor",
+  "mcpSetup": "frely mcp setup --workspace .",
+  "mcpUrl": "frely mcp url",
+  "providerShare": "frely provider share ollama",
+  "providerList": "frely provider list"
+}

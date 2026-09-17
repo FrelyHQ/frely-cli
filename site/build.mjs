@@ -6,9 +6,26 @@ import { createHash } from 'node:crypto';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = resolve(root, '_site');
-const template = await readFile(new URL('./template.html', import.meta.url), 'utf8');
+const shell = await readFile(new URL('./template.html', import.meta.url), 'utf8');
+const include = /\{\{> ([a-z][a-z0-9-]*)\}\}/g;
+const components = new Map();
+for (const [, name] of shell.matchAll(include)) {
+  if (!components.has(name)) {
+    const content = await readFile(new URL(`./components/${name}.html`, import.meta.url), 'utf8');
+    if (content.includes('{{>')) throw new Error(`Nested component includes are unsupported: ${name}`);
+    components.set(name, content.trim());
+  }
+}
+const template = shell.replace(include, (_, name) => components.get(name));
+if (template.includes('{{>')) throw new Error('Invalid component include');
+const commands = JSON.parse(await readFile(new URL('./commands.json', import.meta.url), 'utf8'));
 const token = /\{\{([\w.]+)\}\}/g;
-const required = new Set([...template.matchAll(token)].map((match) => match[1]).filter((key) => !key.startsWith('page.')));
+const required = new Set([...template.matchAll(token)].map((match) => match[1]).filter((key) => !key.startsWith('page.') && !key.startsWith('command.')));
+for (const [, key] of template.matchAll(token)) {
+  if (key.startsWith('command.') && (typeof commands[key.slice(8)] !== 'string' || !commands[key.slice(8)].trim())) {
+    throw new Error(`Missing or empty command: ${key}`);
+  }
+}
 const escapeHtml = (value) => value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const locales = [
   { lang: 'en', route: 'en', ogLocale: 'en_US', ogAlternate: 'zh_CN' },
@@ -34,7 +51,8 @@ for (const locale of locales) {
   for (const entry of locale.lang === 'en' ? [false, true] : [false]) {
     const page = { ...locale, ...assetVersions, entry: String(entry), base: entry ? './' : '../', enCurrent: locale.lang === 'en' ? 'page' : 'false', zhCurrent: locale.lang === 'zh-CN' ? 'page' : 'false' };
     const html = template.replace(token, (_, key) => {
-      const value = key.startsWith('page.') ? page[key.slice(5)] : messages[key];
+      const value = key.startsWith('page.') ? page[key.slice(5)]
+        : key.startsWith('command.') ? commands[key.slice(8)] : messages[key];
       if (typeof value !== 'string') throw new Error(`Unknown template key: ${key}`);
       return escapeHtml(value);
     });

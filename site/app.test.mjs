@@ -21,7 +21,7 @@ function fixture({ url = 'https://cli.frely.cloud/zh/?ref=docs#install', lang = 
     focus() { this.focused = true; },
     scrollIntoView() { this.scrolled = true; },
   });
-  const tabs = ['tools', 'agents', 'models'].map((name) => element({ 'aria-controls': 'panel-' + name, 'aria-selected': String(name === 'tools') }));
+  const tabs = ['tools', 'models', 'agents'].map((name) => element({ 'aria-controls': 'panel-' + name, 'aria-selected': String(name === 'tools') }));
   const panels = Object.fromEntries(tabs.map((tab, index) => [tab.getAttribute('aria-controls'), element({}, { hidden: index !== 0 })]));
   const links = ['en', 'zh'].map((language) => element({}, { href: new URL('../' + language + '/', location).href, dataset: { language } }));
   const command = { textContent: ' frely doctor ' };
@@ -65,7 +65,7 @@ test('direct workflow links reveal the right panel on load, hash changes and lan
   assert.equal(f.panels['panel-models'].hidden, false);
   assert.equal(f.panels['panel-tools'].hidden, true);
   assert.equal(f.panels['panel-models'].scrolled, true);
-  assert.equal(f.tabs[2].attrs['aria-selected'], 'true');
+  assert.equal(f.tabs[1].attrs['aria-selected'], 'true');
   const translated = fixture({ url: f.links[1].href });
   assert.equal(translated.panels['panel-models'].hidden, false);
   f.hash('#panel-tools');
