@@ -1,6 +1,6 @@
 # frely-cli
 
-设计与 ChatGPT MCP 用户流程见 [`docs/chatgpt-mcp.md`](docs/chatgpt-mcp.md)。
+设备 MCP 的产品定义与通用客户端接入见 [`docs/device-mcp.md`](docs/device-mcp.md)。
 
 `frely-cli` is Frely's local command-line client, remote Agent bridge, and local MCP runtime. Remote Agent use and local tool sharing are separate flows.
 
@@ -12,10 +12,10 @@ release. Check the installed version and published release before following them
 
 ```text
 Remote Agent Skill: install -> frely login -> frely skill install -> frely agent invoke
-Local tool sharing:  install -> frely login -> frely mcp setup -> add stable MCP URL -> OAuth authorize
+Device MCP:  install on target computer -> frely login -> frely mcp -> add MCP URL to client -> OAuth authorize
 ```
 
-`frely skill install` installs a local trigger Skill. It does not install a model or change the user's current model Provider/Base URL. `frely mcp setup` provisions local file, shell, process, and workspace execution; consuming a remote Frely Agent does not require that local execution authorization.
+`frely skill install` installs a local trigger Skill. It does not install a model or change the user's current model Provider/Base URL. `frely mcp` provisions local file, shell, process, and workspace execution; consuming a remote Frely Agent does not require that local execution authorization.
 
 There is no separate `friday-local` project. Local MCP execution belongs to `frely-cli`.
 
@@ -158,17 +158,19 @@ printf '%s' 'Your complete task' | \
   frely agent invoke '<distribution-id>' --input-stdin --json
 ```
 
-### Local MCP connection
+### Device MCP: control this computer from a remote client
 
-For local workspace, file, shell, and process sharing, enable the separate local MCP runtime:
+Frely CLI turns the target computer into a personal device MCP service. ChatGPT in a browser, Claude Code on another computer, and other remote HTTP MCP clients with OAuth use the same endpoint. Install and run Frely CLI on the computer to control; the calling computer only needs its MCP client.
+
+Enable file, shell and process access on the target computer:
 
 ```sh
-frely mcp setup --workspace /path/to/project
+frely mcp --workspace /path/to/project
 ```
 
 `frely login` requests a restricted account session through browser device authorization. Basic sessions use private plaintext files, not the OS credential store. Legacy account cookies do not migrate to this store. Basic features and Network commands do not initialize MCP credentials.
 
-`frely mcp setup` initializes a separate secure MCP key, requests browser approval for this device and workspace, and installs the user-level Device Relay service. The default authorization is 90 days; `--days 1..180` selects a duration. `frely mcp renew --days 180` requires a new approval and rotates the MCP execution key. The MCP URL remains bound to the device. Login refresh, OAuth refresh, restart and repeated setup do not extend authorization.
+`frely mcp` initializes a separate secure MCP key, requests browser approval for this device and workspace, and installs the user-level Device Relay service. The default authorization is 90 days; `--days 1..180` selects a duration. `frely mcp renew --days 180` requires a new approval and rotates the MCP execution key. The MCP URL remains bound to the device. Login refresh, OAuth refresh, restart and repeated setup do not extend authorization.
 
 Services use macOS LaunchAgents, Linux systemd user units, or Windows Task Scheduler for the logged-on user. Windows implementation needs native acceptance testing. Linux MCP secure storage can require Secret Service or an injected key; basic installation does not.
 
@@ -182,15 +184,21 @@ Add the exact printed URL to a remote MCP client with OAuth support, choose
 OAuth and complete authorization. Keep the computer online. Ask the client to
 list the top-level names in your selected workspace, without writing files or
 running shell commands. A returned result that matches the folder verifies the
-first connection. `frely doctor` shows whether the running relay has a recent heartbeat; it does not test ChatGPT OAuth or execute a tool through ChatGPT.
+first connection. `frely doctor` shows whether the running relay has a recent heartbeat; it does not complete client OAuth authorization or execute a tool through that client.
 
 Use `frely doctor` for a quick overview. If a call fails, run `frely doctor -v` for detailed diagnostics.
 
-Or show ChatGPT-oriented connection details with:
+For Claude Code on the calling computer, replace the placeholder with the URL printed on the target computer:
 
 ```sh
-frely mcp chatgpt
+claude mcp add --transport http frely-computer "<MCP_URL>"
 ```
+
+Open `/mcp` in Claude Code to complete OAuth authorization. Use a distinct server name per device. Ask the Agent to use Frely tools for remote work; its built-in shell still runs on the calling computer. Clients of the same device share its workspace and managed processes. Unknown-outcome writes must not be replayed.
+
+Manage your devices in Frely → **Device MCP** (`/user/account/connections`). The page shows execution permission and connection history, not a live online indicator. Client OAuth authorization and device execution permission have separate lifecycles.
+
+`frely mcp setup` and `frely mcp chatgpt` remain compatibility aliases. The latter prints the same connection details; it does not create a ChatGPT-specific service. A bare `frely mcp` uses the current directory.
 
 ## Local model sharing
 
@@ -239,9 +247,9 @@ frely agent invoke <distribution-id> (--input <text>|--input-stdin) [--json]
 frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]
 frely provider list [--json]
 frely provider finalize <provider-id>
-frely mcp setup [--workspace <path>]
+frely mcp [--workspace <path>] [--days 1..180]
+frely mcp renew [--days 1..180]
 frely mcp url [--json]
-frely mcp chatgpt
 frely mcp serve [--workspace <path>]
 frely mcp service start|stop|uninstall
 frely mcp revoke
@@ -324,7 +332,7 @@ The MCP authorization and workspace must also match the running relay. Missing,
 stale or old-runtime observations are reported as unknown. After upgrading,
 restart the background service to enable heartbeat reporting. Diagnostics never
 restart it automatically or open a second relay connection. Neither mode claims
-to test ChatGPT OAuth or an end-to-end tool call.
+to test client OAuth or an end-to-end tool call.
 
 Legacy `frely status`, `frely mcp status`, `frely mcp service status` and
 `frely doctor --mcp` remain compatible for existing scripts, but are no longer

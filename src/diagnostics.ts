@@ -46,10 +46,10 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
   const mcpMatches = Boolean(metadata && bindingMatches && metadata.grant.deviceId === binding?.deviceId
     && metadata.relayUrl === binding?.relayUrl && metadata.userId === binding?.userId);
   add("mcp", metadataError || expired || (metadata && !mcpMatches) || (!metadata && options.mcp) ? "fail" : metadata ? "pass" : "info",
-    metadataError ? "Configuration could not be read. Run frely mcp setup."
+    metadataError ? "Configuration could not be read. Run frely mcp."
       : !metadata ? "Not enabled (optional)."
       : expired ? "Authorization expired or inactive. Run frely mcp renew."
-      : !mcpMatches ? "Authorization does not match this account/device. Run frely mcp setup."
+      : !mcpMatches ? "Authorization does not match this account/device. Run frely mcp."
       : `Configured; expires ${metadata.grant.expiresAt} (local authorization).`);
 
   const service = metadata || binding ? await dependencies.serviceStatus().catch(() => null) : null;

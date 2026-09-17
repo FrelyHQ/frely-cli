@@ -14,13 +14,12 @@ export const COMMANDS = [
   { id: "provider.share", usage: "frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]", auth: "account", effect: "remote-write", purpose: "Publish a local model Provider." },
   { id: "provider.list", usage: "frely provider list [--json]", auth: "account", effect: "read", purpose: "List configured local Providers." },
   { id: "provider.finalize", usage: "frely provider finalize <provider-id>", auth: "account", effect: "remote-write", purpose: "Finish a prepared local Provider." },
-  { id: "mcp.setup", usage: "frely mcp [setup] [--workspace <path>] [--days 1..180]", auth: "account-and-browser", effect: "authorization", purpose: "Authorize local tool execution and install its background service." },
-  { id: "mcp.renew", usage: "frely mcp renew [--days 1..180]", auth: "account-and-browser", effect: "authorization", purpose: "Renew local MCP execution authorization." },
-  { id: "mcp.url", usage: "frely mcp url [--json]", auth: "mcp", effect: "read", purpose: "Read this device's MCP URL." },
-  { id: "mcp.chatgpt", usage: "frely mcp chatgpt", auth: "mcp", effect: "read", purpose: "Read MCP connection details for ChatGPT." },
+  { id: "mcp.setup", usage: "frely mcp [--workspace <path>] [--days 1..180]", auth: "account-and-browser", effect: "authorization", purpose: "Enable this computer as a device MCP service for remote HTTP MCP clients with OAuth; install its background service." },
+  { id: "mcp.renew", usage: "frely mcp renew [--days 1..180]", auth: "account-and-browser", effect: "authorization", purpose: "Renew this device's execution authorization without changing its MCP URL." },
+  { id: "mcp.url", usage: "frely mcp url [--json]", auth: "mcp", effect: "read", purpose: "Read this device's stable MCP URL; --json includes HTTP transport and OAuth connection details." },
   { id: "mcp.serve", usage: "frely mcp serve [--workspace <path>]", auth: "account-and-mcp", effect: "local-execution", purpose: "Serve authorized local workspace tools." },
   { id: "mcp.service", usage: "frely mcp service start|stop|uninstall", auth: "none", effect: "local-service", purpose: "Manage the local MCP background service; use frely doctor to inspect it." },
-  { id: "mcp.revoke", usage: "frely mcp revoke", auth: "account", effect: "remote-write", purpose: "Revoke local MCP execution authorization." },
+  { id: "mcp.revoke", usage: "frely mcp revoke", auth: "account", effect: "remote-write", purpose: "Revoke device MCP execution authorization for every connected client." },
   { id: "mcp.stdio", usage: "frely mcp stdio [--workspace <path>]", auth: "mcp", effect: "local-execution", purpose: "Serve authorized local tools over stdio." },
   { id: "network", usage: "frely network setup|status|find|use|logout [--json]", auth: "network", effect: "subcommand-dependent", purpose: "Access Frely Network using its separate setup and credentials." },
 ] as const;
@@ -40,6 +39,9 @@ export function agentHelp() {
       "A Key amount limit is a spending cap. It reserves no funds and remains subject to its owner's available Plan allowance and Credit.",
       "Budget sources are independent constraints. Do not sum their remaining amounts or describe them as a Key balance.",
       "Installing a remote Agent Skill does not replace the host's current model provider.",
+      "Device MCP exposes this computer to remote HTTP MCP clients with OAuth. Commands execute on the device, not on the calling computer.",
+      "Use frely mcp to enable device MCP, frely mcp url for its address, and frely doctor [-v] for status and diagnostics.",
+      "Remote clients of one device share its workspace and managed processes. Shell uses the device OS account; it is not a workspace sandbox.",
     ],
     commands: COMMANDS,
   };
@@ -47,4 +49,13 @@ export function agentHelp() {
 
 export function cliUsage(): string {
   return "Usage:\n" + COMMANDS.map((command) => "  " + command.usage + "\n").join("");
+}
+
+export function mcpUsage(): string {
+  return "Device MCP — use this computer from a remote MCP client.\n\nUsage:\n"
+    + COMMANDS.filter((command) => command.id.startsWith("mcp.")).map((command) => "  " + command.usage + "\n").join("")
+    + "\nStatus and diagnostics: frely doctor [-v] [--json]\n\n"
+    + "Run setup on the computer to control. Add its MCP URL to ChatGPT, Claude Code on another computer, or another HTTP MCP client, then authorize with OAuth.\n"
+    + "Clients share the device workspace and managed processes. Shell runs under the device OS account.\n"
+    + "Compatibility: frely mcp setup and frely mcp chatgpt remain available.\n";
 }

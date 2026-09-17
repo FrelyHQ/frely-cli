@@ -14,7 +14,8 @@ import { discoverLocalModels } from "./provider/local.js";
 import { finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider, waitForLocalProviderRelay } from "./provider/control.js";
 import { getLocalProvider, isSupportedLocalModelName, listLocalProviders, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider } from "./provider/state.js";
 import { VERSION } from "./version.js";
-import { agentHelp, cliUsage } from "./agent-help.js";
+import { agentHelp, cliUsage, mcpUsage } from "./agent-help.js";
+import { normalizeMcpArgs } from "./mcp-command.js";
 import { getKeyBudget, KeyBudgetError, publicKeyBudgetError } from "./key-budget.js";
 import { runNetwork, publicNetworkError } from "./network.js";
 import { installSkillAdapter, invokeInstalledAgent, publicSkillAccessError, removeSkillAdapter, skillAdapterStatus } from "./skill/access.js";
@@ -22,10 +23,9 @@ import type { SkillHost, SkillScope } from "./skill/managed.js";
 
 
 async function main(): Promise<void> {
-  const args = process.argv.slice(2);
+  const args = normalizeMcpArgs(process.argv.slice(2));
   const command = args[0];
-  if (command === "mcp" && ["--help", "help", "-h"].includes(args[1] ?? "")) return usage();
-  if (command === "mcp" && args.length === 1) args.push("setup");
+  if (command === "mcp" && args[1] === "help") { stdout.write(mcpUsage()); return; }
   if (command === "--version" || command === "-v" || command === "version") {
     stdout.write(`${VERSION}\n`);
     return;
@@ -114,7 +114,7 @@ async function main(): Promise<void> {
     }, { openBrowser: !noBrowser });
     const user = result.user;
     stdout.write(`Logged in as ${user.email}.\n`);
-    stdout.write("Run `frely mcp setup --workspace <path>` to provision this machine and get the ChatGPT MCP address.\n");
+    stdout.write("Run `frely mcp --workspace <path>` on the computer you want to control, then connect your MCP client with OAuth.\n");
     return;
   }
 
@@ -217,17 +217,20 @@ async function main(): Promise<void> {
     const old = await inspectMcpMetadata();
     const workspace = option(args, "--workspace") ?? (args[1] === "renew" ? old?.grant.workspace : undefined) ?? process.cwd();
     const authorization = await setupMcpAuthorization(workspace, option(args, "--days"), args[1] === "renew", ({ verificationUri, keyThumbprint, days }) => {
-      stdout.write(`MCP remote execution authorization: ${days} days\nMCP key: ${keyThumbprint}\nApprove: ${verificationUri}\n`);
+      stdout.write(`Device MCP execution authorization: ${days} days\nMCP key: ${keyThumbprint}\nApprove: ${verificationUri}\n`);
     });
     const service = await installMcpService(authorization.grant.workspace);
     stdout.write(`MCP URL: ${authorization.mcpUrl}\nExpires: ${authorization.grant.expiresAt}\nBackground service: ${service.active ? "running" : "installed"}\n`);
-    stdout.write("MCP URL is stable. Configure the remote client with OAuth; renewal does not change the URL.\n");
+    stdout.write("Connect ChatGPT, Claude Code on another computer, or another remote HTTP MCP client with OAuth.\n");
+    stdout.write(`Manage device MCP: ${new URL("/user/account/connections", authorization.relayUrl).toString()}\n`);
+    stdout.write("Keep this computer running and online. Check configuration and connection with frely doctor; use -v for diagnostics.\n");
+    stdout.write("Verify the client connection by asking for workspace_info or list_directory. The MCP URL stays the same after renewal.\n");
     return;
   }
 
   if (command === "mcp" && (args[1] === "url" || args[1] === "chatgpt")) {
     const authorization = await requireMcpAuthorization();
-    const value = { deviceId: authorization.grant.deviceId, mcpUrl: authorization.mcpUrl, authentication: "oauth", expiresAt: authorization.grant.expiresAt };
+    const value = { deviceId: authorization.grant.deviceId, mcpUrl: authorization.mcpUrl, transport: "http", authentication: "oauth", workspace: authorization.grant.workspace, expiresAt: authorization.grant.expiresAt };
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
     else if (args[1] === "chatgpt") stdout.write(`MCP URL: ${authorization.mcpUrl}\nAuthentication: OAuth\n`);
     else stdout.write(`${authorization.mcpUrl}\n`);

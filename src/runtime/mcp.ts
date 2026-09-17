@@ -62,10 +62,10 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
       { readOnly: false, destructive: true, idempotent: false },
     ),
     tool("start_process", "Start a persistent shell process as the current OS user.", { command: stringSchema("Shell command"), cwd: stringSchema("Relative working directory", ".") }, { readOnly: false, destructive: true, idempotent: false }),
-    tool("list_processes", "List processes started by this MCP session.", {}, { readOnly: true }),
+    tool("list_processes", "List processes started by this MCP runtime.", {}, { readOnly: true }),
     tool("read_process", "Read process output using absolute cursors.", { processId: stringSchema("Process id"), stdoutCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), stderrCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER) }, { readOnly: true }),
     tool("write_process", "Write stdin to a running process.", { processId: stringSchema("Process id"), input: stringSchema("Input text") }, { readOnly: false, destructive: true, idempotent: false }),
-    tool("stop_process", "Stop a process started by this MCP session.", { processId: stringSchema("Process id") }, { readOnly: false, destructive: true, idempotent: true }),
+    tool("stop_process", "Stop a process started by this MCP runtime.", { processId: stringSchema("Process id") }, { readOnly: false, destructive: true, idempotent: true }),
   ] }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {

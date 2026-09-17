@@ -56,9 +56,9 @@ export async function loadMcpAuthorization(): Promise<McpAuthorization | null> {
 
 export async function requireMcpAuthorization(workspace?: string): Promise<McpAuthorization> {
   const authorization = await loadMcpAuthorization();
-  if (!authorization) throw new Error("MCP is not enabled. Run frely mcp setup.");
+  if (!authorization) throw new Error("MCP is not enabled. Run frely mcp.");
   assertMcpActive(authorization.grant);
-  if (workspace !== undefined && await realpath(resolve(workspace)) !== authorization.grant.workspace) throw new Error("Workspace differs from the approved MCP workspace. Run frely mcp setup for the new workspace.");
+  if (workspace !== undefined && await realpath(resolve(workspace)) !== authorization.grant.workspace) throw new Error("Workspace differs from the approved MCP workspace. Run frely mcp for the new workspace.");
   const auth = await requireLogin();
   if (authorization.relayUrl !== auth.config.relayUrl || authorization.userId !== auth.user.id) throw new Error("MCP authorization belongs to a different account.");
   const response = await relayFetch(auth.config.relayUrl, auth.credential, `${ENDPOINT}?requestId=${authorization.grant.id}`, { method: "GET" });
@@ -116,7 +116,7 @@ export async function setupMcpAuthorization(workspaceInput: string, daysInput?: 
     if (current.status !== "pending") throw new Error("MCP approval was denied or expired.");
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
-  throw new Error("MCP approval expired. Run frely mcp setup.");
+  throw new Error("MCP approval expired. Run frely mcp.");
 }
 
 export async function revokeMcpAuthorization(): Promise<void> {
