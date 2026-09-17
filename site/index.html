@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101211">
+  <meta name="description" content="Frely CLI connects your terminal to remote agents, local MCP tools, and local models. Open source. Install with npm or download a standalone executable.">
+  <meta property="og:title" content="Frely CLI — Your AI. On your terms.">
+  <meta property="og:description" content="Remote agents, local tools, and your own models. Connected from one open-source command line.">
+  <meta property="og:type" content="website">
+  <link rel="canonical" href="https://cli.frely.cloud/">
+  <title>Frely CLI — Your AI. On your terms.</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23101211'/%3E%3Cpath d='m7 9 7 7-7 7M18 23h7' fill='none' stroke='%23d3fa6a' stroke-width='3'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+  <noscript><style>.workflow-tabs{display:none}.workflow-layout{display:block}.workflow-panel[hidden]{display:block}.copy-button{display:none}</style></noscript>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="header wrap">
+    <a class="brand" href="#" aria-label="Frely CLI home"><span class="brand-symbol" aria-hidden="true">›_</span>frely<span class="brand-label">CLI</span></a>
+    <nav aria-label="Main navigation">
+      <a href="#workflows">What it does</a>
+      <a href="https://github.com/FrelyHQ/frely-cli#readme">Docs</a>
+      <a class="github-link" href="https://github.com/FrelyHQ/frely-cli">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <a class="release" href="https://github.com/FrelyHQ/frely-cli/releases/latest"><span>OPEN SOURCE</span> Meet Frely CLI <span aria-hidden="true">↗</span></a>
+        <h1 id="hero-title">Your AI.<br>On your <em>terms.</em></h1>
+        <p class="hero-description">Bring remote agents, local tools, and your own models into one workflow. Right from your terminal.</p>
+        <a class="button primary" href="#install">Install Frely CLI <span aria-hidden="true">↓</span></a>
+        <p class="platform-note">macOS · Linux · Windows</p>
+      </div>
+      <div class="terminal" aria-label="Example Frely CLI commands">
+        <div class="terminal-bar"><span class="terminal-title"><span aria-hidden="true">›_</span> frely / quick tour</span><span class="mono">EXAMPLE</span></div>
+        <div class="terminal-body">
+          <div class="terminal-line"><span class="line-number">01</span><span class="comment"># One account. Your workflow.</span></div>
+          <div class="terminal-line"><span class="line-number">02</span><code><span class="prompt">$</span> frely login</code></div>
+          <div class="terminal-line spacer"><span class="line-number">03</span></div>
+          <div class="terminal-line"><span class="line-number">04</span><span class="comment"># Give your AI access to local tools</span></div>
+          <div class="terminal-line"><span class="line-number">05</span><code><span class="prompt">$</span> frely mcp setup <span class="flag">--workspace</span> .</code></div>
+          <div class="terminal-line"><span class="line-number">06</span><code><span class="prompt">$</span> frely mcp url</code></div>
+          <div class="terminal-line spacer"><span class="line-number">07</span></div>
+          <div class="terminal-line"><span class="line-number">08</span><span class="comment"># Connect your local model</span></div>
+          <div class="terminal-line"><span class="line-number">09</span><code><span class="prompt">$</span> frely provider share <span class="flag">ollama</span></code></div>
+          <div class="terminal-line spacer"><span class="line-number">10</span></div>
+          <div class="terminal-line"><span class="line-number">11</span><code><span class="prompt">$</span> <span class="cursor" aria-hidden="true"></span></code></div>
+        </div>
+        <div class="terminal-footer"><span>YOUR TERMINAL. MORE CONNECTED.</span><span aria-hidden="true">⌘</span></div>
+      </div>
+    </section>
+    <div class="principles wrap" aria-label="Project highlights"><span>Built on MCP</span><span>Local-first tools</span><span>OpenAI-compatible models</span><a href="https://github.com/FrelyHQ/frely-cli/blob/main/LICENSE">Apache-2.0 licensed <span aria-hidden="true">↗</span></a></div>
+    <section class="workflows wrap section" id="workflows" aria-labelledby="workflows-title">
+      <div class="section-heading"><p class="eyebrow">01 / CONNECT YOUR WORKFLOW</p><h2 id="workflows-title">One CLI.<br>Three ways to connect.</h2><p>Choose what you need. Remote agents and local execution have separate setup flows.</p></div>
+      <div class="workflow-layout">
+        <div class="workflow-tabs" role="tablist" aria-label="Frely CLI workflows" aria-orientation="vertical">
+          <button class="workflow-tab" id="tab-tools" role="tab" aria-selected="true" aria-controls="panel-tools" tabindex="0"><span class="tab-number">01</span><span><strong>Connect local tools</strong><span>Let your AI work with your workspace.</span></span><span class="tab-arrow" aria-hidden="true">↗</span></button>
+          <button class="workflow-tab" id="tab-agents" role="tab" aria-selected="false" aria-controls="panel-agents" tabindex="-1"><span class="tab-number">02</span><span><strong>Call remote agents</strong><span>Bring published Frely agents to your host.</span></span><span class="tab-arrow" aria-hidden="true">↗</span></button>
+          <button class="workflow-tab" id="tab-models" role="tab" aria-selected="false" aria-controls="panel-models" tabindex="-1"><span class="tab-number">03</span><span><strong>Share local models</strong><span>Connect Ollama to your Frely account.</span></span><span class="tab-arrow" aria-hidden="true">↗</span></button>
+        </div>
+        <div class="workflow-panels">
+          <div class="workflow-panel" id="panel-tools" role="tabpanel" aria-labelledby="tab-tools" tabindex="0">
+            <p class="panel-label">LOCAL TOOLS / MCP</p><h3>Your workspace,<br>within reach.</h3><p>Connect a remote MCP client to local files, shell commands, and persistent processes. Approve your device and workspace in the browser, then add the stable MCP URL to your client.</p>
+            <pre><code>frely login
+frely mcp setup --workspace .
+frely mcp url</code></pre>
+            <p class="fineprint">Local execution requires your approval. Shell commands run with your OS user’s permissions; the workspace is not a shell sandbox.</p>
+            <a class="text-link" href="https://github.com/FrelyHQ/frely-cli/blob/main/docs/chatgpt-mcp.md">Read the MCP setup guide <span aria-hidden="true">↗</span></a>
+          </div>
+          <div class="workflow-panel" id="panel-agents" role="tabpanel" aria-labelledby="tab-agents" tabindex="0" hidden>
+            <p class="panel-label">REMOTE AGENTS / SKILLS</p><h3>More capabilities.<br>Your familiar host.</h3><p>Install a published Frely Agent as a local trigger Skill for Codex, Claude Code, Pi, or another supported host. Keep your current model and provider configuration.</p>
+            <pre><code>frely login
+frely skill install &lt;manifest-url&gt; \
+  --host codex --scope global
+frely agent invoke &lt;distribution-id&gt; \
+  --input "Your task"</code></pre>
+            <p class="fineprint">Replace the placeholders with a published Agent’s manifest URL and distribution ID. Remote Agent use does not require local MCP setup.</p>
+            <a class="text-link" href="https://github.com/FrelyHQ/frely-cli#first-use">Read the Agent guide <span aria-hidden="true">↗</span></a>
+          </div>
+          <div class="workflow-panel" id="panel-models" role="tabpanel" aria-labelledby="tab-models" tabindex="0" hidden>
+            <p class="panel-label">LOCAL MODELS / PROVIDERS</p><h3>Your model.<br>A wider workspace.</h3><p>Connect a running Ollama or another loopback OpenAI-compatible runtime as a personal Frely Provider. Use it through your existing Frely Access Points and API keys.</p>
+            <pre><code>frely login
+frely provider share ollama
+frely provider list</code></pre>
+            <p class="fineprint">Requires a running local model and an empty, active personal Provider slot. Sharing a Provider does not enable local MCP execution.</p>
+            <a class="text-link" href="https://github.com/FrelyHQ/frely-cli#local-model-sharing">Read the Provider guide <span aria-hidden="true">↗</span></a>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="install-section" id="install" aria-labelledby="install-title"><div class="wrap install-layout">
+      <div><p class="eyebrow">02 / START HERE</p><h2 id="install-title">A small install.<br>A new connection.</h2><p>Install the CLI, sign in, then choose your workflow.</p><a class="text-link" href="https://github.com/FrelyHQ/frely-cli/releases/latest">Prefer a standalone executable? <span aria-hidden="true">↗</span></a><p class="fineprint">Standalone releases include their runtime.<br>The npm package requires Node.js 22 or newer.</p></div>
+      <ol class="install-steps">
+        <li><div class="step-heading"><span>01</span><h3>Install or update</h3><span class="step-meta">npm</span></div><div class="command"><code id="install-command">npm install --global --ignore-scripts frely-cli@latest</code><button class="copy-button" data-copy="install-command" aria-label="Copy npm install command">Copy</button></div></li>
+        <li><div class="step-heading"><span>02</span><h3>Sign in with your browser</h3></div><div class="command"><code id="login-command">frely login</code><button class="copy-button" data-copy="login-command" aria-label="Copy login command">Copy</button></div></li>
+        <li><div class="step-heading"><span>03</span><h3>Check your setup</h3></div><div class="command"><code id="doctor-command">frely doctor</code><button class="copy-button" data-copy="doctor-command" aria-label="Copy doctor command">Copy</button></div></li>
+      </ol>
+    </div></section>
+    <section class="open-source wrap section" aria-labelledby="source-title"><div><p class="eyebrow">03 / OPEN BY DESIGN</p><h2 id="source-title">Read it. Run it.<br>Make it better.</h2><p>Frely CLI and this page are open source. Explore the code, report an issue, or contribute your next improvement.</p><p class="fineprint">The CLI connects to Frely’s hosted Relay service. The open-source client and local MCP runtime are licensed under Apache-2.0; Frely trademarks remain reserved.</p></div><div class="source-actions"><a class="button secondary" href="https://github.com/FrelyHQ/frely-cli">Explore the source <span aria-hidden="true">↗</span></a><a class="text-link" href="https://github.com/FrelyHQ/frely-cli/blob/main/CONTRIBUTING.md">Contribution guide <span aria-hidden="true">↗</span></a></div></section>
+  </main>
+  <footer class="footer wrap"><a class="brand" href="#" aria-label="Frely CLI home"><span class="brand-symbol" aria-hidden="true">›_</span>frely<span class="brand-label">CLI</span></a><span class="footer-note">A little closer to your machine.</span><nav aria-label="Footer navigation"><a href="https://app.frely.cloud">Frely</a><a href="https://github.com/FrelyHQ/frely-cli/blob/main/SECURITY.md">Security</a><a href="https://github.com/FrelyHQ/frely-cli/blob/main/TRADEMARKS.md">Trademarks</a></nav></footer>
+  <p class="sr-only" id="copy-status" role="status" aria-live="polite"></p>
+</body>
+</html>

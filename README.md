@@ -18,6 +18,13 @@ The hosted Friday Relay control plane remains a separate service dependency.
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development guidance and
 [`SECURITY.md`](SECURITY.md) for private vulnerability reporting.
 
+## Landing page
+
+The open-source CLI landing page lives in [`site/`](site/README.md), alongside
+the CLI under the same Apache-2.0 license and trademark policy. It is prepared
+for `cli.frely.cloud` and deploys independently as a static site. Website assets
+are excluded from the npm package.
+
 ## Quick install
 
 After the standalone artifacts and installer are released, Frely can serve `install.sh` as:
@@ -134,6 +141,10 @@ printf '%s' "$FRELY_AGENT_KEY" | \
 The CLI verifies the key against the target model-scoped MCP `tools/list` endpoint, stores it in the secure credential store, and records only `authMode=api-key` in managed Skill metadata. Use short-lived, single-model keys with bounded quota for sharing; do not paste a Creator master key.
 
 The generated Skill calls the published Agent through Frely's model-scoped MCP endpoint. Invoke the installed Agent from automation with the full task on stdin:
+
+```sh
+printf '%s' 'Your complete task' | \
+  frely agent invoke '<distribution-id>' --input-stdin --json
 ```
 
 For local workspace, file, shell, and process sharing, enable the separate local MCP runtime:
