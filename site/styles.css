@@ -9,7 +9,7 @@
   --line:#323833;
   --accent:#d3fa6a;
   --mono:"SFMono-Regular",Consolas,"Liberation Mono",monospace;
-  --sans:Inter,"Helvetica Neue",Arial,sans-serif;
+  --sans:Inter,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif;
 }
 
 * {
@@ -955,5 +955,43 @@ code {
   *,*::before,*::after {
     animation:none!important;
     transition:none!important;
+  }
+}
+
+/* Keep native language names visible at every viewport size. */
+.header nav {
+  flex-wrap:wrap;
+  gap:1rem 1.5rem;
+}
+.language-switch {
+  display:inline-flex;
+  align-items:center;
+  gap:.25rem;
+  padding:.2rem;
+  border:1px solid var(--line);
+  border-radius:5px;
+}
+.language-switch a {
+  padding:.35rem .55rem;
+  white-space:nowrap;
+  border-radius:3px;
+}
+.language-switch a[aria-current="page"],
+.language-switch a[aria-current="page"]:hover {
+  background:var(--accent);
+  color:var(--bg);
+}
+:lang(zh-CN) h1, :lang(zh-CN) h2, :lang(zh-CN) .workflow-panel h3 {
+  letter-spacing:-.025em;
+  line-height:1.25;
+}
+:lang(zh-CN) h1 {
+  font-size:clamp(2.8rem,5.3vw,5rem);
+}
+@media(max-width:600px) {
+  .header nav {
+    width:100%;
+    justify-content:space-between;
+    gap:.5rem;
   }
 }

@@ -41,8 +41,9 @@ jobs:
       - name: Prepare static website
         run: |
           node --check site/app.js
-          mkdir _site
-          cp site/index.html site/styles.css site/app.js LICENSE NOTICE TRADEMARKS.md _site/
+          node --check site/locale.js
+          node --test site/locale.test.mjs
+          node site/build.mjs
           node -e 'require("node:fs").writeFileSync("_site/release.json", JSON.stringify({sourceSha: process.env.GITHUB_SHA}) + "\n")'
 
       - name: Configure GitHub Pages
