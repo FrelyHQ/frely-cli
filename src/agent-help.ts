@@ -17,7 +17,7 @@ export const COMMANDS = [
   { id: "provider.finalize", usage: "frely provider finalize <provider-id>", auth: "account", effect: "remote-write", purpose: "Finish a prepared local Provider." },
   { id: "mcp.setup", usage: "frely mcp [--workspace <path>] [--days 1..180]", auth: "account-and-browser", effect: "authorization", purpose: "Enable this computer as a device MCP service for remote HTTP MCP clients with OAuth; install its background service." },
   { id: "mcp.renew", usage: "frely mcp renew [--days 1..180]", auth: "account-and-browser", effect: "authorization", purpose: "Renew this device's execution authorization without changing its MCP URL." },
-  { id: "mcp.url", usage: "frely mcp url [--json]", auth: "mcp", effect: "read", purpose: "Read this device's stable MCP URL; --json includes HTTP transport and OAuth connection details." },
+  { id: "mcp.url", usage: "frely mcp url [--json]", auth: "account-and-mcp-or-browser", effect: "authorization-if-unconfigured", purpose: "Read this device's stable MCP URL. If unconfigured, set up the user home directory with browser approval and install the background service. --json includes HTTP transport and OAuth connection details; setup prompts go to stderr." },
   { id: "mcp.serve", usage: "frely mcp serve [--workspace <path>]", auth: "account-and-mcp", effect: "local-execution", purpose: "Serve authorized local workspace tools." },
   { id: "mcp.service", usage: "frely mcp service start|stop|uninstall", auth: "none", effect: "local-service", purpose: "Manage the local MCP background service; use frely doctor to inspect it." },
   { id: "mcp.revoke", usage: "frely mcp revoke", auth: "account", effect: "remote-write", purpose: "Revoke device MCP execution authorization for every connected client." },
@@ -42,6 +42,7 @@ export function agentHelp() {
       "Installing a remote Agent Skill does not replace the host's current model provider.",
       "Device MCP exposes this computer to remote HTTP MCP clients with OAuth. Commands execute on the device, not on the calling computer.",
       "Use frely mcp to enable device MCP, frely mcp url for its address, and frely doctor [-v] for status and diagnostics.",
+      "If MCP is unconfigured, frely mcp url sets up the user home directory with browser approval. Existing workspaces and authorization expiry stay unchanged.",
       "Remote clients of one device share its workspace and managed processes. Shell uses the device OS account; it is not a workspace sandbox.",
     ],
     commands: COMMANDS,
@@ -57,6 +58,8 @@ export function mcpUsage(): string {
     + COMMANDS.filter((command) => command.id.startsWith("mcp.")).map((command) => "  " + command.usage + "\n").join("")
     + "\nStatus and diagnostics: frely doctor [-v] [--json]\n\n"
     + "Run setup on the computer to control. Add its MCP URL to ChatGPT, Claude Code on another computer, or another HTTP MCP client, then authorize with OAuth.\n"
+    + "If MCP is unconfigured, frely mcp url runs setup for your home directory (~), waits for browser approval, then installs the background service. Setup prompts go to stderr; stdout contains only the URL or JSON.\n"
+    + "Existing workspaces are preserved. Expired authorization requires frely mcp renew.\n"
     + "Clients share the device workspace and managed processes. Shell runs under the device OS account.\n"
     + "Compatibility: frely mcp setup and frely mcp chatgpt remain available.\n";
 }

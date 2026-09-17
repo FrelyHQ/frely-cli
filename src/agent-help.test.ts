@@ -11,10 +11,13 @@ test("Agent help runs offline without authentication or credential-store access"
     env: { ...process.env, FRELY_CREDENTIAL_STORE: "intentionally-invalid", FRELY_RELAY_URL: "not-a-url" },
   });
   assert.equal(result.stderr, "");
-  const help = JSON.parse(result.stdout) as { schemaVersion: string; cliVersion: string; commands: { id: string; usage: string }[] };
+  const help = JSON.parse(result.stdout) as { schemaVersion: string; cliVersion: string; commands: { id: string; usage: string; effect: string; purpose: string }[] };
   assert.equal(help.schemaVersion, "frely.cli.agent-help.v1");
   assert.equal(help.cliVersion, VERSION);
   assert.ok(help.commands.some(command => command.id === "key.budget"));
+  const mcpUrl = help.commands.find(command => command.id === "mcp.url");
+  assert.equal(mcpUrl?.effect, "authorization-if-unconfigured");
+  assert.match(mcpUrl!.purpose, /home directory with browser approval/);
   assert.ok(help.commands.some(command => command.id === "agent.invoke"));
   assert.equal(help.commands.find(command => command.id === "doctor")?.usage, "frely doctor [-v] [--json]");
   assert.ok(!help.commands.some(command => ["status", "mcp.status"].includes(command.id)));

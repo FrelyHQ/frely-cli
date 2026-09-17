@@ -1,3 +1,7 @@
+import { homedir } from "node:os";
+import { inspectMcpMetadata, requireMcpAuthorization, setupMcpAuthorization, type McpAuthorization } from "./mcp-authorization.js";
+import { installMcpService } from "./service.js";
+
 /**
  * Keep the public device-MCP entry client-neutral. Legacy commands still parse,
  * but are not advertised as separate ways to connect a particular AI client.
@@ -38,4 +42,20 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
     }
   }
   return args;
+}
+
+/** Bootstrap only an unconfigured device; existing grants retain their workspace and lifecycle. */
+export async function resolveMcpUrlAuthorization(
+  notify: (message: string) => void,
+  installService: typeof installMcpService = installMcpService,
+): Promise<McpAuthorization> {
+  if (await inspectMcpMetadata()) return requireMcpAuthorization();
+  const workspace = homedir();
+  notify(`No MCP workspace is configured. Setting up your home directory: ${workspace}\n`);
+  const authorization = await setupMcpAuthorization(workspace, undefined, false, ({ verificationUri, keyThumbprint, days }) => {
+    notify(`Device MCP execution authorization: ${days} days\nMCP key: ${keyThumbprint}\nApprove: ${verificationUri}\n`);
+  });
+  const service = await installService(authorization.grant.workspace);
+  notify(`Background service: ${service.active ? "running" : "installed"}\n`);
+  return authorization;
 }

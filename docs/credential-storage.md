@@ -24,6 +24,8 @@ Old account cookies and old `frely-cli` secure-store records do not migrate to p
 
 `frely mcp` and `frely mcp setup` initialize the MCP store and create a separate Ed25519 key. The CLI persists that key before opening the approval page. The page displays the device, key fingerprint, workspace, permissions and duration. Approval needs an account cookie and a user action; a basic bearer token is rejected even when accompanied by a cookie.
 
+When no MCP metadata exists, `frely mcp url` (also the legacy `frely mcp chatgpt` alias) runs the same setup for the user home directory (`~`), including browser approval and background-service installation. Existing grants are validated without changing their workspace, key or expiry. Invalid configuration, missing credentials, denial and expiry remain errors; they do not trigger replacement setup. Initialization messages go to stderr, preserving URL/JSON stdout.
+
 | Rule | Value |
 | --- | --- |
 | Default authorization | 90 days |

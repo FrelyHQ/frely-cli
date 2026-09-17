@@ -16,7 +16,7 @@ import { getLocalProvider, isSupportedLocalModelName, listLocalProviders, normal
 import { runCloud } from "./cloud.js";
 import { VERSION } from "./version.js";
 import { agentHelp, cliUsage, mcpUsage } from "./agent-help.js";
-import { normalizeMcpArgs } from "./mcp-command.js";
+import { normalizeMcpArgs, resolveMcpUrlAuthorization } from "./mcp-command.js";
 import { getKeyBudget, KeyBudgetError, publicKeyBudgetError } from "./key-budget.js";
 import { runNetwork, publicNetworkError } from "./network.js";
 import { installSkillAdapter, invokeInstalledAgent, publicSkillAccessError, removeSkillAdapter, skillAdapterStatus } from "./skill/access.js";
@@ -237,7 +237,7 @@ async function main(): Promise<void> {
   }
 
   if (command === "mcp" && (args[1] === "url" || args[1] === "chatgpt")) {
-    const authorization = await requireMcpAuthorization();
+    const authorization = await resolveMcpUrlAuthorization((message) => { process.stderr.write(message); });
     const value = { deviceId: authorization.grant.deviceId, mcpUrl: authorization.mcpUrl, transport: "http", authentication: "oauth", workspace: authorization.grant.workspace, expiresAt: authorization.grant.expiresAt };
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
     else if (args[1] === "chatgpt") stdout.write(`MCP URL: ${authorization.mcpUrl}\nAuthentication: OAuth\n`);

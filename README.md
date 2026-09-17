@@ -180,6 +180,8 @@ You can print the URL again with:
 frely mcp url
 ```
 
+If MCP has not been configured, `frely mcp url` automatically runs the equivalent of `frely mcp setup --workspace ~`: it requests browser approval for your home directory (90 days by default), then installs the background service and prints the URL. Run `frely login` first. To select a project directory instead, run `frely mcp --workspace /path/to/project` before requesting the URL. Existing workspaces are preserved; expired authorization still requires `frely mcp renew`. Setup prompts go to stderr, so stdout remains a single URL or, with `--json`, a JSON object. No URL is printed if approval or service installation fails.
+
 Add the exact printed URL to a remote MCP client with OAuth support, choose
 OAuth and complete authorization. Keep the computer online. Ask the client to
 list the top-level names in your selected workspace, without writing files or
