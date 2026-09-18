@@ -270,6 +270,8 @@ pre { padding:1rem 1.2rem; margin:1.4rem 0; border:1px solid var(--line); border
 .footer { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:1rem 2rem; padding-block:2rem; border-top:1px solid var(--line); }
 .footer .brand { font-size:1.3rem; }
 .footer-note { font-size:.75rem; color:var(--muted); }
+.product-hunt-badge { display:block; flex:0 0 auto; line-height:0; }
+.product-hunt-badge img { display:block; width:250px; max-width:100%; height:auto; }
 .footer nav { font-size:.8125rem; gap:.5rem 1.25rem; }
 .footer nav a { display:inline-flex; align-items:center; min-height:44px; }
 
