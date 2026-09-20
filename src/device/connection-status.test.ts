@@ -33,7 +33,7 @@ test("real relay pong updates private status; lease disable and disconnect canno
   });
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  reporter.report({ type: "connecting", authorizationId: lease.authorizationId, mcpEnabled: true });
+  reporter.report({ type: "connecting", authorizationId: lease.authorizationId, mcpEnabled: true, transport: "cloudflare_do" });
   let heartbeat!: () => void;
   const received = new Promise<void>((resolve) => { heartbeat = resolve; });
   runtime = serveConnection("ws://127.0.0.1:" + address.port, "synthetic-secret-token", binding.deviceId, null, lease,
@@ -43,6 +43,7 @@ test("real relay pong updates private status; lease disable and disconnect canno
   const connected = await readConnectionStatus(binding); assert.ok(connected);
   assert.equal(connectionIsLive(connected), true);
   assert.equal(connected.mcpEnabled, true);
+  assert.equal(connected.transport, "cloudflare_do");
   assert.equal(await readConnectionStatus({ ...binding, userId: "other" }), null);
   lease.close(); await reporter.flush();
   assert.equal((await readConnectionStatus(binding))?.mcpEnabled, false);

@@ -6,6 +6,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { deviceStatePath, type DeviceBinding } from "./state.js";
 import { diagnosticError } from "../runtime/diagnostics.js";
+import { isDeviceTransportKind, type DeviceTransportKind } from "./transport.js";
 
 export const HEARTBEAT_MAX_AGE_MS = 75_000;
 export interface ConnectionStatus {
@@ -21,6 +22,7 @@ export interface ConnectionStatus {
   workspace?: string;
   authorizationId?: string | undefined;
   mcpEnabled: boolean;
+  transport?: DeviceTransportKind | undefined;
   state: "connecting" | "connected" | "disconnected" | "stopped";
   updatedAt: string;
   connectedAt?: string | undefined;
@@ -29,7 +31,7 @@ export interface ConnectionStatus {
 }
 export type ConnectionEvent =
   | { type: "upgrade_watch"; enabled: boolean }
-  | { type: "connecting"; authorizationId?: string | undefined; mcpEnabled: boolean }
+  | { type: "connecting"; authorizationId?: string | undefined; mcpEnabled: boolean; transport?: DeviceTransportKind }
   | { type: "connected" | "heartbeat" | "mcp_disabled" | "stopped" }
   | { type: "disconnected" | "authorization_unavailable"; error: unknown };
 
@@ -52,8 +54,15 @@ export function connectionReporter(binding: DeviceBinding, workspace?: string) {
     if (event.type === "upgrade_watch") {
       current = { ...current, autoRefresh: event.enabled };
     } else if (event.type === "connecting") {
-      current = { ...current, state: "connecting", mcpEnabled: event.mcpEnabled,
-        authorizationId: event.authorizationId, heartbeatAt: undefined, connectedAt: undefined };
+      current = {
+        ...current,
+        state: "connecting",
+        mcpEnabled: event.mcpEnabled,
+        authorizationId: event.authorizationId,
+        transport: event.transport,
+        heartbeatAt: undefined,
+        connectedAt: undefined,
+      };
     } else if (event.type === "connected") {
       current = { ...current, state: "connected", connectedAt: now };
     } else if (event.type === "heartbeat") {
@@ -62,8 +71,12 @@ export function connectionReporter(binding: DeviceBinding, workspace?: string) {
       current = { ...current, mcpEnabled: false };
     } else if (event.type === "disconnected" || event.type === "authorization_unavailable") {
       const error = diagnosticError(event.error);
-      current = { ...current, ...(event.type === "disconnected" ? { state: "disconnected" as const } : {}), mcpEnabled: false,
-        lastError: [error.code, error.message].filter(Boolean).join(": ") };
+      current = {
+        ...current,
+        ...(event.type === "disconnected" ? { state: "disconnected" as const } : {}),
+        mcpEnabled: false,
+        lastError: [error.code, error.message].filter(Boolean).join(": "),
+      };
     } else {
       current = { ...current, state: "stopped", mcpEnabled: false };
     }
@@ -92,20 +105,28 @@ export async function readConnectionStatus(binding: DeviceBinding): Promise<Conn
     || (value.heartbeatAt !== undefined && !Number.isFinite(Date.parse(value.heartbeatAt)))
     || (value.connectedAt !== undefined && !Number.isFinite(Date.parse(value.connectedAt)))
     || (value.workspace !== undefined && typeof value.workspace !== "string")
+    || (value.transport !== undefined && !isDeviceTransportKind(value.transport))
     || (value.authorizationId !== undefined && !/^mca_[a-f0-9]{32}$/u.test(value.authorizationId))) return null;
-  // Return only known fields; never print arbitrary content from a diagnostic file.
-  return { version: 1,
+  return {
+    version: 1,
     ...(typeof value.autoRefresh === "boolean" ? { autoRefresh: value.autoRefresh } : {}),
     ...(typeof value.cliVersion === "string" ? { cliVersion: value.cliVersion.slice(0, 80) } : {}),
     ...(typeof value.entry === "string" ? { entry: value.entry } : {}),
     ...(typeof value.startedAt === "string" ? { startedAt: value.startedAt } : {}),
-    pid: value.pid, relayUrl: binding.relayUrl, userId: binding.userId, deviceId: binding.deviceId,
-    state: value.state, mcpEnabled: value.mcpEnabled, updatedAt: value.updatedAt,
+    pid: value.pid,
+    relayUrl: binding.relayUrl,
+    userId: binding.userId,
+    deviceId: binding.deviceId,
+    state: value.state,
+    mcpEnabled: value.mcpEnabled,
+    updatedAt: value.updatedAt,
     ...(value.workspace ? { workspace: value.workspace } : {}),
+    ...(value.transport ? { transport: value.transport } : {}),
     ...(value.authorizationId ? { authorizationId: value.authorizationId } : {}),
     ...(value.heartbeatAt ? { heartbeatAt: value.heartbeatAt } : {}),
     ...(value.connectedAt ? { connectedAt: value.connectedAt } : {}),
-    ...(typeof value.lastError === "string" ? { lastError: value.lastError.slice(0, 240) } : {}) };
+    ...(typeof value.lastError === "string" ? { lastError: value.lastError.slice(0, 240) } : {}),
+  };
 }
 export function connectionIsLive(status: ConnectionStatus, now = Date.now()): boolean {
   if (status.state !== "connected" || !status.heartbeatAt) return false;

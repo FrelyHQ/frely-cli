@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RelayMcpSession } from "../runtime/relay-mcp.js";
 import { McpLease } from "../runtime/mcp-lease.js";
-import { serveConnection } from "./relay-client.js";
+import { isTransportFallbackEligible, serveConnection } from "./relay-client.js";
 import type { DeviceRelayEnvelope, DeviceRelayResponse } from "./protocol.js";
 
 test("Device Relay websocket subprotocol can carry multiplexed envelopes", async () => {
@@ -118,4 +118,37 @@ test("real Relay frames isolate reused client IDs and cancel only the addressed 
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(workspace, { recursive: true, force: true });
   }
+});
+
+test("transport fallback is reserved for transport failures", async () => {
+  async function closeWith(code: number, reason: string) {
+    const server = new WebSocketServer({ port: 0, handleProtocols: () => DEVICE_RELAY_PROTOCOL });
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const connected = new Promise<WebSocket>((resolve) => server.once("connection", resolve));
+    const controller = new AbortController();
+    const runtime = serveConnection(
+      `ws://127.0.0.1:${address.port}`,
+      "synthetic-test-token",
+      `drd_${"a".repeat(32)}`,
+      null,
+      null,
+      controller.signal,
+      () => undefined,
+    );
+    const socket = await connected;
+    socket.close(code, reason);
+    const error = await runtime.then(() => null, (value: unknown) => value);
+    for (const client of server.clients) client.terminate();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    assert.ok(error instanceof Error);
+    return error;
+  }
+
+  const lifecycle = await closeWith(4412, "hard_lifetime");
+  assert.equal(isTransportFallbackEligible(lifecycle), false);
+
+  const unavailable = await closeWith(4500, "edge_unavailable");
+  assert.equal(isTransportFallbackEligible(unavailable), true);
 });

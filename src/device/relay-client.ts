@@ -4,6 +4,7 @@ import { requireMcpAuthorization } from "../mcp-authorization.js";
 import { McpLease } from "../runtime/mcp-lease.js";
 import WebSocket, { type RawData } from "ws";
 import { connectionGrant, ensureDevice } from "./control.js";
+import { nextDeviceTransportKind, selectDeviceTransport, type DeviceTransportGrant, type DeviceTransportKind } from "./transport.js";
 import { connectionReporter, type ConnectionEvent } from "./connection-status.js";
 import { randomBytes } from "node:crypto";
 import {
@@ -46,10 +47,14 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
       .catch((error) => { diagnostic(log, "relay.upgrade_watch_unavailable", {}, error); return () => {}; })
     : Promise.resolve(() => {});
   let delayMs = 1000;
+  let preferredTransport: DeviceTransportKind | undefined;
   try {
     while (!options.signal.aborted) {
       let session: RelayMcpSession | null = null;
       let lease: McpLease | null = null;
+      let selectedTransport: DeviceTransportGrant | undefined;
+      let transports: readonly DeviceTransportGrant[] = [];
+      let retryWithoutDelay = false;
       try {
         let authorization = null;
         if (options.workspace) {
@@ -70,16 +75,48 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
             session = null; lease = null;
           }
         }
-        reporter.report({ type: "connecting", mcpEnabled: Boolean(authorization), authorizationId: authorization?.grant.id });
         const grant = await connectionGrant(device, authorization ? { authorizationId: authorization.grant.id, sign: authorization.sign } : undefined);
-        await serveConnection(grant.websocketUrl, grant.accessToken, device.deviceId, session, lease, options.signal, log, reporter.report, maintenance);
+        transports = grant.transports;
+        selectedTransport = selectDeviceTransport(transports, preferredTransport);
+        const isFallback = preferredTransport !== undefined && selectedTransport.kind === preferredTransport;
+        reporter.report({ type: "connecting", mcpEnabled: Boolean(authorization), authorizationId: authorization?.grant.id, transport: selectedTransport.kind });
+        diagnostic(log, isFallback ? `relay.transport_selected_fallback.${selectedTransport.kind}` : `relay.transport_selected.${selectedTransport.kind}`);
+        await serveConnection(
+          selectedTransport.websocketUrl,
+          selectedTransport.accessToken,
+          device.deviceId,
+          session,
+          lease,
+          options.signal,
+          log,
+          (event) => {
+            if (event.type === "connected") delayMs = 1000;
+            reporter.report(event);
+          },
+          maintenance,
+        );
+        preferredTransport = undefined;
         delayMs = 1000;
       } catch (error) {
         if (options.signal.aborted) break;
-        diagnostic(log, "relay.disconnected", {}, error);
+        if (selectedTransport && isTransportFallbackEligible(error)) {
+          const fallback = nextDeviceTransportKind(transports, selectedTransport.kind);
+          if (fallback) {
+            preferredTransport = fallback;
+            retryWithoutDelay = true;
+            diagnostic(log, `relay.transport_fallback.${selectedTransport.kind}_to_${fallback}`, {}, error);
+          } else {
+            preferredTransport = undefined;
+          }
+        } else {
+          preferredTransport = undefined;
+        }
+        diagnostic(log, selectedTransport ? `relay.disconnected.${selectedTransport.kind}` : "relay.disconnected", {}, error);
         reporter.report({ type: "disconnected", error });
-        await wait(delayMs, options.signal);
-        delayMs = Math.min(delayMs * 2, 15_000);
+        if (!retryWithoutDelay) {
+          await wait(delayMs, options.signal);
+          delayMs = Math.min(delayMs * 2, 15_000);
+        }
       } finally {
         lease?.close();
         await session?.close();
@@ -88,6 +125,26 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
     reporter.report({ type: "stopped" });
     await reporter.flush();
   } finally { (await closeRefresh)(); await closeMaintenance?.(); }
+}
+
+class DeviceTransportConnectionError extends Error {
+  constructor(message: string, readonly fallbackEligible: boolean) {
+    super(message);
+    this.name = "Error";
+  }
+}
+
+export function isTransportFallbackEligible(error: unknown): boolean {
+  return error instanceof DeviceTransportConnectionError && error.fallbackEligible;
+}
+
+function closedTransportError(code: number, reason: Buffer): DeviceTransportConnectionError {
+  const text = reason.toString();
+  const noFallback = new Set(["hard_lifetime", "connection_replaced", "device_revoked", "revocation_check_failed", "frame_invalid"]);
+  return new DeviceTransportConnectionError(
+    `WebSocket closed (${code}${text ? `: ${text}` : ""})`,
+    !noFallback.has(text),
+  );
 }
 
 export async function serveConnection(
@@ -151,10 +208,10 @@ export async function serveConnection(
     socket.on("pong", (data: Buffer) => {
       if (heartbeatNonce && data.equals(heartbeatNonce)) { heartbeatNonce = undefined; report({ type: "heartbeat" }); }
     });
-    socket.once("error", (error) => finish(error));
+    socket.once("error", () => finish(new DeviceTransportConnectionError("Device transport WebSocket failed.", true)));
     socket.once("close", (code, reason) => {
       if (signal.aborted) finish();
-      else finish(new Error(`WebSocket closed (${code}${reason.length ? `: ${reason.toString()}` : ""})`));
+      else finish(closedTransportError(code, reason));
     });
     socket.on("message", (data) => {
       // WebSocket peers may deliver the same JSON envelope as either a text

@@ -72,10 +72,10 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
     : connection.state === "disconnected" || connection.state === "stopped" ? connection.state : "unknown";
   add("connection", connectionState === "not_configured" ? "info" : live && (!metadata || mcpReady) ? "pass" : "fail",
     connectionState === "not_configured" ? "Not configured."
-      : live && metadata && !mcpReady ? "Relay connected, but this MCP authorization/workspace is not active in the running service."
-      : live ? "Relay connected; recent heartbeat received."
-      : connectionState === "disconnected" ? "Disconnected; the relay is retrying."
-      : connectionState === "stopped" ? "Relay stopped. Run frely mcp service start."
+      : live && metadata && !mcpReady ? "Device transport connected, but this MCP authorization/workspace is not active in the running service."
+      : live ? "Device transport connected; recent heartbeat received."
+      : connectionState === "disconnected" ? "Disconnected; the device transport is retrying."
+      : connectionState === "stopped" ? "Device transport stopped. Run frely mcp service start."
       : "Unknown: no recent heartbeat for this account/device. Run frely doctor -v.");
 
   const update = await upgradePromise;
@@ -116,7 +116,7 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
           ? `Running ${connection.cliVersion}; installed ${VERSION}. ${refreshGuidance}` : "Running")
         : service.installed ? "Stopped" : "Not installed",
       connection: connectionState === "not_configured" ? "Not configured"
-        : live ? metadata && !mcpReady ? "Relay connected; MCP unavailable" : "Connected (recent heartbeat)"
+        : live ? metadata && !mcpReady ? "Device transport connected; MCP unavailable" : "Connected (recent heartbeat)"
         : connectionState === "disconnected" ? "Disconnected (retrying)" : connectionState === "stopped" ? "Stopped"
         : "Unknown (no recent heartbeat)",
     },
@@ -128,7 +128,7 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
       expiresAt: metadata?.grant.expiresAt, service,
       runningVersion: connection?.cliVersion, runningEntry: connection?.entry, startedAt: connection?.startedAt,
       connection: { state: connectionState, live, mcpReady, observation: connection },
-      coverage: "Heartbeat verifies the device-to-relay transport. ChatGPT OAuth and end-to-end tool calls are not tested.",
+      coverage: "Heartbeat verifies the active device transport. ChatGPT OAuth and end-to-end tool calls are not tested.",
     } } : {}),
   };
 }

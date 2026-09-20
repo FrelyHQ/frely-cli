@@ -76,6 +76,8 @@ claude mcp add --transport http frely-computer-a "<电脑 A 输出的 MCP URL>"
 
 Relay 负责设备身份、MCP 授权、OAuth、连接、请求转发和撤销。CLI 负责本机执行、工作目录、调度与进程生命周期。项目不创建独立 `friday-local` runtime。
 
+Cloudflare Worker + Durable Objects 数据面迁移方案见 [Device Transport](device-transport.md)。方案保留 Relay 作为备用 transport；公网 MCP URL 与 `frely.device-relay.v1` 不变。
+
 ## 安装
 
 仓库提供 `install.sh` 与 `install.ps1`。安装器下载独立程序，校验 SHA-256，写入用户目录，不要求 Node.js、npm、管理员权限或密钥配置。公开入口依赖 GitHub Release 中对应的平台程序与校验文件；tag 发布流程负责生成这些资产。

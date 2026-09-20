@@ -3,14 +3,13 @@ import { requireLogin } from "../auth.js";
 import { createConnectionProof, deleteDeviceIdentity, loadOrCreateDeviceIdentity } from "./identity.js";
 import { clearDeviceBinding, readDeviceBinding, writeDeviceBinding, type DeviceBinding } from "./state.js";
 import { VERSION } from "../version.js";
+import { isDeviceTransportKind, type DeviceTransportGrant } from "./transport.js";
 
 const CLIENT_VERSION = VERSION;
 const TIMEOUT_MS = 15_000;
 
 export interface ConnectionGrant {
-  websocketUrl: string;
-  accessToken: string;
-  expiresAt: string;
+  transports: readonly DeviceTransportGrant[];
 }
 
 export async function ensureDevice(): Promise<DeviceBinding> {
@@ -71,11 +70,52 @@ export async function connectionGrant(binding?: DeviceBinding, mcp?: { authoriza
   const payload = await responseJson(response);
   if (!response.ok) throw new Error(publicError(payload, response.status));
   const record = object(payload);
-  return {
+  return { transports: parseConnectionTransports(record) };
+}
+
+
+function parseConnectionTransports(record: Record<string, unknown>): readonly DeviceTransportGrant[] {
+  const topLevelExpiresAt = optionalExpiry(record.expiresAt);
+  const raw = record.transports;
+  if (raw !== undefined) {
+    if (!Array.isArray(raw) || raw.length < 1 || raw.length > 8) throw new Error("Frely Relay returned invalid Device transports.");
+    const transports: DeviceTransportGrant[] = [];
+    const seen = new Set<string>();
+    for (const value of raw) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Frely Relay returned an invalid Device transport.");
+      const candidate = value as Record<string, unknown>;
+      if (!isDeviceTransportKind(candidate.kind)) continue;
+      if (seen.has(candidate.kind)) throw new Error("Frely Relay returned duplicate Device transports.");
+      seen.add(candidate.kind);
+      transports.push({
+        kind: candidate.kind,
+        websocketUrl: validateWebSocketUrl(requiredString(candidate, "websocketUrl", 4096)),
+        accessToken: requiredString(candidate, "accessToken", 8192),
+        expiresAt: requiredExpiry(candidate.expiresAt, topLevelExpiresAt),
+      });
+    }
+    if (transports.length > 0) return transports;
+  }
+  return [{
+    kind: "relay",
     websocketUrl: validateWebSocketUrl(requiredString(record, "websocketUrl", 4096)),
     accessToken: requiredString(record, "accessToken", 8192),
-    expiresAt: requiredString(record, "expiresAt", 128),
-  };
+    expiresAt: requiredExpiry(record.expiresAt),
+  }];
+}
+
+function optionalExpiry(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.length < 1 || value.length > 128 || !Number.isFinite(Date.parse(value))) {
+    throw new Error("Frely Relay returned an invalid expiresAt.");
+  }
+  return value;
+}
+
+function requiredExpiry(value: unknown, fallback?: string): string {
+  const expiry = value === undefined ? fallback : optionalExpiry(value);
+  if (!expiry) throw new Error("Frely Relay returned an invalid expiresAt.");
+  return expiry;
 }
 
 export async function revokeDevice(): Promise<void> {

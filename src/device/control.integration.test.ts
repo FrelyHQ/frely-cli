@@ -12,9 +12,10 @@ import { useMemoryCredentialStore } from "../test-support.js";
 
 const ACCOUNT_SERVICE = "frely-cli-basic-v1";
 
-test("account session enrolls device, gets a signed connection grant, and revokes", async () => {
+test("account session enrolls device, gets signed legacy and edge connection grants, and revokes", async () => {
   const requests: Array<{ method: string; path: string; authorization?: string; body?: Record<string, unknown> }> = [];
   let origin = "";
+  let connectCalls = 0;
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -35,7 +36,31 @@ test("account session enrolls device, gets a signed connection grant, and revoke
       const message = connectionProofMessage(String(body?.deviceId ?? ""), String(body?.issuedAt ?? ""), String(body?.nonce ?? ""));
       const key = createPublicKey({ key: Buffer.from(publicKeySpki, "base64url"), type: "spki", format: "der" });
       assert.equal(verify(null, Buffer.from(message), key, Buffer.from(String(body?.signature ?? ""), "base64url")), true);
-      response.end(JSON.stringify({ websocketUrl: `ws://127.0.0.1:${(server.address() as { port: number }).port}/device-relay`, accessToken: "short-lived-grant", expiresAt: "2099-01-01T00:00:00.000Z" }));
+      connectCalls += 1;
+      const relayTarget = `ws://127.0.0.1:${(server.address() as { port: number }).port}/device-relay`;
+      if (connectCalls === 1) {
+        response.end(JSON.stringify({ websocketUrl: relayTarget, accessToken: "legacy-relay-grant", expiresAt: "2099-01-01T00:00:00.000Z" }));
+      } else {
+        response.end(JSON.stringify({
+          websocketUrl: relayTarget,
+          accessToken: "legacy-compat-grant",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+          transports: [
+            {
+              kind: "cloudflare_do",
+              websocketUrl: `ws://127.0.0.1:${(server.address() as { port: number }).port}/edge-device-relay`,
+              accessToken: "edge-grant",
+              expiresAt: "2099-01-01T00:00:00.000Z",
+            },
+            {
+              kind: "relay",
+              websocketUrl: relayTarget,
+              accessToken: "fallback-relay-grant",
+              expiresAt: "2099-01-01T00:00:00.000Z",
+            },
+          ],
+        }));
+      }
       return;
     }
     if (request.method === "POST" && request.url === "/api/user/device-relay/revoke") {
@@ -64,15 +89,23 @@ test("account session enrolls device, gets a signed connection grant, and revoke
     assert.equal("mcpUrl" in device, false);
     const repeated = await ensureDevice();
     assert.equal(repeated.deviceId, device.deviceId);
-    const grant = await connectionGrant(device);
-    assert.equal(grant.accessToken, "short-lived-grant");
+
+    const legacyGrant = await connectionGrant(device);
+    assert.deepEqual(legacyGrant.transports.map((transport) => transport.kind), ["relay"]);
+    assert.equal(legacyGrant.transports[0]!.accessToken, "legacy-relay-grant");
+
+    const edgeGrant = await connectionGrant(device);
+    assert.deepEqual(edgeGrant.transports.map((transport) => transport.kind), ["cloudflare_do", "relay"]);
+    assert.equal(edgeGrant.transports[0]!.accessToken, "edge-grant");
+    assert.equal(edgeGrant.transports[1]!.accessToken, "fallback-relay-grant");
+
     await revokeDevice();
 
     const protectedCalls = requests.filter((request) => request.path.startsWith("/api/user/device-relay/"));
-    assert.equal(protectedCalls.length, 3);
+    assert.equal(protectedCalls.length, 4);
     assert.ok(protectedCalls.every((request) => request.authorization === "Bearer synthetic-basic-session"));
     assert.equal(protectedCalls[0]?.body?.deviceId, undefined);
-    assert.equal(protectedCalls[2]?.body?.deviceId, "device_test");
+    assert.equal(protectedCalls[3]?.body?.deviceId, "device_test");
   } finally {
     restoreCredentialStore();
     if (previousConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
