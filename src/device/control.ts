@@ -118,6 +118,12 @@ function requiredExpiry(value: unknown, fallback?: string): string {
   return expiry;
 }
 
+export async function resetDeviceRegistration(): Promise<void> {
+  const auth = await requireLogin();
+  await clearDeviceBinding();
+  await deleteDeviceIdentity(auth.config.relayUrl, auth.user.id);
+}
+
 export async function revokeDevice(): Promise<void> {
   const auth = await requireLogin();
   const binding = await currentDevice();

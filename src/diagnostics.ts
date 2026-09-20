@@ -1,6 +1,7 @@
 import { inspectUpgrade } from "./upgrade/update.js";
 import { authConfigPath, inspectAuth, probeCredentialStore, whoami, type AuthSnapshot } from "./auth.js";
-import { inspectMcpMetadata, requireMcpAuthorization } from "./mcp-authorization.js";
+import { clearMcpAuthorization, inspectMcpMetadata, McpAuthorizationError, requireMcpAuthorization } from "./mcp-authorization.js";
+import { resetDeviceRegistration } from "./device/control.js";
 import { readDeviceBinding } from "./device/state.js";
 import { connectionIsLive, connectionStatusPath, readConnectionStatus } from "./device/connection-status.js";
 import { serviceStatus } from "./service.js";
@@ -9,8 +10,15 @@ import { VERSION } from "./version.js";
 export interface DiagnosticCheck { name: string; ok: boolean; detail: string; status: "pass" | "fail" | "info" }
 export interface DoctorOptions { verbose?: boolean; /** Compatibility with doctor --mcp. */ mcp?: boolean }
 const defaultDependencies = { inspectAuth, probeCredentialStore, whoami, inspectMcpMetadata, requireMcpAuthorization,
+  reconcileMcpAuthorization: async (metadata: Awaited<ReturnType<typeof inspectMcpMetadata>>, code: string) => {
+    if (!metadata) return;
+    await clearMcpAuthorization(metadata);
+    if (code === "device_not_found" || code === "device_revoked") await resetDeviceRegistration();
+  },
   readDeviceBinding, readConnectionStatus, serviceStatus, inspectUpgrade };
-type DoctorDependencies = typeof defaultDependencies;
+type DoctorDependencies = Omit<typeof defaultDependencies, "reconcileMcpAuthorization"> & {
+  reconcileMcpAuthorization?: typeof defaultDependencies.reconcileMcpAuthorization;
+};
 
 export async function statusSnapshot() {
   const auth = await inspectAuth();
@@ -97,7 +105,14 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
     } else add("account_session", "info", "Not checked: no stored account credential.");
     if (metadata && !expired && mcpMatches) {
       try { await dependencies.requireMcpAuthorization(); add("mcp_authorization", "pass", "Secure key and server authorization verified."); }
-      catch { add("mcp_authorization", "fail", "Secure key or server authorization could not be verified. Check connectivity, login and MCP renewal."); }
+      catch (error) {
+        if (metadata && error instanceof McpAuthorizationError && ["mcp_authorization_not_found", "mcp_authorization_invalid", "device_not_found", "device_revoked"].includes(error.code)) {
+          try {
+            await dependencies.reconcileMcpAuthorization?.(metadata, error.code);
+            add("mcp_authorization", "info", `Local MCP state repaired after server response: ${error.code}. Run frely mcp setup to request approval.`);
+          } catch { add("mcp_authorization", "fail", "MCP authorization is invalid and local state could not be repaired."); }
+        } else add("mcp_authorization", "fail", "Secure key or server authorization could not be verified. Check connectivity, login and MCP renewal.");
+      }
     } else add("mcp_authorization", "info", "Not checked: MCP configuration/authorization is unavailable.");
   }
 

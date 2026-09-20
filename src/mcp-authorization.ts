@@ -5,13 +5,21 @@ import { homedir } from "node:os";
 import { requireLogin, openVerificationUrl } from "./auth.js";
 import { credentialStore } from "./credential-store.js";
 import { ensureCredentialDirectory, readPrivateFile, writePrivateFile } from "./credential-file.js";
-import { ensureDevice, relayFetch } from "./device/control.js";
+import { ensureDevice, relayFetch, resetDeviceRegistration } from "./device/control.js";
 import { identityFromPrivateKey } from "./device/identity.js";
 
 export const MCP_DEFAULT_DAYS = 90;
 export const MCP_MAX_DAYS = 180;
 const SERVICE = "frely-cli-mcp-authorization-v1";
 const ENDPOINT = "/api/user/device-relay/mcp";
+const RECOVERABLE_CODES = new Set(["mcp_authorization_not_found", "mcp_authorization_invalid", "device_not_found", "device_revoked"]);
+
+export class McpAuthorizationError extends Error {
+  constructor(public readonly code: string, public readonly status: number, message: string) {
+    super(message);
+    this.name = "McpAuthorizationError";
+  }
+}
 export interface McpAuthorizationView {
   id: string; deviceId: string; keyThumbprint: string; workspace: string; days: number;
   approvalDeadline: string; approvedAt: string | null; expiresAt: string | null;
@@ -41,6 +49,11 @@ async function writeMetadata(metadata: McpMetadata): Promise<void> {
   await writePrivateFile(path, JSON.stringify(metadata) + "\n");
 }
 const account = (metadata: McpMetadata) => `${new URL(metadata.relayUrl).origin}|${metadata.userId}|${metadata.grant.id}`;
+
+export async function clearMcpAuthorization(metadata: McpMetadata): Promise<void> {
+  await credentialStore.deletePassword(SERVICE, account(metadata));
+  await unlink(mcpMetadataPath()).catch(() => undefined);
+}
 
 export async function loadMcpAuthorization(): Promise<McpAuthorization | null> {
   const metadata = await inspectMcpMetadata();
@@ -76,7 +89,15 @@ export async function setupMcpAuthorization(workspaceInput: string, daysInput?: 
   const auth = await requireLogin();
   const old = await inspectMcpMetadata();
   if (!renew && old?.relayUrl === auth.config.relayUrl && old.userId === auth.user.id && old.grant.workspace === workspace
-    && old.grant.status === "active" && Date.parse(old.grant.expiresAt ?? "") > Date.now()) return requireMcpAuthorization(workspace);
+    && old.grant.status === "active" && Date.parse(old.grant.expiresAt ?? "") > Date.now()) {
+    try {
+      return await requireMcpAuthorization(workspace);
+    } catch (error) {
+      if (!(error instanceof McpAuthorizationError) || !RECOVERABLE_CODES.has(error.code)) throw error;
+      await clearMcpAuthorization(old);
+      await resetDeviceRegistration();
+    }
+  }
   // Secure storage belongs to MCP setup, not basic login, status, Network or installation.
   const probe = "probe:" + randomUUID();
   await credentialStore.setPassword(SERVICE, probe, probe);
@@ -160,13 +181,24 @@ function validateMcpResource(input: unknown, deviceId: string): string {
   return url.toString();
 }
 async function readRequest(response: Response): Promise<{ grant: McpAuthorizationView; mcpResource: string }> {
-  if (!response.ok) throw new Error(`MCP authorization request failed (HTTP ${response.status}).`);
+  if (!response.ok) await throwMcpAuthorizationError(response);
   const payload = await response.json();
   const grant = validateView(payload);
   const record = payload as Record<string, unknown>;
   return { grant, mcpResource: validateMcpResource(record.mcpResource, grant.deviceId) };
 }
 async function readView(response: Response): Promise<McpAuthorizationView> {
-  if (!response.ok) throw new Error(`MCP authorization request failed (HTTP ${response.status}).`);
+  if (!response.ok) await throwMcpAuthorizationError(response);
   return validateView(await response.json());
+}
+
+async function throwMcpAuthorizationError(response: Response): Promise<never> {
+  let payload: unknown = null;
+  try { payload = await response.json(); } catch { /* keep the status-only fallback */ }
+  const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
+  const error = record.error && typeof record.error === "object" && !Array.isArray(record.error)
+    ? record.error as Record<string, unknown> : record;
+  const code = typeof error.code === "string" ? error.code : `http_${response.status}`;
+  const message = typeof error.message === "string" ? error.message : `MCP authorization request failed (HTTP ${response.status}).`;
+  throw new McpAuthorizationError(code, response.status, message);
 }
