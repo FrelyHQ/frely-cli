@@ -71,3 +71,51 @@ window.addEventListener('hashchange', () => {
     link.href = target.href;
   }
 });
+
+
+// Microsoft Clarity analytics. The project id is public by design because it is shipped to browsers.
+(() => {
+  const projectId = 'ykc2prmxm6';
+  const storageKey = 'frely_clarity_consent_v1';
+  const surface = 'frely-cli-landing';
+  let consent = null;
+  try { consent = window.localStorage.getItem(storageKey); } catch {}
+
+  const loadClarity = () => {
+    if (window.clarity) return;
+    window.clarity = function () { (window.clarity.q = window.clarity.q || []).push(arguments); };
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = 'https://www.clarity.ms/tag/' + projectId;
+    document.head.appendChild(script);
+    window.clarity('consentv2', { analytics_Storage: 'granted', ad_Storage: 'denied' });
+    window.clarity('set', 'surface', surface);
+    window.clarity('set', 'locale', document.documentElement.lang || 'unknown');
+  };
+
+  if (consent === 'granted') {
+    loadClarity();
+    return;
+  }
+  if (consent === 'denied') return;
+
+  if (!document.documentElement || !document.body || typeof document.createElement !== 'function') return;
+  const zh = document.documentElement.lang.toLowerCase().startsWith('zh');
+  const panel = document.createElement('section');
+  panel.className = 'clarity-consent';
+  panel.setAttribute('aria-label', zh ? '分析偏好' : 'Analytics preferences');
+  panel.innerHTML = '<div><strong>' + (zh ? '分析偏好' : 'Analytics preferences') + '</strong><p>' +
+    (zh ? '我们使用 Microsoft Clarity 分析站点使用情况。广告存储保持关闭。' : 'We use Microsoft Clarity to understand site usage. Advertising storage stays disabled.') +
+    '</p></div><div class="clarity-consent-actions"><button type="button" data-clarity="deny">' +
+    (zh ? '拒绝' : 'Reject') + '</button><button type="button" class="clarity-consent-accept" data-clarity="grant">' +
+    (zh ? '接受分析' : 'Accept analytics') + '</button></div>';
+  document.body.appendChild(panel);
+
+  panel.addEventListener('click', (event) => {
+    const action = event.target instanceof Element ? event.target.getAttribute('data-clarity') : null;
+    if (!action) return;
+    try { window.localStorage.setItem(storageKey, action === 'grant' ? 'granted' : 'denied'); } catch {}
+    panel.remove();
+    if (action === 'grant') loadClarity();
+  });
+})();
