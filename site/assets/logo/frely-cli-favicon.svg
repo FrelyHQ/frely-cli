@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Extracted verbatim from site/template.html (favicon data URI). Tab-icon variant: dark tile, lime terminal mark. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="7" fill="#101211"/>
+  <path d="m7 9 7 7-7 7M18 23h7" fill="none" stroke="#d3fa6a" stroke-width="3"/>
+</svg>
