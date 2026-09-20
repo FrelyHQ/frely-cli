@@ -1,17 +1,28 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { win32 } from "node:path";
 
+const PROCESS_CLOSE_TIMEOUT_MS = 5000;
+
 export async function terminateProcessTree(child: ChildProcess): Promise<void> {
   const pid = child.pid;
-  if (!pid) return;
+  if (!pid || childClosed(child)) return;
+  const closed = waitForChildClose(child, PROCESS_CLOSE_TIMEOUT_MS);
+  let terminate: Promise<void>;
   if (process.platform === "win32") {
     const taskkill = win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe");
-    await new Promise<void>((resolve) => execFile(taskkill, ["/PID", String(pid), "/T", "/F"], { windowsHide: true, timeout: 5000 }, () => resolve()));
+    terminate = new Promise<void>((resolve) => execFile(
+      taskkill,
+      ["/PID", String(pid), "/T", "/F"],
+      { windowsHide: true, timeout: PROCESS_CLOSE_TIMEOUT_MS },
+      () => resolve(),
+    ));
   } else {
     try { process.kill(-pid, "SIGKILL"); } catch (error) {
       if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ESRCH") child.kill("SIGKILL");
     }
+    terminate = Promise.resolve();
   }
+  await Promise.all([terminate, closed]);
 }
 
 export function runShellCommand(command: string, cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number, maxBytes: number, signal?: AbortSignal): Promise<{ stdout: string; stderr: string }> {
@@ -37,5 +48,31 @@ export function runShellCommand(command: string, cwd: string, env: NodeJS.Proces
       else resolve({ stdout: Buffer.concat(output).toString("utf8"), stderr: Buffer.concat(errors).toString("utf8") });
     });
     if (signal?.aborted) abort();
+  });
+}
+
+function childClosed(child: ChildProcess): boolean {
+  if (child.exitCode === null && child.signalCode === null) return false;
+  return [child.stdin, child.stdout, child.stderr].every((stream) => !stream || stream.destroyed);
+}
+
+function waitForChildClose(child: ChildProcess, timeoutMs: number): Promise<void> {
+  if (childClosed(child)) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    const onClose = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      child.removeListener("close", onClose);
+      reject(new Error(`Timed out waiting for process ${child.pid ?? "unknown"} to release its resources.`));
+    }, timeoutMs);
+    timer.unref?.();
+    child.once("close", onClose);
+    if (childClosed(child)) {
+      child.removeListener("close", onClose);
+      clearTimeout(timer);
+      resolve();
+    }
   });
 }

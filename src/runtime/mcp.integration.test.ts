@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -89,5 +89,52 @@ setTimeout(() => {
   } finally {
     await client.close();
     await server.close();
+  }
+});
+
+
+test("MCP shutdown waits for command processes to release the workspace", async () => {
+  const root = await mkdtemp(join(tmpdir(), "frely-cli-mcp-shutdown-"));
+  await writeFile(join(root, "hold.cjs"), `
+const fs = require("node:fs");
+const marker = process.argv[2];
+fs.writeFileSync(marker, String(process.pid));
+setInterval(() => {}, 1000);
+`);
+  const server = await createMcpServer(root);
+  const client = new Client({ name: "frely-cli-shutdown-test", version: "1.0.0" }, { capabilities: {} });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  let running: Promise<unknown> | undefined;
+  try {
+    const persistent = await client.callTool({
+      name: "start_process",
+      arguments: { command: "node hold.cjs persistent.ready" },
+    });
+    assert.equal(persistent.isError, undefined, JSON.stringify(persistent.content));
+
+    running = client.callTool({
+      name: "run_command",
+      arguments: { command: "node hold.cjs command.ready", timeoutMs: 5000 },
+    }).then(() => undefined, () => undefined);
+
+    for (const marker of ["persistent.ready", "command.ready"]) {
+      let pid = 0;
+      for (let attempt = 0; attempt < 100 && !pid; attempt += 1) {
+        pid = await readFile(join(root, marker), "utf8").then(Number, () => 0);
+        if (!pid) await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.ok(pid > 0, `${marker} process must start before shutdown`);
+    }
+
+    await client.close();
+    await server.close();
+    await running;
+    await rm(root, { recursive: true, force: true });
+  } finally {
+    await client.close().catch(() => undefined);
+    await server.close().catch(() => undefined);
+    await running?.catch(() => undefined);
+    await rm(root, { recursive: true, force: true }).catch(() => undefined);
   }
 });
