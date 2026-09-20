@@ -35,7 +35,29 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
   const unregister = options.maintenance?.registerProcesses(() => processes.list().filter((p) => p.running).length);
   const server = new Server({ name: "frely-cli", version: VERSION }, { capabilities: { tools: {} } });
 
-  const stop = () => { lifecycle.abort(); void processes.close().finally(() => unregister?.()); };
+  const activeCalls = new Set<Promise<void>>();
+  let cleanupPromise: Promise<void> | undefined;
+
+  const cleanup = () => cleanupPromise ??= (async () => {
+    while (activeCalls.size > 0) {
+      await Promise.allSettled([...activeCalls]);
+    }
+    await processes.close();
+    unregister?.();
+  })();
+  const stop = () => {
+    lifecycle.abort();
+    void cleanup().catch(() => undefined);
+  };
+  const sdkClose = server.close.bind(server);
+  server.close = async () => {
+    lifecycle.abort();
+    try {
+      await sdkClose();
+    } finally {
+      await cleanup();
+    }
+  };
   options.signal?.addEventListener("abort", stop, { once: true });
   if (options.signal?.aborted) stop();
   server.onclose = () => { options.signal?.removeEventListener("abort", stop); stop(); };
@@ -72,6 +94,9 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
   ] }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+    let complete: (() => void) | undefined;
+    const active = new Promise<void>((resolve) => { complete = resolve; });
+    activeCalls.add(active);
     const finish = options.maintenance?.track();
     const name = request.params.name;
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
@@ -81,7 +106,11 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
     } catch (error) {
       try { options.onToolError?.(extra.requestId, name, error); } catch { /* Diagnostics cannot change tool results. */ }
       return { isError: true, content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Local tool failed." }] };
-    } finally { finish?.(); }
+    } finally {
+      finish?.();
+      complete?.();
+      activeCalls.delete(active);
+    }
   });
 
   return server;
