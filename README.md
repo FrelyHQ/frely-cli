@@ -1,114 +1,44 @@
 # frely-cli
 
-设备 MCP 的产品定义与通用客户端接入见 [`docs/device-mcp.md`](docs/device-mcp.md)。
+[English](README.md) · [简体中文](README.zh-CN.md)
 
-`frely-cli` includes FrelyMCP: let agents access your device from any location. Browser agents and command-line agents such as Codex and Claude Code use MCP to access the files, commands and processes on the computer you authorize. Invoking Frely-hosted Agents and sharing local model Providers are optional CLI features with their own setup and authorization.
+`frely-cli` turns the computer you choose into a secure remote device that AI agents can operate. Browser agents (ChatGPT, Codex) and command-line agents (Claude Code, pi) connect through Model Context Protocol (MCP) and access the files, commands and processes inside the workspace you authorize — from anywhere.
 
-**Release boundary (checked 2026-09-17):** npm `frely-cli@latest` resolves to
-`0.6.2`. The published tarball includes device MCP, Provider commands,
-`frely skill install` and `frely agent invoke`. Agent examples below apply to that
-release. Package contents establish command availability; service deployment,
-account or API-key access and client connections need their own verification.
+Two optional features, each with its own setup and authorization:
+
+- **Remote Agent Skill** — install a published Frely Agent as a local trigger Skill and invoke it from automation.
+- **Local model sharing** — publish a local Ollama / OpenAI-compatible runtime as your personal Frely Provider.
+
+This repository contains the open-source Frely client and local MCP runtime. The hosted Frely Relay control plane remains a separate service dependency. There is no separate `friday-local` project; local MCP execution belongs to `frely-cli`.
 
 ```text
 Remote Agent Skill: install -> frely login -> frely skill install -> frely agent invoke
 Device MCP:  install on target computer -> frely login -> frely mcp -> add MCP URL to client -> OAuth authorize
 ```
 
-`frely skill install` installs a local trigger Skill. It does not install a model or change the user's current model Provider/Base URL. `frely mcp` provisions local file, shell, process, and workspace execution; consuming a remote Frely Agent does not require that local execution authorization.
+## Install
 
-There is no separate `friday-local` project. Local MCP execution belongs to `frely-cli`.
-
-This repository contains the open-source Frely client and local MCP runtime.
-The hosted Friday Relay control plane remains a separate service dependency.
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development guidance and
-[`SECURITY.md`](SECURITY.md) for private vulnerability reporting.
-
-## Landing page
-
-The open-source CLI landing page lives in [`site/`](site/README.md), alongside
-the CLI under the same Apache-2.0 license and trademark policy. It is prepared
-for `cli.frely.cloud` and deploys independently as a static site. Website assets
-are excluded from the npm package.
-
-## Quick install
-
-After the standalone artifacts and installer are released, Frely can serve `install.sh` as:
+The standalone installers select the platform executable, verify a SHA-256 checksum and install into the user directory. They do not require Node.js, npm or a keyring.
 
 ```sh
+# macOS / Linux
 curl -fsSL https://app.frely.cloud/install.sh | sh
 ```
 
-The standalone installers (`install.sh` and `install.ps1`) select a platform executable, verify its SHA-256 checksum and install in the user directory. They do not require Node.js, npm or a keyring. The npm package requires Node.js 22 or newer. Tagged releases publish the npm package and standalone GitHub Release assets after cross-platform verification. See [credential and installation boundaries](docs/credential-storage.md).
+```powershell
+# Windows
+irm https://github.com/FrelyHQ/frely-cli/releases/latest/download/install.ps1 | iex
+```
 
-## Install or update with npm
-
-To install or update to the latest release, use:
+Or with npm (Node.js 22 or newer required):
 
 ```sh
 npm install --global --ignore-scripts frely-cli@latest
 ```
 
-To install or update to a specific release, replace `latest` with the release version. For example:
+To install a specific release, replace `latest` with the version. Tagged releases publish the npm package and standalone GitHub Release assets after cross-platform verification.
 
-```sh
-npm install --global frely-cli@0.3.6
-```
-
-## Update an existing installation
-
-```sh
-frely doctor
-frely upgrade
-```
-
-`doctor` reports the installation path, distribution and latest stable version.
-Release lookup has a timeout; offline version checks do not fail other diagnostics.
-Use `doctor --json` for structured results. `upgrade` has no options and never
-changes to a different installer, edits PATH or downgrades a newer installation.
-
-On macOS/Linux, `upgrade` updates the current standalone, npm-global or Bun-global
-installation. Standalone downloads are checksum-checked and tested before the
-installed executable is replaced. npm/Bun keep their original global directory
-and run with `--ignore-scripts`. Unknown installations, local links, source
-checkouts and temporary runners are left unchanged.
-
-A matching, running Device Relay service is paused for maintenance, restarted
-and checked after installation. Credentials, device identity, MCP URL, workspace
-and authorization expiry are preserved. Stopped or uninstalled services stay
-that way. If requests or managed processes are still running, the upgrade exits
-without stopping them. Finish those tasks and run the command in a local terminal;
-an upgrade invoked inside the MCP service being upgraded is itself active work.
-The connection may disconnect during the service restart. Installation, runtime
-version and Relay connectivity are reported separately.
-
-On Windows, `upgrade` prints a PowerShell command for the detected installation.
-Run it in a local terminal after finishing Frely tasks, then run `frely doctor`.
-The CLI does not launch an update helper or schedule a background replacement.
-
-For an already-running macOS/Linux service with automatic refresh support,
-updating the same installation with npm, Bun or the standalone installer also
-loads the new version without manual service commands. The service checks local
-installation files every five seconds, waits for two stable observations and
-checks that the new CLI starts. Active calls, managed processes and buffered
-responses defer the switch; calls remain available while work finishes.
-It uses the existing service supervisor and does not download updates itself.
-The MCP address, credentials, workspace and authorization expiry stay unchanged.
-
-A service that is stopped or not installed is never started by this watcher.
-Foreground sessions, source/link installs, changes of installation path and
-Windows replacement remain outside automatic refresh. A short reconnection
-window is possible; failed or outcome-unknown calls are not replayed.
-
-Versions predating the upgrade/refresh support require a one-time transition;
-see [service maintenance and legacy upgrades](docs/service-maintenance.md).
-Manual pause/resume commands remain in maintenance help.
-
-If more than one `frely` is installed, check the path shown by `doctor` before
-upgrading. The CLI does not remove other installations or choose one by changing
-shell configuration. See [the self-upgrade contract](docs/self-upgrade.md).
-
-## Install from a local checkout
+### Install from a local checkout
 
 To install the current source checkout with Bun:
 
@@ -119,42 +49,57 @@ bun run build
 bun install --global "$PWD"
 ```
 
-Use the absolute `$PWD` path in the global install command. Bun installs the `frely` executable in its global bin directory. If the command is not found, add that directory to your `PATH`:
+Use the absolute `$PWD` path in the global install command. If `frely` is not found, add the Bun global bin to your `PATH`:
 
 ```sh
 export PATH="$(bun pm bin -g):$PATH"
 ```
 
-This source revision has no keytar dependency or native npm build step. Dependency installation supports `npm ci --ignore-scripts` and `bun install --ignore-scripts`. Do not add a lifecycle-script trust exception for an old keytar installation.
-
-The repository uses npm as the canonical package manager for CI and releases
-and commits `package-lock.json`. Bun can be used for local development; keep
-the lockfiles synchronized when changing dependencies.
+This source revision has no keytar dependency or native npm build step. Dependency installation supports `npm ci --ignore-scripts` and `bun install --ignore-scripts`. The repository uses npm as the canonical package manager for CI and releases and commits `package-lock.json`; Bun is for local development — keep the lockfiles synchronized when changing dependencies.
 
 ## First use
 
-Sign in once when the consumer uses their own Frely account:
+Sign in once with the Frely account the consumer uses:
 
 ```sh
 frely login
 ```
 
-To choose another browser or Frely account, disable automatic browser opening:
+The browser opens automatically. To choose another browser or Frely account, run `frely login --no-browser` and open the printed URL only in the browser signed in to the account you want to use. Visiting a device authorization URL while signed in can bind that code to the account before you click Approve — if the default browser already opened it with another account, press Ctrl+C, run `frely login --no-browser` again, and use the **new URL**. Signing in again or reusing the old URL does not switch its account. Keep `--relay <url>` when using a custom Relay. `FRELY_NO_BROWSER=1` remains supported.
+
+### Device MCP: control this computer from a remote client
+
+On the computer to control, enable file, shell and process access:
 
 ```sh
-frely login --no-browser
+frely mcp --workspace /path/to/project
 ```
 
-Open the printed URL only in the browser signed in to the account you want to use. Visiting a device authorization URL while signed in can bind that code to the account before you click Approve. If the default browser already opened it with another account, press Ctrl+C, run `frely login --no-browser` again, and use the **new URL**. Signing in again or reusing the old URL does not switch its account. Keep `--relay <url>` when using a custom Relay.
+`frely login` requests a restricted account session through browser device authorization. `frely mcp` initializes a separate secure MCP key, requests browser approval for this device and workspace, and installs the user-level Device Relay service (macOS LaunchAgent, Linux systemd user unit, or Windows Task Scheduler). The default authorization is 90 days; `--days 1..180` selects a duration.
 
-`FRELY_NO_BROWSER=1` remains supported for scripts and existing setups. `frely login --help` lists the available options.
+Print the URL to add to an MCP client:
+
+```sh
+frely mcp url
+```
+
+If MCP has not been configured, `frely mcp url` automatically runs the equivalent of `frely mcp setup --workspace ~`: it requests browser approval for your home directory (90 days by default), then installs the background service and prints the URL. Run `frely login` first. Setup prompts go to stderr, so stdout remains a single URL or, with `--json`, a JSON object. No URL is printed if approval or service installation fails.
+
+Add the exact printed URL to a remote MCP client with OAuth support, choose OAuth and complete authorization. Keep the computer online. Verify the first connection by asking the client to list the top-level names in your selected workspace, without writing files or running shell commands — a returned result that matches the folder confirms connectivity.
+
+For Claude Code on the calling computer:
+
+```sh
+claude mcp add --transport http frely-computer "<MCP_URL>"
+```
+
+Open `/mcp` in Claude Code to complete OAuth authorization. Use a distinct server name per device. Ask the Agent to use Frely tools for remote work; its built-in shell still runs on the calling computer. Clients of the same device share its workspace and managed processes.
+
+Authorization lifecycle: `frely mcp renew --days 180` requires a new approval and rotates the MCP execution key. The MCP URL remains bound to the device. Login refresh, OAuth refresh, restart and repeated setup do not extend authorization. Manage your devices in Frely → **Device MCP** (`/user/account/connections`). `frely mcp setup` and `frely mcp chatgpt` remain compatibility aliases; a bare `frely mcp` uses the current directory.
 
 ### Invoke a Frely-hosted Agent
 
-The verified npm release `0.6.2` includes the Agent installation and invocation
-commands below. Use a published Agent with account or restricted API-key access.
-
-To install a published Frely Agent as a local trigger Skill:
+Use a published Agent with account or restricted API-key access. To install it as a local trigger Skill:
 
 ```sh
 frely skill install https://app.frely.cloud/api/public/virtual-models/<distribution-id> \
@@ -183,59 +128,13 @@ printf '%s' 'Your complete task' | \
   frely agent invoke '<distribution-id>' --input-stdin --json
 ```
 
-### Device MCP: control this computer from a remote client
-
-Frely CLI turns the target computer into a personal device MCP service. ChatGPT in a browser, Claude Code on another computer, and other remote HTTP MCP clients with OAuth use the same endpoint. Install and run Frely CLI on the computer to control; the calling computer only needs its MCP client.
-
-Enable file, shell and process access on the target computer:
-
-```sh
-frely mcp --workspace /path/to/project
-```
-
-`frely login` requests a restricted account session through browser device authorization. Basic sessions use private plaintext files, not the OS credential store. Legacy account cookies do not migrate to this store. Basic features and Network commands do not initialize MCP credentials.
-
-`frely mcp` initializes a separate secure MCP key, requests browser approval for this device and workspace, and installs the user-level Device Relay service. The default authorization is 90 days; `--days 1..180` selects a duration. `frely mcp renew --days 180` requires a new approval and rotates the MCP execution key. The MCP URL remains bound to the device. Login refresh, OAuth refresh, restart and repeated setup do not extend authorization.
-
-Services use macOS LaunchAgents, Linux systemd user units, or Windows Task Scheduler for the logged-on user. Windows implementation needs native acceptance testing. Linux MCP secure storage can require Secret Service or an injected key; basic installation does not.
-
-You can print the URL again with:
-
-```sh
-frely mcp url
-```
-
-If MCP has not been configured, `frely mcp url` automatically runs the equivalent of `frely mcp setup --workspace ~`: it requests browser approval for your home directory (90 days by default), then installs the background service and prints the URL. Run `frely login` first. To select a project directory instead, run `frely mcp --workspace /path/to/project` before requesting the URL. Existing workspaces are preserved; expired authorization still requires `frely mcp renew`. Setup prompts go to stderr, so stdout remains a single URL or, with `--json`, a JSON object. No URL is printed if approval or service installation fails.
-
-Add the exact printed URL to a remote MCP client with OAuth support, choose
-OAuth and complete authorization. Keep the computer online. Ask the client to
-list the top-level names in your selected workspace, without writing files or
-running shell commands. A returned result that matches the folder verifies the
-first connection. `frely doctor` shows whether the running relay has a recent heartbeat; it does not complete client OAuth authorization or execute a tool through that client.
-
-Use `frely doctor` for a quick overview. If a call fails, run `frely doctor -v` for detailed diagnostics.
-
-For Claude Code on the calling computer, replace the placeholder with the URL printed on the target computer:
-
-```sh
-claude mcp add --transport http frely-computer "<MCP_URL>"
-```
-
-Open `/mcp` in Claude Code to complete OAuth authorization. Use a distinct server name per device. Ask the Agent to use Frely tools for remote work; its built-in shell still runs on the calling computer. Clients of the same device share its workspace and managed processes. Unknown-outcome writes must not be replayed.
-
-Manage your devices in Frely → **Device MCP** (`/user/account/connections`). The page shows execution permission and connection history, not a live online indicator. Client OAuth authorization and device execution permission have separate lifecycles.
-
-`frely mcp setup` and `frely mcp chatgpt` remain compatibility aliases. The latter prints the same connection details; it does not create a ChatGPT-specific service. A bare `frely mcp` uses the current directory.
-
 ## Local model sharing
 
-`frely-cli` can publish a loopback OpenAI-compatible runtime as a Frely personal Provider. Ollama is the default driver.
+Publish a loopback OpenAI-compatible runtime as a Frely personal Provider. Ollama is the default driver:
 
 ```sh
 frely provider share ollama
 ```
-
-Default Ollama endpoint: `http://127.0.0.1:11434/v1`.
 
 Custom endpoint and model selection:
 
@@ -247,7 +146,7 @@ frely provider share openai-compatible \
   --name "Local GPU"
 ```
 
-Requirements: Frely login, one empty active personal Provider slot, loopback HTTP, OpenAI-compatible `/v1`. Model names cannot contain whitespace or `/`.
+Requirements: Frely login, one empty active personal Provider slot, loopback HTTP, OpenAI-compatible `/v1` (default Ollama endpoint `http://127.0.0.1:11434/v1`). Model names cannot contain whitespace or `/`.
 
 The command creates a server-managed `openai-compatible` personal Provider, stores the local endpoint in owner-only CLI state, starts the Device Relay service, signs a Provider credential with the device Ed25519 key, configures CPA, and enables the declared models. Existing Frely Access Point and API-key flows consume the Provider.
 
@@ -260,9 +159,47 @@ frely provider finalize <provider-id>
 
 `finalize` resumes CPA setup for a Provider left in a prepared state.
 
-## Frely Cloud
+## Update and diagnostics
 
-Use `frely cloud` to discover and call cloud business operations. See [Cloud commands and authorization](docs/cloud.md).
+```sh
+frely doctor      # installation path, distribution, latest stable, local account/MCP/service state
+frely doctor -v   # + config paths, runtime details, authorization expiry, last heartbeat, sanitized errors
+frely upgrade     # updates the running installation in place
+```
+
+`frely upgrade` never changes to a different installer, edits PATH or downgrades a newer installation. Standalone downloads are checksum-checked and tested before the installed executable is replaced. npm/Bun installations keep their original global directory. A matching, running Device Relay service is paused for maintenance, restarted and checked after installation; credentials, device identity, MCP URL, workspace and authorization expiry are preserved. On Windows, `upgrade` prints a PowerShell command for the detected installation to run in a local terminal.
+
+`frely doctor` is the single diagnostic entry point and never restarts the service. `Connected` means the matching account/device process has received a WebSocket heartbeat within 75 seconds and the MCP authorization and workspace match the running relay. Neither mode completes client OAuth authorization or executes a tool call through the client. Legacy `frely status`, `frely mcp status`, `frely mcp service status` and `frely doctor --mcp` remain compatible, but `frely doctor` is the recommended entry point.
+
+Full behavior: [the self-upgrade contract](docs/self-upgrade.md) and [service maintenance and legacy upgrades](docs/service-maintenance.md). If more than one `frely` is installed, check the path shown by `doctor` before upgrading.
+
+## Local execution boundaries
+
+The local MCP server exposes workspace inspection, file search/read/write/patch, directory create/delete/move, shell commands, and persistent process management.
+
+Filesystem tools are constrained to the selected workspace, reject symlink escapes, cap normal file reads/writes at 1 MiB, use no-follow reads, and use atomic replacement for writes. `run_command` and persistent process tools execute with the current OS user's permissions; the workspace only constrains their working directory and is **not** a shell sandbox.
+
+Read-only local operations may overlap; writes and shell operations use the local fair scheduler — this avoids device-wide `busy -> 429` behavior.
+
+## Authentication and secrets
+
+Basic account and Network sessions use private plaintext files. They cannot approve MCP authorization or invoke account-management operations outside their explicit scopes. The Provider key is separate from the MCP execution key.
+
+MCP secrets use AES-256-GCM files with a master key in macOS Keychain, Windows Credential Manager or Linux Secret Service. Headless deployments can inject a 32-byte key through `FRELY_CREDENTIAL_KEY` and select `FRELY_CREDENTIAL_STORE=encrypted-file`. MCP has no plaintext fallback; secure-store failure does not stop basic features.
+
+The stable MCP URL contains no credential. Remote clients hold OAuth credentials; the CLI holds the MCP execution private key. The Relay checks OAuth resource binding and the current MCP execution lease. Expiry blocks requests and queued work and cancels managed execution; it does not undo writes or create a sandbox around arbitrary shell programs.
+
+Storage, migration, service injection, release requirements and threat boundaries: [credential and installation boundaries](docs/credential-storage.md).
+
+## Architecture
+
+- Product definition and generic client integration: [docs/device-mcp.md](docs/device-mcp.md)
+- Device Relay transport: subprotocol, connection grant, reconnection, fallback state machine: [docs/device-transport.md](docs/device-transport.md)
+- Relay OAuth 2.1 Authorization Code + PKCE, discovery and token endpoints: [docs/mcp-oauth-relay-contract.md](docs/mcp-oauth-relay-contract.md)
+- Cloud commands and authorization: [docs/cloud.md](docs/cloud.md)
+- Frely Network commands (unreleased): [docs/frely-network.md](docs/frely-network.md)
+
+The public MCP URL is the canonical resource returned by Relay, for example `https://connect.frely.cloud/mcp/<device-id>`. Use `frely mcp url`; do not derive the URL from the control-plane hostname. The URL contains no bearer secret.
 
 ## Commands
 
@@ -288,139 +225,16 @@ frely mcp revoke
 frely mcp stdio [--workspace <path>]
 ```
 
-`frely mcp serve` is the foreground form of the Device Relay client. Remote execution requires the approved workspace and MCP lease. A Provider-only connection does not enable MCP.
+`frely mcp serve` is the foreground form of the Device Relay client. Remote execution requires the approved workspace and MCP lease; a Provider-only connection does not enable MCP.
 
 `frely logout` removes the account session and attempts to stop the background service. `frely mcp revoke` revokes the MCP lease and removes its secure credential; it retains the Provider device and service.
 
-## MCP provisioning contract
+## Landing page
 
-The CLI expects Frely Relay to expose these authenticated user endpoints:
-
-```text
-POST /api/user/device-relay/enroll
-POST /api/user/device-relay/connect
-POST /api/user/device-relay/revoke
-```
-
-Enrollment returns:
-
-```json
-{
-  "deviceId": "..."
-}
-```
-
-The public MCP URL is the canonical resource returned by Relay, for example
-`https://connect.frely.cloud/mcp/<device-id>`. Use `frely mcp url`; do not derive the URL
-from the control-plane hostname. The URL contains no bearer secret. Remote MCP clients use OAuth 2.1 Authorization Code + PKCE. OAuth access tokens bind to the exact MCP resource URL and do not extend the 90/180-day local execution authorization. Relay OAuth requirements are defined in [`docs/mcp-oauth-relay-contract.md`](docs/mcp-oauth-relay-contract.md).
-
-A Device Relay connection request uses the enrolled Ed25519 device key and returns a short-lived connection grant:
-
-```json
-{
-  "websocketUrl": "wss://...",
-  "accessToken": "short-lived-token",
-  "expiresAt": "..."
-}
-```
-
-The access token is sent only in the WebSocket `Authorization` header. It is not printed and is not persisted in the MCP URL.
-
-## Device Relay
-
-The WebSocket subprotocol is `frely.device-relay.v1`. Requests use independent request IDs and a 64-request inflight window. Read-only local operations may overlap; writes and shell operations use the local fair scheduler. This avoids LocalMCP's device-wide `busy -> 429` behavior.
-
-The client requests a fresh short-lived connection grant for every connection attempt and reconnects with bounded exponential backoff. A renewed Frely login is picked up by the next reconnect without reinstalling the service.
-
-## Local MCP capabilities
-
-The local MCP server exposes workspace inspection, file search/read/write/patch, directory create/delete/move, shell commands, and persistent process management.
-
-Filesystem tools are constrained to the selected workspace, reject symlink escapes, cap normal file reads/writes at 1 MiB, use no-follow reads, and use atomic replacement for writes. `run_command` and persistent process tools execute with the current OS user's permissions; the workspace only constrains their working directory and is not a shell sandbox.
-
-## Authentication and secrets
-
-Basic account and Network sessions use private plaintext files. They cannot approve MCP authorization or invoke account-management operations outside their explicit scopes. The Provider key is separate from the MCP execution key.
-
-MCP secrets use AES-256-GCM files with a master key in macOS Keychain, Windows Credential Manager or Linux Secret Service. Headless deployments can inject a 32-byte key through `FRELY_CREDENTIAL_KEY` and select `FRELY_CREDENTIAL_STORE=encrypted-file`. MCP has no plaintext fallback. Secure-store failure does not stop basic features.
-
-The stable MCP URL contains no credential. Remote clients hold OAuth credentials; the CLI holds the MCP execution private key. The Relay checks OAuth resource binding and the current MCP execution lease. Expiry blocks requests and queued work and cancels managed execution. It does not undo writes or create a sandbox around arbitrary shell programs.
-
-`frely doctor` is the single diagnostic entry point. It reports the installation
-path and distribution, checks the latest stable release with a deadline, and reads
-local account, MCP authorization, service and connection state. It does not access
-the MCP keyring in summary mode. An unavailable release source is informational;
-unconfigured account/MCP features remain optional.
-
-`frely doctor -v` (also `--verbose`) adds configuration paths, runtime details,
-service state, authorization expiry, last received heartbeat and sanitized last
-connection error. It also checks session storage, the account session and any
-configured MCP secure key/server authorization. Add `--json` to either view for
-structured output. Confirmed failures and unknown connectivity for a configured
-relay return a nonzero exit code.
-
-A running process is not proof of connectivity. Connected means the matching
-account/device process has received a WebSocket heartbeat within 75 seconds.
-The MCP authorization and workspace must also match the running relay. Missing,
-stale or old-runtime observations are reported as unknown. Verbose diagnostics
-include the running CLI version, entry path and start time. Diagnostics never
-restart the service or open a second relay connection. Neither mode claims
-to test client OAuth or an end-to-end tool call.
-
-Legacy `frely status`, `frely mcp status`, `frely mcp service status` and
-`frely doctor --mcp` remain compatible for existing scripts, but are no longer
-listed as recommended diagnostic entry points. The legacy status output shapes
-are unchanged; `doctor --mcp` requests verbose checks and requires MCP setup.
-
-Storage, migration, service injection, release requirements and threat boundaries: [`docs/credential-storage.md`](docs/credential-storage.md).
-
-## Current server dependency
-
-The CLI side of installation, account login, device enrollment, MCP URL discovery, background service lifecycle, Device Relay WebSocket transport, multiplexing, reconnection, local MCP execution, local model discovery, and loopback Provider forwarding is implemented here.
-
-A Frely Relay deployment must implement the device provisioning endpoints, Device Relay WebSocket host, OAuth-protected MCP ingress, OAuth discovery/token endpoints, local Provider ingress, and personal Provider control flow. The MCP URL is a stable resource identifier. Local Provider credentials are device-key signatures stored by CPA. See [`docs/mcp-oauth-relay-contract.md`](docs/mcp-oauth-relay-contract.md).
+The open-source CLI landing page lives in [`site/`](site/README.md), alongside the CLI under the same Apache-2.0 license and trademark policy. It is prepared for `cli.frely.cloud` and deploys independently as a static site. Website assets are excluded from the npm package.
 
 ## License and trademarks
 
-`frely-cli` is licensed under the Apache License 2.0; see [`LICENSE`](LICENSE).
-The Frely name, logos, and product names are not licensed as trademarks; see
-[`TRADEMARKS.md`](TRADEMARKS.md).
+`frely-cli` is licensed under the Apache License 2.0; see [`LICENSE`](LICENSE). The Frely name, logos, and product names are not licensed as trademarks; see [`TRADEMARKS.md`](TRADEMARKS.md).
 
-## Frely Network onboarding
-
-The Network commands are part of the unreleased 0.4.0 source version. The npm distribution requires Node.js 22 or newer; the standalone distribution includes its runtime. Package publication and server activation are separate release steps.
-
-```sh
-frely network setup --host chatgpt --json
-frely network status --json
-frely network find --capability web3.address-risk --json
-frely network use --capability web3.address-risk \
-  --input-json '{"address":"<EVM_ADDRESS>","chainId":"1"}' \
-  --request-id '<REQUEST_UUID>' --json
-frely network logout --json
-```
-
-The examples contain placeholders. Host values are `chatgpt`, `claude-code`, `opencode` and `generic`. Setup returns a browser link and request code without waiting for a signature or requiring a TTY. The next status or capability call retrieves the authorization. ChatGPT requires an existing device-execution bridge and uses the instructions in its current conversation; setup does not add a ChatGPT connector or native Skill.
-
-`--network <HTTPS-origin>` selects a deployment. Credentials are scoped to that origin in the basic private-file store under `frely-network`; they do not share Frely account or device-relay credentials. Tokens and private device codes are excluded from command output. `logout` affects the Network session, not the existing FrelyMCP service. An unconfirmed remote revocation is reported as an error.
-
-Skill installation manages its own files and hash metadata. An unmanaged file, user edit or symlink causes a failure rather than a configuration overwrite. Installation paths are `.claude/skills/frely-network`, `.config/opencode/skills/frely-network` or `.agents/skills/frely-network` under the user home.
-
-The first address-risk profile requires target chain `1`; the wallet login chain does not choose the target. Service output contains source-backed risk signals and `scamProbability: null`, not a fabricated percentage. Calls use platform demo quota without granting wallet transfer permissions. Preserve the request UUID for retries; the CLI does not resend an ambiguous service call.
-
-Source verification:
-
-```sh
-npm ci
-npm run check
-npm test
-npm run build
-node dist/index.js network help --json
-```
-
-CLI unit tests use a fake credential store and temporary home directories. They do not verify the user's OS credential-store permissions or a deployed Network.
-
-The planned unified MCP entry will support wallet-funded capability use without
-a Frely account. Current device MCP authorization and demo Network calls do not
-implement that complete flow. See [Wallet access plan](docs/mcp-wallet-access-plan.md)
-for the accepted product boundary and remaining work.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development guidance and [`SECURITY.md`](SECURITY.md) for private vulnerability reporting.
