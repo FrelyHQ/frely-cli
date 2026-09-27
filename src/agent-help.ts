@@ -50,8 +50,51 @@ export function agentHelp() {
   };
 }
 
+const GROUPS: readonly { title: string; ids: readonly string[] }[] = [
+  { title: "Account", ids: ["login", "logout", "whoami"] },
+  { title: "Status", ids: ["doctor", "upgrade", "help"] },
+  { title: "Device MCP", ids: ["mcp.setup", "mcp.renew", "mcp.url", "mcp.serve", "mcp.revoke", "mcp.stdio"] },
+  { title: "Providers", ids: ["provider.share", "provider.list", "provider.finalize"] },
+  { title: "Skills & Agents", ids: ["skill.install", "skill.status", "skill.remove", "agent.invoke"] },
+  { title: "Cloud, Key & Network", ids: ["cloud", "key.budget", "network"] },
+];
+
+// Short, flag-light forms for the human `--help` overview. The full usage
+// strings (with every flag) live on COMMANDS and stay in `frely help --agent
+// --json`, which this overview points to for the complete contract.
+const SHORT_USAGE: Readonly<Record<string, string>> = {
+  login: "frely login [--relay <url>] [--no-browser]",
+  logout: "frely logout",
+  whoami: "frely whoami",
+  doctor: "frely doctor [-v] [--json]",
+  upgrade: "frely upgrade",
+  help: "frely help --agent --json",
+  "mcp.setup": "frely mcp [--workspace <path>] [--days 1..180]",
+  "mcp.renew": "frely mcp renew [--days 1..180]",
+  "mcp.url": "frely mcp url [--json]",
+  "mcp.serve": "frely mcp serve [--workspace <path>]",
+  "mcp.revoke": "frely mcp revoke",
+  "mcp.stdio": "frely mcp stdio [--workspace <path>]",
+  "provider.share": "frely provider share [ollama|openai-compatible] [--models <a,b>]",
+  "provider.list": "frely provider list [--json]",
+  "provider.finalize": "frely provider finalize <provider-id>",
+  "skill.install": "frely skill install <manifest-url> [--host <host>] [--scope <scope>]",
+  "skill.status": "frely skill status <distribution-id>",
+  "skill.remove": "frely skill remove <distribution-id>",
+  "agent.invoke": "frely agent invoke <distribution-id> (--input <text>|--input-stdin)",
+  cloud: "frely cloud list|describe|call|login|logout",
+  "key.budget": "frely key budget (--api-key-stdin|--distribution <id>)",
+  network: "frely network setup|status|find|use|logout",
+};
 export function cliUsage(): string {
-  return "Usage:\n" + COMMANDS.filter((command) => command.id !== "mcp.service").map((command) => "  " + command.usage + "\n").join("") + "\nMaintenance (not required for supported upgrades):\n  frely mcp service start|stop|uninstall\n";
+  const lines = ["Usage: frely <command>\n"];
+  for (const group of GROUPS) {
+    lines.push(`\n${group.title}:\n`);
+    for (const id of group.ids) lines.push(`  ${SHORT_USAGE[id] ?? id}\n`);
+  }
+  lines.push("\nMaintenance (not required for supported upgrades):\n  frely mcp service start|stop|uninstall\n");
+  lines.push("\nFull flags and the machine-readable contract: frely help --agent --json\n");
+  return lines.join("");
 }
 
 export function mcpUsage(): string {
