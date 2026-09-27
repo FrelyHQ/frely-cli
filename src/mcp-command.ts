@@ -21,10 +21,29 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
   const flags: Record<string, readonly string[]> = {
     url: ["--json"],
     serve: ["--provider-only"],
+    "workspace.list": ["--json"],
   };
   if (action === "service") {
     if (!args[2] || !["start", "stop", "uninstall"].includes(args[2])) throw new Error("Use frely mcp service start|stop|uninstall. Inspect status with frely doctor.");
     if (args.length > 3) throw new Error("Unsupported MCP service option. Run frely mcp --help.");
+    return args;
+  }
+  if (action === "workspace") {
+    const subaction = args[2];
+    if (!subaction || !["add", "list", "remove"].includes(subaction)) {
+      throw new Error("Use frely mcp workspace add|list|remove. Run frely mcp --help.");
+    }
+    if (subaction === "add") {
+      if (!args[3]) throw new Error("frely mcp workspace add requires a path argument.");
+      if (args.length > 4) throw new Error("Unsupported workspace add option. Run frely mcp --help.");
+    } else if (subaction === "list") {
+      if (args.length > 3 && !args.slice(3).every((arg) => arg === "--json")) {
+        throw new Error("Unsupported workspace list option. Run frely mcp --help.");
+      }
+    } else if (subaction === "remove") {
+      if (!args[3]) throw new Error("frely mcp workspace remove requires a path argument.");
+      if (args.length > 4) throw new Error("Unsupported workspace remove option. Run frely mcp --help.");
+    }
     return args;
   }
   if (!Object.hasOwn(valueOptions, action)) throw new Error("Unknown device MCP command. Run frely mcp --help.");

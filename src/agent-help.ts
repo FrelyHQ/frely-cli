@@ -20,6 +20,9 @@ export const COMMANDS = [
   { id: "mcp.renew", usage: "frely mcp renew [--days 1..180]", auth: "account-and-browser", effect: "authorization", purpose: "Renew this device's execution authorization without changing its MCP URL." },
   { id: "mcp.url", usage: "frely mcp url [--json]", auth: "account-and-mcp-or-browser", effect: "authorization-if-unconfigured", purpose: "Read this device's stable MCP URL. If unconfigured, set up the user home directory with browser approval and install the background service. --json includes HTTP transport and OAuth connection details; setup prompts go to stderr." },
   { id: "mcp.serve", usage: "frely mcp serve [--workspace <path>]", auth: "account-and-mcp", effect: "local-execution", purpose: "Serve authorized local workspace tools." },
+  { id: "mcp.workspace.add", usage: "frely mcp workspace add <path>", auth: "mcp", effect: "local-write", purpose: "Register an additional workspace directory for this device." },
+  { id: "mcp.workspace.list", usage: "frely mcp workspace list [--json]", auth: "mcp", effect: "read", purpose: "List all registered workspace directories." },
+  { id: "mcp.workspace.remove", usage: "frely mcp workspace remove <path>", auth: "mcp", effect: "local-write", purpose: "Unregister a workspace directory (but not the primary)." },
   { id: "mcp.service", usage: "frely mcp service start|stop|uninstall", auth: "none", effect: "local-service", purpose: "Pause, resume or remove the local MCP background service for maintenance. Supported upgrades restore running services without these commands." },
   { id: "mcp.revoke", usage: "frely mcp revoke", auth: "account", effect: "remote-write", purpose: "Revoke device MCP execution authorization for every connected client." },
   { id: "mcp.stdio", usage: "frely mcp stdio [--workspace <path>]", auth: "mcp", effect: "local-execution", purpose: "Serve authorized local tools over stdio." },
@@ -53,7 +56,7 @@ export function agentHelp() {
 const GROUPS: readonly { title: string; ids: readonly string[] }[] = [
   { title: "Account", ids: ["login", "logout", "whoami"] },
   { title: "Status", ids: ["doctor", "upgrade", "help"] },
-  { title: "Device MCP", ids: ["mcp.setup", "mcp.renew", "mcp.url", "mcp.serve", "mcp.revoke", "mcp.stdio"] },
+  { title: "Device MCP", ids: ["mcp.setup", "mcp.renew", "mcp.url", "mcp.serve", "mcp.workspace.add", "mcp.workspace.list", "mcp.workspace.remove", "mcp.revoke", "mcp.stdio"] },
   { title: "Providers", ids: ["provider.share", "provider.list", "provider.finalize"] },
   { title: "Skills & Agents", ids: ["skill.install", "skill.status", "skill.remove", "agent.invoke"] },
   { title: "Cloud, Key & Network", ids: ["cloud", "key.budget", "network"] },
@@ -73,6 +76,9 @@ const SHORT_USAGE: Readonly<Record<string, string>> = {
   "mcp.renew": "frely mcp renew [--days 1..180]",
   "mcp.url": "frely mcp url [--json]",
   "mcp.serve": "frely mcp serve [--workspace <path>]",
+  "mcp.workspace.add": "frely mcp workspace add <path>",
+  "mcp.workspace.list": "frely mcp workspace list [--json]",
+  "mcp.workspace.remove": "frely mcp workspace remove <path>",
   "mcp.revoke": "frely mcp revoke",
   "mcp.stdio": "frely mcp stdio [--workspace <path>]",
   "provider.share": "frely provider share [ollama|openai-compatible] [--models <a,b>]",
@@ -86,6 +92,7 @@ const SHORT_USAGE: Readonly<Record<string, string>> = {
   "key.budget": "frely key budget (--api-key-stdin|--distribution <id>)",
   network: "frely network setup|status|find|use|logout",
 };
+
 export function cliUsage(): string {
   const lines = ["Usage: frely <command>\n"];
   for (const group of GROUPS) {

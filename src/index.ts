@@ -45,13 +45,13 @@ async function main(): Promise<void> {
   if (command === "key") {
     if (args[1] !== "budget") throw new KeyBudgetError("input_invalid", "Usage: frely key budget (--api-key-stdin|--distribution <distribution-id>) [--json]");
     const distributionId = option(args, "--distribution");
-    const relayUrl = option(args, "--relay");
+    const relayUrl = option(args, "--relay") as string | undefined;
     if (args.includes("--api-key-stdin") === (distributionId !== undefined)) throw new KeyBudgetError("input_invalid", "Use exactly one of --api-key-stdin or --distribution <distribution-id>.");
     const apiKey = args.includes("--api-key-stdin") ? await readStdinSecret(8192) : undefined;
     const value = await getKeyBudget({
       ...(apiKey === undefined ? {} : { apiKey }),
       ...(distributionId === undefined ? {} : { distributionId }),
-      ...(relayUrl === undefined ? {} : { relayUrl }),
+      ...(relayUrl === undefined ? {} : { relayUrl: relayUrl as string }),
     });
     stdout.write(JSON.stringify(value, null, args.includes("--json") ? undefined : 2) + "\n");
     return;
@@ -129,7 +129,7 @@ async function main(): Promise<void> {
     }, { openBrowser: !noBrowser });
     const user = result.user;
     stdout.write(`Logged in as ${user.email}.\n`);
-    if (!result.sessionBound) {
+    if (!("sessionBound" in result) || !result.sessionBound) {
       stdout.write("Your server version is older and does not support logging out per device yet.\n");
     }
     stdout.write("Run `frely mcp --workspace <path>` on the computer you want to control, then connect your MCP client with OAuth.\n");

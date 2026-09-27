@@ -6,6 +6,8 @@ import { ProcessManager } from "./process-manager.js";
 import { FairRwScheduler } from "./scheduler.js";
 import { safeEnv, Workspace } from "./workspace.js";
 import { VERSION } from "../version.js";
+import { ensureWorkspaceRegistered, listWorkspaces } from "./workspace-registry.js";
+import { resolveWorkspace } from "./workspace-router.js";
 
 interface ToolFlags {
   readOnly: boolean;
@@ -20,8 +22,22 @@ export interface McpRuntimeOptions {
   maxConcurrentCommands?: number;
   onToolError?: (requestId: string | number, tool: string, error: unknown) => void;
 }
+
 export async function createMcpServer(workspaceInput: string, options: McpRuntimeOptions = {}): Promise<Server> {
-  const workspace = await Workspace.open(workspaceInput);
+  // Ensure the primary workspace is registered
+  await ensureWorkspaceRegistered(workspaceInput);
+
+  // Load all registered workspaces
+  const roots = await listWorkspaces();
+  const workspaces = new Map<string, Workspace>();
+  for (const root of roots) {
+    workspaces.set(root, await Workspace.open(root));
+  }
+
+  // Get the primary workspace root (realpath-ed)
+  const primaryWorkspace = await Workspace.open(workspaceInput);
+  const primaryRoot = primaryWorkspace.root;
+
   const lifecycle = new AbortController();
   const assertAuthorized = async () => { lifecycle.signal.throwIfAborted(); await options.assertAuthorized?.(); };
   const maxConcurrentCommands = options.maxConcurrentCommands ?? 4;
@@ -101,7 +117,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
     const name = request.params.name;
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
     try {
-      const result = await dispatch(name, args, workspace, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]));
+      const result = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]));
       return { content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result) }] };
     } catch (error) {
       try { options.onToolError?.(extra.requestId, name, error); } catch { /* Diagnostics cannot change tool results. */ }
@@ -121,32 +137,67 @@ export async function startStdioMcp(workspaceInput: string, options: McpRuntimeO
   await server.connect(new StdioServerTransport());
 }
 
-async function dispatch(name: string, args: Record<string, unknown>, workspace: Workspace, processes: ProcessManager, workspaceScheduler: FairRwScheduler, commandScheduler: FairRwScheduler, processScheduler: FairRwScheduler, signal: AbortSignal): Promise<unknown> {
+async function dispatch(
+  name: string,
+  args: Record<string, unknown>,
+  workspaces: Map<string, unknown>,
+  primaryRoot: string,
+  processes: ProcessManager,
+  workspaceScheduler: FairRwScheduler,
+  commandScheduler: FairRwScheduler,
+  processScheduler: FairRwScheduler,
+  signal: AbortSignal,
+): Promise<unknown> {
   const guarded = <T>(work: () => Promise<T>) => async () => { signal.throwIfAborted(); return work(); };
   const read = <T>(work: () => Promise<T>) => workspaceScheduler.read(guarded(work));
   const write = <T>(work: () => Promise<T>) => workspaceScheduler.write(guarded(work));
   const processRead = <T>(work: () => Promise<T>) => processScheduler.read(guarded(work));
-  if (name === "workspace_info") return read(async () => workspace.info());
-  if (name === "list_directory") return read(() => workspace.listDirectory(textArg(args, "path", ".")));
-  if (name === "stat_path") return read(() => workspace.statPath(textArg(args, "path")));
-  if (name === "find_files") return read(() => workspace.findFiles(textArg(args, "path", "."), textArg(args, "pattern"), intArg(args, "maxResults", 100, 1, 1000)));
-  if (name === "search_files") return read(() => workspace.searchFiles(textArg(args, "path", "."), textArg(args, "query"), { regex: boolArg(args, "regex", false), caseSensitive: boolArg(args, "caseSensitive", false), maxResults: intArg(args, "maxResults", 100, 1, 500), contextLines: intArg(args, "contextLines", 0, 0, 10) }));
-  if (name === "read_file") return read(() => workspace.readFile(textArg(args, "path")));
-  if (name === "read_file_lines") return read(() => workspace.readFileLines(textArg(args, "path"), intArg(args, "startLine", 1, 1, Number.MAX_SAFE_INTEGER), optionalIntArg(args, "endLine", 1, Number.MAX_SAFE_INTEGER)));
-  if (name === "write_file") return write(() => workspace.writeFile(textArg(args, "path"), textArg(args, "content"), boolArg(args, "overwrite", false)));
-  if (name === "apply_patch") return write(() => workspace.applyPatch(textArg(args, "path"), arrayArg(args, "edits", 1, 100), optionalTextArg(args, "expectedSha256")));
-  if (name === "create_directory") return write(() => workspace.createDirectory(textArg(args, "path")));
-  if (name === "delete_path") return write(() => workspace.deletePath(textArg(args, "path"), boolArg(args, "recursive", false)));
-  if (name === "move_path") return write(() => workspace.movePath(textArg(args, "from"), textArg(args, "to"), boolArg(args, "overwrite", false)));
+
+  // Special case: workspace_info returns {root, workspaces} for all workspaces
+  if (name === "workspace_info") {
+    return read(async () => ({
+      root: primaryRoot,
+      workspaces: Array.from(workspaces.keys()),
+    }));
+  }
+
+  // For all other tools, resolve the workspace based on the input path/cwd
+  const { workspace, relativeInput } = resolveWorkspace(
+    workspaces as Map<string, Workspace>,
+    name === "run_command" || name === "start_process" ? textArg(args, "cwd", ".") : (name === "move_path" ? textArg(args, "from", ".") : textArg(args, "path", ".")),
+  );
+
+  if (name === "list_directory") return read(() => workspace.listDirectory(relativeInput));
+  if (name === "stat_path") return read(() => workspace.statPath(relativeInput));
+  if (name === "find_files") return read(() => workspace.findFiles(relativeInput, textArg(args, "pattern"), intArg(args, "maxResults", 100, 1, 1000)));
+  if (name === "search_files") return read(() => workspace.searchFiles(relativeInput, textArg(args, "query"), { regex: boolArg(args, "regex", false), caseSensitive: boolArg(args, "caseSensitive", false), maxResults: intArg(args, "maxResults", 100, 1, 500), contextLines: intArg(args, "contextLines", 0, 0, 10) }));
+  if (name === "read_file") return read(() => workspace.readFile(relativeInput));
+  if (name === "read_file_lines") return read(() => workspace.readFileLines(relativeInput, intArg(args, "startLine", 1, 1, Number.MAX_SAFE_INTEGER), optionalIntArg(args, "endLine", 1, Number.MAX_SAFE_INTEGER)));
+  if (name === "write_file") return write(() => workspace.writeFile(relativeInput, textArg(args, "content"), boolArg(args, "overwrite", false)));
+  if (name === "apply_patch") return write(() => workspace.applyPatch(relativeInput, arrayArg(args, "edits", 1, 100), optionalTextArg(args, "expectedSha256")));
+  if (name === "create_directory") return write(() => workspace.createDirectory(relativeInput));
+  if (name === "delete_path") return write(() => workspace.deletePath(relativeInput, boolArg(args, "recursive", false)));
+  if (name === "move_path") {
+    const toPath = textArg(args, "to");
+    const { workspace: wsTo, relativeInput: relTo } = resolveWorkspace(workspaces as Map<string, Workspace>, toPath);
+    if (workspace !== wsTo) {
+      throw new Error("move_path: source and destination must be in the same workspace.");
+    }
+    return write(() => workspace.movePath(relativeInput, relTo, boolArg(args, "overwrite", false)));
+  }
   if (name === "run_command") {
-    const work = () => workspace.runCommand(textArg(args, "command"), textArg(args, "cwd", "."), intArg(args, "timeoutMs", 30000, 100, 120000), signal);
+    const command = textArg(args, "command");
+    const work = () => workspace.runCommand(command, relativeInput, intArg(args, "timeoutMs", 30000, 100, 120000), signal);
     return concurrencyArg(args) === "exclusive" ? commandScheduler.write(guarded(work)) : commandScheduler.read(guarded(work));
   }
-  if (name === "start_process") return processRead(async () => {
-    const cwd = await workspace.processCwd(textArg(args, "cwd", "."));
-    signal.throwIfAborted();
-    return processes.start(textArg(args, "command"), cwd, safeEnv(), workspace.root);
-  });
+  if (name === "start_process") {
+    const command = textArg(args, "command");
+    return processRead(async () => {
+      const cwdPath = await workspace.processCwd(relativeInput);
+      signal.throwIfAborted();
+      return processes.start(command, cwdPath, safeEnv(), workspace.root);
+    });
+  }
   if (name === "list_processes") return processRead(async () => processes.list());
   if (name === "read_process") return processRead(async () => processes.read(textArg(args, "processId"), intArg(args, "stdoutCursor", 0, 0, Number.MAX_SAFE_INTEGER), intArg(args, "stderrCursor", 0, 0, Number.MAX_SAFE_INTEGER)));
   if (name === "write_process") return processRead(() => processes.write(textArg(args, "processId"), textArg(args, "input")));
