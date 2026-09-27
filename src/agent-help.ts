@@ -105,6 +105,5 @@ export function mcpUsage(): string {
     + "Run setup on the computer to control. Add its MCP URL to ChatGPT, Claude Code on another computer, or another HTTP MCP client, then authorize with OAuth.\n"
     + "If MCP is unconfigured, frely mcp url runs setup for your home directory (~), waits for browser approval, then installs the background service. Setup prompts go to stderr; stdout contains only the URL or JSON.\n"
     + "Existing workspaces are preserved. Expired authorization requires frely mcp renew.\n"
-    + "Clients share the device workspace and managed processes. Shell runs under the device OS account.\n"
-    + "Compatibility: frely mcp setup and frely mcp chatgpt remain available.\n";
+    + "Clients share the device workspace and managed processes. Shell runs under the device OS account.\n";
 }

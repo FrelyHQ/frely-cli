@@ -4,4 +4,4 @@
 
 <a id="first-connection"></a>
 
-首次连接请按 [通用连接流程](device-mcp.md#first-connection) 操作。旧命令 `frely mcp chatgpt` 保留兼容；新指引使用 `frely mcp url`。
+首次连接请按 [通用连接流程](device-mcp.md#first-connection) 操作，用 `frely mcp url` 获取地址。

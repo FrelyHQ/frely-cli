@@ -95,7 +95,7 @@ claude mcp add --transport http frely-computer "<MCP_URL>"
 
 Open `/mcp` in Claude Code to complete OAuth authorization. Use a distinct server name per device. Ask the Agent to use Frely tools for remote work; its built-in shell still runs on the calling computer. Clients of the same device share its workspace and managed processes.
 
-Authorization lifecycle: `frely mcp renew --days 180` requires a new approval and rotates the MCP execution key. The MCP URL remains bound to the device. Login refresh, OAuth refresh, restart and repeated setup do not extend authorization. Manage your devices in Frely → **Device MCP** (`/user/account/connections`). `frely mcp setup` and `frely mcp chatgpt` remain compatibility aliases; a bare `frely mcp` uses the current directory.
+Authorization lifecycle: `frely mcp renew --days 180` requires a new approval and rotates the MCP execution key. The MCP URL remains bound to the device. Login refresh, OAuth refresh, restart and repeated setup do not extend authorization. Manage your devices in Frely → **Device MCP** (`/user/account/connections`). A bare `frely mcp` uses the current directory.
 
 ### Invoke a Frely-hosted Agent
 
@@ -169,7 +169,7 @@ frely upgrade     # updates the running installation in place
 
 `frely upgrade` never changes to a different installer, edits PATH or downgrades a newer installation. Standalone downloads are checksum-checked and tested before the installed executable is replaced. npm/Bun installations keep their original global directory. A matching, running Device Relay service is paused for maintenance, restarted and checked after installation; credentials, device identity, MCP URL, workspace and authorization expiry are preserved. On Windows, `upgrade` prints a PowerShell command for the detected installation to run in a local terminal.
 
-`frely doctor` is the single diagnostic entry point and never restarts the service. `Connected` means the matching account/device process has received a WebSocket heartbeat within 75 seconds and the MCP authorization and workspace match the running relay. Neither mode completes client OAuth authorization or executes a tool call through the client. Legacy `frely status`, `frely mcp status`, `frely mcp service status` and `frely doctor --mcp` remain compatible, but `frely doctor` is the recommended entry point.
+`frely doctor` is the single diagnostic entry point and never restarts the service. `Connected` means the matching account/device process has received a WebSocket heartbeat within 75 seconds and the MCP authorization and workspace match the running relay. Neither mode completes client OAuth authorization or executes a tool call through the client. `frely doctor --mcp` is the recommended way to check the protected credential and server state.
 
 Full behavior: [the self-upgrade contract](docs/self-upgrade.md) and [service maintenance and legacy upgrades](docs/service-maintenance.md). If more than one `frely` is installed, check the path shown by `doctor` before upgrading.
 

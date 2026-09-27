@@ -156,11 +156,11 @@ test("MCP URL propagates service installation failure instead of returning a suc
   assert.doesNotMatch(f.state.messages.join(""), /Background service/);
 });
 
-test("MCP URL keeps bootstrap prompts off stdout, including JSON mode and the legacy alias", async (t) => {
+test("MCP URL keeps bootstrap prompts off stdout, including JSON mode", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "frely-mcp-url-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const entry = fileURLToPath(new URL("./index.js", import.meta.url));
-  for (const args of [["mcp", "url"], ["mcp", "url", "--json"], ["mcp", "chatgpt", "--json"]]) {
+  for (const args of [["mcp", "url"], ["mcp", "url", "--json"]]) {
     await assert.rejects(promisify(execFile)(process.execPath, [entry, ...args], {
       env: { ...process.env, XDG_CONFIG_HOME: directory, FRELY_NO_BROWSER: "1" },
     }), (error: unknown) => {

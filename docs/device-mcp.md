@@ -27,7 +27,6 @@ FrelyMCP 的产品定位是：**让 Agent 从任何地方访问你的设备。**
 - Web：Frely → **Device MCP**，路径保持 `/user/account/connections`。展示设备、工作区、执行权限与到期时间，复制连接 URL 或 Claude Code 命令，撤销设备或 MCP 权限。
 - CLI：`frely mcp` 启用，`frely mcp url` 获取地址，`frely mcp renew` 续期，`frely mcp revoke` 撤销。状态和诊断统一使用 `frely doctor [-v]`。
 - Landing：以 Agent 从外部访问用户设备为主线，网页 Agent 与命令行 Agent 是接入场景；主标题为“让 Agent 从任何地方访问你的设备”。中英文保持同一能力边界，避免副词。独立功能无步骤编号；页面不展示写死的产品版本或发行状态。
-- 兼容：`frely mcp setup` 和 `frely mcp chatgpt` 保留；后者只展示同一服务的 URL/OAuth 信息，不是独立通道。
 - `frely mcp url --json` 返回 `deviceId`、`mcpUrl`、`transport=http`、`authentication=oauth`、`workspace` 和 `expiresAt`；新增字段不改变原 URL。
 
 设备列表的 Last connected 是历史时间，不代表当前在线。在线状态在被控电脑用 `frely doctor` 检查；客户端 OAuth 与真实工具调用需要单独验证。
@@ -164,7 +163,7 @@ frely doctor -v
 frely mcp revoke
 ```
 
-`frely doctor` 读取本地配置、账号摘要、设备权限、后台服务及近期连接心跳；`-v` 进一步检查安全凭证和服务端授权。未启用 MCP 属于可选状态。旧 `mcp status`、`mcp service status` 与 `doctor --mcp` 仅保留兼容，不作为新的用户入口。
+`frely doctor` 读取本地配置、账号摘要、设备权限、后台服务及近期连接心跳；`-v` 进一步检查安全凭证和服务端授权。未启用 MCP 属于可选状态。
 
 授权到期后，Relay 拒绝本机执行请求；CLI 在排队任务开始前检查期限，取消 MCP 请求并关闭受管进程。Provider 身份与服务保留。MCP 存储不可用时，基础功能可用，连接可保留 Provider 能力。
 

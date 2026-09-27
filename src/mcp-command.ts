@@ -3,8 +3,8 @@ import { inspectMcpMetadata, requireMcpAuthorization, setupMcpAuthorization, typ
 import { installMcpService } from "./service.js";
 
 /**
- * Keep the public device-MCP entry client-neutral. Legacy commands still parse,
- * but are not advertised as separate ways to connect a particular AI client.
+ * Keep the public device-MCP entry client-neutral. `setup` is implicit when no
+ * subcommand is given; every other action must be named explicitly.
  */
 export function normalizeMcpArgs(input: readonly string[]): string[] {
   const args = [...input];
@@ -14,18 +14,17 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
   const action = args[1]!;
   const valueOptions: Record<string, readonly string[]> = {
     setup: ["--workspace", "--days"], renew: ["--workspace", "--days"],
-    url: [], chatgpt: [], status: [], revoke: [],
+    url: [], revoke: [],
     serve: ["--workspace", "--service-config-home", "--service-credential-store"],
     stdio: ["--workspace"],
   };
   const flags: Record<string, readonly string[]> = {
-    url: ["--json"], chatgpt: ["--json"], status: ["--json"],
+    url: ["--json"],
     serve: ["--provider-only"],
   };
   if (action === "service") {
-    if (!args[2]) args.push("status");
-    if (!["start", "stop", "uninstall", "status"].includes(args[2]!)) throw new Error("Use frely mcp service start|stop|uninstall. Inspect status with frely doctor.");
-    if (args.slice(3).some((arg) => arg !== "--json") || (args.length > 3 && args[2] !== "status")) throw new Error("Unsupported MCP service option. Run frely mcp --help.");
+    if (!args[2] || !["start", "stop", "uninstall"].includes(args[2])) throw new Error("Use frely mcp service start|stop|uninstall. Inspect status with frely doctor.");
+    if (args.length > 3) throw new Error("Unsupported MCP service option. Run frely mcp --help.");
     return args;
   }
   if (!Object.hasOwn(valueOptions, action)) throw new Error("Unknown device MCP command. Run frely mcp --help.");

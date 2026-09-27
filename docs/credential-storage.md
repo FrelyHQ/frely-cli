@@ -24,7 +24,7 @@ Old account cookies and old `frely-cli` secure-store records do not migrate to p
 
 `frely mcp` and `frely mcp setup` initialize the MCP store and create a separate Ed25519 key. The CLI persists that key before opening the approval page. The page displays the device, key fingerprint, workspace, permissions and duration. Approval needs an account cookie and a user action; a basic bearer token is rejected even when accompanied by a cookie.
 
-When no MCP metadata exists, `frely mcp url` (also the legacy `frely mcp chatgpt` alias) runs the same setup for the user home directory (`~`), including browser approval and background-service installation. Existing grants are validated without changing their workspace, key or expiry. Invalid configuration, missing credentials, denial and expiry remain errors; they do not trigger replacement setup. Initialization messages go to stderr, preserving URL/JSON stdout.
+When no MCP metadata exists, `frely mcp url` runs the same setup for the user home directory (`~`), including browser approval and background-service installation. Existing grants are validated without changing their workspace, key or expiry. Invalid configuration, missing credentials, denial and expiry remain errors; they do not trigger replacement setup. Initialization messages go to stderr, preserving URL/JSON stdout.
 
 | Rule | Value |
 | --- | --- |
@@ -61,7 +61,7 @@ The CLI checks the lease before queued work starts. A running lease uses wall ti
 
 Completed writes are not rolled back. An arbitrary shell command can create effects or detached processes outside the managed process set. Workspace selection is not a shell sandbox. Same-user malware and administrators are outside this credential boundary.
 
-`frely mcp status` reads local metadata and does not access a keyring; it is not proof that the server still accepts a grant. `frely doctor --mcp` checks the protected credential and server state. `frely doctor` treats an unconfigured MCP as optional.
+`frely doctor --mcp` checks the protected credential and server state; `frely doctor` treats an unconfigured MCP as optional.
 
 ## Commands
 
@@ -71,7 +71,7 @@ frely doctor
 frely mcp setup --workspace /path/to/project
 frely mcp setup --workspace /path/to/project --days 180
 frely mcp renew --days 180
-frely mcp status --json
+
 frely doctor --mcp
 frely mcp url
 frely mcp revoke

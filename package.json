@@ -1,6 +1,6 @@
 {
   "name": "frely-cli",
-  "version": "0.6.10",
+  "version": "0.7.0",
   "description": "Frely account CLI and local MCP runtime",
   "license": "Apache-2.0",
   "repository": {
@@ -42,6 +42,7 @@
     "access": "public"
   },
   "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.77",
     "@modelcontextprotocol/sdk": "^1.18.1",
     "ws": "^8.18.3"
   },

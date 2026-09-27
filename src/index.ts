@@ -5,12 +5,12 @@ import { McpLease } from "./runtime/mcp-lease.js";
 import { resolve } from "node:path";
 import { stdin, stdout } from "node:process";
 import { loginDevice, logout, requireLogin, whoami } from "./auth.js";
-import { doctor, formatDoctor, statusSnapshot } from "./diagnostics.js";
+import { doctor, formatDoctor } from "./diagnostics.js";
 import { currentDevice, ensureDevice, revokeDevice } from "./device/control.js";
 import { createLocalProviderToken, loadOrCreateDeviceIdentity } from "./device/identity.js";
 import { serveDeviceRelay } from "./device/relay-client.js";
 import { startStdioMcp } from "./runtime/mcp.js";
-import { installDeviceRelayService, installMcpService, serviceStatus, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
+import { installDeviceRelayService, installMcpService, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
 import { discoverLocalModels } from "./provider/local.js";
 import { finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider, waitForLocalProviderRelay } from "./provider/control.js";
 import { getLocalProvider, isSupportedLocalModelName, listLocalProviders, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider } from "./provider/state.js";
@@ -129,6 +129,9 @@ async function main(): Promise<void> {
     }, { openBrowser: !noBrowser });
     const user = result.user;
     stdout.write(`Logged in as ${user.email}.\n`);
+    if (!result.sessionBound) {
+      stdout.write("Your server version is older and does not support logging out per device yet.\n");
+    }
     stdout.write("Run `frely mcp --workspace <path>` on the computer you want to control, then connect your MCP client with OAuth.\n");
     return;
   }
@@ -146,17 +149,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === "status") {
-    const value = await statusSnapshot();
-    if (args.includes("--json")) stdout.write(`${JSON.stringify(value, null, 2)}\n`);
-    else {
-      stdout.write(`Frely CLI ${VERSION}\n`);
-      stdout.write(`Relay: ${value.auth.relayUrl ?? "not configured"}\n`);
-      stdout.write(`Account: ${value.auth.user?.email ?? "not logged in"}\n`);
-      stdout.write(`Credential: ${value.auth.credentialStored ? "stored" : "missing"}\n`);
-    }
-    return;
-  }
 
   if (command === "doctor") {
     const value = await doctor({ verbose: args.includes("-v") || args.includes("--verbose"), mcp: args.includes("--mcp") });
@@ -243,20 +235,11 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === "mcp" && (args[1] === "url" || args[1] === "chatgpt")) {
+  if (command === "mcp" && args[1] === "url") {
     const authorization = await resolveMcpUrlAuthorization((message) => { process.stderr.write(message); });
     const value = { deviceId: authorization.grant.deviceId, mcpUrl: authorization.mcpUrl, transport: "http", authentication: "oauth", workspace: authorization.grant.workspace, expiresAt: authorization.grant.expiresAt };
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
-    else if (args[1] === "chatgpt") stdout.write(`MCP URL: ${authorization.mcpUrl}\nAuthentication: OAuth\n`);
     else stdout.write(`${authorization.mcpUrl}\n`);
-    return;
-  }
-
-  if (command === "mcp" && args[1] === "status") {
-    const metadata = await inspectMcpMetadata();
-    const value = metadata ? { configured: true, deviceId: metadata.grant.deviceId, workspace: metadata.grant.workspace,
-      expiresAt: metadata.grant.expiresAt, expired: !metadata.grant.expiresAt || Date.parse(metadata.grant.expiresAt) <= Date.now() } : { configured: false };
-    stdout.write(`${JSON.stringify(value, null, 2)}\n`);
     return;
   }
 
@@ -280,23 +263,12 @@ async function main(): Promise<void> {
     }
     return;
   }
-
   if (command === "mcp" && args[1] === "service") {
-    const action = args[2] ?? "status";
-    if (action === "status") {
-      const service = await serviceStatus();
-      if (args.includes("--json")) stdout.write(`${JSON.stringify(service, null, 2)}\n`);
-      else {
-        stdout.write(`Installed: ${service.installed ? "yes" : "no"}\n`);
-        stdout.write(`Active: ${service.active ? "yes" : "no"}\n`);
-        if (service.workspace) stdout.write(`Workspace: ${service.workspace}\n`);
-      }
-      return;
-    }
+    const action = args[2];
     if (action === "start") { const service = await startMcpService(); stdout.write(`Frely MCP service ${service.active ? "started" : "not active"}.\n`); return; }
     if (action === "stop") { const service = await stopMcpService(); stdout.write(`Frely MCP service ${service.active ? "still active" : "stopped"}.\n`); return; }
     if (action === "uninstall") { await uninstallMcpService(); stdout.write("Frely MCP background service removed.\n"); return; }
-    throw new Error("Unknown MCP service action. Use status, start, stop, or uninstall.");
+    throw new Error("Unknown MCP service action. Use start, stop, or uninstall. Inspect status with frely doctor.");
   }
 
   if (command === "mcp" && args[1] === "revoke") {

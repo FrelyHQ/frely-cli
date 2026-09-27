@@ -95,7 +95,7 @@ claude mcp add --transport http frely-computer "<MCP_URL>"
 
 在 Claude Code 中打开 `/mcp` 完成 OAuth 授权。每台设备使用不同的服务器名。让 Agent 用 Frely 工具做远程工作；它自带的 shell 仍跑在调用端电脑。同一设备的客户端共享其工作区与托管进程。
 
-授权生命周期：`frely mcp renew --days 180` 需要新的批准并轮换 MCP 执行密钥。MCP URL 始终绑定该设备。登录刷新、OAuth 刷新、重启与重复配置都不延长授权。在 Frely → **Device MCP**（`/user/account/connections`）管理你的设备。`frely mcp setup` 与 `frely mcp chatgpt` 仍是兼容别名；不带参数的 `frely mcp` 使用当前目录。
+授权生命周期：`frely mcp renew --days 180` 需要新的批准并轮换 MCP 执行密钥。MCP URL 始终绑定该设备。登录刷新、OAuth 刷新、重启与重复配置都不延长授权。在 Frely → **Device MCP**（`/user/account/connections`）管理你的设备。不带参数的 `frely mcp` 使用当前目录。
 
 ### 调用 Frely 托管的 Agent
 
@@ -169,7 +169,7 @@ frely upgrade     # 原地升级当前正在运行的安装
 
 `frely upgrade` 永不换安装器、不改 PATH、不降级更新版本。standalone 下载会先校验 SHA-256 并做启动测试再替换可执行文件；npm/Bun 安装保持原全局目录。匹配的、正在运行的 Device Relay 服务会被暂停维护、重启并在安装后检查；凭证、设备身份、MCP URL、工作区与授权到期均保留。Windows 上 `upgrade` 打印检测到安装方式对应的 PowerShell 命令，请在本地终端执行。
 
-`frely doctor` 是唯一诊断入口，永不重启服务。“Connected” 表示匹配的账号/设备进程在 75 秒内收到 WebSocket 心跳，且 MCP 授权与工作区与运行中的 relay 匹配。两种模式都不代替客户端完成 OAuth 授权，也不代替执行工具调用。旧的 `frely status`、`frely mcp status`、`frely mcp service status` 与 `frely doctor --mcp` 保持兼容，但 `frely doctor` 是推荐入口。
+`frely doctor` 是唯一诊断入口，永不重启服务。“Connected” 表示匹配的账号/设备进程在 75 秒内收到 WebSocket 心跳，且 MCP 授权与工作区与运行中的 relay 匹配。两种模式都不代替客户端完成 OAuth 授权，也不代替执行工具调用。`frely doctor --mcp` 是检查受保护凭证和服务端授权状态的推荐方式。
 
 完整行为：[self-upgrade 契约](docs/self-upgrade.md) 与[服务维护与旧版本迁移](docs/service-maintenance.md)。若安装了多个 `frely`，升级前先查看 `doctor` 显示的路径。
 

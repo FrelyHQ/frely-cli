@@ -8,15 +8,14 @@ import { normalizeMcpArgs } from "./mcp-command.js";
 const execute = promisify(execFile);
 const entry = fileURLToPath(new URL("./index.js", import.meta.url));
 
-test("device MCP accepts the documented short entry and preserves explicit and compatibility commands", () => {
+test("device MCP accepts the documented short entry and explicit subcommands", () => {
   assert.deepEqual(normalizeMcpArgs(["mcp"]), ["mcp", "setup"]);
   assert.deepEqual(normalizeMcpArgs(["mcp", "--workspace", "/project with spaces", "--days", "90"]), ["mcp", "setup", "--workspace", "/project with spaces", "--days", "90"]);
   for (const args of [
     ["mcp", "setup", "--workspace", "/project"],
     ["mcp", "url", "--json"],
-    ["mcp", "chatgpt"],
     ["mcp", "renew", "--days", "180"],
-    ["mcp", "service", "status", "--json"],
+    ["mcp", "service", "start"],
     ["mcp", "serve", "--workspace", "/project", "--service-config-home", "/config", "--service-credential-store", "native"],
   ]) assert.deepEqual(normalizeMcpArgs(args), args);
 });
@@ -42,6 +41,10 @@ test("invalid MCP arguments fail before login, authorization, service installati
     ["mcp", "url", "--workspace", "/unexpected"],
     ["mcp", "setup", "--days", "90", "--days", "180"],
     ["mcp", "typo"],
+    ["mcp", "chatgpt"],
+    ["mcp", "status"],
+    ["mcp", "service"],
+    ["mcp", "service", "status"],
     ["mcp", "service", "unknown"],
   ]) {
     await assert.rejects(execute(process.execPath, [entry, ...args], {
