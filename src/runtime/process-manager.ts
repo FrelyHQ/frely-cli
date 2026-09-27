@@ -1,4 +1,5 @@
 import { terminateProcessTree } from "./process-tree.js";
+import { sandboxCommand } from "./sandbox.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
@@ -45,13 +46,14 @@ export class ProcessManager {
   private readonly processes = new Map<string, ManagedProcess>();
   private readonly operations = new Map<string, Promise<unknown>>();
 
-  start(command: string, cwd: string, env: NodeJS.ProcessEnv): ProcessSnapshot {
+  async start(command: string, cwd: string, env: NodeJS.ProcessEnv, workspaceRoot: string): Promise<ProcessSnapshot> {
     if (this.closed) throw new Error("MCP process manager is closed.");
     if (!command.trim()) throw new Error("command is required.");
     this.pruneExited();
     if (this.processes.size >= MAX_PROCESSES) throw new Error(`At most ${MAX_PROCESSES} managed processes may exist in one MCP session.`);
+    const sandboxed = await sandboxCommand(command, workspaceRoot);
     const id = randomUUID();
-    const child = spawn(command, { cwd, env, shell: true, stdio: "pipe", detached: process.platform !== "win32", windowsHide: true });
+    const child = spawn(sandboxed, { cwd, env, shell: true, stdio: "pipe", detached: process.platform !== "win32", windowsHide: true });
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     const managed: ManagedProcess = {

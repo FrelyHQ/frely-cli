@@ -56,11 +56,11 @@ test("cancelling a running shell command rejects its result", async () => {
 
 test("closing an MCP process manager stops tracked children and forbids new starts", async () => {
   const manager = new ProcessManager();
-  const started = manager.start(`"${process.execPath}" -e "setInterval(() => {}, 1000)"`, process.cwd(), safeEnv());
+  const started = await manager.start(`"${process.execPath}" -e "setInterval(() => {}, 1000)"`, process.cwd(), safeEnv(), process.cwd());
   try {
     await sleep(30); await manager.close();
     for (let attempt = 0; attempt < 40 && manager.read(started.id, 0, 0).running; attempt++) await sleep(25);
     assert.equal(manager.read(started.id, 0, 0).running, false);
-    assert.throws(() => manager.start("echo blocked", process.cwd(), safeEnv()), /closed/);
+    await assert.rejects(manager.start("echo blocked", process.cwd(), safeEnv(), process.cwd()), /closed/);
   } finally { await manager.close(); }
 });

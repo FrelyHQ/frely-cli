@@ -1,4 +1,5 @@
 import { runShellCommand } from "./process-tree.js";
+import { sandboxCommand } from "./sandbox.js";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from "node:fs/promises";
@@ -204,7 +205,8 @@ export class Workspace {
   async runCommand(command: string, cwdInput: string, timeoutMs: number, signal?: AbortSignal) {
     if (!command.trim()) throw new Error("command is required.");
     const cwd = await this.existingPath(cwdInput || ".", "directory");
-    const { stdout, stderr } = await runShellCommand(command, cwd, safeEnv(), timeoutMs, MAX_OUTPUT_BYTES, signal);
+    const sandboxed = await sandboxCommand(command, this.root);
+    const { stdout, stderr } = await runShellCommand(sandboxed, cwd, safeEnv(), timeoutMs, MAX_OUTPUT_BYTES, signal);
     return { stdout: truncate(stdout), stderr: truncate(stderr) };
   }
 

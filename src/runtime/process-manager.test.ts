@@ -7,7 +7,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 test("persistent process exposes cursor based output", async () => {
   const manager = new ProcessManager();
-  const started = manager.start(`${process.execPath} -e "console.log('ready'); setTimeout(() => console.log('done'), 40)"`, process.cwd(), safeEnv());
+  const started = await manager.start(`${process.execPath} -e "console.log('ready'); setTimeout(() => console.log('done'), 40)"`, process.cwd(), safeEnv(), process.cwd());
   assert.equal(started.running, true);
   let first = manager.read(started.id, 0, 0);
   for (let attempt = 0; attempt < 20 && !/done/.test(first.stdout); attempt += 1) {

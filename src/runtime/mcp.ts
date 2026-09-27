@@ -145,7 +145,7 @@ async function dispatch(name: string, args: Record<string, unknown>, workspace: 
   if (name === "start_process") return processRead(async () => {
     const cwd = await workspace.processCwd(textArg(args, "cwd", "."));
     signal.throwIfAborted();
-    return processes.start(textArg(args, "command"), cwd, safeEnv());
+    return processes.start(textArg(args, "command"), cwd, safeEnv(), workspace.root);
   });
   if (name === "list_processes") return processRead(async () => processes.list());
   if (name === "read_process") return processRead(async () => processes.read(textArg(args, "processId"), intArg(args, "stdoutCursor", 0, 0, Number.MAX_SAFE_INTEGER), intArg(args, "stderrCursor", 0, 0, Number.MAX_SAFE_INTEGER)));
