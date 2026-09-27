@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import WebSocket, { WebSocketServer, type WebSocket as WsSocket } from "ws";
+import WebSocket, { WebSocketServer, WebSocket as WsSocket } from "ws";
 import { serveConnection } from "./relay-client.js";
 import { RelayNodeSession, type NodeFrameHandler } from "../runtime/relay-session.js";
 import { DEVICE_RELAY_PROTOCOL, decodeDeviceRelayEnvelope, encodeDeviceRelayEnvelope, type DeviceRelayEnvelope } from "./protocol.js";
