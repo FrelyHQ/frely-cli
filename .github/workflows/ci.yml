@@ -19,7 +19,7 @@ jobs:
       matrix:
         node: [22, 24]
         os:
-          - ubuntu-latest
+          - ubuntu-24.04
           - macos-latest
           - windows-latest
 
