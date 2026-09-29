@@ -20,11 +20,11 @@ test("resolveWorkspace: single workspace is backward compatible", async () => {
   const dotResult = resolveWorkspace(workspaces, ".");
   assert.equal(dotResult.relativeInput, ".");
 
-  // Absolute path should work and be converted to relative
+  // Absolute path is passed through untouched (single-workspace behavior is unchanged)
   const absPath = join(root, "src/file.ts");
   const absResult = resolveWorkspace(workspaces, absPath);
   assert.equal(absResult.workspace, workspace);
-  assert.equal(absResult.relativeInput, join("src", "file.ts"));
+  assert.equal(absResult.relativeInput, absPath);
 });
 
 test("resolveWorkspace: multiple workspaces require absolute paths", async () => {
@@ -81,12 +81,14 @@ test("resolveWorkspace: throws for path outside all workspaces", async () => {
   assert.throws(() => resolveWorkspace(workspaces, outsidePath), /not inside any registered workspace/i);
 });
 
-test("resolveWorkspace: correctly computes relative paths for subdirectories", async () => {
+test("resolveWorkspace: with multiple workspaces computes the path relative to the matched root", async () => {
   const root = await mkdtemp(join(tmpdir(), "frely-workspace-"));
+  const other = await mkdtemp(join(tmpdir(), "frely-workspace-other-"));
   const ws = await Workspace.open(root);
-  const workspaces = new Map([[root, ws]]);
+  const workspaces = new Map([[root, ws], [other, await Workspace.open(other)]]);
 
   const deepPath = join(root, "a", "b", "c", "file.ts");
   const result = resolveWorkspace(workspaces, deepPath);
+  assert.equal(result.workspace, ws);
   assert.equal(result.relativeInput, join("a", "b", "c", "file.ts"));
 });

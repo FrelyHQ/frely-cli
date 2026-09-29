@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { upgrade } from "./upgrade/update.js";
 import { setupMcpAuthorization, requireMcpAuthorization, inspectMcpMetadata, revokeMcpAuthorization } from "./mcp-authorization.js";
+import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
 import { resolve } from "node:path";
 import { stdin, stdout } from "node:process";
@@ -263,6 +264,12 @@ async function main(): Promise<void> {
     }
     return;
   }
+  if (command === "mcp" && args[1] === "workspace") {
+    const metadata = await inspectMcpMetadata();
+    await runWorkspaceCommand({ args, primary: metadata?.grant.workspace ?? null, write: (text) => { stdout.write(text); } });
+    return;
+  }
+
   if (command === "mcp" && args[1] === "service") {
     const action = args[2];
     if (action === "start") { const service = await startMcpService(); stdout.write(`Frely MCP service ${service.active ? "started" : "not active"}.\n`); return; }

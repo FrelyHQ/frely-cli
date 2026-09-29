@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { agentHelp } from "./agent-help.js";
 import { VERSION } from "./version.js";
 
 const execute = promisify(execFile);
@@ -38,4 +39,9 @@ test("key command argument failures are JSON and never echo unsupported secret a
     assert.equal(JSON.parse(result.stdout).ok, false);
     assert.ok(!result.stdout.includes("synthetic-argv-key"));
   }
+});
+
+test("agent help lists the mcp workspace commands", () => {
+  const ids = agentHelp().commands.map((command: { id: string }) => command.id);
+  for (const id of ["mcp.workspace.add", "mcp.workspace.list", "mcp.workspace.remove"]) assert.ok(ids.includes(id), id);
 });

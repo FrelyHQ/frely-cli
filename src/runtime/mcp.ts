@@ -161,6 +161,12 @@ async function dispatch(
     }));
   }
 
+  // Process-management tools address a process id, not a path: no workspace routing.
+  if (name === "list_processes") return processRead(async () => processes.list());
+  if (name === "read_process") return processRead(async () => processes.read(textArg(args, "processId"), intArg(args, "stdoutCursor", 0, 0, Number.MAX_SAFE_INTEGER), intArg(args, "stderrCursor", 0, 0, Number.MAX_SAFE_INTEGER)));
+  if (name === "write_process") return processRead(() => processes.write(textArg(args, "processId"), textArg(args, "input")));
+  if (name === "stop_process") return processRead(() => processes.stop(textArg(args, "processId")));
+
   // For all other tools, resolve the workspace based on the input path/cwd
   const { workspace, relativeInput } = resolveWorkspace(
     workspaces as Map<string, Workspace>,
@@ -198,10 +204,6 @@ async function dispatch(
       return processes.start(command, cwdPath, safeEnv(), workspace.root);
     });
   }
-  if (name === "list_processes") return processRead(async () => processes.list());
-  if (name === "read_process") return processRead(async () => processes.read(textArg(args, "processId"), intArg(args, "stdoutCursor", 0, 0, Number.MAX_SAFE_INTEGER), intArg(args, "stderrCursor", 0, 0, Number.MAX_SAFE_INTEGER)));
-  if (name === "write_process") return processRead(() => processes.write(textArg(args, "processId"), textArg(args, "input")));
-  if (name === "stop_process") return processRead(() => processes.stop(textArg(args, "processId")));
   throw new Error(`Unknown tool: ${name}`);
 }
 
