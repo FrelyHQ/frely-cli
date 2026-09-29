@@ -11,7 +11,9 @@ const CONFIG_VERSION = 3;
 const LEGACY_CONFIG_VERSION = 1;
 const OAUTH_CLIENT_ID = "frely-cli-basic";
 const OAUTH_SCOPE = "openid profile profile:read email offline_access device-relay:provider";
-const DEFAULT_RELAY = "https://app.frely.cloud";
+const DEFAULT_RELAY = "https://frely.cloud";
+// app.frely.cloud now belongs to the Frely App; logins saved against it must be redone on frely.cloud.
+const RETIRED_RELAY_HOSTNAME = "app.frely.cloud";
 const REQUEST_TIMEOUT_MS = 15_000;
 
 function debugAuth(message: string): void {
@@ -151,6 +153,7 @@ function appendSessionBinding(body: URLSearchParams, deviceId?: string | null): 
 
 export async function whoami(): Promise<PublicUser> {
   const config = await readConfig();
+  assertCurrentRelay(config);
   const credential = await loadCredential(config, true);
   if (!credential) throw new Error("No Frely login is stored. Run `frely login`.");
   const user = await fetchUser(config.relayUrl, credential);
@@ -162,6 +165,7 @@ export async function whoami(): Promise<PublicUser> {
 
 export async function requireLogin(): Promise<{ config: { relayUrl: string }; user: PublicUser; credential: AuthCredential; cookie?: string }> {
   const config = await readConfig();
+  assertCurrentRelay(config);
   const credential = await loadCredential(config, true);
   if (!credential) throw new Error("No Frely login is stored. Run `frely login`.");
   const user = await fetchUser(config.relayUrl, credential).catch((error) => {
@@ -269,6 +273,12 @@ export async function probeCredentialStore(): Promise<void> {
     if (await credentialStore.getPassword(SERVICE, account) !== value) throw new Error("Credential store readback failed.");
   } finally {
     if (!await credentialStore.deletePassword(SERVICE, account)) throw new Error("Credential store deletion failed.");
+  }
+}
+
+function assertCurrentRelay(config: CliConfig): void {
+  if (new URL(config.relayUrl).hostname === RETIRED_RELAY_HOSTNAME) {
+    throw new Error("Frely moved to https://frely.cloud. Run `frely login` again.");
   }
 }
 

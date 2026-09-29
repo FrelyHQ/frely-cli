@@ -137,7 +137,7 @@ URL 形态：
 https://connect.frely.cloud/mcp/<device-id>
 ```
 
-URL 是 Relay 返回的 canonical MCP resource，不从 `app.frely.cloud` 或其他控制面地址推导，也不包含 bearer secret。客户端 Authentication 选择 `OAuth`。
+URL 是 Relay 返回的 canonical MCP resource，不从 `frely.cloud` 或其他控制面地址推导，也不包含 bearer secret。客户端 Authentication 选择 `OAuth`。
 
 远程客户端通过 OAuth 2.1 Authorization Code + PKCE 获取访问令牌。访问令牌绑定精确 MCP resource URL。OAuth refresh 不延长 MCP 执行授权。
 

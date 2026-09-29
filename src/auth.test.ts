@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { authConfigPath, inspectAuth, login, loginDevice, logout } from "./auth.js";
+import { dirname, join } from "node:path";
+import { authConfigPath, inspectAuth, login, loginDevice, logout, normalizeRelayUrl, requireLogin } from "./auth.js";
 import { credentialStore } from "./credential-store.js";
 import { basicCredentialStore } from "./credential-basic.js";
 import { useMemoryCredentialStore } from "./test-support.js";
@@ -112,4 +112,19 @@ test("login without a session id from an older Relay stays backward compatible",
   const stored = await basicCredentialStore.getPassword("frely-cli-basic-v1", "https://test.invalid");
   assert.equal(JSON.parse(stored!).sessionBindingId, undefined);
   await logout();
+});
+
+test("defaults to frely.cloud and asks logins saved on app.frely.cloud to log in again", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "frely-cli-retired-relay-"));
+  const previous = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, FRELY_RELAY_URL: process.env.FRELY_RELAY_URL };
+  process.env.XDG_CONFIG_HOME = directory;
+  delete process.env.FRELY_RELAY_URL;
+  t.after(async () => {
+    for (const [name, value] of Object.entries(previous)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+    await rm(directory, { recursive: true, force: true });
+  });
+  assert.equal(normalizeRelayUrl(), "https://frely.cloud");
+  await mkdir(dirname(authConfigPath()), { recursive: true });
+  await writeFile(authConfigPath(), JSON.stringify({ version: 3, relayUrl: "https://app.frely.cloud", user: { id: "user_test", email: "user@example.com" } }));
+  await assert.rejects(requireLogin(), /Frely moved to https:\/\/frely\.cloud/);
 });

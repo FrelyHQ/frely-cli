@@ -22,7 +22,7 @@ The standalone installers select the platform executable, verify a SHA-256 check
 
 ```sh
 # macOS / Linux
-curl -fsSL https://app.frely.cloud/install.sh | sh
+curl -fsSL https://frely.cloud/install.sh | sh
 ```
 
 ```powershell
@@ -102,7 +102,7 @@ Authorization lifecycle: `frely mcp renew --days 180` requires a new approval an
 Use a published Agent with account or restricted API-key access. To install it as a local trigger Skill:
 
 ```sh
-frely skill install https://app.frely.cloud/api/public/virtual-models/<distribution-id> \
+frely skill install https://frely.cloud/api/public/virtual-models/<distribution-id> \
   --host pi \
   --scope global \
   --json
@@ -112,7 +112,7 @@ A Creator can also provide an existing model-scoped, quota-limited API key for a
 
 ```sh
 printf '%s' "$FRELY_AGENT_KEY" | \
-  frely skill install https://app.frely.cloud/api/public/virtual-models/<distribution-id> \
+  frely skill install https://frely.cloud/api/public/virtual-models/<distribution-id> \
     --host chatgpt \
     --scope global \
     --api-key-stdin \

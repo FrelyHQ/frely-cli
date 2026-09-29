@@ -22,7 +22,7 @@ Device MCP:  在被控电脑安装 -> frely login -> frely mcp -> 客户端添�
 
 ```sh
 # macOS / Linux
-curl -fsSL https://app.frely.cloud/install.sh | sh
+curl -fsSL https://frely.cloud/install.sh | sh
 ```
 
 ```powershell
@@ -102,7 +102,7 @@ claude mcp add --transport http frely-computer "<MCP_URL>"
 使用有账号或受限 API-key 访问权限的已发布 Agent。安装为本地触发 Skill：
 
 ```sh
-frely skill install https://app.frely.cloud/api/public/virtual-models/<distribution-id> \
+frely skill install https://frely.cloud/api/public/virtual-models/<distribution-id> \
   --host pi \
   --scope global \
   --json
@@ -112,7 +112,7 @@ Creator 也可以提供一个现成的模型级、限额 API key 用于赞助/�
 
 ```sh
 printf '%s' "$FRELY_AGENT_KEY" | \
-  frely skill install https://app.frely.cloud/api/public/virtual-models/<distribution-id> \
+  frely skill install https://frely.cloud/api/public/virtual-models/<distribution-id> \
     --host chatgpt \
     --scope global \
     --api-key-stdin \

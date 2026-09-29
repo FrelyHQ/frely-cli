@@ -1,6 +1,6 @@
 # Frely Cloud
 
-`frely cloud` calls the Frely application's business tools at `https://app.frely.cloud/mcp`. It uses the application origin selected by your Frely account configuration. Device access uses Frely Connect and has separate authorization.
+`frely cloud` calls the Frely application's business tools at `https://frely.cloud/mcp`. It uses the application origin selected by your Frely account configuration. Device access uses Frely Connect and has separate authorization.
 
 ```sh
 frely cloud login
