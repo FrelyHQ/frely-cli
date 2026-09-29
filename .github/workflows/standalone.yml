@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -36,7 +36,7 @@ jobs:
       - name: Verify offline installer and checksum rejection
         run: npm run test:installer
       - name: Preserve unsigned verification artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: standalone-${{ matrix.os }}
           path: artifacts/
