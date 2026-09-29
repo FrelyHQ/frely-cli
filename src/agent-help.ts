@@ -1,7 +1,7 @@
 import { VERSION } from "./version.js";
 
 export const COMMANDS = [
-  { id: "cloud", usage: "frely cloud list|describe|call|login|logout [--help]", auth: "cloud-oauth", effect: "subcommand-dependent", purpose: "Discover and call Frely cloud business operations at app.frely.cloud/mcp. Use describe before call; parameters and results are JSON." },
+  { id: "cloud", usage: "frely cloud list|describe|call|login|logout [--help]", auth: "cloud-oauth", effect: "subcommand-dependent", purpose: "Discover and call Frely cloud business operations at frely.cloud/mcp. Use describe before call; parameters and results are JSON." },
   { id: "upgrade", usage: "frely upgrade", auth: "none", effect: "local-write", purpose: "Upgrade the current installation to the latest stable release. Windows prints a manual command; doctor checks versions." },
   { id: "help", usage: "frely help --agent --json", auth: "none", effect: "read", purpose: "Read this installed CLI's current Agent instructions." },
   { id: "key.budget", usage: "frely key budget (--api-key-stdin [--relay <url>]|--distribution <distribution-id>) [--json]", auth: "api-key", effect: "read", purpose: "Read the Key's self usage and each funding source's limits without account login." },

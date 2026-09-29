@@ -95,7 +95,7 @@ https://connect.frely.cloud/.well-known/oauth-protected-resource/mcp/drd_xxx
 {
   "resource": "https://connect.frely.cloud/mcp/drd_xxx",
   "authorization_servers": [
-    "https://app.frely.cloud/api/auth"
+    "https://frely.cloud/api/auth"
   ],
   "scopes_supported": [
     "mcp:invoke"
@@ -117,18 +117,18 @@ WWW-Authenticate: Bearer resource_metadata="https://connect.frely.cloud/.well-kn
 Endpoint：
 
 ```text
-https://app.frely.cloud/.well-known/oauth-authorization-server/api/auth
+https://frely.cloud/.well-known/oauth-authorization-server/api/auth
 ```
 
 最低 metadata：
 
 ```json
 {
-  "issuer": "https://app.frely.cloud/api/auth",
-  "authorization_endpoint": "https://app.frely.cloud/api/auth/oauth2/authorize",
-  "token_endpoint": "https://app.frely.cloud/api/auth/oauth2/token",
-  "revocation_endpoint": "https://app.frely.cloud/api/auth/oauth2/revoke",
-  "registration_endpoint": "https://app.frely.cloud/api/auth/oauth2/register",
+  "issuer": "https://frely.cloud/api/auth",
+  "authorization_endpoint": "https://frely.cloud/api/auth/oauth2/authorize",
+  "token_endpoint": "https://frely.cloud/api/auth/oauth2/token",
+  "revocation_endpoint": "https://frely.cloud/api/auth/oauth2/revoke",
+  "registration_endpoint": "https://frely.cloud/api/auth/oauth2/register",
   "response_types_supported": ["code"],
   "grant_types_supported": ["authorization_code", "refresh_token"],
   "code_challenge_methods_supported": ["S256"],
