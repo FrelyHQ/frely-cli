@@ -12,7 +12,7 @@
 本仓库包含开源的 Frely 客户端与本地 MCP 运行时；托管的 Frely Relay 控制面是独立的服务依赖。不存在独立的 `friday-local` 项目，本地 MCP 执行属于 `frely-cli`。
 
 ```text
-Remote Agent Skill: 安装 -> frely login -> frely skill install -> frely agent invoke
+Remote Agent Skill: 安装 -> frely login -> frely agent install -> frely agent run
 Device MCP:  在被控电脑安装 -> frely login -> frely mcp -> 客户端添加 MCP URL -> OAuth 授权
 ```
 
@@ -75,15 +75,9 @@ frely login
 frely mcp --workspace /path/to/project
 ```
 
-`frely login` 通过浏览器设备授权获取受限账号会话。`frely mcp` 初始化独立的 MCP 安全密钥、请求浏览器批准该设备与工作区，并安装用户级 Device Relay 服务（macOS LaunchAgent、Linux systemd 用户单元或 Windows 任务计划程序）。默认授权 90 天，`--days 1..180` 可选时长。
+`frely login` 通过浏览器设备授权获取受限账号会话。首次运行 `frely mcp` 会初始化独立的 MCP 安全密钥、请求浏览器批准该设备与工作区（省略 `--workspace` 时为当前目录）、安装用户级 Device Relay 服务（macOS LaunchAgent、Linux systemd 用户单元或 Windows 任务计划程序），并打印 MCP URL。默认授权 90 天，`--days 1..180` 可选时长。
 
-打印要添加到 MCP 客户端的 URL：
-
-```sh
-frely mcp url
-```
-
-如果 MCP 尚未配置，`frely mcp url` 会自动执行等价的 `frely mcp setup --workspace ~`：请求浏览器批准家目录（默认 90 天），然后安装后台服务并打印 URL。请先运行 `frely login`。安装提示走 stderr，stdout 保持单一 URL（或 `--json` 时一个 JSON 对象）；批准或安装失败则不打印 URL。
+`frely mcp` 是幂等的：启用后再次运行只打印同一个 URL，需要地址时直接再运行即可。提示走 stderr，stdout 保持单一 URL（或 `--json` 时一个 JSON 对象）；批准或安装失败则不打印 URL。要开放更多目录，用 `frely mcp workspace add <path>`；`frely mcp workspace` 列出所有目录。
 
 把打印的完整 URL 添加到支持 OAuth 的远程 MCP 客户端，选择 OAuth 并完成授权。保持电脑在线。验证首次连接：让客户端只列出所选工作区的顶层名称，不写文件、不跑 shell 命令——返回与目录一致的结果即连通。
 
@@ -95,14 +89,14 @@ claude mcp add --transport http frely-computer "<MCP_URL>"
 
 在 Claude Code 中打开 `/mcp` 完成 OAuth 授权。每台设备使用不同的服务器名。让 Agent 用 Frely 工具做远程工作；它自带的 shell 仍跑在调用端电脑。同一设备的客户端共享其工作区与托管进程。
 
-授权生命周期：`frely mcp renew --days 180` 需要新的批准并轮换 MCP 执行密钥。MCP URL 始终绑定该设备。登录刷新、OAuth 刷新、重启与重复配置都不延长授权。在 Frely → **Device MCP**（`/user/account/connections`）管理你的设备。不带参数的 `frely mcp` 使用当前目录。
+授权生命周期：授权过期后，`frely mcp` 会请求新的批准并轮换 MCP 执行密钥；`frely mcp --days 180` 可提前续期。MCP URL 始终绑定该设备。登录刷新、OAuth 刷新与重启都不延长授权。`frely mcp stop|start` 暂停或恢复后台服务；`frely mcp remove` 撤销所有客户端的访问并卸载服务（本机有本地 Provider 时服务改为仅 Provider 模式继续运行）。在 Frely → **Device MCP**（`/user/account/connections`）管理你的设备。
 
 ### 调用 Frely 托管的 Agent
 
-使用有账号或受限 API-key 访问权限的已发布 Agent。安装为本地触发 Skill：
+使用有账号或受限 API-key 访问权限的已发布 Agent。安装为本地触发 Skill（也可以用完整 manifest URL 代替 id）：
 
 ```sh
-frely skill install https://frely.cloud/api/public/virtual-models/<distribution-id> \
+frely agent install <distribution-id> \
   --host pi \
   --scope global \
   --json
@@ -112,7 +106,7 @@ Creator 也可以提供一个现成的模型级、限额 API key 用于赞助/�
 
 ```sh
 printf '%s' "$FRELY_AGENT_KEY" | \
-  frely skill install https://frely.cloud/api/public/virtual-models/<distribution-id> \
+  frely agent install <distribution-id> \
     --host chatgpt \
     --scope global \
     --api-key-stdin \
@@ -125,8 +119,10 @@ CLI 会用目标模型级 MCP `tools/list` 端点验证 key，存入安全凭证
 
 ```sh
 printf '%s' '你的完整任务' | \
-  frely agent invoke '<distribution-id>' --input-stdin --json
+  frely agent run '<distribution-id>' --input-stdin --json
 ```
+
+`frely agent status <distribution-id>` 查看已安装的 Skill，API-key 安装时同时显示该 Key 的预算。`frely agent remove <distribution-id>` 删除 Skill 及其保存的 key。
 
 ## 本地模型共享
 
@@ -150,19 +146,18 @@ frely provider share openai-compatible \
 
 该命令创建服务端管理的 `openai-compatible` 个人 Provider，把本地端点存入仅属主可读的 CLI 状态，启动 Device Relay 服务，用设备 Ed25519 key 签署 Provider 凭证，配置 CPA 并启用声明的模型。现有 Frely Access Point 与 API-key 流程即可消费该 Provider。
 
-Provider 检查与恢复：
+Provider 检查：
 
 ```sh
 frely provider list
-frely provider finalize <provider-id>
 ```
 
-`finalize` 为停留在 prepared 状态的 Provider 续跑 CPA 配置。
+如果 Provider 已准备但设置中途失败，再运行一次 `frely provider share` 即可：它会续完该 Provider，而不是新建一个。
 
 ## 升级与诊断
 
 ```sh
-frely doctor      # 安装路径、发行形态、最新稳定版、本地账号/MCP/服务状态
+frely doctor      # 当前账号、安装路径、发行形态、最新稳定版、MCP/服务状态
 frely doctor -v   # 另加配置路径、运行时细节、授权到期、最近心跳、脱敏错误
 frely upgrade     # 原地升级当前正在运行的安装
 ```
@@ -197,37 +192,32 @@ MCP 密钥使用 AES-256-GCM 文件，主密钥存 macOS Keychain、Windows 凭�
 - Device Relay 传输：子协议、连接 grant、重连、回退状态机：[docs/device-transport.md](docs/device-transport.md)
 - Relay OAuth 2.1 Authorization Code + PKCE、发现与 token 端点：[docs/mcp-oauth-relay-contract.md](docs/mcp-oauth-relay-contract.md)
 - Cloud 命令与授权：[docs/cloud.md](docs/cloud.md)
-- Frely Network 命令（未发布）：[docs/frely-network.md](docs/frely-network.md)
+- Frely Network 命令（预览，不在 `frely --help` 中列出）：[docs/frely-network.md](docs/frely-network.md)
 
-公网 MCP URL 是 Relay 返回的规范资源，例如 `https://connect.frely.cloud/mcp/<device-id>`。请使用 `frely mcp url`，不要从控制面域名推导。URL 不含 bearer secret。
+公网 MCP URL 是 Relay 返回的规范资源，例如 `https://connect.frely.cloud/mcp/<device-id>`。请使用 `frely mcp` 输出的地址，不要从控制面域名推导。URL 不含 bearer secret。
 
 ## 命令
 
 ```text
 frely login [--relay <https-url>] [--no-browser]
 frely logout
-frely whoami
 frely doctor [-v] [--json]
 frely upgrade
-frely skill install <manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--api-key-stdin] [--json]
-frely skill status <distribution-id> [--json]
-frely skill remove <distribution-id> [--json]
-frely agent invoke <distribution-id> (--input <text>|--input-stdin) [--json]
+frely mcp [--workspace <path>] [--days 1..180] [--json]
+frely mcp workspace [add|remove <path>] [--json]
+frely mcp stop|start|remove
+frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--api-key-stdin] [--json]
+frely agent run <distribution-id> (--input <text>|--input-stdin) [--json]
+frely agent status (<distribution-id>|--api-key-stdin [--relay <url>]) [--json]
+frely agent remove <distribution-id> [--json]
 frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]
 frely provider list [--json]
-frely provider finalize <provider-id>
-frely mcp [--workspace <path>] [--days 1..180]
-frely mcp renew [--days 1..180]
-frely mcp url [--json]
-frely mcp serve [--workspace <path>]
-frely mcp service start|stop|uninstall
-frely mcp revoke
-frely mcp stdio [--workspace <path>]
+frely cloud list|describe|call
 ```
 
-`frely mcp serve` 是 Device Relay 客户端的前台形式。远程执行需要已批准的工作区与 MCP 租约；只有 Provider 的连接不开启 MCP。
+以下命令不在 `frely --help` 中列出，但在 `frely help --agent --json` 中：`frely mcp stdio [--workspace <path>]` 通过 stdio 为本地 MCP 客户端提供工具；`frely mcp serve` 是后台服务运行的前台 Device Relay 客户端；`frely network` 是 Network 预览。
 
-`frely logout` 删除账号会话并尝试停止后台服务。`frely mcp revoke` 撤销 MCP 租约并删除其安全凭证；保留 Provider 设备与服务。
+`frely logout` 删除账号会话、撤销 Cloud 授权并尝试停止后台服务。
 
 ## 落地页
 

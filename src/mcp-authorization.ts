@@ -59,7 +59,7 @@ export async function loadMcpAuthorization(): Promise<McpAuthorization | null> {
   const metadata = await inspectMcpMetadata();
   if (!metadata) return null;
   const raw = await credentialStore.getPassword(SERVICE, account(metadata));
-  if (!raw) throw new Error("MCP secure credential is unavailable. Run frely mcp renew; no replacement key was generated.");
+  if (!raw) throw new Error("MCP secure credential is unavailable. Run frely mcp --days 90 to renew; no replacement key was generated.");
   const value = JSON.parse(raw) as McpSecret;
   if (value.version !== 1 || JSON.stringify(value.metadata) !== JSON.stringify(metadata) || typeof value.privateKeyPem !== "string") throw new Error("MCP credential does not match its authorization.");
   const identity = identityFromPrivateKey(value.privateKeyPem);
@@ -77,7 +77,7 @@ export async function requireMcpAuthorization(workspace?: string): Promise<McpAu
   const response = await relayFetch(auth.config.relayUrl, auth.credential, `${ENDPOINT}?requestId=${authorization.grant.id}`, { method: "GET" });
   const current = await readView(response);
   assertMcpActive(current);
-  if (JSON.stringify(current) !== JSON.stringify(authorization.grant)) throw new Error("MCP authorization changed. Run frely mcp renew.");
+  if (JSON.stringify(current) !== JSON.stringify(authorization.grant)) throw new Error("MCP authorization changed. Run frely mcp --days 90 to renew.");
   return authorization;
 }
 
@@ -153,7 +153,7 @@ export async function revokeMcpAuthorization(): Promise<void> {
 }
 export function assertMcpActive(view: McpAuthorizationView, now = Date.now()): void {
   if (view.status !== "active" || !view.expiresAt || !Number.isFinite(Date.parse(view.expiresAt)) || Date.parse(view.expiresAt) <= now) {
-    throw new Error("MCP_AUTHORIZATION_EXPIRED: run frely mcp renew. Basic features remain available.");
+    throw new Error("MCP_AUTHORIZATION_EXPIRED: run frely mcp to renew. Basic features remain available.");
   }
 }
 function validateView(input: unknown): McpAuthorizationView {

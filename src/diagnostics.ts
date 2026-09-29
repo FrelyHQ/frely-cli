@@ -43,7 +43,7 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
   }));
   add("account", auth.credentialError || (auth.configured && !auth.credentialStored) ? "fail" : auth.credentialStored ? "pass" : "info",
     auth.credentialError ? "Account configuration or credentials could not be read. Run frely login."
-      : auth.credentialStored ? `${auth.user?.email ?? "configured"} (stored; not checked online)`
+      : auth.credentialStored ? `${auth.user ? `${auth.user.email} (${auth.user.id})` : "configured"}; stored, not checked online`
       : "Not logged in (optional). Run frely login to use account features.");
 
   let metadataError = false;
@@ -58,7 +58,7 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
   add("mcp", metadataError || expired || (metadata && !mcpMatches) || (!metadata && options.mcp) ? "fail" : metadata ? "pass" : "info",
     metadataError ? "Configuration could not be read. Run frely mcp."
       : !metadata ? "Not enabled (optional)."
-      : expired ? "Authorization expired or inactive. Run frely mcp renew."
+      : expired ? "Authorization expired or inactive. Run frely mcp to renew."
       : !mcpMatches ? "Authorization does not match this account/device. Run frely mcp."
       : `Configured; expires ${metadata.grant.expiresAt} (local authorization).`);
 
@@ -83,7 +83,7 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
       : live && metadata && !mcpReady ? "Device transport connected, but this MCP authorization/workspace is not active in the running service."
       : live ? "Device transport connected; recent heartbeat received."
       : connectionState === "disconnected" ? "Disconnected; the device transport is retrying."
-      : connectionState === "stopped" ? "Device transport stopped. Run frely mcp service start."
+      : connectionState === "stopped" ? "Device transport stopped. Run frely mcp start."
       : "Unknown: no recent heartbeat for this account/device. Run frely doctor -v.");
 
   const update = await upgradePromise;
@@ -109,7 +109,7 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
         if (metadata && error instanceof McpAuthorizationError && ["mcp_authorization_not_found", "mcp_authorization_invalid", "device_not_found", "device_revoked"].includes(error.code)) {
           try {
             await dependencies.reconcileMcpAuthorization?.(metadata, error.code);
-            add("mcp_authorization", "info", `Local MCP state repaired after server response: ${error.code}. Run frely mcp setup to request approval.`);
+            add("mcp_authorization", "info", `Local MCP state repaired after server response: ${error.code}. Run frely mcp to request approval.`);
           } catch { add("mcp_authorization", "fail", "MCP authorization is invalid and local state could not be repaired."); }
         } else add("mcp_authorization", "fail", "Secure key or server authorization could not be verified. Check connectivity, login and MCP renewal.");
       }

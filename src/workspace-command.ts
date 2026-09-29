@@ -8,7 +8,7 @@ export interface WorkspaceCommandInput {
   write: (text: string) => void;
 }
 
-/** `frely mcp workspace add|list|remove`. `args` is the full argv, e.g. ["mcp", "workspace", "add", "/path"]. */
+/** `frely mcp workspace [add|remove <path>]`. `args` is the normalized argv, e.g. ["mcp", "workspace", "add", "/path"]; a bare list is normalized to "list". */
 export async function runWorkspaceCommand({ args, primary: primaryInput, write }: WorkspaceCommandInput): Promise<void> {
   if (!primaryInput) throw new Error("MCP is not enabled. Run frely mcp.");
   const primary = await realpath(primaryInput);
@@ -32,7 +32,7 @@ export async function runWorkspaceCommand({ args, primary: primaryInput, write }
       : format(primary, roots));
     return;
   }
-  throw new Error("Use frely mcp workspace add|list|remove. Run frely mcp --help.");
+  throw new Error("Use frely mcp workspace [add|remove <path>]. Run frely mcp --help.");
 }
 
 function ordered(primary: string, roots: string[]): string[] {

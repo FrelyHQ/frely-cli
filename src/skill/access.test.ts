@@ -62,7 +62,7 @@ test("installs a managed trigger Skill without installing the remote Agent", asy
     assert.equal(result.distributionId, distributionId);
     assert.equal(result.skillPath, join(root, ".pi", "agent", "skills", "frely-tripready-01234567", "SKILL.md"));
     const text = await readFile(result.skillPath, "utf8");
-    assert.match(text, /frely agent invoke creator_distribution_/u);
+    assert.match(text, /frely agent run creator_distribution_/u);
     assert.doesNotMatch(text, /api\.frely\.cloud\/mcp/u);
     const status = await skillAdapterStatus(distributionId, root);
     assert.equal(status.state, "managed");
@@ -204,7 +204,7 @@ test("published client trigger metadata drives Skill discovery and invocation", 
     const frontmatter = text.split("---")[1]!;
     assert.ok(frontmatter.includes(JSON.stringify(trigger.description)));
     for (const condition of trigger.when) assert.ok(text.includes(condition));
-    assert.ok(text.includes("frely agent invoke " + distributionId + " --input-stdin --json"));
+    assert.ok(text.includes("frely agent run " + distributionId + " --input-stdin --json"));
     assert.ok(!text.includes(payload.urls.mcp));
   } finally { await rm(home, { recursive: true, force: true }); }
 });

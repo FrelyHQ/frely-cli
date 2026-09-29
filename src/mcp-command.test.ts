@@ -11,17 +11,23 @@ const entry = fileURLToPath(new URL("./index.js", import.meta.url));
 test("device MCP accepts the documented short entry and explicit subcommands", () => {
   assert.deepEqual(normalizeMcpArgs(["mcp"]), ["mcp", "setup"]);
   assert.deepEqual(normalizeMcpArgs(["mcp", "--workspace", "/project with spaces", "--days", "90"]), ["mcp", "setup", "--workspace", "/project with spaces", "--days", "90"]);
+  assert.deepEqual(normalizeMcpArgs(["mcp", "--json"]), ["mcp", "setup", "--json"]);
+  assert.deepEqual(normalizeMcpArgs(["mcp", "workspace"]), ["mcp", "workspace", "list"]);
+  assert.deepEqual(normalizeMcpArgs(["mcp", "workspace", "--json"]), ["mcp", "workspace", "list", "--json"]);
+  // Upgrade bridge for Windows commands printed by 0.7.x.
+  assert.deepEqual(normalizeMcpArgs(["mcp", "service", "start"]), ["mcp", "start"]);
   for (const args of [
-    ["mcp", "setup", "--workspace", "/project"],
-    ["mcp", "url", "--json"],
-    ["mcp", "renew", "--days", "180"],
-    ["mcp", "service", "start"],
+    ["mcp", "workspace", "add", "/project"],
+    ["mcp", "stop"],
+    ["mcp", "start"],
+    ["mcp", "remove"],
+    ["mcp", "stdio", "--workspace", "/project"],
     ["mcp", "serve", "--workspace", "/project", "--service-config-home", "/config", "--service-credential-store", "native"],
   ]) assert.deepEqual(normalizeMcpArgs(args), args);
 });
 
 test("MCP help works offline for the entry and subcommands", async () => {
-  for (const args of [["mcp", "--help"], ["mcp", "renew", "--help"], ["mcp", "help"]]) {
+  for (const args of [["mcp", "--help"], ["mcp", "remove", "--help"], ["mcp", "help"]]) {
     const result = await execute(process.execPath, [entry, ...args], {
       env: { ...process.env, FRELY_CREDENTIAL_STORE: "intentionally-invalid", FRELY_RELAY_URL: "not-a-url" },
     });
@@ -38,13 +44,19 @@ test("invalid MCP arguments fail before login, authorization, service installati
     ["mcp", "--workspace"],
     ["mcp", "--workspace", "--days", "90"],
     ["mcp", "--unknown", "synthetic-secret"],
-    ["mcp", "url", "--workspace", "/unexpected"],
-    ["mcp", "setup", "--days", "90", "--days", "180"],
+    ["mcp", "--days", "90", "--days", "180"],
+    ["mcp", "setup"],
+    ["mcp", "url"],
+    ["mcp", "renew"],
+    ["mcp", "revoke"],
+    ["mcp", "stop", "--force"],
+    ["mcp", "workspace", "list"],
+    ["mcp", "workspace", "add"],
     ["mcp", "typo"],
     ["mcp", "chatgpt"],
     ["mcp", "status"],
     ["mcp", "service"],
-    ["mcp", "service", "status"],
+    ["mcp", "service", "uninstall"],
     ["mcp", "service", "unknown"],
   ]) {
     await assert.rejects(execute(process.execPath, [entry, ...args], {

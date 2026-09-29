@@ -10,6 +10,8 @@ export interface LocalProviderBinding {
   providerBaseUrl: string;
   models: string[];
   createdAt: string;
+  /** Prepared on the server but not finalized yet; `frely provider share` resumes it. */
+  pending?: boolean;
 }
 
 interface LocalProviderState { version: 1; providers: LocalProviderBinding[] }
@@ -93,6 +95,7 @@ function parseProvider(value: unknown): LocalProviderBinding {
     providerBaseUrl: String(record.providerBaseUrl ?? ""),
     models: Array.isArray(record.models) ? record.models.map(String) : [],
     createdAt: String(record.createdAt ?? ""),
+    ...(record.pending === true ? { pending: true } : {}),
   };
   validateProvider(provider);
   return provider;
