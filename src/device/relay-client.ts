@@ -276,11 +276,9 @@ async function handleFrame(
   inflight.set(envelope.id, { request: envelope, controller });
   const operation = envelope.method === "provider"
     ? executeProviderRequest(envelope, socket, controller.signal, cancelled, log)
-    : envelope.method === "node"
-      ? executeNodeRequest(envelope, session)
-      : executeMcpRequest(envelope, session, lease).then((payload) => {
-          if (!cancelled.has(envelope.id)) send(socket, { protocol: DEVICE_RELAY_PROTOCOL, type: "response", id: envelope.id, ok: true, payload }, log);
-        });
+    : (envelope.method === "node" ? executeNodeRequest(envelope, session) : executeMcpRequest(envelope, session, lease)).then((payload) => {
+        if (!cancelled.has(envelope.id)) send(socket, { protocol: DEVICE_RELAY_PROTOCOL, type: "response", id: envelope.id, ok: true, payload }, log);
+      });
   void operation.catch((error) => {
     diagnostic(log, "relay.request_failed", { requestId: envelope.id, ...(envelope.method === "mcp" ? mcpDiagnosticContext(envelope.payload) : {}) }, error);
     if (!cancelled.has(envelope.id)) send(socket, errorResponse(envelope.id, relayErrorCode(envelope.method), safeMessage(error)), log);
