@@ -22,7 +22,7 @@ test("workspace commands require MCP to be enabled", async () => {
 test("workspace add registers a directory and list reports primary plus additions", async () => {
   const primary = await dir("frely-ws-primary-");
   const extra = await dir("frely-ws-extra-");
-  assert.match(await run(primary, "add", extra), new RegExp(`Added workspace ${extra}`));
+  assert.ok((await run(primary, "add", extra)).includes(`Added workspace ${extra}`));
   const listed = JSON.parse(await run(primary, "list", "--json")) as { primary: string; workspaces: string[] };
   assert.deepEqual(listed, { primary, workspaces: [primary, extra] });
   assert.match(await run(primary, "list"), /\(primary\)/);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import test from "node:test";
@@ -16,7 +16,8 @@ test("workspace registry: ensureWorkspaceRegistered adds workspace to registry",
   const testRoot = await mkdtemp(join(tmpdir(), "frely-registry-test-"));
   await ensureWorkspaceRegistered(testRoot);
   const roots = await listWorkspaces();
-  assert(roots.some((r) => r.includes(testRoot) || r === testRoot));
+  // The registry stores the realpath, which on Windows can differ from the mkdtemp spelling.
+  assert(roots.includes(await realpath(testRoot)));
 });
 
 test("workspace registry: addWorkspace validates directory exists", async () => {
