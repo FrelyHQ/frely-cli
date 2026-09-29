@@ -28,6 +28,7 @@ interface CliConfig {
   version: number;
   relayUrl: string;
   user: PublicUser;
+  deviceId?: string;
 }
 
 export interface AuthCredential {
@@ -35,7 +36,13 @@ export interface AuthCredential {
   value: string;
   refreshToken?: string;
   expiresAt?: number;
+  /** Bound Frely CLI session id returned by the Relay when per-device sessions are supported. */
+  sessionBindingId?: string;
 }
+
+const SESSION_BINDING_DEVICE_ID_PARAM = "session_binding_device_id";
+const SESSION_BINDING_ID_FIELD = "frely_cli_session_id";
+const LOCAL_DEVICE_ID_PREFIX = "frd_local_";
 
 interface DeviceCodeResponse {
   device_code: string;
@@ -52,6 +59,8 @@ interface StoredOAuthCredential {
   accessToken: string;
   refreshToken?: string;
   expiresAt: number;
+  /** Bound Frely CLI session id, when the Relay supported per-device sessions at issue time. */
+  sessionBindingId?: string;
 }
 
 export interface AuthSnapshot {
@@ -96,15 +105,16 @@ export async function loginDevice(
   relayInput?: string,
   notify?: (details: { verificationUri: string; userCode: string }) => void,
   options: { openBrowser?: boolean } = {},
-): Promise<{ user: PublicUser; verificationUri: string; userCode: string }> {
+): Promise<{ user: PublicUser; verificationUri: string; userCode: string; sessionBound: boolean }> {
   const relayUrl = normalizeRelayUrl(relayInput);
   await probeCredentialStore();
+  const deviceId = localDeviceId((await readConfig().catch(() => null))?.deviceId);
   const device = await requestDeviceCode(relayUrl);
   const verificationUri = validateVerificationUrl(device.verification_uri_complete || `${device.verification_uri}?user_code=${encodeURIComponent(device.user_code)}`, relayUrl);
   notify?.({ verificationUri, userCode: device.user_code });
   if (options.openBrowser !== false) openVerificationUrl(verificationUri);
-  const token = await pollDeviceToken(relayUrl, device);
-  const user = await fetchUser(relayUrl, { scheme: "bearer", value: token.accessToken, ...(token.refreshToken ? { refreshToken: token.refreshToken } : {}), expiresAt: token.expiresAt });
+  const token = await pollDeviceToken(relayUrl, device, deviceId);
+  const user = await fetchUser(relayUrl, { scheme: "bearer", value: token.accessToken, ...(token.refreshToken ? { refreshToken: token.refreshToken } : {}), expiresAt: token.expiresAt, ...(token.sessionBindingId ? { sessionBindingId: token.sessionBindingId } : {}) });
   const key = accountKey(relayUrl);
   await credentialStore.setPassword(SERVICE, key, JSON.stringify({
     version: 1,
@@ -112,14 +122,31 @@ export async function loginDevice(
     accessToken: token.accessToken,
     ...(token.refreshToken ? { refreshToken: token.refreshToken } : {}),
     expiresAt: token.expiresAt,
+    ...(token.sessionBindingId ? { sessionBindingId: token.sessionBindingId } : {}),
   } satisfies StoredOAuthCredential));
   try {
-    await writeConfig({ version: CONFIG_VERSION, relayUrl, user });
+    await writeConfig({ version: CONFIG_VERSION, relayUrl, user, deviceId });
   } catch (error) {
     await credentialStore.deletePassword(SERVICE, key).catch(() => false);
     throw error;
   }
-  return { user, verificationUri, userCode: device.user_code };
+  return { user, verificationUri, userCode: device.user_code, sessionBound: Boolean(token.sessionBindingId) };
+}
+
+/**
+ * A stable local device identifier used to bind OAuth sessions to this machine.
+ * It is generated once and persisted in the CLI config so re-login reuses the
+ * same id, enabling per-device session management on Relay versions that support it.
+ */
+function localDeviceId(existing?: string | null): string {
+  if (typeof existing === "string" && existing.length > 0) return existing;
+  return LOCAL_DEVICE_ID_PREFIX + randomUUID().replace(/-/g, "");
+}
+
+function appendSessionBinding(body: URLSearchParams, deviceId?: string | null): void {
+  if (typeof deviceId === "string" && deviceId.length > 0) {
+    body.set(SESSION_BINDING_DEVICE_ID_PARAM, deviceId);
+  }
 }
 
 export async function whoami(): Promise<PublicUser> {
@@ -225,6 +252,7 @@ export async function readConfiguredLocalCredential(relayInput?: string): Promis
       value: stored.accessToken,
       ...(isString(stored.refreshToken) ? { refreshToken: stored.refreshToken } : {}),
       ...(typeof stored.expiresAt === "number" ? { expiresAt: stored.expiresAt } : {}),
+      ...(isString(stored.sessionBindingId) ? { sessionBindingId: stored.sessionBindingId } : {}),
     };
   } catch {
     // Presence remains the routing signal. The remote adapter will surface a
@@ -277,14 +305,16 @@ async function requestDeviceCode(relayUrl: string): Promise<DeviceCodeResponse> 
   return { device_code: record.device_code, user_code: record.user_code, verification_uri: record.verification_uri, verification_uri_complete: record.verification_uri_complete, expires_in: expiresIn, interval };
 }
 
-async function pollDeviceToken(relayUrl: string, device: DeviceCodeResponse): Promise<{ accessToken: string; refreshToken?: string; expiresAt: number }> {
+async function pollDeviceToken(relayUrl: string, device: DeviceCodeResponse, deviceId?: string | null): Promise<{ accessToken: string; refreshToken?: string; expiresAt: number; sessionBindingId?: string }> {
   const deadline = Date.now() + device.expires_in * 1000;
   let intervalMs = device.interval * 1000;
   while (Date.now() < deadline) {
+    const body = new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: device.device_code, client_id: OAUTH_CLIENT_ID, resource: `${relayUrl}/api` });
+    appendSessionBinding(body, deviceId);
     const response = await fetchWithTimeout(`${relayUrl}/api/auth/oauth2/token`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded", origin: relayUrl, accept: "application/json" },
-      body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: device.device_code, client_id: OAUTH_CLIENT_ID, resource: `${relayUrl}/api` }).toString(),
+      body: body.toString(),
       redirect: "error",
     });
     const payload = await safeJson(response);
@@ -292,7 +322,7 @@ async function pollDeviceToken(relayUrl: string, device: DeviceCodeResponse): Pr
     const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
     if (response.ok && isString(record.access_token) && (!record.token_type || String(record.token_type).toLowerCase() === "bearer")) {
       const expiresIn = numberPayload(record.expires_in, 1, 86_400);
-      return { accessToken: record.access_token, ...(isString(record.refresh_token) ? { refreshToken: record.refresh_token } : {}), expiresAt: Date.now() + expiresIn * 1000 };
+      return { accessToken: record.access_token, ...(isString(record.refresh_token) ? { refreshToken: record.refresh_token } : {}), expiresAt: Date.now() + expiresIn * 1000, ...(isString(record[SESSION_BINDING_ID_FIELD]) ? { sessionBindingId: record[SESSION_BINDING_ID_FIELD] as string } : {}) };
     }
     const errorCode = typeof record.error === "string" ? record.error : "";
     if (errorCode === "authorization_pending") {
@@ -333,27 +363,32 @@ async function loadCredential(config: CliConfig, refresh: boolean, input?: strin
     const stored = JSON.parse(raw) as Partial<StoredOAuthCredential>;
     if (stored.version !== 1 || stored.type !== "basic-oauth" || !isString(stored.accessToken) || typeof stored.expiresAt !== "number") return null;
     if (refresh && stored.refreshToken && stored.expiresAt <= Date.now() + 30_000) {
-      const next = await refreshOAuthCredential(config.relayUrl, stored.refreshToken);
+      const next = await refreshOAuthCredential(config.relayUrl, stored.refreshToken, config.deviceId);
       if (next.expiresAt === undefined) return null;
-      await credentialStore.setPassword(SERVICE, accountKey(config.relayUrl), JSON.stringify({ version: 1, type: "basic-oauth", accessToken: next.value, ...(next.refreshToken ? { refreshToken: next.refreshToken } : {}), expiresAt: next.expiresAt } satisfies StoredOAuthCredential));
+      const refreshed: StoredOAuthCredential = { version: 1, type: "basic-oauth", accessToken: next.value, ...(next.refreshToken ? { refreshToken: next.refreshToken } : {}), expiresAt: next.expiresAt };
+      const sessionBindingId = next.sessionBindingId ?? stored.sessionBindingId;
+      if (sessionBindingId) refreshed.sessionBindingId = sessionBindingId;
+      await credentialStore.setPassword(SERVICE, accountKey(config.relayUrl), JSON.stringify(refreshed satisfies StoredOAuthCredential));
       return next;
     }
-    return { scheme: "bearer", value: stored.accessToken, ...(stored.refreshToken ? { refreshToken: stored.refreshToken } : {}), expiresAt: stored.expiresAt };
+    return { scheme: "bearer", value: stored.accessToken, ...(stored.refreshToken ? { refreshToken: stored.refreshToken } : {}), expiresAt: stored.expiresAt, ...(stored.sessionBindingId ? { sessionBindingId: stored.sessionBindingId } : {}) };
   } catch {
     return null;
   }
 }
 
-async function refreshOAuthCredential(relayUrl: string, refreshToken: string): Promise<AuthCredential> {
+async function refreshOAuthCredential(relayUrl: string, refreshToken: string, deviceId?: string | null): Promise<AuthCredential> {
+  const body = new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken, client_id: OAUTH_CLIENT_ID, resource: `${relayUrl}/api` });
+  appendSessionBinding(body, deviceId);
   const response = await fetchWithTimeout(`${relayUrl}/api/auth/oauth2/token`, {
     method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: relayUrl, accept: "application/json" },
-    body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken, client_id: OAUTH_CLIENT_ID, resource: `${relayUrl}/api` }).toString(), redirect: "error",
+    body: body.toString(), redirect: "error",
   });
   const payload = await safeJson(response);
   const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
   if (!response.ok || !isString(record.access_token)) throw new Error("Frely login expired. Run `frely login`.");
   const expiresIn = numberPayload(record.expires_in, 1, 86_400);
-  return { scheme: "bearer", value: record.access_token, ...(isString(record.refresh_token) ? { refreshToken: record.refresh_token } : { refreshToken }), expiresAt: Date.now() + expiresIn * 1000 };
+  return { scheme: "bearer", value: record.access_token, ...(isString(record.refresh_token) ? { refreshToken: record.refresh_token } : { refreshToken }), expiresAt: Date.now() + expiresIn * 1000, ...(isString(record[SESSION_BINDING_ID_FIELD]) ? { sessionBindingId: record[SESSION_BINDING_ID_FIELD] as string } : {}) };
 }
 
 export function openVerificationUrl(url: string): void {

@@ -19,6 +19,7 @@ import {
 } from "./protocol.js";
 import { diagnostic, mcpDiagnosticContext, type DiagnosticLog } from "../runtime/diagnostics.js";
 import { RelayMcpSession } from "../runtime/relay-mcp.js";
+import type { RelaySession } from "../runtime/relay-session.js";
 import { openLocalProviderRequest, readLocalProviderBody } from "../provider/local.js";
 
 export interface RelayServeOptions {
@@ -27,6 +28,14 @@ export interface RelayServeOptions {
   restartForUpgrade?: () => void;
   signal: AbortSignal;
   log?: (message: string) => void;
+  /**
+   * Injected [RelaySession] factory for non-MCP transports (e.g. Pi Node).
+   *
+   * When provided the relay skips MCP authorization and bridges frames to the
+   * injected session; pairing/access control is enforced by the owning runtime.
+   * When omitted the relay falls back to the existing MCP path.
+   */
+  session?: () => Promise<RelaySession>;
 }
 
 interface InflightRequest {
@@ -50,14 +59,25 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
   let preferredTransport: DeviceTransportKind | undefined;
   try {
     while (!options.signal.aborted) {
-      let session: RelayMcpSession | null = null;
+      let session: RelaySession | null = null;
       let lease: McpLease | null = null;
       let selectedTransport: DeviceTransportGrant | undefined;
       let transports: readonly DeviceTransportGrant[] = [];
       let retryWithoutDelay = false;
       try {
         let authorization = null;
-        if (options.workspace) {
+        if (options.session) {
+          // Injected session (e.g. Pi Node). No MCP authorization is required;
+          // the relay bridges frames to this session and the owning runtime
+          // enforces pairing/access control.
+          try {
+            session = await options.session();
+          } catch (error) {
+            diagnostic(log, "relay.session_unavailable", {}, error);
+            reporter.report({ type: "authorization_unavailable", error: (error as Error)?.message ?? String(error) });
+            session = null;
+          }
+        } else if (options.workspace) {
           try {
             authorization = await requireMcpAuthorization(options.workspace);
             if (authorization.grant.deviceId !== device.deviceId) throw new Error("MCP device differs from the connected device.");
@@ -151,7 +171,7 @@ export async function serveConnection(
   websocketUrl: string,
   accessToken: string,
   deviceId: string,
-  session: RelayMcpSession | null,
+  session: RelaySession | null,
   lease: McpLease | null,
   signal: AbortSignal,
   log: (message: string) => void,
@@ -186,7 +206,7 @@ export async function serveConnection(
       for (const [id, item] of inflight) {
         cancelled.add(id);
         item.controller.abort();
-        if (item.request.method === "mcp") session?.cancel(id);
+        if (item.request.method === "mcp" || item.request.method === "node") session?.cancel(id);
       }
       signal.removeEventListener("abort", onAbort);
       lease?.controller.signal.removeEventListener("abort", onLeaseAbort);
@@ -227,7 +247,7 @@ async function handleFrame(
   socket: WebSocket,
   inflight: Map<string, InflightRequest>,
   cancelled: Set<string>,
-  session: RelayMcpSession | null,
+  session: RelaySession | null,
   lease: McpLease | null,
   log: DiagnosticLog,
   maintenance?: MaintenanceGate,
@@ -256,12 +276,14 @@ async function handleFrame(
   inflight.set(envelope.id, { request: envelope, controller });
   const operation = envelope.method === "provider"
     ? executeProviderRequest(envelope, socket, controller.signal, cancelled, log)
-    : executeMcpRequest(envelope, session, lease).then((payload) => {
-        if (!cancelled.has(envelope.id)) send(socket, { protocol: DEVICE_RELAY_PROTOCOL, type: "response", id: envelope.id, ok: true, payload }, log);
-      });
+    : envelope.method === "node"
+      ? executeNodeRequest(envelope, session)
+      : executeMcpRequest(envelope, session, lease).then((payload) => {
+          if (!cancelled.has(envelope.id)) send(socket, { protocol: DEVICE_RELAY_PROTOCOL, type: "response", id: envelope.id, ok: true, payload }, log);
+        });
   void operation.catch((error) => {
     diagnostic(log, "relay.request_failed", { requestId: envelope.id, ...(envelope.method === "mcp" ? mcpDiagnosticContext(envelope.payload) : {}) }, error);
-    if (!cancelled.has(envelope.id)) send(socket, errorResponse(envelope.id, envelope.method === "mcp" ? "mcp_execution_failed" : "provider_execution_failed", safeMessage(error)), log);
+    if (!cancelled.has(envelope.id)) send(socket, errorResponse(envelope.id, relayErrorCode(envelope.method), safeMessage(error)), log);
   }).finally(() => {
     release?.();
     inflight.delete(envelope.id);
@@ -269,10 +291,21 @@ async function handleFrame(
   });
 }
 
-async function executeMcpRequest(request: DeviceRelayRequest, session: RelayMcpSession | null, lease: McpLease | null): Promise<unknown> {
+async function executeMcpRequest(request: DeviceRelayRequest, session: RelaySession | null, lease: McpLease | null): Promise<unknown> {
   if (!session || !lease || request.authorizationId !== lease.authorizationId) throw new Error("MCP execution authorization is missing or mismatched.");
   lease.assert();
   return session.execute(request.payload, request.id);
+}
+
+async function executeNodeRequest(request: DeviceRelayRequest, session: RelaySession | null): Promise<unknown> {
+  if (!session) throw new Error("No node session available.");
+  return session.execute(request.payload, request.id);
+}
+
+function relayErrorCode(method: string): string {
+  if (method === "mcp") return "mcp_execution_failed";
+  if (method === "node") return "node_execution_failed";
+  return "provider_execution_failed";
 }
 
 async function executeProviderRequest(request: DeviceRelayRequest, socket: WebSocket, signal: AbortSignal, cancelled: Set<string>, log: DiagnosticLog): Promise<void> {

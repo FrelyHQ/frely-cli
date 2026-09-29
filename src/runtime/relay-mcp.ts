@@ -3,6 +3,7 @@ import { diagnostic, mcpDiagnosticContext, type DiagnosticLog } from "./diagnost
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { createMcpServer, type McpRuntimeOptions } from "./mcp.js";
+import type { RelaySession } from "./relay-session.js";
 
 type RequestId = string | number;
 
@@ -13,7 +14,7 @@ type Pending = {
   reject: (error: unknown) => void;
 };
 
-export class RelayMcpSession {
+export class RelayMcpSession implements RelaySession {
   private readonly pending = new Map<RequestId, Pending>();
   private readonly relayRequests = new Map<string, string>();
   private readonly transport = new RelayMcpTransport(this.pending, this.relayRequests);
