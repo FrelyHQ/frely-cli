@@ -40,7 +40,7 @@ export async function inspectMcpMetadata(): Promise<McpMetadata | null> {
   const value = JSON.parse(raw) as McpMetadata;
   if (value.version !== 1 || typeof value.relayUrl !== "string" || typeof value.mcpResource !== "string" || typeof value.userId !== "string") throw new Error("MCP configuration is invalid.");
   value.grant = validateView(value.grant);
-  value.mcpResource = validateMcpResource(value.mcpResource, value.grant.deviceId);
+  value.mcpResource = validateMcpResource(value.mcpResource);
   return value;
 }
 async function writeMetadata(metadata: McpMetadata): Promise<void> {
@@ -170,12 +170,14 @@ function validateView(input: unknown): McpAuthorizationView {
   return { id: value.id, deviceId: value.deviceId, workspace: value.workspace, keyThumbprint: value.keyThumbprint,
     days: value.days, approvalDeadline: value.approvalDeadline, approvedAt: value.approvedAt, expiresAt: value.expiresAt, status: value.status };
 }
-function validateMcpResource(input: unknown, deviceId: string): string {
+// One account-level URL reaches every MCP-enabled device; tools select a device by argument.
+const DEVICE_MCP_PATH = "/mcp/devices";
+function validateMcpResource(input: unknown): string {
   if (typeof input !== "string" || input.length > 4096) throw new Error("MCP resource URL is invalid.");
   let url: URL;
   try { url = new URL(input); } catch { throw new Error("MCP resource URL is invalid."); }
   const loopbackHttp = url.protocol === "http:" && ["127.0.0.1", "localhost", "::1"].includes(url.hostname);
-  if ((url.protocol !== "https:" && !loopbackHttp) || url.username || url.password || url.search || url.hash || url.pathname !== `/mcp/${deviceId}`) {
+  if ((url.protocol !== "https:" && !loopbackHttp) || url.username || url.password || url.search || url.hash || url.pathname !== DEVICE_MCP_PATH) {
     throw new Error("MCP resource URL is invalid.");
   }
   return url.toString();
@@ -185,7 +187,7 @@ async function readRequest(response: Response): Promise<{ grant: McpAuthorizatio
   const payload = await response.json();
   const grant = validateView(payload);
   const record = payload as Record<string, unknown>;
-  return { grant, mcpResource: validateMcpResource(record.mcpResource, grant.deviceId) };
+  return { grant, mcpResource: validateMcpResource(record.mcpResource) };
 }
 async function readView(response: Response): Promise<McpAuthorizationView> {
   if (!response.ok) await throwMcpAuthorizationError(response);

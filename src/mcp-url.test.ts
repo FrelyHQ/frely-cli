@@ -28,7 +28,7 @@ async function fixture(t: TestContext, denied = false) {
     await rm(directory, { recursive: true, force: true });
   });
   const relayUrl = "https://test.invalid", userId = "user_test", deviceId = `drd_${"1".repeat(32)}`;
-  const mcpResource = `https://mcp.test.invalid/mcp/${deviceId}`;
+  const mcpResource = "https://mcp.test.invalid/mcp/devices";
   await mkdir(join(directory, "frely"), { recursive: true, mode: 0o700 });
   await writeFile(join(directory, "frely", "config.json"), JSON.stringify({
     version: 3, relayUrl, user: { id: userId, email: "user@example.com" },
