@@ -1,11 +1,12 @@
 import { inspectUpgrade } from "./upgrade/update.js";
 import { authConfigPath, inspectAuth, probeCredentialStore, whoami, type AuthSnapshot } from "./auth.js";
-import { clearMcpAuthorization, inspectMcpMetadata, McpAuthorizationError, requireMcpAuthorization } from "./mcp-authorization.js";
+import { clearMcpAuthorization, inspectMcpMetadata, McpAuthorizationError, McpConfigInvalidError, mcpMetadataPath, requireMcpAuthorization } from "./mcp-authorization.js";
 import { resetDeviceRegistration } from "./device/control.js";
 import { readDeviceBinding } from "./device/state.js";
 import { connectionIsLive, connectionStatusPath, readConnectionStatus } from "./device/connection-status.js";
 import { serviceStatus } from "./service.js";
 import { VERSION } from "./version.js";
+import { dirname } from "node:path";
 import { readAppInstall, verifyCapsule } from "./agent/app-install.js";
 import { loadAgentConfig } from "./agent/agent-service.js";
 import { isSandboxDisabled } from "./runtime/sandbox.js";
@@ -49,8 +50,17 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
       : auth.credentialStored ? `${auth.user ? `${auth.user.email} (${auth.user.id})` : "configured"}; stored, not checked online`
       : "Not logged in (optional). Run frely login to use account features.");
 
-  let metadataError = false;
-  const metadata = await dependencies.inspectMcpMetadata().catch(() => { metadataError = true; return null; });
+  // Doctor only reports; repair needs browser approval, so it is left to frely mcp.
+  let metadataIssue: string | null = null;
+  const metadata = await dependencies.inspectMcpMetadata().catch((error: unknown) => {
+    metadataIssue = !(error instanceof McpConfigInvalidError)
+      ? process.platform === "win32" ? `Configuration unreadable: ${mcpMetadataPath()}`
+        : `Configuration unreadable. Use owner-only permissions: chmod 700 ${dirname(mcpMetadataPath())} && chmod 600 ${mcpMetadataPath()}`
+      : error.reason === "legacy_url" ? "Configuration from an older CLI. Run frely mcp to repair."
+      : "Configuration invalid. Run frely mcp to repair.";
+    return null;
+  });
+  const metadataError = metadataIssue !== null;
   const binding = await dependencies.readDeviceBinding().catch(() => null);
   const bindingMatches = Boolean(binding && binding.relayUrl === auth.relayUrl && binding.userId === auth.user?.id);
   const now = Date.now();
@@ -59,11 +69,10 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
   const mcpMatches = Boolean(metadata && bindingMatches && metadata.grant.deviceId === binding?.deviceId
     && metadata.relayUrl === binding?.relayUrl && metadata.userId === binding?.userId);
   add("mcp", metadataError || expired || (metadata && !mcpMatches) || (!metadata && options.mcp) ? "fail" : metadata ? "pass" : "info",
-    metadataError ? "Configuration could not be read. Run frely mcp."
-      : !metadata ? "Not enabled (optional)."
+    metadataIssue ?? (!metadata ? "Not enabled (optional)."
       : expired ? "Authorization expired or inactive. Run frely mcp to renew."
       : !mcpMatches ? "Authorization does not match this account/device. Run frely mcp."
-      : `Configured; expires ${metadata.grant.expiresAt} (local authorization).`);
+      : `Configured; expires ${metadata.grant.expiresAt} (local authorization).`));
 
   const service = metadata || binding ? await dependencies.serviceStatus().catch(() => null) : null;
   add("service", service?.active ? "pass" : "info",
@@ -136,8 +145,8 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
       upgrade: update.message,
       account: auth.credentialError ? "Configuration unreadable" : auth.credentialStored
         ? (auth.user?.email ?? "Configured") + " (stored)" : "Not logged in",
-      mcp: metadataError ? "Configuration unreadable" : !metadata ? "Not enabled" : expired ? "Expired or inactive"
-        : !mcpMatches ? "Account/device mismatch" : "Configured (local); expires " + metadata.grant.expiresAt,
+      mcp: metadataIssue ?? (!metadata ? "Not enabled" : expired ? "Expired or inactive"
+        : !mcpMatches ? "Account/device mismatch" : "Configured (local); expires " + metadata.grant.expiresAt),
       service: !metadata && !binding ? "Not configured" : !service ? "Unknown" : service.active ? (connection?.cliVersion && connection.pid === service.pid && connection.cliVersion !== VERSION
           ? `Running ${connection.cliVersion}; installed ${VERSION}. ${refreshGuidance}` : "Running")
         : service.installed ? "Stopped" : "Not installed",

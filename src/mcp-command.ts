@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
-import { inspectMcpMetadata, requireMcpAuthorization, setupMcpAuthorization, type McpAuthorization, type McpMetadata } from "./mcp-authorization.js";
+import { inspectMcpMetadataOrQuarantine, requireMcpAuthorization, setupMcpAuthorization, type McpAuthorization, type McpMetadata } from "./mcp-authorization.js";
 import { installMcpService } from "./service.js";
 
 /**
@@ -69,7 +69,7 @@ export async function ensureMcpAuthorization(
   input: { workspace?: string; days?: string; notify: (message: string) => void },
   installService: typeof installMcpService = installMcpService,
 ): Promise<McpAuthorization> {
-  const metadata = await inspectMcpMetadata();
+  const metadata = await inspectMcpMetadataOrQuarantine(input.notify);
   if (metadata && input.workspace !== undefined) {
     const requested = await realpath(resolve(input.workspace));
     if (requested !== metadata.grant.workspace) {

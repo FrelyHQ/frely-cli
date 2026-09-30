@@ -1,5 +1,5 @@
 import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
-import { realpath, unlink } from "node:fs/promises";
+import { realpath, rename, unlink } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { requireLogin, openVerificationUrl } from "./auth.js";
@@ -34,14 +34,37 @@ export function parseMcpDays(input?: string | number): number {
   return value;
 }
 export function mcpMetadataPath(): string { return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "frely", "mcp-v1", "authorization.json"); }
+/** The metadata file was read but its content is unusable; unsafe permissions and IO errors are not this. */
+export class McpConfigInvalidError extends Error {
+  constructor(public readonly reason: "legacy_url" | "malformed") {
+    super(reason === "legacy_url" ? "MCP configuration was written by an older CLI (per-device MCP URL)." : "MCP configuration is invalid.");
+    this.name = "McpConfigInvalidError";
+  }
+}
 export async function inspectMcpMetadata(): Promise<McpMetadata | null> {
   const raw = await readPrivateFile(mcpMetadataPath());
   if (!raw) return null;
-  const value = JSON.parse(raw) as McpMetadata;
-  if (value.version !== 1 || typeof value.relayUrl !== "string" || typeof value.mcpResource !== "string" || typeof value.userId !== "string") throw new Error("MCP configuration is invalid.");
-  value.grant = validateView(value.grant);
-  value.mcpResource = validateMcpResource(value.mcpResource);
+  let value: McpMetadata;
+  try { value = JSON.parse(raw) as McpMetadata; } catch { throw new McpConfigInvalidError("malformed"); }
+  if (!value || typeof value !== "object" || value.version !== 1 || typeof value.relayUrl !== "string" || typeof value.mcpResource !== "string" || typeof value.userId !== "string") throw new McpConfigInvalidError("malformed");
+  try { value.mcpResource = validateMcpResource(value.mcpResource); }
+  catch { throw new McpConfigInvalidError(/\/mcp\/drd_[a-f0-9]{32}\/?$/u.test(value.mcpResource) ? "legacy_url" : "malformed"); }
+  try { value.grant = validateView(value.grant); } catch { throw new McpConfigInvalidError("malformed"); }
   return value;
+}
+/**
+ * Like inspectMcpMetadata, but moves invalid content aside (kept for inspection) and reports it as
+ * unconfigured, so `frely mcp` can set up again instead of failing on the same file forever.
+ */
+export async function inspectMcpMetadataOrQuarantine(notify: (message: string) => void): Promise<McpMetadata | null> {
+  try { return await inspectMcpMetadata(); }
+  catch (error) {
+    if (!(error instanceof McpConfigInvalidError)) throw error;
+    const backup = `${mcpMetadataPath()}.invalid-${new Date().toISOString().replace(/[:.]/gu, "-")}`;
+    await rename(mcpMetadataPath(), backup);
+    notify(`${error.message} Moved it to ${backup}.\n`);
+    return null;
+  }
 }
 async function writeMetadata(metadata: McpMetadata): Promise<void> {
   const path = mcpMetadataPath();
@@ -140,8 +163,8 @@ export async function setupMcpAuthorization(workspaceInput: string, daysInput?: 
   throw new Error("MCP approval expired. Run frely mcp.");
 }
 
-export async function revokeMcpAuthorization(): Promise<void> {
-  const metadata = await inspectMcpMetadata();
+export async function revokeMcpAuthorization(notify: (message: string) => void = () => undefined): Promise<void> {
+  const metadata = await inspectMcpMetadataOrQuarantine(notify);
   if (!metadata) return;
   const auth = await requireLogin();
   if (metadata.relayUrl !== auth.config.relayUrl || metadata.userId !== auth.user.id) throw new Error("MCP authorization belongs to another account.");
