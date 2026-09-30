@@ -2,9 +2,19 @@
  * Device Relay `method: "agent"` bridge: translates `{op, args}` payloads
  * (plan §5) into AgentService calls for remote-control clients (web UI).
  * Remote sources are gated by `frely app remote enable` inside the service.
+ *
+ * Op dispatch lives in `../agent/ops.ts` (shared with the MCP toolset bridge
+ * and the local GUI ops socket). This module keeps the relay-facing error
+ * type and strips local-only task fields (source, worktreePath, approval)
+ * before anything leaves the device.
  */
 import type { DeviceRelayRequest } from "../device/protocol.js";
 import type { AgentService } from "../agent/agent-service.js";
+import type { AgentTaskRecord } from "../agent/task-store.js";
+import { AGENT_OPS, dispatchAgentOp, isAgentOp } from "../agent/ops.js";
+
+export { AGENT_OPS, isAgentOp } from "../agent/ops.js";
+export type { AgentOp } from "../agent/ops.js";
 
 export class RelayAgentError extends Error {
   constructor(readonly code: string, message?: string) {
@@ -13,31 +23,12 @@ export class RelayAgentError extends Error {
   }
 }
 
-export const AGENT_OPS = [
-  "agent_start_task",
-  "agent_list_tasks",
-  "agent_get_task",
-  "agent_get_events",
-  "agent_send_message",
-  "agent_get_diff",
-  "agent_request_merge",
-  "agent_approve_merge",
-  "agent_discard_task",
-  "agent_cancel_task",
-] as const;
-
-export type AgentOp = (typeof AGENT_OPS)[number];
-
-export function isAgentOp(op: string): op is AgentOp {
-  return (AGENT_OPS as readonly string[]).includes(op);
-}
-
 /** MCP toolset bridge: expose agent ops as agent_* tools (plan §5) when the frely-app toolset is enabled. */
 export function createAgentCallBridge(agent: AgentService, defaults: { workspace: string }): (op: string, args: Record<string, unknown>) => Promise<unknown> {
   return async (op, args) => {
     if (!isAgentOp(op) || op === "agent_approve_merge") throw new RelayAgentError("unknown_op", `Agent tool not available over MCP: ${op}.`);
     try {
-      return await dispatchOp(op, args, agent, defaults);
+      return redact(await dispatchAgentOp(op, args, agent, defaults));
     } catch (error) {
       if (error instanceof RelayAgentError) throw error;
       const message = error instanceof Error ? error.message : String(error);
@@ -53,7 +44,7 @@ export async function executeAgentRequest(request: DeviceRelayRequest, agent: Ag
   if (typeof op !== "string" || !isAgentOp(op)) throw new RelayAgentError("unknown_op", `Unknown agent op. Supported: ${AGENT_OPS.join(", ")}.`);
   const record = (args && typeof args === "object" && !Array.isArray(args) ? args : {}) as Record<string, unknown>;
   try {
-    return await dispatchOp(op, record, agent, defaults);
+    return redact(await dispatchAgentOp(op, record, agent, defaults, { source: { kind: "web" }, approvedBy: "web" }));
   } catch (error) {
     const code = error instanceof Error && "code" in error ? String((error as { code: unknown }).code) : "internal";
     const message = error instanceof Error ? error.message : String(error);
@@ -61,97 +52,22 @@ export async function executeAgentRequest(request: DeviceRelayRequest, agent: Ag
   }
 }
 
-async function dispatchOp(op: AgentOp, args: Record<string, unknown>, agent: AgentService, defaults: { workspace: string }): Promise<unknown> {
-  switch (op) {
-    case "agent_start_task": {
-      const task = await agent.startTask({
-        workspace: optionalString(args.workspace) ?? defaults.workspace,
-        goal: requiredString(args.goal, "goal"),
-        ...(typeof args.model === "string" && args.model.length > 0 ? { model: args.model } : {}),
-        ...(typeof args.maxCostUsd === "number" && Number.isFinite(args.maxCostUsd) ? { maxCostUsd: args.maxCostUsd } : {}),
-        source: { kind: "web" },
-      });
-      return { task: publicTask(task) };
-    }
-    case "agent_list_tasks": {
-      const workspace = optionalString(args.workspace) ?? defaults.workspace;
-      const tasks = await agent.listTasks(workspace);
-      return { tasks: tasks.map(publicTask) };
-    }
-    case "agent_get_task":
-      return { task: publicTask(await agent.getTask(requiredTaskId(args))) };
-    case "agent_get_events": {
-      const cursor = optionalNumber(args.cursor) ?? 0;
-      const page = await agent.getEvents(requiredTaskId(args), Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0);
-      return { events: page.events, nextCursor: page.nextCursor };
-    }
-    case "agent_send_message":
-      await agent.sendMessage(requiredTaskId(args), requiredString(args.message, "message"));
-      return { sent: true };
-    case "agent_get_diff": {
-      const result = await agent.getDiff(requiredTaskId(args), optionalString(args.path));
-      return { diff: result.diff, truncated: result.truncated };
-    }
-    case "agent_request_merge": {
-      const note = optionalString(args.note);
-      const task = await agent.requestMerge(requiredTaskId(args), note);
-      return { task: publicTask(task) };
-    }
-    case "agent_approve_merge": {
-      const task = await agent.approveMerge(requiredTaskId(args), "web");
-      return { task: publicTask(task) };
-    }
-    case "agent_discard_task": {
-      const task = await agent.discardTask(requiredTaskId(args));
-      return { task: publicTask(task) };
-    }
-    case "agent_cancel_task": {
-      const task = await agent.cancelTask(requiredTaskId(args));
-      return { task: publicTask(task) };
-    }
-    default:
-      throw new RelayAgentError("unknown_op", op satisfies never);
+/** Map task records to the public view inside op results. */
+function redact(result: unknown): unknown {
+  if (!result || typeof result !== "object") return result;
+  if ("task" in result && result.task) {
+    const view = result as { task: unknown };
+    return { ...view, task: publicTask(view.task as AgentTaskRecord) };
   }
+  if ("tasks" in result && Array.isArray(result.tasks)) {
+    const view = result as { tasks: unknown[] };
+    return { ...view, tasks: view.tasks.map((task) => publicTask(task as AgentTaskRecord)) };
+  }
+  return result;
 }
 
 /** Strip local-only fields before leaving the device. */
-function publicTask(task: Parameters<typeof publicTaskImpl>[0]): ReturnType<typeof publicTaskImpl> {
-  return publicTaskImpl(task);
-}
-
-function publicTaskImpl(task: {
-  id: string;
-  workspace: string;
-  branch: string;
-  baseBranch: string;
-  goal: string;
-  model: string | null;
-  maxCostUsd: number;
-  status: string;
-  mergeStatus: string;
-  usage: { inputTokens: number; outputTokens: number; costUsd: number };
-  error: string | null;
-  createdAt: string;
-  updatedAt: string;
-  settledAt: string | null;
-}) {
+function publicTask(task: AgentTaskRecord): Record<string, unknown> {
   const { id, workspace, branch, baseBranch, goal, model, maxCostUsd, status, mergeStatus, usage, error, createdAt, updatedAt, settledAt } = task;
   return { id, workspace, branch, baseBranch, goal, model, maxCostUsd, status, mergeStatus, usage, error, createdAt, updatedAt, settledAt };
-}
-
-function requiredTaskId(args: Record<string, unknown>): string {
-  return requiredString(args.taskId, "taskId");
-}
-
-function requiredString(value: unknown, name: string): string {
-  if (typeof value !== "string" || value.length === 0) throw new RelayAgentError("invalid_args", `${name} must be a non-empty string.`);
-  return value;
-}
-
-function optionalString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function optionalNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }

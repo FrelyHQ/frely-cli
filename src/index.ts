@@ -3,7 +3,7 @@ import { upgrade } from "./upgrade/update.js";
 import { setupMcpAuthorization, requireMcpAuthorization, inspectMcpMetadata, revokeMcpAuthorization } from "./mcp-authorization.js";
 import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { stdin, stdout } from "node:process";
 import { loginDevice, logout, requireLogin, whoami } from "./auth.js";
 import { doctor, formatDoctor } from "./diagnostics.js";
@@ -21,6 +21,9 @@ import { loadAgentConfig, saveAgentConfig } from "./agent/agent-service.js";
 import { readAppInstall } from "./agent/app-install.js";
 import { detectSandboxBackend } from "./runtime/sandbox.js";
 import { provisionAgentKey } from "./agent/app-key.js";
+import { startAgentOpsServer } from "./agent/ops-server.js";
+import { agentStateDir } from "./agent/task-store.js";
+import { connect as socketConnect } from "node:net";
 import { TaskStore } from "./agent/task-store.js";
 import { VERSION } from "./version.js";
 import { agentHelp, cliUsage, mcpUsage } from "./agent-help.js";
@@ -259,6 +262,15 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "app" && args[1] === "connect-info") {
+    const socketPath = join(agentStateDir(), "ops.sock");
+    const probe = await pingAgentOpsSocket(socketPath, 300);
+    const value = { opsSocketPath: socketPath, running: probe.running, ...(probe.version ? { version: probe.version } : {}), ...(probe.pid ? { pid: probe.pid } : {}) };
+    if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
+    else stdout.write(`Ops socket: ${socketPath}\nStatus: ${probe.running ? "running" : "stopped (start with frely mcp serve)"}\n`);
+    return;
+  }
+
   if (command === "app" && args[1] === "remote") {
     const action = args[2];
     const config = await loadAgentConfig();
@@ -309,7 +321,13 @@ async function main(): Promise<void> {
           remoteControl: config.remoteControlEnabled,
         };
       };
-      await serveDeviceRelay({ ...(workspace ? { workspace } : {}), agent, capabilities, managedService: Boolean(serviceConfigHome), restartForUpgrade: stop, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
+      const ops = await startAgentOpsServer(agent, { workspace: workspace ?? process.cwd(), log: agentLog });
+      process.stderr.write(`Agent ops socket: ${ops.path}\n`);
+      try {
+        await serveDeviceRelay({ ...(workspace ? { workspace } : {}), agent, capabilities, managedService: Boolean(serviceConfigHome), restartForUpgrade: stop, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
+      } finally {
+        await ops.close().catch(() => undefined);
+      }
     } finally {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
@@ -349,6 +367,29 @@ async function main(): Promise<void> {
 
   usage();
   process.exitCode = 2;
+}
+
+function pingAgentOpsSocket(socketPath: string, timeoutMs: number): Promise<{ running: boolean; pid?: number | undefined; version?: string | undefined }> {
+  return new Promise((resolvePing) => {
+    const socket = socketConnect(socketPath);
+    const finish = (value: { running: boolean; pid?: number | undefined; version?: string | undefined }) => {
+      socket.destroy();
+      clearTimeout(timer);
+      resolvePing(value);
+    };
+    const timer = setTimeout(() => finish({ running: false }), timeoutMs);
+    socket.on("connect", () => socket.write(`${JSON.stringify({ id: 1, op: "ping", args: {} })}\n`));
+    socket.on("data", (chunk: Buffer) => {
+      for (const line of chunk.toString("utf8").split("\n")) {
+        if (line.trim().length === 0) continue;
+        try {
+          const response = JSON.parse(line) as { ok?: boolean; result?: { pong?: boolean; pid?: number; version?: string } };
+          if (response.ok && response.result?.pong) finish({ running: true, pid: response.result.pid, version: response.result.version });
+        } catch { /* ignore partial lines */ }
+      }
+    });
+    socket.on("error", () => finish({ running: false }));
+  });
 }
 
 function option(args: string[], name: string): string | undefined {
