@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { upgrade } from "./upgrade/update.js";
-import { requireMcpAuthorization, inspectMcpMetadata, revokeMcpAuthorization } from "./mcp-authorization.js";
+import { requireMcpAuthorization, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization } from "./mcp-authorization.js";
 import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
 import { join, resolve } from "node:path";
@@ -299,7 +299,7 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "mcp" && args[1] === "workspace") {
-    const metadata = await inspectMcpMetadata();
+    const metadata = await inspectMcpMetadataOrQuarantine((message) => { process.stderr.write(message); });
     await runWorkspaceCommand({ args, primary: metadata?.grant.workspace ?? null, write: (text) => { stdout.write(text); } });
     return;
   }
@@ -308,7 +308,7 @@ async function main(): Promise<void> {
   if (command === "mcp" && args[1] === "stop") { const service = await stopMcpService(); stdout.write(`Frely MCP service ${service.active ? "still active" : "stopped"}.\n`); return; }
 
   if (command === "mcp" && args[1] === "remove") {
-    await revokeMcpAuthorization();
+    await revokeMcpAuthorization((message) => { process.stderr.write(message); });
     if ((await listLocalProviders()).length > 0) {
       await installDeviceRelayService();
       stdout.write("Device MCP removed. The background service keeps running for local Providers.\n");

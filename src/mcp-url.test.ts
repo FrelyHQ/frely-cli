@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import test, { type TestContext } from "node:test";
 import { basicCredentialStore } from "./credential-basic.js";
 import { credentialStore } from "./credential-store.js";
-import { inspectMcpMetadata, mcpMetadataPath, setupMcpAuthorization, type McpAuthorizationView } from "./mcp-authorization.js";
+import { inspectMcpMetadata, McpConfigInvalidError, mcpMetadataPath, setupMcpAuthorization, type McpAuthorizationView } from "./mcp-authorization.js";
 import { ensureMcpAuthorization } from "./mcp-command.js";
 import { useMemoryCredentialStore } from "./test-support.js";
 
@@ -132,27 +132,51 @@ test("frely mcp renews an expired grant or an explicit --days for the same works
   }
 });
 
-test("frely mcp does not silently replace missing keys or invalid configuration", async (t) => {
-  for (const scenario of ["missing-key", "invalid-config"] as const) {
+test("frely mcp does not silently replace a missing key", async (t) => {
+  const f = await fixture(t);
+  const original = await setupMcpAuthorization(f.directory);
+  await credentialStore.deletePassword("frely-cli-mcp-authorization-v1", `${f.relayUrl}|${f.userId}|${original.grant.id}`);
+  const metadata = await readFile(mcpMetadataPath(), "utf8");
+  await assert.rejects(ensureMcpAuthorization({ notify: f.notify }, f.install), /secure credential is unavailable.*--days/);
+  assert.equal(f.state.requests, 1);
+  assert.deepEqual(f.state.installations, []);
+  assert.deepEqual(f.state.messages, []);
+  assert.equal(await readFile(mcpMetadataPath(), "utf8"), metadata);
+});
+
+test("frely mcp moves invalid or legacy configuration aside and sets up again", async (t) => {
+  for (const scenario of ["malformed", "legacy-url"] as const) {
     await t.test(scenario, async (t) => {
       const f = await fixture(t);
       const original = await setupMcpAuthorization(f.directory);
-      let expected: RegExp;
-      if (scenario === "missing-key") {
-        await credentialStore.deletePassword("frely-cli-mcp-authorization-v1", `${f.relayUrl}|${f.userId}|${original.grant.id}`);
-        expected = /secure credential is unavailable.*--days/;
-      } else {
-        await writeFile(mcpMetadataPath(), "{}\n", { mode: 0o600 });
-        expected = /MCP configuration is invalid/;
-      }
-      const metadata = await readFile(mcpMetadataPath(), "utf8");
-      await assert.rejects(ensureMcpAuthorization({ notify: f.notify }, f.install), expected);
-      assert.equal(f.state.requests, 1);
-      assert.deepEqual(f.state.installations, []);
-      assert.deepEqual(f.state.messages, []);
-      assert.equal(await readFile(mcpMetadataPath(), "utf8"), metadata);
+      const stored = JSON.parse(await readFile(mcpMetadataPath(), "utf8"));
+      const content = scenario === "malformed" ? "{not json\n"
+        : JSON.stringify({ ...stored, mcpResource: `https://mcp.test.invalid/mcp/${original.grant.deviceId}` }) + "\n";
+      await writeFile(mcpMetadataPath(), content, { mode: 0o600 });
+      await assert.rejects(inspectMcpMetadata(), (error: unknown) => error instanceof McpConfigInvalidError
+        && error.reason === (scenario === "malformed" ? "malformed" : "legacy_url"));
+      const workspace = await realpath(f.directory);
+      const repaired = await ensureMcpAuthorization({ workspace, notify: f.notify }, f.install);
+      assert.notEqual(repaired.grant.id, original.grant.id);
+      assert.equal(repaired.mcpUrl, f.mcpResource);
+      assert.equal(f.state.requests, 2);
+      assert.deepEqual(f.state.installations, [workspace]);
+      assert.match(f.state.messages.join(""), /Moved it to .*authorization\.json\.invalid-.*\nEnabling device MCP/);
+      const backups = (await readdir(dirname(mcpMetadataPath()))).filter((name) => name.startsWith("authorization.json.invalid-"));
+      assert.equal(backups.length, 1);
+      assert.equal(await readFile(join(dirname(mcpMetadataPath()), backups[0]!), "utf8"), content);
     });
   }
+});
+
+test("frely mcp leaves unreadable configuration untouched", { skip: process.platform === "win32" }, async (t) => {
+  const f = await fixture(t);
+  await setupMcpAuthorization(f.directory);
+  await chmod(mcpMetadataPath(), 0o644);
+  await assert.rejects(ensureMcpAuthorization({ notify: f.notify }, f.install), /permissions are unsafe/);
+  assert.equal(f.state.requests, 1);
+  assert.ok(await inspectMcpMetadata().then(() => false, () => true));
+  assert.deepEqual((await readdir(dirname(mcpMetadataPath()))).filter((name) => name.includes(".invalid-")), []);
 });
 
 test("frely mcp fails without installing a service when browser approval is denied", async (t) => {

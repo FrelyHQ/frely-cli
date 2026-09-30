@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { doctor, formatDoctor } from "./diagnostics.js";
-import type { McpMetadata } from "./mcp-authorization.js";
+import { McpConfigInvalidError, type McpMetadata } from "./mcp-authorization.js";
 import type { DeviceBinding } from "./device/state.js";
 import { HEARTBEAT_MAX_AGE_MS, type ConnectionStatus } from "./device/connection-status.js";
 
@@ -113,6 +113,18 @@ test("invalid MCP metadata is a failure, not silently treated as optional", asyn
   const report = await doctor({}, f.dependencies);
   assert.equal(report.ok, false);
   assert.doesNotMatch(JSON.stringify(report), /synthetic-secret/);
+  assert.match(report.summary.mcp, /Configuration unreadable/);
+});
+
+test("doctor names invalid MCP configuration and points to frely mcp", async () => {
+  for (const [reason, expected] of [["legacy_url", /older CLI\. Run frely mcp to repair/], ["malformed", /invalid\. Run frely mcp to repair/]] as const) {
+    const f = fixture();
+    f.dependencies.inspectMcpMetadata = async () => { throw new McpConfigInvalidError(reason); };
+    const report = await doctor({}, f.dependencies);
+    assert.equal(report.ok, false);
+    assert.match(report.summary.mcp, expected);
+    assert.match(report.checks.find((check) => check.name === "mcp")!.detail, expected);
+  }
 });
 
 
