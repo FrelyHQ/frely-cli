@@ -36,26 +36,26 @@ FrelyMCP 的产品定位是：**让 Agent 从任何地方访问你的设备。**
 在目标电脑安装并运行 `frely mcp`。在运行 Codex 的另一台电脑中添加该地址：
 
 ```sh
-codex mcp add frely-computer --url "<MCP_URL>"
+codex mcp add frely --url "<MCP_URL>"
 ```
 
 按提示完成 OAuth 授权；需要发起授权时执行：
 
 ```sh
-codex mcp login frely-computer
+codex mcp login frely
 ```
 
-以上命令语法由本机 Codex 的 `mcp add --help` 和 `mcp login --help` 核对。每台目标设备使用不同的服务名称。让 Agent 使用 Frely 的 `workspace_info` 与 `list_directory` 核对目标设备；命令行 Agent 自带 Shell 在调用端电脑执行。本次配置文档核对不等于新建 OAuth 连接或真实调用验收。
+以上命令语法由本机 Codex 的 `mcp add --help` 和 `mcp login --help` 核对。同一账户的所有设备共用这一个服务。让 Agent 先调用 Frely 的 `list_devices`，再用带 `device` 参数的 `list_directory` 核对目标设备；命令行 Agent 自带 Shell 在调用端电脑执行。本次配置文档核对不等于新建 OAuth 连接或真实调用验收。
 
 ## Claude Code 跨电脑接入
 
 在电脑 A 安装并运行 `frely mcp`。在电脑 B 的 Claude Code 中添加 A 的地址：
 
 ```sh
-claude mcp add --transport http frely-computer-a "<电脑 A 输出的 MCP URL>"
+claude mcp add --transport http frely "<电脑 A 输出的 MCP URL>"
 ```
 
-在 Claude Code 中打开 `/mcp`，完成 OAuth 授权。调用端登录设备所有者的 Frely 账号。要求 Agent 使用 Frely 的 `workspace_info` 与 `list_directory`，核对返回的路径和文件名属于电脑 A。Agent 自带的 Shell 默认仍属于电脑 B，任务说明应明确使用远程 Frely 工具。
+在 Claude Code 中打开 `/mcp`，完成 OAuth 授权。调用端登录设备所有者的 Frely 账号。要求 Agent 调用 Frely 的 `list_devices`，再以 `device` 指定电脑 A 调用 `list_directory`，核对返回的路径和文件名属于电脑 A。Agent 自带的 Shell 默认仍属于电脑 B，任务说明应明确使用远程 Frely 工具。
 
 参考：[Claude Code 官方 MCP 文档](https://code.claude.com/docs/en/mcp)。这里只说明接入配置；真实客户端的 OAuth、调用与续期验证不能由源码或单测替代。
 
@@ -124,7 +124,7 @@ Windows 服务使用当前登录用户的 Task Scheduler 任务；macOS 使用 L
 
 ## 添加到远程客户端
 
-ChatGPT、另一台电脑上的 Claude Code 和其他支持远程 HTTP MCP + OAuth 的客户端使用同一个设备服务。被控电脑安装 frely-cli；调用端不要求安装 frely-cli。每台设备使用独立 URL，客户端内的服务名称也应区分设备。
+ChatGPT、另一台电脑上的 Claude Code 和其他支持远程 HTTP MCP + OAuth 的客户端使用同一个设备服务。被控电脑安装 frely-cli；调用端不要求安装 frely-cli。同一账户的所有设备共用一个 URL，客户端只需添加一次；工具通过 `device` 参数（设备名或 id）选择设备，`list_devices` 列出设备、在线状态与工作区。
 
 ```sh
 frely mcp
@@ -133,7 +133,7 @@ frely mcp
 URL 形态：
 
 ```text
-https://connect.frely.cloud/mcp/<device-id>
+https://connect.frely.cloud/mcp/devices
 ```
 
 URL 是 Relay 返回的 canonical MCP resource，不从 `frely.cloud` 或其他控制面地址推导，也不包含 bearer secret。客户端 Authentication 选择 `OAuth`。
