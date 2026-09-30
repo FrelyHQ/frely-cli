@@ -19,7 +19,7 @@ import {
 } from "./protocol.js";
 import { diagnostic, mcpDiagnosticContext, type DiagnosticLog } from "../runtime/diagnostics.js";
 import { RelayMcpSession } from "../runtime/relay-mcp.js";
-import { executeAgentRequest } from "../runtime/relay-agent.js";
+import { executeAgentRequest, createAgentCallBridge } from "../runtime/relay-agent.js";
 import type { AgentService } from "../agent/agent-service.js";
 import type { RelaySession } from "../runtime/relay-session.js";
 import { openLocalProviderRequest, readLocalProviderBody } from "../provider/local.js";
@@ -44,6 +44,8 @@ export interface RelayServeOptions {
    * a clear error instead of breaking the relay connection.
    */
   agent?: AgentService;
+  /** Device capability report sent once per connection for the web console (plan §6.4). */
+  capabilities?: () => Record<string, unknown> | Promise<Record<string, unknown>> | undefined;
 }
 
 interface InflightRequest {
@@ -91,7 +93,10 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
             if (authorization.grant.deviceId !== device.deviceId) throw new Error("MCP device differs from the connected device.");
             lease = new McpLease(authorization.grant.id, Date.parse(authorization.grant.expiresAt!));
             const guard = lease;
-            session = await RelayMcpSession.create(options.workspace, { assertAuthorized: () => guard.assert(), signal: guard.controller.signal, log, ...(maintenance ? { maintenance } : {}) });
+            session = await RelayMcpSession.create(options.workspace, {
+              assertAuthorized: () => guard.assert(), signal: guard.controller.signal, log, ...(maintenance ? { maintenance } : {}),
+              ...(options.agent ? { callAgent: createAgentCallBridge(options.agent, { workspace: options.workspace }) } : {}),
+            });
             const activeSession = session;
             guard.controller.signal.addEventListener("abort", () => { void activeSession.close(); }, { once: true });
           } catch (error) {
@@ -124,6 +129,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
             reporter.report(event);
           },
           maintenance,
+          options.capabilities,
         );
         preferredTransport = undefined;
         delayMs = 1000;
@@ -189,6 +195,7 @@ export async function serveConnection(
   log: (message: string) => void,
   report: (event: ConnectionEvent) => void = () => undefined,
   maintenance?: MaintenanceGate,
+  capabilities?: () => Record<string, unknown> | Promise<Record<string, unknown>> | undefined,
 ): Promise<void> {
   if (signal.aborted) return;
   await new Promise<void>((resolve, reject) => {
@@ -235,6 +242,7 @@ export async function serveConnection(
       diagnostic(log, "relay.connected");
       report({ type: "connected" });
       if (lease?.controller.signal.aborted) report({ type: "mcp_disabled" });
+      void sendCapabilities(socket, capabilities);
       ping();
     });
     socket.on("pong", (data: Buffer) => {
@@ -310,7 +318,7 @@ async function handleFrame(
 async function executeMcpRequest(request: DeviceRelayRequest, session: RelaySession | null, lease: McpLease | null): Promise<unknown> {
   if (!session || !lease || request.authorizationId !== lease.authorizationId) throw new Error("MCP execution authorization is missing or mismatched.");
   lease.assert();
-  return session.execute(request.payload, request.id);
+  return session.execute(request.payload, request.id, request.toolsets);
 }
 
 async function executeNodeRequest(request: DeviceRelayRequest, session: RelaySession | null): Promise<unknown> {
@@ -388,6 +396,17 @@ async function sendAsync(socket: WebSocket, envelope: DeviceRelayEnvelope): Prom
   await new Promise<void>((resolve, reject) => {
     socket.send(encoded, (error) => error ? reject(error) : resolve());
   });
+}
+
+/** Best-effort capability report; relay-side rejection must never drop the connection. */
+async function sendCapabilities(socket: WebSocket, capabilities?: () => Record<string, unknown> | Promise<Record<string, unknown>> | undefined): Promise<void> {
+  try {
+    const report = await capabilities?.() ?? {};
+    if (socket.readyState !== WebSocket.OPEN) return;
+    socket.send(encodeDeviceRelayEnvelope({ protocol: DEVICE_RELAY_PROTOCOL, type: "device_capabilities", id: `caps_${randomBytes(8).toString("hex")}`, capabilities: report }));
+  } catch {
+    // Older relays reject unknown frames; capability reporting is advisory only.
+  }
 }
 
 function errorResponse(id: string, code: string, message: string): DeviceRelayResponse {

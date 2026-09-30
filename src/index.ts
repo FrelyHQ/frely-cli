@@ -19,6 +19,7 @@ import { runCloud } from "./cloud.js";
 import { createAgentService } from "./agent/compose.js";
 import { loadAgentConfig, saveAgentConfig } from "./agent/agent-service.js";
 import { readAppInstall } from "./agent/app-install.js";
+import { provisionAgentKey } from "./agent/app-key.js";
 import { TaskStore } from "./agent/task-store.js";
 import { VERSION } from "./version.js";
 import { agentHelp, cliUsage, mcpUsage } from "./agent-help.js";
@@ -248,6 +249,15 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "app" && args[1] === "key") {
+    const lifetime = Number(option(args, "--lifetime-usd") ?? 50);
+    const key = await provisionAgentKey(lifetime);
+    if (args.includes("--json")) stdout.write(`${JSON.stringify({ keyId: key.keyId, name: key.name, lifetimeUsd: key.lifetimeUsd })}\n`);
+    else stdout.write(`Frely app key: ${key.name}\nKey: ${key.rawKey}\nLifetime spend limit: $${key.lifetimeUsd ?? "unlimited"}\n`);
+    stdout.write("This key is shown once and is not stored by the CLI. Store it where the frely app reads model credentials.\n");
+    return;
+  }
+
   if (command === "app" && args[1] === "remote") {
     const action = args[2];
     const config = await loadAgentConfig();
@@ -288,7 +298,17 @@ async function main(): Promise<void> {
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     try {
-      await serveDeviceRelay({ ...(workspace ? { workspace } : {}), agent, managedService: Boolean(serviceConfigHome), restartForUpgrade: stop, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
+      const capabilities = async () => {
+        const install = await readAppInstall().then((value) => value, () => null);
+        const config = await loadAgentConfig();
+        return {
+          app: { ...(install ? { installed: true, version: install.appVersion } : { installed: false }) },
+          sandbox: "none",
+          agentHost: true,
+          remoteControl: config.remoteControlEnabled,
+        };
+      };
+      await serveDeviceRelay({ ...(workspace ? { workspace } : {}), agent, capabilities, managedService: Boolean(serviceConfigHome), restartForUpgrade: stop, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
     } finally {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);

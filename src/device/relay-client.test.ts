@@ -154,3 +154,73 @@ test("transport fallback is reserved for transport failures", async () => {
   const unavailable = await closeWith(4500, "edge_unavailable");
   assert.equal(isTransportFallbackEligible(unavailable), true);
 });
+
+test("device reports capabilities once per connection and forwards frame toolsets", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "frely-relay-caps-"));
+  const lease = new McpLease(`mca_${"a".repeat(32)}`, Date.now() + 60_000);
+  const session = await RelayMcpSession.create(workspace, {
+    log: () => undefined,
+    signal: lease.controller.signal,
+    assertAuthorized: () => lease.assert(),
+    callAgent: async (op) => ({ bridged: op }),
+  });
+  const server = new WebSocketServer({ port: 0, handleProtocols: () => DEVICE_RELAY_PROTOCOL });
+  const listening = new Promise<void>((resolve) => server.once("listening", resolve));
+  const controller = new AbortController();
+  const frames: DeviceRelayEnvelope[] = [];
+  try {
+    await listening;
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const connected = new Promise<WebSocket>((resolve) => server.once("connection", (peer) => {
+      peer.on("message", (data) => {
+        const envelope = decodeDeviceRelayEnvelope(Buffer.from(data as Buffer));
+        frames.push(envelope);
+        if (envelope.type !== "response") return;
+        peer.send(encodeDeviceRelayEnvelope(envelope));
+      });
+      resolve(peer);
+    }));
+    const runtime = serveConnection(`ws://127.0.0.1:${address.port}`, "synthetic-test-token", `drd_${"a".repeat(32)}`, session, lease, null, process.cwd(), controller.signal, () => undefined, () => undefined, undefined, () => ({ app: { installed: true, version: "0.4.0" }, sandbox: "none", agentHost: true, remoteControl: false }));
+    void runtime.catch(() => undefined);
+    await connected;
+
+    // The capability report must arrive without any request from the relay.
+    const reported = await new Promise<DeviceRelayEnvelope>((resolve) => {
+      const poll = () => {
+        const found = frames.find((frame) => frame.type === "device_capabilities");
+        if (found) resolve(found); else setTimeout(poll, 10);
+      };
+      poll();
+    });
+    assert.equal(reported.type, "device_capabilities");
+    assert.deepEqual((reported as { capabilities: Record<string, unknown> }).capabilities, { app: { installed: true, version: "0.4.0" }, sandbox: "none", agentHost: true, remoteControl: false });
+
+    // A relay request frame carrying toolsets must reach the session and bridge agent calls.
+    const peer = frames; // responses echo back over the same socket captured above
+    void peer;
+    const wire = await connected;
+    wire.send(encodeDeviceRelayEnvelope({
+      protocol: DEVICE_RELAY_PROTOCOL, type: "request", id: "relay-request-agent", method: "mcp", authorizationId: lease.authorizationId,
+      toolsets: ["workspace", "frely-app"],
+      payload: { jsonrpc: "2.0", id: 0, method: "tools/call", params: { name: "agent_list_tasks", arguments: {} } },
+    }));
+    const bridged = await new Promise<DeviceRelayEnvelope>((resolve) => {
+      const poll = () => {
+        const found = frames.find((frame) => frame.type === "response" && frame.id === "relay-request-agent");
+        if (found) resolve(found); else setTimeout(poll, 10);
+      };
+      poll();
+    });
+    assert.equal(bridged.type, "response");
+    const payload = (bridged as { payload?: { result?: { content?: Array<{ text: string }> } } }).payload;
+    assert.deepEqual(JSON.parse(payload?.result?.content?.[0]?.text ?? "{}"), { bridged: "agent_list_tasks" });
+  } finally {
+    controller.abort();
+    lease.close();
+    await session.close();
+    for (const client of server.clients) client.terminate();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(workspace, { recursive: true, force: true });
+  }
+});

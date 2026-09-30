@@ -32,6 +32,20 @@ export function isAgentOp(op: string): op is AgentOp {
   return (AGENT_OPS as readonly string[]).includes(op);
 }
 
+/** MCP toolset bridge: expose agent ops as agent_* tools (plan §5) when the frely-app toolset is enabled. */
+export function createAgentCallBridge(agent: AgentService, defaults: { workspace: string }): (op: string, args: Record<string, unknown>) => Promise<unknown> {
+  return async (op, args) => {
+    if (!isAgentOp(op) || op === "agent_approve_merge") throw new RelayAgentError("unknown_op", `Agent tool not available over MCP: ${op}.`);
+    try {
+      return await dispatchOp(op, args, agent, defaults);
+    } catch (error) {
+      if (error instanceof RelayAgentError) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      throw new RelayAgentError("agent_tool_failed", message);
+    }
+  };
+}
+
 export async function executeAgentRequest(request: DeviceRelayRequest, agent: AgentService, defaults: { workspace: string }): Promise<unknown> {
   const payload = request.payload;
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new RelayAgentError("invalid_payload", "Agent request payload must be an object with op and args.");

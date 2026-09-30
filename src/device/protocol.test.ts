@@ -27,3 +27,32 @@ test("device relay Provider stream envelopes round trip", () => {
 test("device relay rejects malformed request ids", () => {
   assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ protocol: DEVICE_RELAY_PROTOCOL, type: "cancel", id: "short" })));
 });
+
+test("device relay request toolsets round trip and validate", () => {
+  const good = {
+    protocol: DEVICE_RELAY_PROTOCOL,
+    type: "request" as const,
+    id: "abcdefghijklmnop",
+    method: "mcp" as const,
+    authorizationId: "mca_" + "a".repeat(32),
+    toolsets: ["workspace", "frely-app"],
+    payload: { jsonrpc: "2.0", id: 1, method: "tools/list" },
+  };
+  assert.deepEqual(decodeDeviceRelayEnvelope(encodeDeviceRelayEnvelope(good)), good);
+  for (const toolsets of [[], ["workspace", "workspace"], ["UPPER"], "workspace", ["a".repeat(33)]]) {
+    assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...good, toolsets })), /frame_invalid/);
+  }
+  assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...good, method: "provider", authorizationId: undefined, toolsets: ["workspace"] })));
+});
+
+test("device relay capabilities envelope round trips within 4KB", () => {
+  const report = {
+    protocol: DEVICE_RELAY_PROTOCOL,
+    type: "device_capabilities" as const,
+    id: "caps_1234567890ab",
+    capabilities: { app: { installed: true, version: "0.4.0" }, sandbox: "none", agentHost: true, remoteControl: false },
+  };
+  assert.deepEqual(decodeDeviceRelayEnvelope(encodeDeviceRelayEnvelope(report)), report);
+  assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...report, capabilities: ["not", "an", "object"] })));
+  assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...report, capabilities: { blob: "x".repeat(8_192) } })));
+});
