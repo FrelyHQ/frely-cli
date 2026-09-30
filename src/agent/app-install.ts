@@ -4,7 +4,8 @@
  */
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { lstat, readFile, readlink, stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { lstat, readFile, stat } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 
 export const APP_INSTALL_SCHEMA_VERSION = 1;
@@ -17,14 +18,14 @@ export type AppInstall = {
   protocolVersion: number;
 };
 
+/** Frely App Pi Node capsule (schema 3): one Bun-compiled executable plus data files. */
 export type CapsuleManifest = {
   schemaVersion: number;
   capsuleKind: string;
   sourceCommit: string;
   target: { id: string; platform: string; architecture: string };
   versions: { piNode: string; protocol: string };
-  runtime: { executable: string };
-  application: { entrypoint: string; agentHostEntrypoint?: string; launch?: string[] };
+  runtime: { executable: string; agentHostArguments: string[] };
 };
 
 export class AppInstallError extends Error {
@@ -61,12 +62,15 @@ export async function readAppInstall(path?: string, env: NodeJS.ProcessEnv = pro
 
 export type CapsuleFacts = {
   manifest: CapsuleManifest;
-  nodeExecutable: string;
-  agentHostEntrypoint: string;
-  entrypointIsAgentHost: boolean;
+  executable: string;
+  agentHostArguments: string[];
 };
 
-/** Structural capsule verification: manifest shape, platform match, entrypoints. */
+const CAPSULE_SCHEMA_VERSION = 3;
+const CAPSULE_KIND = "pi-node-executable";
+const AGENT_HOST_ARGUMENTS = ["agent-host"];
+
+/** Structural capsule verification: manifest shape, platform match, executable. */
 export async function verifyCapsule(appInstall: AppInstall): Promise<CapsuleFacts> {
   let manifestRaw: string;
   try {
@@ -80,23 +84,17 @@ export async function verifyCapsule(appInstall: AppInstall): Promise<CapsuleFact
   } catch {
     throw new AppInstallError("capsule_invalid");
   }
-  if (manifest.schemaVersion !== 2 || manifest.capsuleKind !== "pi-node-runtime") throw new AppInstallError("capsule_invalid");
+  if (manifest.schemaVersion !== CAPSULE_SCHEMA_VERSION || manifest.capsuleKind !== CAPSULE_KIND) throw new AppInstallError("capsule_invalid");
   if (typeof manifest.sourceCommit !== "string" || !/^[0-9a-f]{40}$/u.test(manifest.sourceCommit)) throw new AppInstallError("capsule_invalid");
   const platform = process.platform === "win32" ? "win32" : process.platform === "darwin" ? "darwin" : "linux";
-  if (manifest.target.platform !== platform) throw new AppInstallError("capsule_platform_mismatch");
+  if (manifest.target?.platform !== platform) throw new AppInstallError("capsule_platform_mismatch");
 
-  const nodeExecutable = join(appInstall.capsulePath, manifest.runtime.executable);
-  if (!(await isFile(nodeExecutable))) throw new AppInstallError("capsule_invalid");
-
-  const agentHostEntrypoint = manifest.application.agentHostEntrypoint ?? manifest.application.entrypoint;
-  const entrypointPath = join(appInstall.capsulePath, agentHostEntrypoint);
-  if (!(await isFile(entrypointPath))) throw new AppInstallError("capsule_invalid");
-  return {
-    manifest,
-    nodeExecutable,
-    agentHostEntrypoint: entrypointPath,
-    entrypointIsAgentHost: manifest.application.agentHostEntrypoint !== undefined,
-  };
+  const runtime = manifest.runtime;
+  if (typeof runtime?.executable !== "string" || runtime.executable.includes("/") || runtime.executable.includes("\\")) throw new AppInstallError("capsule_invalid");
+  if (!Array.isArray(runtime.agentHostArguments) || JSON.stringify(runtime.agentHostArguments) !== JSON.stringify(AGENT_HOST_ARGUMENTS)) throw new AppInstallError("capsule_invalid");
+  const executable = join(appInstall.capsulePath, runtime.executable);
+  if (!(await isFile(executable))) throw new AppInstallError("capsule_invalid");
+  return { manifest, executable, agentHostArguments: [...runtime.agentHostArguments] };
 }
 
 /**
@@ -105,37 +103,26 @@ export async function verifyCapsule(appInstall: AppInstall): Promise<CapsuleFact
  */
 export async function verifyCapsuleIntegrity(appInstall: AppInstall): Promise<void> {
   const manifest = JSON.parse(await readFile(join(appInstall.capsulePath, CAPSULE_MANIFEST_NAME), "utf8")) as CapsuleManifest & {
-    integrity: { algorithm: "sha256"; manifestExcludedPath: string; payloadFileCount: number; payloadSize: number; files: Array<{ path: string; sha256?: string; symlinkTarget?: string; bytes?: number }> };
+    integrity: { algorithm: "sha256"; manifestExcludedPath: string; payloadFileCount: number; payloadSize: number; files: Array<{ path: string; type: string; size: number; sha256: string }> };
   };
   const integrity = manifest.integrity;
-  if (!integrity || integrity.algorithm !== "sha256") throw new AppInstallError("capsule_invalid");
+  if (!integrity || integrity.algorithm !== "sha256" || !Array.isArray(integrity.files)) throw new AppInstallError("capsule_invalid");
   const seen = new Set<string>();
   let totalSize = 0;
-  let count = 0;
   for (const entry of integrity.files) {
     if (typeof entry.path !== "string" || entry.path.startsWith("/") || entry.path.includes("..")) throw new AppInstallError("capsule_invalid");
-    if (seen.has(entry.path)) throw new AppInstallError("capsule_invalid");
+    if (entry.type !== "file" || seen.has(entry.path)) throw new AppInstallError("capsule_invalid");
     seen.add(entry.path);
     const full = resolve(appInstall.capsulePath, entry.path);
     if (relative(appInstall.capsulePath, full).startsWith("..")) throw new AppInstallError("capsule_invalid");
     const info = await lstat(full).catch(() => null);
-    if (!info) throw new AppInstallError("capsule_integrity_failed");
-    if (entry.symlinkTarget !== undefined) {
-      if (!info.isSymbolicLink()) throw new AppInstallError("capsule_integrity_failed");
-      const target = await readlink(full);
-      if (target !== entry.symlinkTarget) throw new AppInstallError("capsule_integrity_failed");
-      continue;
-    }
-    if (!info.isFile()) throw new AppInstallError("capsule_integrity_failed");
+    if (!info || !info.isFile() || info.size !== entry.size) throw new AppInstallError("capsule_integrity_failed");
     const hash = createHash("sha256");
-    const content = await readFile(full);
-    hash.update(content);
+    for await (const chunk of createReadStream(full)) hash.update(chunk as Buffer);
     if (hash.digest("hex") !== entry.sha256) throw new AppInstallError("capsule_integrity_failed");
-    if (typeof entry.bytes === "number" && entry.bytes !== content.byteLength) throw new AppInstallError("capsule_integrity_failed");
-    totalSize += content.byteLength;
-    count += 1;
+    totalSize += info.size;
   }
-  if (count !== integrity.payloadFileCount || totalSize !== integrity.payloadSize) throw new AppInstallError("capsule_integrity_failed");
+  if (seen.size !== integrity.payloadFileCount || totalSize !== integrity.payloadSize) throw new AppInstallError("capsule_integrity_failed");
 }
 
 async function isFile(path: string): Promise<boolean> {
