@@ -73,7 +73,7 @@ async function runTask(params) {
     if (params.goal === "use-tools") {
       const write = await request("tool.write", { taskId, path: "feature.txt", content: "made by agent\\n" });
       if (!write.result || write.result.ok !== true) throw new Error("tool.write failed: " + JSON.stringify(write.result));
-      const bash = await request("tool.bash", { taskId, command: "node -p process.cwd()", cwd: "." });
+      const bash = await request("tool.bash", { taskId, command: "pwd", cwd: "." });
       if (bash.result.ok !== true || !bash.result.result.stdout.includes(params.worktreePath)) throw new Error("tool.bash not inside worktree");
       const escape = await request("tool.write", { taskId, path: "../escape.txt", content: "bad", overwrite: true });
       if (escape.result.ok === true) throw new Error("path escape unexpectedly allowed");
