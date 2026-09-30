@@ -173,7 +173,7 @@ test("Windows package instructions preserve manager and prefix, escape paths, an
   const installation = { method: "npm" as const, entry: "C:\\odd'name\\node_modules\\frely-cli\\dist\\index.js", manager: "C:\\odd'name\\npm.cmd", prefix: "C:\\odd'name", platform: "win32" as const };
   const command = manualUpgradeCommand(installation, "1.2.3", false);
   assert.match(command, /frely-cli@1\.2\.3/); assert.match(command, /--prefix/); assert.match(command, /--ignore-scripts/);
-  assert.doesNotMatch(command, /mcp service start/);
+  assert.doesNotMatch(command, /mcp start/);
   assert.match(manualUpgradeCommand(installation, "1.2.3", true), /finally/);
 });
 

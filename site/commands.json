@@ -3,7 +3,6 @@
   "login": "frely login",
   "doctor": "frely doctor",
   "mcpSetup": "frely mcp",
-  "mcpUrl": "frely mcp url",
   "claudeConnect": "claude mcp add --transport http frely-computer \"<MCP_URL>\"",
   "codexConnect": "codex mcp add frely-computer --url \"<MCP_URL>\"",
   "codexAuthorize": "codex mcp login frely-computer"

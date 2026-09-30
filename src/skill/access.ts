@@ -52,6 +52,11 @@ export class SkillAccessError extends Error {
   }
 }
 
+/** `frely agent install` accepts a distribution id and resolves its public manifest on the account's Frely origin. */
+export function agentManifestUrl(target: string, relayUrl: string): string {
+  return DISTRIBUTION_ID.test(target) ? `${relayUrl}/api/public/virtual-models/${target}` : target;
+}
+
 export async function installSkillAdapter(input: {
   readonly manifestUrl: string;
   readonly host: SkillHost;
@@ -170,7 +175,7 @@ export async function invokeInstalledAgent(input: {
   if (record.authMode === "api-key") {
     const store = input.credentialStore ?? secureCredentialStore;
     token = await store.getPassword(SKILL_API_KEY_SERVICE, record.distributionId).catch(() => null) ?? "";
-    if (!token) throw new SkillAccessError("auth_required", "The model-scoped API key is unavailable. Reinstall this Skill with --api-key-stdin.");
+    if (!token) throw new SkillAccessError("auth_required", "The model-scoped API key is unavailable. Reinstall with frely agent install <distribution-id> --api-key-stdin.");
   } else {
     const login = await requireLogin().catch(() => { throw new SkillAccessError("auth_required", "Frely login is required. Run `frely login`."); });
     token = login.credential.value;
@@ -188,7 +193,7 @@ export async function invokeInstalledAgent(input: {
     return Object.freeze({ ok: true, distributionId: record.distributionId, modelId: record.modelId, text: result.text, ...(result.usage ? { usage: result.usage } : {}) });
   } catch (error) {
     if (error instanceof SkillInvocationError && error.code === "entitlement_required") throw new SkillAccessError("entitlement_required", "This Frely Agent is not available to the configured credential.");
-    if (error instanceof SkillInvocationError && error.code === "remote_authorization_failed") throw new SkillAccessError("remote_authorization_failed", record.authMode === "api-key" ? "The model-scoped API key was rejected. Reinstall this Skill with a valid key." : "Frely authorization failed. Run `frely login` again.");
+    if (error instanceof SkillInvocationError && error.code === "remote_authorization_failed") throw new SkillAccessError("remote_authorization_failed", record.authMode === "api-key" ? "The model-scoped API key was rejected. Reinstall with frely agent install <distribution-id> --api-key-stdin." : "Frely authorization failed. Run `frely login` again.");
     throw new SkillAccessError("remote_call_failed", "The remote Frely Agent call failed.");
   }
 }
@@ -301,7 +306,7 @@ function renderSkill(manifest: PublicVirtualModelManifest, slug: string): string
   const description = oneLine(manifest.clientTrigger?.description ?? manifest.description ?? `Use ${manifest.name} through Frely when the user's task matches this Agent.`).slice(0, 900);
   const capabilities = manifest.capabilities.length === 0 ? "- Use the published Agent for tasks described by this Skill." : manifest.capabilities.map((capability) => `- ${capability.id}${capability.description ? `: ${oneLine(capability.description)}` : ""}`).join("\n");
   const triggers = manifest.clientTrigger?.when.map((condition) => `- ${oneLine(condition)}`).join("\n") ?? `- The user explicitly asks for ${oneLine(manifest.name)} or their task matches its published capabilities.`;
-  return `---\nname: ${slug}\ndescription: ${JSON.stringify(description)}\ncompatibility: ${JSON.stringify("Requires frely-cli and network access to Frely.")}\nmetadata:\n  frely-distribution-id: ${JSON.stringify(manifest.id)}\n  frely-model-id: ${JSON.stringify(manifest.modelId)}\n---\n\n# ${oneLine(manifest.name)}\n\nThe Agent runs remotely on Frely; this Skill contains only trigger and invocation instructions.\n\n## When to use\n\n${triggers}\n\n## Public capabilities\n\n${capabilities}\n\n## Execute\n\nPass the user's complete relevant request to stdin of:\n\n\`frely agent invoke ${manifest.id} --input-stdin --json\`\n\nDo not put credentials in the command and do not replace the user's current model provider. Return the remote Agent's result to the user. If the remote call fails, surface the returned state instead of inventing current external facts.\n`;
+  return `---\nname: ${slug}\ndescription: ${JSON.stringify(description)}\ncompatibility: ${JSON.stringify("Requires frely-cli and network access to Frely.")}\nmetadata:\n  frely-distribution-id: ${JSON.stringify(manifest.id)}\n  frely-model-id: ${JSON.stringify(manifest.modelId)}\n---\n\n# ${oneLine(manifest.name)}\n\nThe Agent runs remotely on Frely; this Skill contains only trigger and invocation instructions.\n\n## When to use\n\n${triggers}\n\n## Public capabilities\n\n${capabilities}\n\n## Execute\n\nPass the user's complete relevant request to stdin of:\n\n\`frely agent run ${manifest.id} --input-stdin --json\`\n\nDo not put credentials in the command and do not replace the user's current model provider. Return the remote Agent's result to the user. If the remote call fails, surface the returned state instead of inventing current external facts.\n`;
 }
 
 function hostAction(host: SkillHost): string {

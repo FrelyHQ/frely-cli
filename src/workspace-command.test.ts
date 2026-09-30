@@ -49,7 +49,7 @@ test("workspace remove refuses the primary and removes other workspaces", async 
   const primary = await dir("frely-ws-rm-primary-");
   const extra = await dir("frely-ws-rm-extra-");
   await run(primary, "add", extra);
-  await assert.rejects(() => run(primary, "remove", primary), /Cannot remove the primary workspace .*frely mcp revoke/);
+  await assert.rejects(() => run(primary, "remove", primary), /Cannot remove the primary workspace .*frely mcp remove/);
   await run(primary, "remove", extra);
   assert.deepEqual(JSON.parse(await run(primary, "list", "--json")).workspaces, [primary]);
   await assert.rejects(() => run(primary, "remove", extra), /Workspace not registered/);

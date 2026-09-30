@@ -131,7 +131,7 @@ export function manualUpgradeCommand(installation: Installation, version: string
   if (windows) {
     const frely = installation.method === "standalone" ? `& ${quote(installation.entry)}` : `& ${quote(process.execPath)} ${quote(installation.entry)}`;
     const body = serviceActive
-      ? `${frely} mcp service stop; if ($LASTEXITCODE -ne 0) { throw 'Could not stop Frely service' }; try { ${command} } finally { ${frely} mcp service start }`
+      ? `${frely} mcp stop; if ($LASTEXITCODE -ne 0) { throw 'Could not stop Frely service' }; try { ${command} } finally { ${frely} mcp start }`
       : command;
     // Child PowerShell keeps installer environment changes out of the user's shell.
     return `powershell -NoProfile -Command ${quote(`$ErrorActionPreference = 'Stop'; ${body}`)}`;

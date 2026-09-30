@@ -3,19 +3,17 @@
 `frely cloud` calls the Frely application's business tools at `https://frely.cloud/mcp`. It uses the application origin selected by your Frely account configuration. Device access uses Frely Connect and has separate authorization.
 
 ```sh
-frely cloud login
 frely cloud list
 frely cloud list --group agents
 frely cloud describe agents.create
 frely cloud call agents.list --json '{"page":1,"pageSize":25}'
 frely cloud call usage.summary
 frely cloud call agents.create --input ./agent.json
-frely cloud logout
 ```
 
 The CLI discovers tool names, input/output schemas and descriptions from the server on each command. Use `describe` to inspect the deployed contract before preparing input. Tool additions do not need a CLI upgrade.
 
-Cloud login opens a browser for separate OAuth authorization. If basic login has selected an account, authorize that same account. Cloud credentials use encrypted storage independent of basic and device credentials; `frely cloud logout` revokes the Cloud authorization. Basic `frely logout` does not replace this command.
+The first Cloud command opens a browser for separate OAuth authorization. If basic login has selected an account, authorize that same account. Cloud credentials use encrypted storage independent of basic and device credentials; `frely logout` also revokes the Cloud authorization.
 
 `list`, `describe` and `call` print JSON. `--json` supplies an input object; `--input` reads an object from a file, up to 512 KiB. An MCP tool error exits with status 2.
 

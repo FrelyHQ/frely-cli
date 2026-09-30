@@ -16,10 +16,9 @@ export const CLOUD_USAGE = `Frely Cloud — call your Frely application.
   frely cloud list [--group <name>]
   frely cloud describe <tool>
   frely cloud call <tool> [--json '<object>' | --input <file>]
-  frely cloud login
-  frely cloud logout
 
-Results are JSON. Cloud authorization is separate from device MCP.
+Results are JSON. The first command opens a browser for Cloud authorization;
+frely logout also revokes it. Cloud authorization is separate from device MCP.
 Calls may create resources or incur usage. Failed writes are never replayed automatically.
 `;
 interface StoredCloud {
@@ -61,7 +60,7 @@ async function connectCloud() {
   const identity = await cloudIdentity();
   const raw = await credentialStore.getPassword(SERVICE, identity.key);
   let stored: StoredCloud = raw ? JSON.parse(raw) as StoredCloud : { version: 1, resource: identity.resource, redirectUrl: "" };
-  if (stored.version !== 1 || stored.resource !== identity.resource) throw new Error("Cloud credentials are invalid. Run frely cloud logout.");
+  if (stored.version !== 1 || stored.resource !== identity.resource) throw new Error("Cloud credentials are invalid. Run frely logout, then frely login.");
   const state = randomUUID();
   let verifier = "";
   let listener: HttpServer | undefined;
@@ -116,7 +115,7 @@ async function connectCloud() {
       if (identity.userId) {
         let subject: unknown;
         try { subject = (JSON.parse(Buffer.from(tokens.access_token.split(".")[1] ?? "", "base64url").toString()) as { sub?: unknown }).sub; } catch { /* Rejected below. */ }
-        if (subject !== identity.userId) throw new Error("Cloud authorization used another account. Use the account shown by frely whoami.");
+        if (subject !== identity.userId) throw new Error("Cloud authorization used another account. Use the account shown by frely doctor.");
       }
       stored.tokens = tokens;
       stored.expiresAt = Date.now() + (tokens.expires_in ?? 600) * 1000;
@@ -168,14 +167,14 @@ async function connectCloud() {
   } catch {
     await closeListener();
     await client.close().catch(() => undefined);
-    throw new Error("Cloud connection or authorization failed. Confirm app availability and account selection, then run frely cloud login. No business call was replayed.");
+    throw new Error("Cloud connection or authorization failed. Confirm app availability and account selection, then run the command again. No business call was replayed.");
   }
 }
 
 export async function runCloud(args: readonly string[]): Promise<{ value?: unknown; text?: string; failed?: boolean }> {
   const action = args[1] ?? "list";
   if (action === "help" || args.includes("--help") || args.includes("-h")) return { text: CLOUD_USAGE };
-  if (!["list", "describe", "call", "login", "logout"].includes(action)) throw new Error(CLOUD_USAGE);
+  if (!["list", "describe", "call"].includes(action)) throw new Error(CLOUD_USAGE);
   const named = action === "describe" || action === "call";
   const name = named ? args[2] : undefined;
   if (named && (!name || !/^[a-zA-Z0-9_.-]{1,128}$/.test(name))) throw new Error("A valid Cloud tool name is required.");
@@ -200,10 +199,8 @@ export async function runCloud(args: readonly string[]): Promise<{ value?: unkno
     if (!value || Array.isArray(value) || typeof value !== "object") throw new Error("Cloud input must be a JSON object.");
     input = value as Record<string, unknown>;
   }
-  if (action === "logout") { await logoutCloud(); return { value: { authorized: false } }; }
   const session = await connectCloud();
   try {
-    if (action === "login") return { value: { authorized: true } };
     const all = [];
     const cursors = new Set<string>();
     let cursor: string | undefined;

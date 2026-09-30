@@ -4,4 +4,4 @@
 
 <a id="first-connection"></a>
 
-首次连接请按 [通用连接流程](device-mcp.md#first-connection) 操作，用 `frely mcp url` 获取地址。
+首次连接请按 [通用连接流程](device-mcp.md#first-connection) 操作，用 `frely mcp` 获取地址。

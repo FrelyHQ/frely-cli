@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,7 @@ import test, { type TestContext } from "node:test";
 import { basicCredentialStore } from "./credential-basic.js";
 import { credentialStore } from "./credential-store.js";
 import { inspectMcpMetadata, mcpMetadataPath, setupMcpAuthorization, type McpAuthorizationView } from "./mcp-authorization.js";
-import { resolveMcpUrlAuthorization } from "./mcp-command.js";
+import { ensureMcpAuthorization } from "./mcp-command.js";
 import { useMemoryCredentialStore } from "./test-support.js";
 
 async function fixture(t: TestContext, denied = false) {
@@ -76,61 +76,77 @@ async function fixture(t: TestContext, denied = false) {
   return { directory, relayUrl, userId, mcpResource, state, notify, install };
 }
 
-test("MCP URL bootstraps the home directory once with the normal approval and service lifecycle", async (t) => {
+test("frely mcp sets up an unconfigured device once, then returns the same authorization silently", async (t) => {
   const f = await fixture(t);
-  const authorization = await resolveMcpUrlAuthorization(f.notify, f.install);
-  const home = await realpath(homedir());
-  assert.equal(authorization.grant.workspace, home);
+  const project = join(f.directory, "project with spaces");
+  await mkdir(project);
+  const authorization = await ensureMcpAuthorization({ workspace: project, notify: f.notify }, f.install);
+  const workspace = await realpath(project);
+  assert.equal(authorization.grant.workspace, workspace);
   assert.equal(authorization.grant.days, 90);
   assert.equal(authorization.mcpUrl, f.mcpResource);
-  assert.deepEqual(f.state.installations, [home]);
-  assert.match(f.state.messages.join(""), /home directory:.*\nDevice MCP execution authorization: 90 days/);
+  assert.deepEqual(f.state.installations, [workspace]);
+  assert.match(f.state.messages.join(""), /Enabling device MCP for .*\nDevice MCP execution authorization: 90 days/);
   assert.match(f.state.messages.join(""), /Approve: https:\/\/test.invalid\/device\?mcp_request=/);
   assert.match(f.state.messages.join(""), /Background service: running/);
   const metadata = await readFile(mcpMetadataPath(), "utf8");
   f.state.messages.length = 0;
-  const again = await resolveMcpUrlAuthorization(f.notify, f.install);
-  assert.equal(again.grant.id, authorization.grant.id);
-  assert.equal(again.grant.keyThumbprint, authorization.grant.keyThumbprint);
-  assert.equal(again.grant.expiresAt, authorization.grant.expiresAt);
+  for (const input of [{}, { workspace: project }]) {
+    const again = await ensureMcpAuthorization({ ...input, notify: f.notify }, f.install);
+    assert.equal(again.grant.id, authorization.grant.id);
+    assert.equal(again.grant.keyThumbprint, authorization.grant.keyThumbprint);
+    assert.equal(again.grant.expiresAt, authorization.grant.expiresAt);
+  }
   assert.equal(f.state.requests, 1);
-  assert.deepEqual(f.state.installations, [home]);
+  assert.deepEqual(f.state.installations, [workspace]);
   assert.deepEqual(f.state.messages, []);
   assert.equal(await readFile(mcpMetadataPath(), "utf8"), metadata);
 });
 
-test("MCP URL preserves an explicitly configured workspace", async (t) => {
+test("frely mcp refuses to switch the primary workspace and points to workspace add", async (t) => {
   const f = await fixture(t);
-  const project = join(f.directory, "project with spaces");
-  await mkdir(project);
-  const original = await setupMcpAuthorization(project, 30);
-  const authorization = await resolveMcpUrlAuthorization(f.notify, f.install);
-  assert.equal(authorization.grant.workspace, await realpath(project));
-  assert.equal(authorization.grant.id, original.grant.id);
-  assert.equal(authorization.grant.expiresAt, original.grant.expiresAt);
+  const original = await setupMcpAuthorization(f.directory, 30);
+  const other = join(f.directory, "other");
+  await mkdir(other);
+  await assert.rejects(ensureMcpAuthorization({ workspace: other, notify: f.notify }, f.install), /frely mcp workspace add/);
+  assert.equal((await inspectMcpMetadata())?.grant.id, original.grant.id);
   assert.equal(f.state.requests, 1);
   assert.deepEqual(f.state.installations, []);
-  assert.deepEqual(f.state.messages, []);
 });
 
-test("MCP URL does not replace expired grants, missing keys or invalid configuration with home setup", async (t) => {
-  for (const scenario of ["expired", "missing-key", "invalid-config"] as const) {
+test("frely mcp renews an expired grant or an explicit --days for the same workspace", async (t) => {
+  for (const scenario of ["expired", "days"] as const) {
+    await t.test(scenario, async (t) => {
+      const f = await fixture(t);
+      const original = await setupMcpAuthorization(f.directory, 30);
+      if (scenario === "expired") t.mock.timers.enable({ apis: ["Date"], now: Date.parse(original.grant.expiresAt!) + 1 });
+      const renewed = await ensureMcpAuthorization({ ...(scenario === "days" ? { days: "180" } : {}), notify: f.notify }, f.install);
+      assert.notEqual(renewed.grant.id, original.grant.id);
+      assert.equal(renewed.grant.workspace, original.grant.workspace);
+      assert.equal(renewed.grant.days, scenario === "days" ? 180 : 90);
+      assert.equal(renewed.mcpUrl, original.mcpUrl);
+      assert.equal(f.state.requests, 2);
+      assert.deepEqual(f.state.installations, [original.grant.workspace]);
+      assert.match(f.state.messages.join(""), /Renewing device MCP authorization/);
+    });
+  }
+});
+
+test("frely mcp does not silently replace missing keys or invalid configuration", async (t) => {
+  for (const scenario of ["missing-key", "invalid-config"] as const) {
     await t.test(scenario, async (t) => {
       const f = await fixture(t);
       const original = await setupMcpAuthorization(f.directory);
       let expected: RegExp;
-      if (scenario === "expired") {
-        t.mock.timers.enable({ apis: ["Date"], now: Date.parse(original.grant.expiresAt!) + 1 });
-        expected = /MCP_AUTHORIZATION_EXPIRED/;
-      } else if (scenario === "missing-key") {
+      if (scenario === "missing-key") {
         await credentialStore.deletePassword("frely-cli-mcp-authorization-v1", `${f.relayUrl}|${f.userId}|${original.grant.id}`);
-        expected = /secure credential is unavailable/;
+        expected = /secure credential is unavailable.*--days/;
       } else {
         await writeFile(mcpMetadataPath(), "{}\n", { mode: 0o600 });
         expected = /MCP configuration is invalid/;
       }
       const metadata = await readFile(mcpMetadataPath(), "utf8");
-      await assert.rejects(resolveMcpUrlAuthorization(f.notify, f.install), expected);
+      await assert.rejects(ensureMcpAuthorization({ notify: f.notify }, f.install), expected);
       assert.equal(f.state.requests, 1);
       assert.deepEqual(f.state.installations, []);
       assert.deepEqual(f.state.messages, []);
@@ -139,35 +155,36 @@ test("MCP URL does not replace expired grants, missing keys or invalid configura
   }
 });
 
-test("MCP URL fails without installing a service when browser approval is denied", async (t) => {
+test("frely mcp fails without installing a service when browser approval is denied", async (t) => {
   const f = await fixture(t, true);
-  await assert.rejects(resolveMcpUrlAuthorization(f.notify, f.install), /approval was denied or expired/);
+  await assert.rejects(ensureMcpAuthorization({ workspace: f.directory, notify: f.notify }, f.install), /approval was denied or expired/);
   assert.deepEqual(f.state.installations, []);
   assert.equal(await inspectMcpMetadata(), null);
   assert.doesNotMatch(f.state.messages.join(""), /Background service/);
 });
 
-test("MCP URL propagates service installation failure instead of returning a successful connection", async (t) => {
+test("frely mcp propagates service installation failure instead of returning a successful connection", async (t) => {
   const f = await fixture(t);
-  await assert.rejects(resolveMcpUrlAuthorization(f.notify, async () => {
+  await assert.rejects(ensureMcpAuthorization({ workspace: f.directory, notify: f.notify }, async () => {
     throw new Error("synthetic service failure");
   }), /synthetic service failure/);
-  assert.equal((await inspectMcpMetadata())?.grant.workspace, await realpath(homedir()));
+  assert.equal((await inspectMcpMetadata())?.grant.workspace, await realpath(f.directory));
   assert.doesNotMatch(f.state.messages.join(""), /Background service/);
 });
 
-test("MCP URL keeps bootstrap prompts off stdout, including JSON mode", async (t) => {
+test("frely mcp keeps setup prompts off stdout, including JSON mode", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "frely-mcp-url-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const entry = fileURLToPath(new URL("./index.js", import.meta.url));
-  for (const args of [["mcp", "url"], ["mcp", "url", "--json"]]) {
+  for (const args of [["mcp"], ["mcp", "--json"]]) {
     await assert.rejects(promisify(execFile)(process.execPath, [entry, ...args], {
+      cwd: directory,
       env: { ...process.env, XDG_CONFIG_HOME: directory, FRELY_NO_BROWSER: "1" },
     }), (error: unknown) => {
       const result = error as Error & { code: number; stdout: string; stderr: string };
       assert.equal(result.code, 1);
       assert.equal(result.stdout, "");
-      assert.match(result.stderr, /Setting up your home directory:/);
+      assert.match(result.stderr, /Enabling device MCP for/);
       assert.match(result.stderr, /frely login/);
       return true;
     });

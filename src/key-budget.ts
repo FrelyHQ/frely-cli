@@ -29,7 +29,7 @@ export async function getKeyBudget(input: {
     if (!/^creator_distribution_[a-f0-9]{24}$/u.test(input.distributionId)) throw new KeyBudgetError("input_invalid", "Frely distribution id is invalid.");
     const installed = await readManagedSkill(input.distributionId, input.home ?? homedir());
     if (!installed) throw new KeyBudgetError("target_not_installed", "The Frely Skill target is not installed.");
-    if (installed.authMode !== "api-key") throw new KeyBudgetError("api_key_required", "This Skill uses account login. Supply an API key through --api-key-stdin.");
+    if (installed.authMode !== "api-key") throw new KeyBudgetError("api_key_required", "This Agent uses account login and has no Key budget.");
     const origin = new URL(installed.manifestUrl);
     if (origin.username || origin.password || origin.hash || !(origin.protocol === "https:" && (origin.hostname === "frely.cloud" || origin.hostname.endsWith(".frely.cloud")) || origin.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname))) {
       throw new KeyBudgetError("input_invalid", "Installed Skill credential destination is invalid.");
@@ -40,7 +40,7 @@ export async function getKeyBudget(input: {
     } catch {
       throw new KeyBudgetError("credential_store_failed", "Could not read the saved API key securely.");
     }
-    if (!apiKey) throw new KeyBudgetError("api_key_required", "The saved API key is unavailable. Reinstall this Skill with --api-key-stdin.");
+    if (!apiKey) throw new KeyBudgetError("api_key_required", "The saved API key is unavailable. Reinstall with frely agent install <distribution-id> --api-key-stdin.");
   } else {
     apiKey = input.apiKey!;
     try {
