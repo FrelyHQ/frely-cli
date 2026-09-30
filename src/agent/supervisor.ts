@@ -54,7 +54,7 @@ export class AgentHostConnection {
 
   static async start(facts: CapsuleFacts, options: { log?: DiagnosticLog | undefined; onEvent?: (taskId: string, event: AgentHostTaskEvent) => void; onToolRequest?: (request: HostRequest, args: Record<string, unknown>, taskId: string) => Promise<unknown> }): Promise<AgentHostConnection> {
     const key = newConnectionKey();
-    const child = spawn(facts.nodeExecutable, [facts.agentHostEntrypoint], {
+    const child = spawn(facts.executable, facts.agentHostArguments, {
       stdio: ["ignore", "ignore", "ignore", "pipe"],
       env: { ...process.env, [AGENT_HOST_CONNECTION_KEY_ENV]: key },
       windowsHide: true,

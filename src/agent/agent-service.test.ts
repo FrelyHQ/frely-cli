@@ -127,10 +127,10 @@ async function harness(configOverrides: Partial<AgentRuntimeConfig> = {}): Promi
   const store = new TaskStore(join(stateHome, "tasks"));
   const config: AgentRuntimeConfig = { ...DEFAULT_AGENT_CONFIG, remoteControlEnabled: true, ...configOverrides };
   const facts = {
-    manifest: { schemaVersion: 2, capsuleKind: "pi-node-runtime", sourceCommit: "0".repeat(40), target: { id: "test", platform: process.platform, architecture: "x64" }, versions: { piNode: "0", protocol: "0" }, runtime: { executable: "" }, application: { entrypoint: fakeHostPath, agentHostEntrypoint: fakeHostPath } },
-    nodeExecutable: process.execPath,
-    agentHostEntrypoint: fakeHostPath,
-    entrypointIsAgentHost: true,
+    manifest: { schemaVersion: 3, capsuleKind: "pi-node-executable", sourceCommit: "0".repeat(40), target: { id: "test", platform: process.platform, architecture: "x64" }, versions: { piNode: "0", protocol: "0" }, runtime: { executable: "pi-node", agentHostArguments: ["agent-host"] } },
+    // The fake host is a Node script, so the "executable" is Node running it.
+    executable: process.execPath,
+    agentHostArguments: [fakeHostPath],
   };
   let service: AgentService | null = null;
   const supervisor = new AgentHostSupervisor({
