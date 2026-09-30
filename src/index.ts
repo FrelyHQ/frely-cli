@@ -22,8 +22,9 @@ import { readAppInstall } from "./agent/app-install.js";
 import { detectSandboxBackend } from "./runtime/sandbox.js";
 import { provisionAgentKey } from "./agent/app-key.js";
 import { startAgentOpsServer } from "./agent/ops-server.js";
+import { runAgentOpsStdioBridge } from "./agent/ops-stdio.js";
+import { pingAgentOpsSocket } from "./agent/ops-server.js";
 import { agentStateDir } from "./agent/task-store.js";
-import { connect as socketConnect } from "node:net";
 import { TaskStore } from "./agent/task-store.js";
 import { VERSION } from "./version.js";
 import { agentHelp, cliUsage, mcpUsage } from "./agent-help.js";
@@ -262,6 +263,11 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "app" && args[1] === "ops") {
+    process.exitCode = await runAgentOpsStdioBridge({ stdout: process.stdout, stdin: process.stdin, stderr: process.stderr });
+    return;
+  }
+
   if (command === "app" && args[1] === "connect-info") {
     const socketPath = join(agentStateDir(), "ops.sock");
     const probe = await pingAgentOpsSocket(socketPath, 300);
@@ -367,29 +373,6 @@ async function main(): Promise<void> {
 
   usage();
   process.exitCode = 2;
-}
-
-function pingAgentOpsSocket(socketPath: string, timeoutMs: number): Promise<{ running: boolean; pid?: number | undefined; version?: string | undefined }> {
-  return new Promise((resolvePing) => {
-    const socket = socketConnect(socketPath);
-    const finish = (value: { running: boolean; pid?: number | undefined; version?: string | undefined }) => {
-      socket.destroy();
-      clearTimeout(timer);
-      resolvePing(value);
-    };
-    const timer = setTimeout(() => finish({ running: false }), timeoutMs);
-    socket.on("connect", () => socket.write(`${JSON.stringify({ id: 1, op: "ping", args: {} })}\n`));
-    socket.on("data", (chunk: Buffer) => {
-      for (const line of chunk.toString("utf8").split("\n")) {
-        if (line.trim().length === 0) continue;
-        try {
-          const response = JSON.parse(line) as { ok?: boolean; result?: { pong?: boolean; pid?: number; version?: string } };
-          if (response.ok && response.result?.pong) finish({ running: true, pid: response.result.pid, version: response.result.version });
-        } catch { /* ignore partial lines */ }
-      }
-    });
-    socket.on("error", () => finish({ running: false }));
-  });
 }
 
 function option(args: string[], name: string): string | undefined {

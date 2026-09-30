@@ -6,7 +6,7 @@
  * serving process (`frely mcp serve`), which is also the process hosting
  * agent task execution, so remote and GUI views share one task store.
  */
-import { createServer, type Server } from "node:net";
+import { connect, createServer, type Socket, type Server } from "node:net";
 import { chmod, mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
@@ -165,4 +165,27 @@ function clampConcurrency(value: unknown, fallback: number): number {
 
 function fingerprintFor(tasks: AgentTaskRecord[]): string {
   return JSON.stringify(tasks.map((task) => [task.id, task.status, task.mergeStatus, task.usage.costUsd, task.updatedAt]));
+}
+
+export function pingAgentOpsSocket(socketPath: string, timeoutMs: number): Promise<{ running: boolean; pid?: number | undefined; version?: string | undefined }> {
+  return new Promise((resolvePing) => {
+    const socket = connect(socketPath);
+    const finish = (value: { running: boolean; pid?: number | undefined; version?: string | undefined }) => {
+      socket.destroy();
+      clearTimeout(timer);
+      resolvePing(value);
+    };
+    const timer = setTimeout(() => finish({ running: false }), timeoutMs);
+    socket.on("connect", () => socket.write(`${JSON.stringify({ id: 1, op: "ping", args: {} })}\n`));
+    socket.on("data", (chunk: Buffer) => {
+      for (const line of chunk.toString("utf8").split("\n")) {
+        if (line.trim().length === 0) continue;
+        try {
+          const response = JSON.parse(line) as { ok?: boolean; result?: { pong?: boolean; pid?: number; version?: string } };
+          if (response.ok && response.result?.pong) finish({ running: true, pid: response.result.pid, version: response.result.version });
+        } catch { /* ignore partial lines */ }
+      }
+    });
+    socket.on("error", () => finish({ running: false }));
+  });
 }
