@@ -9,6 +9,8 @@ import { startAgentOpsServer } from "./ops-server.js";
 import { TaskStore, type AgentTaskRecord } from "./task-store.js";
 import { createAgentService } from "./compose.js";
 
+const windowsSkip = process.platform === "win32" ? "agent host ops socket binds a unix socket path; Windows named-pipe transport is not implemented yet" : false;
+
 function makeTask(partial: Partial<AgentTaskRecord>): AgentTaskRecord {
   return {
     id: "at_aaaaaaaaaaaaaaaaaaaaaaaa",
@@ -92,7 +94,7 @@ class SocketClient {
   close(): void { this.socket.destroy(); }
 }
 
-test("agent ops socket serves ping, config, agent ops with gui identity, and task-change pushes", async () => {
+test("agent ops socket serves ping, config, agent ops with gui identity, and task-change pushes", { skip: windowsSkip }, async () => {
   const stateRoot = await mkdtemp(join(tmpdir(), "frely-ops-sock-"));
   const env = { ...process.env, XDG_STATE_HOME: stateRoot } as NodeJS.ProcessEnv;
   const socketPath = join(stateRoot, "ops.sock");

@@ -6,6 +6,8 @@ import test from "node:test";
 import { AgentToolExecutor, toolKindFromMethod } from "./tool-executor.js";
 import { FairRwScheduler } from "../runtime/scheduler.js";
 
+const windowsSkip = process.platform === "win32" ? "sandboxed bash tool assumes a POSIX shell" : false;
+
 test("tool executor maps relay method names to kinds", () => {
   assert.equal(toolKindFromMethod("tool.read"), "read");
   assert.equal(toolKindFromMethod("tool.bash"), "bash");
@@ -70,7 +72,7 @@ test("tool executor refuses edits without matching expectations and disposes", a
   }
 });
 
-test("tool executor runs commands with cwd constrained to the worktree", async () => {
+test("tool executor runs commands with cwd constrained to the worktree", { skip: windowsSkip }, async () => {
   const root = await mkdtemp(join(tmpdir(), "frely-agent-tools-"));
   const outside = await mkdtemp(join(tmpdir(), "frely-agent-outside-"));
   try {

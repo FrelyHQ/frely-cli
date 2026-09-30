@@ -6,6 +6,8 @@ import test from "node:test";
 import { AgentStoreError, agentStateDir, nextRuntimeStatus, TaskStore, type AgentTaskRecord } from "./task-store.js";
 import { newTaskId } from "./protocol.js";
 
+const windowsSkip = process.platform === "win32" ? "agentStateDir XDG override semantics are POSIX-only for now" : false;
+
 function record(id = newTaskId()): AgentTaskRecord {
   const now = new Date().toISOString();
   return {
@@ -114,7 +116,7 @@ test("store rejects corrupt records", async () => {
   }
 });
 
-test("agentStateDir honors XDG_STATE_HOME", () => {
+test("agentStateDir honors XDG_STATE_HOME", { skip: windowsSkip }, () => {
   assert.equal(agentStateDir({ XDG_STATE_HOME: "/xdg/state" } as NodeJS.ProcessEnv), "/xdg/state/frely/agent");
   assert.match(agentStateDir({} as NodeJS.ProcessEnv), /\.local\/state\/frely\/agent$/u);
 });

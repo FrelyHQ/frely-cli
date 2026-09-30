@@ -8,6 +8,8 @@ import test from "node:test";
 import { branchNameForTask, createTaskWorktree, inspectWorkspace, mergeTaskBranch, removeTaskWorktree, taskDiff, WorktreeError, worktreePathForTask } from "./worktrees.js";
 import { newTaskId } from "./protocol.js";
 
+const windowsSkip = process.platform === "win32" ? "worktree path handling assumes POSIX separators" : false;
+
 const exec = promisify(execFile);
 
 async function gitRepo(): Promise<string> {
@@ -37,7 +39,7 @@ test("inspectWorkspace rejects non-repos and dirty repos", async () => {
   }
 });
 
-test("worktree lifecycle: create outside workspace, merge, remove", async () => {
+test("worktree lifecycle: create outside workspace, merge, remove", { skip: windowsSkip }, async () => {
   const repo = await gitRepo();
   try {
     const taskId = newTaskId();
@@ -73,7 +75,7 @@ test("worktree lifecycle: create outside workspace, merge, remove", async () => 
   }
 });
 
-test("merge rebases onto an advanced baseline", async () => {
+test("merge rebases onto an advanced baseline", { skip: windowsSkip }, async () => {
   const repo = await gitRepo();
   try {
     const taskId = newTaskId();
