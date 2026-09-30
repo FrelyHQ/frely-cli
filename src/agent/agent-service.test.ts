@@ -12,6 +12,12 @@ import { newTaskId } from "./protocol.js";
 
 const exec = promisify(execFile);
 
+// The agent host bridge speaks JSON-RPC over the spawned host's fd 3 pipe.
+// Windows cannot open fd>2 pipes as a socket (net.Socket({fd: 3})), so the
+// end-to-end service tests are skipped there until the bridge gains a
+// Windows-capable transport.
+const windowsSkip = process.platform === "win32" ? "agent host fd3 IPC has no Windows transport yet" : false;
+
 const fakeHostSource = `
 import net from "node:net";
 
@@ -67,7 +73,7 @@ async function runTask(params) {
     if (params.goal === "use-tools") {
       const write = await request("tool.write", { taskId, path: "feature.txt", content: "made by agent\\n" });
       if (!write.result || write.result.ok !== true) throw new Error("tool.write failed: " + JSON.stringify(write.result));
-      const bash = await request("tool.bash", { taskId, command: "pwd", cwd: "." });
+      const bash = await request("tool.bash", { taskId, command: "node -p process.cwd()", cwd: "." });
       if (bash.result.ok !== true || !bash.result.result.stdout.includes(params.worktreePath)) throw new Error("tool.bash not inside worktree");
       const escape = await request("tool.write", { taskId, path: "../escape.txt", content: "bad", overwrite: true });
       if (escape.result.ok === true) throw new Error("path escape unexpectedly allowed");
@@ -167,7 +173,7 @@ async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 10_000): P
   assert.fail("condition not reached within timeout");
 }
 
-test("agent service end-to-end: task with tools, merge request and approval", async () => {
+test("agent service end-to-end: task with tools, merge request and approval", { skip: windowsSkip }, async () => {
   const h = await harness();
   try {
     const task = await h.service.startTask({ workspace: h.repo, goal: "use-tools", source: { kind: "web" } });
@@ -202,7 +208,7 @@ test("agent service end-to-end: task with tools, merge request and approval", as
   }
 });
 
-test("agent service rejects remote tasks when remote control is disabled", async () => {
+test("agent service rejects remote tasks when remote control is disabled", { skip: windowsSkip }, async () => {
   const h = await harness({ remoteControlEnabled: false });
   try {
     await assert.rejects(() => h.service.startTask({ workspace: h.repo, goal: "anything", source: { kind: "web" } }), (error: unknown) => error instanceof AgentServiceError && error.code === "remote_control_disabled");
@@ -214,7 +220,7 @@ test("agent service rejects remote tasks when remote control is disabled", async
   }
 });
 
-test("agent service enforces the budget by cancelling the task", async () => {
+test("agent service enforces the budget by cancelling the task", { skip: windowsSkip }, async () => {
   const h = await harness();
   try {
     const task = await h.service.startTask({ workspace: h.repo, goal: "budget-burn", maxCostUsd: 0.01, source: { kind: "web" } });
@@ -230,7 +236,7 @@ test("agent service enforces the budget by cancelling the task", async () => {
   }
 });
 
-test("agent service marks running tasks failed when the host crashes", async () => {
+test("agent service marks running tasks failed when the host crashes", { skip: windowsSkip }, async () => {
   const h = await harness();
   try {
     const task = await h.service.startTask({ workspace: h.repo, goal: "sleep-forever", source: { kind: "web" } });
@@ -245,7 +251,7 @@ test("agent service marks running tasks failed when the host crashes", async () 
   }
 });
 
-test("agent service rejects messages to finished tasks and unknown task ids", async () => {
+test("agent service rejects messages to finished tasks and unknown task ids", { skip: windowsSkip }, async () => {
   const h = await harness();
   try {
     const task = await h.service.startTask({ workspace: h.repo, goal: "quick", source: { kind: "gui" } });
@@ -258,7 +264,7 @@ test("agent service rejects messages to finished tasks and unknown task ids", as
   }
 });
 
-test("agent service rejects non-git and dirty workspaces", async () => {
+test("agent service rejects non-git and dirty workspaces", { skip: windowsSkip }, async () => {
   const h = await harness();
   const plain = await mkdtemp(join(tmpdir(), "frely-agent-plain-"));
   try {
@@ -271,7 +277,7 @@ test("agent service rejects non-git and dirty workspaces", async () => {
   }
 });
 
-test("agent service cancels a running task through the host", async () => {
+test("agent service cancels a running task through the host", { skip: windowsSkip }, async () => {
   const h = await harness();
   try {
     const task = await h.service.startTask({ workspace: h.repo, goal: "sleep-forever", source: { kind: "web" } });
