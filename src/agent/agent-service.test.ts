@@ -187,6 +187,12 @@ test("agent service end-to-end: task with tools, merge request and approval", { 
     // The escape write must not have landed next to the repo.
     assert.equal((await stat(join(h.repo, "..", "escape.txt")).then(() => true, () => false)), false);
 
+    // The events feed can lag the task status store; wait for it to catch up.
+    await waitFor(async () => {
+      const feed = await h.service.getEvents(task.id, 0);
+      return feed.events.some((item) => item.type === "status" && item.status === "running")
+        && feed.events.some((item) => item.type === "status" && item.status === "completed");
+    });
     const events = await h.service.getEvents(task.id, 0);
     assert.ok(events.events.some((item) => item.type === "status" && item.status === "running"));
     assert.ok(events.events.some((item) => item.type === "status" && item.status === "completed"));
