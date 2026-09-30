@@ -25,6 +25,11 @@ export const COMMANDS = [
   { id: "app.connectInfo", usage: "frely app connect-info [--json]", auth: "local", effect: "read-only", purpose: "Report the local agent ops socket path and whether a serving process is reachable (used by the Frely App GUI to find task control)." },
   { id: "app.key", usage: "frely app key [--lifetime-usd N] [--json]", auth: "user", effect: "account-write", purpose: "Provision a device-scoped Frely API key for app agent tasks (shown once, capped at a lifetime spend limit; default $50, max $500)." },
   { id: "app.tasks", usage: "frely app tasks [--json]", auth: "local", effect: "read", purpose: "List local agent tasks with status, merge state and budget usage." },
+  { id: "app.install", usage: "frely app install [--force] [--json]", auth: "local", effect: "local-write", purpose: "Install the Frely App: Homebrew cask when available, otherwise a verified download (SHA-256) from the FrelyHQ/frely-cli release mirror; quarantine is preserved." },
+  { id: "app.open", usage: "frely app open [--window]", auth: "local", effect: "local-write", purpose: "Launch the Frely App in the background (menu bar) or with its main window via --window." },
+  { id: "app.status", usage: "frely app status [--json]", auth: "local", effect: "read", purpose: "Show whether the Frely App is installed, its version, install path, running state and how it is managed." },
+  { id: "app.update", usage: "frely app update [--json]", auth: "local", effect: "local-write", purpose: "Update the Frely App through Homebrew or by re-downloading the latest release." },
+  { id: "app.uninstall", usage: "frely app uninstall", auth: "local", effect: "local-write", purpose: "Uninstall the Frely App. Tasks, credentials and worktrees stay with frely-cli." },
   { id: "network", usage: "frely network setup|status|find|use|logout [--json]", auth: "network", effect: "subcommand-dependent", purpose: "Access Frely Network (preview) using its separate setup and credentials." },
 ] as const;
 

@@ -19,6 +19,7 @@ import { logoutCloud, runCloud } from "./cloud.js";
 import { createAgentService } from "./agent/compose.js";
 import { loadAgentConfig, saveAgentConfig } from "./agent/agent-service.js";
 import { readAppInstall } from "./agent/app-install.js";
+import { appInstallStatus, installApp, openApp, uninstallApp, updateApp } from "./app-manager.js";
 import { detectSandboxBackend } from "./runtime/sandbox.js";
 import { provisionAgentKey } from "./agent/app-key.js";
 import { startAgentOpsServer } from "./agent/ops-server.js";
@@ -257,6 +258,37 @@ async function main(): Promise<void> {
     const tasks = await store.list();
     if (args.includes("--json")) stdout.write(`${JSON.stringify(tasks)}\n`);
     else for (const task of tasks) stdout.write(`${task.id}  ${task.status.padEnd(14)} ${task.mergeStatus.padEnd(15)} $${task.usage.costUsd.toFixed(3)}/${task.maxCostUsd.toFixed(2)}  ${task.goal.split("\n")[0]!.slice(0, 60)}\n`);
+    return;
+  }
+
+  if (command === "app" && args[1] === "install") {
+    const result = await installApp({ log: (message) => stdout.write(`${message}\n`) }, { force: args.includes("--force") });
+    if (args.includes("--json")) stdout.write(`${JSON.stringify(result)}\n`);
+    return;
+  }
+
+  if (command === "app" && args[1] === "open") {
+    await openApp({ log: (message) => stdout.write(`${message}\n`) }, { window: args.includes("--window") });
+    return;
+  }
+
+  if (command === "app" && (args[1] === "status" || args[1] === undefined)) {
+    const status = await appInstallStatus({ log: () => {} });
+    const value = { installed: status.installed, ...(status.path ? { path: status.path } : {}), ...(status.version ? { version: status.version } : {}), running: status.running, managedBy: status.managedBy };
+    if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
+    else if (!status.installed) stdout.write("Frely App is not installed. Run `frely app install`.\n");
+    else stdout.write(`Frely App ${status.version ? `v${status.version} ` : ""}at ${status.path}\nState: ${status.running ? "running" : "not running"} (managed by ${status.managedBy})\n`);
+    return;
+  }
+
+  if (command === "app" && args[1] === "update") {
+    const result = await updateApp({ log: (message) => stdout.write(`${message}\n`) });
+    if (args.includes("--json")) stdout.write(`${JSON.stringify(result)}\n`);
+    return;
+  }
+
+  if (command === "app" && args[1] === "uninstall") {
+    await uninstallApp({ log: (message) => stdout.write(`${message}\n`) });
     return;
   }
 
