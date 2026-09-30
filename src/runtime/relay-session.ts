@@ -16,7 +16,7 @@ import { diagnostic, type DiagnosticLog } from "./diagnostics.js";
  * the relay never hard-codes MCP.
  */
 export interface RelaySession {
-  execute(payload: unknown, relayId: string): Promise<unknown>;
+  execute(payload: unknown, relayId: string, toolsets?: string[]): Promise<unknown>;
   cancel(relayId: string): void;
   close(): Promise<void>;
 }
@@ -47,7 +47,7 @@ export class RelayNodeSession implements RelaySession {
     private readonly log?: DiagnosticLog,
   ) {}
 
-  async execute(payload: unknown, relayId: string): Promise<unknown> {
+  async execute(payload: unknown, relayId: string, _toolsets?: string[]): Promise<unknown> {
     const frame = decodeNodeFrame(payload);
     const controller = new AbortController();
     this.pending.set(relayId, controller);

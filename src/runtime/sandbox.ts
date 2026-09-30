@@ -59,6 +59,17 @@ export function isSandboxStrict(): boolean {
   return value === "1" || value === "true" || value === "on";
 }
 
+/** Best-effort report of the sandbox backend for device capability frames (plan §4.3). */
+export function detectSandboxBackend(): "srt" | "off" | "none" {
+  if (isSandboxDisabled()) return "off";
+  try {
+    if (!SandboxManager.isSupportedPlatform()) return "none";
+    return SandboxManager.checkDependencies().errors.length > 0 ? "none" : "srt";
+  } catch {
+    return "none";
+  }
+}
+
 export function buildSandboxConfig(workspaceRoot: string): SandboxRuntimeConfig {
   return {
     network: {

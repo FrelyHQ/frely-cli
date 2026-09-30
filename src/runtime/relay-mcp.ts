@@ -20,12 +20,15 @@ export class RelayMcpSession implements RelaySession {
   private readonly transport = new RelayMcpTransport(this.pending, this.relayRequests);
 
   private server: Awaited<ReturnType<typeof createMcpServer>> | undefined;
+  /** Latest toolsets observed on an incoming mcp frame; absent (older relays) means workspace only. */
+  private toolsets: string[] = ["workspace"];
   private constructor(private readonly log?: DiagnosticLog) {}
 
   static async create(workspace: string, options: McpRuntimeOptions & { log?: DiagnosticLog } = {}): Promise<RelayMcpSession> {
     const session = new RelayMcpSession(options.log);
     const server = await createMcpServer(workspace, {
       ...options,
+      getToolsets: options.getToolsets ?? (() => session.toolsets),
       onToolError: (requestId, tool, error) => {
         const pending = session.pending.get(requestId);
         if (pending) diagnostic(options.log, "mcp.tool_failed", { requestId: pending.relayId, tool }, error);
@@ -37,7 +40,8 @@ export class RelayMcpSession implements RelaySession {
     return session;
   }
 
-  async execute(payload: unknown, relayId: string = randomUUID()): Promise<unknown> {
+  async execute(payload: unknown, relayId: string = randomUUID(), toolsets?: string[]): Promise<unknown> {
+    if (Array.isArray(toolsets) && toolsets.length > 0) this.toolsets = toolsets;
     const context = { requestId: relayId, ...mcpDiagnosticContext(payload) };
     const started = performance.now();
     diagnostic(this.log, "mcp.request_started", context);

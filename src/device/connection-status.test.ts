@@ -36,7 +36,7 @@ test("real relay pong updates private status; lease disable and disconnect canno
   reporter.report({ type: "connecting", authorizationId: lease.authorizationId, mcpEnabled: true, transport: "cloudflare_do" });
   let heartbeat!: () => void;
   const received = new Promise<void>((resolve) => { heartbeat = resolve; });
-  runtime = serveConnection("ws://127.0.0.1:" + address.port, "synthetic-secret-token", binding.deviceId, null, lease,
+  runtime = serveConnection("ws://127.0.0.1:" + address.port, "synthetic-secret-token", binding.deviceId, null, lease, null, process.cwd(),
     controller.signal, () => undefined, (event) => { reporter.report(event); if (event.type === "heartbeat") heartbeat(); });
   await received;
   await reporter.flush();

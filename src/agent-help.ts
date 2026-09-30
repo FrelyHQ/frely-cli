@@ -20,6 +20,11 @@ export const COMMANDS = [
   { id: "provider.share", usage: "frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]", auth: "account", effect: "remote-write", purpose: "Publish a local model Provider. If a prepared Provider on this device is not finished, resume it instead." },
   { id: "provider.list", usage: "frely provider list [--json]", auth: "account", effect: "read", purpose: "List configured local Providers." },
   { id: "cloud", usage: "frely cloud list|describe|call [--help]", auth: "cloud-oauth", effect: "subcommand-dependent", purpose: "Discover and call Frely cloud business operations at frely.cloud/mcp. The first call requests browser authorization. Use describe before call; parameters and results are JSON." },
+  { id: "app.remote", usage: "frely app remote enable|disable|status [--json]", auth: "local", effect: "local-write", purpose: "Toggle agent remote control for the Frely web app (app.frely.cloud). Disabled by default; enable before starting tasks from a phone." },
+  { id: "app.ops", usage: "frely app ops", auth: "local", effect: "read-only", purpose: "Bridge the local agent ops socket to stdin/stdout (NDJSON, incl. tasks_changed pushes); used by the Frely App GUI task panel." },
+  { id: "app.connectInfo", usage: "frely app connect-info [--json]", auth: "local", effect: "read-only", purpose: "Report the local agent ops socket path and whether a serving process is reachable (used by the Frely App GUI to find task control)." },
+  { id: "app.key", usage: "frely app key [--lifetime-usd N] [--json]", auth: "user", effect: "account-write", purpose: "Provision a device-scoped Frely API key for app agent tasks (shown once, capped at a lifetime spend limit; default $50, max $500)." },
+  { id: "app.tasks", usage: "frely app tasks [--json]", auth: "local", effect: "read", purpose: "List local agent tasks with status, merge state and budget usage." },
   { id: "network", usage: "frely network setup|status|find|use|logout [--json]", auth: "network", effect: "subcommand-dependent", purpose: "Access Frely Network (preview) using its separate setup and credentials." },
 ] as const;
 

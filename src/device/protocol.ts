@@ -6,9 +6,19 @@ export type DeviceRelayRequest = {
   protocol: typeof DEVICE_RELAY_PROTOCOL;
   type: "request";
   id: string;
-  method: "mcp" | "provider" | "node";
+  method: "mcp" | "provider" | "node" | "agent";
   authorizationId?: string;
+  /** Enabled MCP toolsets on the authorization (relay server -> device). Absent means ["workspace"] (older relays). */
+  toolsets?: string[];
   payload: unknown;
+};
+
+/** Device -> relay capability report rendered by the web console (plan §6.4). */
+export type DeviceRelayCapabilities = {
+  protocol: typeof DEVICE_RELAY_PROTOCOL;
+  type: "device_capabilities";
+  id: string;
+  capabilities: Record<string, unknown>;
 };
 
 export type DeviceRelayResponse = {
@@ -49,7 +59,7 @@ export type DeviceRelayStreamEnd = {
 
 export type DeviceRelayMcpDisabled = { protocol: typeof DEVICE_RELAY_PROTOCOL; type: "mcp_disabled"; id: string };
 
-export type DeviceRelayEnvelope = DeviceRelayMcpDisabled | DeviceRelayRequest | DeviceRelayResponse | DeviceRelayCancel | DeviceRelayStreamStart | DeviceRelayStreamChunk | DeviceRelayStreamEnd;
+export type DeviceRelayEnvelope = DeviceRelayMcpDisabled | DeviceRelayRequest | DeviceRelayResponse | DeviceRelayCancel | DeviceRelayStreamStart | DeviceRelayStreamChunk | DeviceRelayStreamEnd | DeviceRelayCapabilities;
 
 export class DeviceRelayProtocolError extends Error {
   constructor(readonly code: "frame_invalid" | "frame_too_large" | "duplicate_request" | "inflight_limit") {
@@ -83,9 +93,16 @@ export function validateDeviceRelayEnvelope(value: unknown): asserts value is De
   if (record.protocol !== DEVICE_RELAY_PROTOCOL || typeof record.type !== "string" || typeof record.id !== "string") throw new DeviceRelayProtocolError("frame_invalid");
   assertRequestId(record.id);
   if (record.type === "request") {
-    exactKeys(record, ["protocol", "type", "id", "method", "payload", ...(record.authorizationId !== undefined ? ["authorizationId"] : [])]);
+    exactKeys(record, ["protocol", "type", "id", "method", "payload", ...(record.authorizationId !== undefined ? ["authorizationId"] : []), ...(record.toolsets !== undefined ? ["toolsets"] : [])]);
     if (record.authorizationId !== undefined && (record.method !== "mcp" || typeof record.authorizationId !== "string" || !/^mca_[a-f0-9]{32}$/u.test(record.authorizationId))) throw new DeviceRelayProtocolError("frame_invalid");
-    if (record.method !== "mcp" && record.method !== "provider" && record.method !== "node") throw new DeviceRelayProtocolError("frame_invalid");
+    if (record.toolsets !== undefined && (record.method !== "mcp" || !isToolsetList(record.toolsets))) throw new DeviceRelayProtocolError("frame_invalid");
+    if (record.method !== "mcp" && record.method !== "provider" && record.method !== "node" && record.method !== "agent") throw new DeviceRelayProtocolError("frame_invalid");
+    return;
+  }
+  if (record.type === "device_capabilities") {
+    exactKeys(record, ["protocol", "type", "id", "capabilities"]);
+    if (!record.capabilities || typeof record.capabilities !== "object" || Array.isArray(record.capabilities)) throw new DeviceRelayProtocolError("frame_invalid");
+    if (Buffer.byteLength(JSON.stringify(record.capabilities)) > 4096) throw new DeviceRelayProtocolError("frame_invalid");
     return;
   }
   if (record.type === "mcp_disabled") {
@@ -125,6 +142,12 @@ export function validateDeviceRelayEnvelope(value: unknown): asserts value is De
     return;
   }
   throw new DeviceRelayProtocolError("frame_invalid");
+}
+
+function isToolsetList(value: unknown): value is string[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8) return false;
+  const unique = new Set(value);
+  return unique.size === value.length && value.every((item) => typeof item === "string" && /^[a-z][a-z0-9_-]{0,31}$/u.test(item));
 }
 
 function assertRequestId(id: string): void {

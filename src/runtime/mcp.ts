@@ -21,6 +21,27 @@ export interface McpRuntimeOptions {
   signal?: AbortSignal;
   maxConcurrentCommands?: number;
   onToolError?: (requestId: string | number, tool: string, error: unknown) => void;
+  /** Enabled toolsets on the current MCP authorization; absent or empty means workspace only (plan §6.4). */
+  getToolsets?: () => string[];
+  /** Bridge for agent_* tools (frely-app toolset). Without it agent tools stay hidden. */
+  callAgent?: (op: string, args: Record<string, unknown>) => Promise<unknown>;
+}
+
+/** agent_* MCP tools exposed when the frely-app toolset is enabled (plan §5). */
+export const AGENT_TOOLS = [
+  { op: "agent_start_task", description: "Start an agent task in a worktree. Returns immediately; poll agent_get_task/agent_get_events.", properties: { goal: stringSchema("What the task should accomplish"), workspace: stringSchema("Workspace root (defaults to the relay workspace)"), model: stringSchema("Model id"), maxCostUsd: { type: "number", minimum: 0.01, maximum: 50 } }, required: ["goal"] },
+  { op: "agent_list_tasks", description: "List agent tasks for a workspace.", properties: { workspace: stringSchema("Workspace root (defaults to the relay workspace)") }, required: [] },
+  { op: "agent_get_task", description: "Fetch one agent task by id.", properties: { taskId: stringSchema("Task id") }, required: ["taskId"] },
+  { op: "agent_get_events", description: "Page agent task events from a cursor.", properties: { taskId: stringSchema("Task id"), cursor: { type: "integer", minimum: 0 } }, required: ["taskId"] },
+  { op: "agent_send_message", description: "Send a user message to a running agent task.", properties: { taskId: stringSchema("Task id"), message: stringSchema("Message text") }, required: ["taskId", "message"] },
+  { op: "agent_get_diff", description: "Get the unified diff of a task worktree.", properties: { taskId: stringSchema("Task id"), path: stringSchema("Limit the diff to one path") }, required: ["taskId"] },
+  { op: "agent_request_merge", description: "Ask the task to wrap up and produce a merge request.", properties: { taskId: stringSchema("Task id"), note: stringSchema("Instruction for wrapping up") }, required: ["taskId"] },
+  { op: "agent_discard_task", description: "Discard a task and delete its worktree.", properties: { taskId: stringSchema("Task id") }, required: ["taskId"] },
+  { op: "agent_cancel_task", description: "Cancel a task; the worktree is kept.", properties: { taskId: stringSchema("Task id") }, required: ["taskId"] },
+] as const;
+
+function enabledToolsets(options: McpRuntimeOptions): string[] {
+  try { return options.getToolsets?.() ?? ["workspace"]; } catch { return ["workspace"]; }
 }
 
 export async function createMcpServer(workspaceInput: string, options: McpRuntimeOptions = {}): Promise<Server> {
@@ -79,6 +100,9 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
   server.onclose = () => { options.signal?.removeEventListener("abort", stop); stop(); };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
+    ...((enabledToolsets(options).includes("frely-app") && options.callAgent)
+      ? AGENT_TOOLS.map((entry) => tool(entry.op, entry.description, entry.properties, { readOnly: entry.op === "agent_get_task" || entry.op === "agent_get_events" || entry.op === "agent_list_tasks" }))
+      : []),
     tool("workspace_info", "Return the active workspace root.", {}, { readOnly: true }),
     tool("list_directory", "List one workspace directory.", { path: stringSchema("Relative directory path", ".") }, { readOnly: true }),
     tool("stat_path", "Inspect one workspace file or directory.", { path: stringSchema("Relative path") }, { readOnly: true }),
@@ -117,6 +141,13 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
     const name = request.params.name;
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
     try {
+      if (name.startsWith("agent_")) {
+        if (!enabledToolsets(options).includes("frely-app") || !options.callAgent) {
+          throw new Error("Agent tools are not enabled for this MCP permission. Enable Frely app tools on the Frely connections page.");
+        }
+        const result = await options.callAgent(name, args);
+        return { content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result) }] };
+      }
       const result = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]));
       return { content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result) }] };
     } catch (error) {

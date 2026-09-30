@@ -3,7 +3,7 @@ import { upgrade } from "./upgrade/update.js";
 import { requireMcpAuthorization, inspectMcpMetadata, revokeMcpAuthorization } from "./mcp-authorization.js";
 import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { stdin, stdout } from "node:process";
 import { inspectAuth, loginDevice, logout, normalizeRelayUrl, requireLogin } from "./auth.js";
 import { doctor, formatDoctor } from "./diagnostics.js";
@@ -16,6 +16,16 @@ import { discoverLocalModels } from "./provider/local.js";
 import { finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider, waitForLocalProviderRelay } from "./provider/control.js";
 import { isSupportedLocalModelName, listLocalProviders, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider, type LocalProviderBinding } from "./provider/state.js";
 import { logoutCloud, runCloud } from "./cloud.js";
+import { createAgentService } from "./agent/compose.js";
+import { loadAgentConfig, saveAgentConfig } from "./agent/agent-service.js";
+import { readAppInstall } from "./agent/app-install.js";
+import { detectSandboxBackend } from "./runtime/sandbox.js";
+import { provisionAgentKey } from "./agent/app-key.js";
+import { startAgentOpsServer } from "./agent/ops-server.js";
+import { runAgentOpsStdioBridge } from "./agent/ops-stdio.js";
+import { pingAgentOpsSocket } from "./agent/ops-server.js";
+import { agentStateDir } from "./agent/task-store.js";
+import { TaskStore } from "./agent/task-store.js";
 import { VERSION } from "./version.js";
 import { agentHelp, cliUsage, mcpUsage } from "./agent-help.js";
 import { ensureMcpAuthorization, normalizeMcpArgs } from "./mcp-command.js";
@@ -202,6 +212,54 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "app" && args[1] === "key") {
+    const lifetime = Number(option(args, "--lifetime-usd") ?? 50);
+    const key = await provisionAgentKey(lifetime);
+    if (args.includes("--json")) stdout.write(`${JSON.stringify({ keyId: key.keyId, name: key.name, lifetimeUsd: key.lifetimeUsd })}\n`);
+    else stdout.write(`Frely app key: ${key.name}\nKey: ${key.rawKey}\nLifetime spend limit: $${key.lifetimeUsd ?? "unlimited"}\n`);
+    stdout.write("This key is shown once and is not stored by the CLI. Store it where the frely app reads model credentials.\n");
+    return;
+  }
+
+  if (command === "app" && args[1] === "ops") {
+    process.exitCode = await runAgentOpsStdioBridge({ stdout: process.stdout, stdin: process.stdin, stderr: process.stderr });
+    return;
+  }
+
+  if (command === "app" && args[1] === "connect-info") {
+    const socketPath = join(agentStateDir(), "ops.sock");
+    const probe = await pingAgentOpsSocket(socketPath, 300);
+    const value = { opsSocketPath: socketPath, running: probe.running, ...(probe.version ? { version: probe.version } : {}), ...(probe.pid ? { pid: probe.pid } : {}) };
+    if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
+    else stdout.write(`Ops socket: ${socketPath}\nStatus: ${probe.running ? "running" : "stopped (start with frely mcp serve)"}\n`);
+    return;
+  }
+
+  if (command === "app" && args[1] === "remote") {
+    const action = args[2];
+    const config = await loadAgentConfig();
+    if (action === "enable") {
+      await saveAgentConfig({ ...config, remoteControlEnabled: true });
+      stdout.write("Agent remote control enabled. Start or restart the device relay service (frely mcp service start).\n");
+    } else if (action === "disable") {
+      await saveAgentConfig({ ...config, remoteControlEnabled: false });
+      stdout.write("Agent remote control disabled.\n");
+    } else if (action === "status" || action === undefined) {
+      const value = { remoteControlEnabled: config.remoteControlEnabled, defaultMaxCostUsd: config.defaultMaxCostUsd, maxCostUsdLimit: config.maxCostUsdLimit, maxConcurrentTasks: config.maxConcurrentTasks };
+      if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
+      else stdout.write(`Agent remote control: ${config.remoteControlEnabled ? "enabled" : "disabled"}\nDefault task budget: $${config.defaultMaxCostUsd} (limit $${config.maxCostUsdLimit})\nConcurrent tasks: up to ${config.maxConcurrentTasks}\n`);
+    } else throw new Error("Unknown app remote action. Use enable, disable, or status.");
+    return;
+  }
+
+  if (command === "app" && args[1] === "tasks") {
+    const store = TaskStore.open();
+    const tasks = await store.list();
+    if (args.includes("--json")) stdout.write(`${JSON.stringify(tasks)}\n`);
+    else for (const task of tasks) stdout.write(`${task.id}  ${task.status.padEnd(14)} ${task.mergeStatus.padEnd(15)} $${task.usage.costUsd.toFixed(3)}/${task.maxCostUsd.toFixed(2)}  ${task.goal.split("\n")[0]!.slice(0, 60)}\n`);
+    return;
+  }
+
   if (command === "mcp" && args[1] === "serve") {
     const serviceConfigHome = option(args, "--service-config-home");
     const serviceCredentialStore = option(args, "--service-credential-store");
@@ -210,12 +268,30 @@ async function main(): Promise<void> {
     await requireLogin();
     const providerOnly = args.includes("--provider-only");
     const workspace = providerOnly ? undefined : resolve(option(args, "--workspace") || process.cwd());
+    const agentLog = (message: string) => process.stderr.write(`${message}\n`);
+    const agent = createAgentService({ defaultWorkspace: workspace ?? process.cwd(), log: agentLog });
     const controller = new AbortController();
     const stop = () => controller.abort();
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     try {
-      await serveDeviceRelay({ ...(workspace ? { workspace } : {}), managedService: Boolean(serviceConfigHome), restartForUpgrade: stop, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
+      const capabilities = async () => {
+        const install = await readAppInstall().then((value) => value, () => null);
+        const config = await loadAgentConfig();
+        return {
+          app: { ...(install ? { installed: true, version: install.appVersion } : { installed: false }) },
+          sandbox: detectSandboxBackend(),
+          agentHost: true,
+          remoteControl: config.remoteControlEnabled,
+        };
+      };
+      const ops = await startAgentOpsServer(agent, { workspace: workspace ?? process.cwd(), log: agentLog });
+      process.stderr.write(`Agent ops socket: ${ops.path}\n`);
+      try {
+        await serveDeviceRelay({ ...(workspace ? { workspace } : {}), agent, capabilities, managedService: Boolean(serviceConfigHome), restartForUpgrade: stop, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
+      } finally {
+        await ops.close().catch(() => undefined);
+      }
     } finally {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
