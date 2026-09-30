@@ -19,6 +19,7 @@ import { runCloud } from "./cloud.js";
 import { createAgentService } from "./agent/compose.js";
 import { loadAgentConfig, saveAgentConfig } from "./agent/agent-service.js";
 import { readAppInstall } from "./agent/app-install.js";
+import { detectSandboxBackend } from "./runtime/sandbox.js";
 import { provisionAgentKey } from "./agent/app-key.js";
 import { TaskStore } from "./agent/task-store.js";
 import { VERSION } from "./version.js";
@@ -303,7 +304,7 @@ async function main(): Promise<void> {
         const config = await loadAgentConfig();
         return {
           app: { ...(install ? { installed: true, version: install.appVersion } : { installed: false }) },
-          sandbox: "none",
+          sandbox: detectSandboxBackend(),
           agentHost: true,
           remoteControl: config.remoteControlEnabled,
         };
