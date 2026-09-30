@@ -16,6 +16,10 @@ import { discoverLocalModels } from "./provider/local.js";
 import { finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider, waitForLocalProviderRelay } from "./provider/control.js";
 import { getLocalProvider, isSupportedLocalModelName, listLocalProviders, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider } from "./provider/state.js";
 import { runCloud } from "./cloud.js";
+import { createAgentService } from "./agent/compose.js";
+import { loadAgentConfig, saveAgentConfig } from "./agent/agent-service.js";
+import { readAppInstall } from "./agent/app-install.js";
+import { TaskStore } from "./agent/task-store.js";
 import { VERSION } from "./version.js";
 import { agentHelp, cliUsage, mcpUsage } from "./agent-help.js";
 import { normalizeMcpArgs, resolveMcpUrlAuthorization } from "./mcp-command.js";
@@ -244,6 +248,31 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "app" && args[1] === "remote") {
+    const action = args[2];
+    const config = await loadAgentConfig();
+    if (action === "enable") {
+      await saveAgentConfig({ ...config, remoteControlEnabled: true });
+      stdout.write("Agent remote control enabled. Start or restart the device relay service (frely mcp service start).\n");
+    } else if (action === "disable") {
+      await saveAgentConfig({ ...config, remoteControlEnabled: false });
+      stdout.write("Agent remote control disabled.\n");
+    } else if (action === "status" || action === undefined) {
+      const value = { remoteControlEnabled: config.remoteControlEnabled, defaultMaxCostUsd: config.defaultMaxCostUsd, maxCostUsdLimit: config.maxCostUsdLimit, maxConcurrentTasks: config.maxConcurrentTasks };
+      if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
+      else stdout.write(`Agent remote control: ${config.remoteControlEnabled ? "enabled" : "disabled"}\nDefault task budget: $${config.defaultMaxCostUsd} (limit $${config.maxCostUsdLimit})\nConcurrent tasks: up to ${config.maxConcurrentTasks}\n`);
+    } else throw new Error("Unknown app remote action. Use enable, disable, or status.");
+    return;
+  }
+
+  if (command === "app" && args[1] === "tasks") {
+    const store = TaskStore.open();
+    const tasks = await store.list();
+    if (args.includes("--json")) stdout.write(`${JSON.stringify(tasks)}\n`);
+    else for (const task of tasks) stdout.write(`${task.id}  ${task.status.padEnd(14)} ${task.mergeStatus.padEnd(15)} $${task.usage.costUsd.toFixed(3)}/${task.maxCostUsd.toFixed(2)}  ${task.goal.split("\n")[0]!.slice(0, 60)}\n`);
+    return;
+  }
+
   if (command === "mcp" && args[1] === "serve") {
     const serviceConfigHome = option(args, "--service-config-home");
     const serviceCredentialStore = option(args, "--service-credential-store");
@@ -252,12 +281,14 @@ async function main(): Promise<void> {
     await requireLogin();
     const providerOnly = args.includes("--provider-only");
     const workspace = providerOnly ? undefined : resolve(option(args, "--workspace") || process.cwd());
+    const agentLog = (message: string) => process.stderr.write(`${message}\n`);
+    const agent = createAgentService({ defaultWorkspace: workspace ?? process.cwd(), log: agentLog });
     const controller = new AbortController();
     const stop = () => controller.abort();
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     try {
-      await serveDeviceRelay({ ...(workspace ? { workspace } : {}), managedService: Boolean(serviceConfigHome), restartForUpgrade: stop, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
+      await serveDeviceRelay({ ...(workspace ? { workspace } : {}), agent, managedService: Boolean(serviceConfigHome), restartForUpgrade: stop, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
     } finally {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);

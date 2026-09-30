@@ -76,7 +76,7 @@ test("real Relay frames isolate reused client IDs and cancel only the addressed 
       });
       resolve(peer);
     }));
-    runtime = serveConnection(`ws://127.0.0.1:${address.port}`, "synthetic-test-token", `drd_${"a".repeat(32)}`, session, lease, controller.signal, log);
+    runtime = serveConnection(`ws://127.0.0.1:${address.port}`, "synthetic-test-token", `drd_${"a".repeat(32)}`, session, lease, null, process.cwd(), controller.signal, log);
     void runtime.catch(() => undefined);
     socket = await connected;
     call("relay-request-aaa", "read_file", { path: "a.txt" });
@@ -134,6 +134,8 @@ test("transport fallback is reserved for transport failures", async () => {
       `drd_${"a".repeat(32)}`,
       null,
       null,
+      null,
+      process.cwd(),
       controller.signal,
       () => undefined,
     );

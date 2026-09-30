@@ -26,6 +26,8 @@ export const COMMANDS = [
   { id: "mcp.service", usage: "frely mcp service start|stop|uninstall", auth: "none", effect: "local-service", purpose: "Pause, resume or remove the local MCP background service for maintenance. Supported upgrades restore running services without these commands." },
   { id: "mcp.revoke", usage: "frely mcp revoke", auth: "account", effect: "remote-write", purpose: "Revoke device MCP execution authorization for every connected client." },
   { id: "mcp.stdio", usage: "frely mcp stdio [--workspace <path>]", auth: "mcp", effect: "local-execution", purpose: "Serve authorized local tools over stdio." },
+  { id: "app.remote", usage: "frely app remote enable|disable|status [--json]", auth: "local", effect: "local-write", purpose: "Toggle agent remote control for the Frely web app (app.frely.cloud). Disabled by default; enable before starting tasks from a phone." },
+  { id: "app.tasks", usage: "frely app tasks [--json]", auth: "local", effect: "read", purpose: "List local agent tasks with status, merge state and budget usage." },
   { id: "network", usage: "frely network setup|status|find|use|logout [--json]", auth: "network", effect: "subcommand-dependent", purpose: "Access Frely Network using its separate setup and credentials." },
 ] as const;
 

@@ -6,6 +6,9 @@ import { readDeviceBinding } from "./device/state.js";
 import { connectionIsLive, connectionStatusPath, readConnectionStatus } from "./device/connection-status.js";
 import { serviceStatus } from "./service.js";
 import { VERSION } from "./version.js";
+import { readAppInstall, verifyCapsule } from "./agent/app-install.js";
+import { loadAgentConfig } from "./agent/agent-service.js";
+import { isSandboxDisabled } from "./runtime/sandbox.js";
 
 export interface DiagnosticCheck { name: string; ok: boolean; detail: string; status: "pass" | "fail" | "info" }
 export interface DoctorOptions { verbose?: boolean; /** Compatibility with doctor --mcp. */ mcp?: boolean }
@@ -89,6 +92,14 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
   const update = await upgradePromise;
   add("installation", "info", `${update.installation.method}: ${update.installation.entry}`);
   add("upgrade", update.state === "current" ? "pass" : "info", update.message);
+
+  const agentConfig = await loadAgentConfig().catch(() => null);
+  const appInstall = await readAppInstall().then((install) => verifyCapsule(install).then(() => install)).catch(() => null);
+  add("agent_app", appInstall ? "pass" : "info",
+    appInstall ? `Frely App ${appInstall.appVersion} installed (capsule verified); agent remote control ${agentConfig?.remoteControlEnabled ? "enabled" : "disabled"}.`
+      : "Frely App not installed. Install the desktop app to enable agent tasks.");
+  add("agent_sandbox", isSandboxDisabled() ? "info" : "pass",
+    isSandboxDisabled() ? "Command sandbox disabled by environment (FRELY_SANDBOX=off)." : "Command sandbox active (workspace + temp writes only).");
   const refreshGuidance = connection?.autoRefresh && connection.pid === service?.pid
     ? "The service will switch after active work finishes and the installation passes its startup check."
     : "Finish running tasks and restart the service from a local terminal.";
