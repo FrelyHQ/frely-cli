@@ -87,9 +87,12 @@ class SocketClient {
       this.waiters.push({ resolve, reject, timer });
     });
   }
-  /** Drop queued push notifications so the next [next] waits for a fresh message. */
-  drainPushes(): void {
-    while (this.lines.length > 0 && this.lines[0]?.push !== undefined) this.lines.shift();
+  /** Read the next request/response message; push snapshots that arrive meanwhile are skipped. */
+  async nextResponse(timeoutMs = 5000): Promise<OpsMessage> {
+    for (;;) {
+      const message = await this.next(timeoutMs);
+      if (message.push === undefined) return message;
+    }
   }
   close(): void { this.socket.destroy(); }
 }
@@ -128,24 +131,25 @@ test("agent ops socket serves ping, config, agent ops with gui identity, and tas
     // Agent ops work over the socket with the full local task view.
     await store.create(makeTask({ id: "at_aaaaaaaaaaaaaaaaaaaaaaaa", goal: "from store" }));
     client.call(4, "agent_list_tasks");
-    client.drainPushes();
-    const listed = await client.next() as { result?: { tasks?: AgentTaskRecord[] } };
+    const listed = await client.nextResponse() as { result?: { tasks?: AgentTaskRecord[] } };
     assert.equal(listed.result?.tasks?.length, 1);
     assert.equal(listed.result?.tasks?.[0]?.source.kind, "web", "ops socket returns the full record including source");
 
     // Unknown op and malformed lines fail without killing the connection.
     client.call(5, "nope");
-    const unknown = await client.next() as { error?: { code?: string } };
+    const unknown = await client.nextResponse() as { error?: { code?: string } };
     assert.equal(unknown.error?.code, "unknown_op");
     client.socket.write("this is not json\n");
-    const malformed = await client.next() as { error?: { code?: string } };
+    const malformed = await client.nextResponse() as { error?: { code?: string } };
     assert.equal(malformed.error?.code, "invalid_request");
     client.call(6, "ping");
-    assert.equal((await client.next() as { result?: { pong?: boolean } }).result?.pong, true);
+    assert.equal((await client.nextResponse() as { result?: { pong?: boolean } }).result?.pong, true);
 
-    // Task changes are pushed to connected clients.
+    // Task changes are pushed to connected clients. The first task's push can
+    // still be in flight when the second lands; wait for the snapshot carrying both.
     await store.create(makeTask({ id: "at_bbbbbbbbbbbbbbbbbbbbbbbb", goal: "second", status: "running" }));
-    const pushed = await client.next(3000) as { push?: string; tasks?: AgentTaskRecord[] };
+    let pushed = await client.next(3000) as { push?: string; tasks?: AgentTaskRecord[] };
+    while (pushed.tasks?.length === 1) pushed = await client.next(3000) as { push?: string; tasks?: AgentTaskRecord[] };
     assert.ok(pushed.tasks && pushed.tasks.length >= 1, "task push carries the tasks");
     assert.equal(pushed.push, "tasks_changed");
     assert.equal(pushed.tasks?.length, 2);
