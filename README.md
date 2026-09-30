@@ -84,12 +84,12 @@ Add the exact printed URL to a remote MCP client with OAuth support, choose OAut
 For Claude Code on the calling computer:
 
 ```sh
-claude mcp add --transport http frely-computer "<MCP_URL>"
+claude mcp add --transport http frely "<MCP_URL>"
 ```
 
-Open `/mcp` in Claude Code to complete OAuth authorization. Use a distinct server name per device. Ask the Agent to use Frely tools for remote work; its built-in shell still runs on the calling computer. Clients of the same device share its workspace and managed processes.
+Open `/mcp` in Claude Code to complete OAuth authorization. One URL serves every device on your account with an active MCP permission: `list_devices` shows your devices and their workspaces, and every other tool takes a `device` argument (device name or id). Ask the Agent to use Frely tools for remote work; its built-in shell still runs on the calling computer. Clients share each device's workspaces and managed processes.
 
-Authorization lifecycle: when the authorization has expired, `frely mcp` asks for a new approval and rotates the MCP execution key; `frely mcp --days 180` renews early. The MCP URL remains bound to the device. Login refresh, OAuth refresh and restart do not extend authorization. `frely mcp stop|start` pauses or resumes the background service; `frely mcp remove` revokes access for every client and uninstalls the service (it keeps running provider-only when local Providers exist). Manage your devices in Frely → **Device MCP** (`/user/account/connections`).
+Authorization lifecycle: when the authorization has expired, `frely mcp` asks for a new approval and rotates the MCP execution key; `frely mcp --days 180` renews early. The MCP URL is the same for all your devices and does not change on renewal. Login refresh, OAuth refresh and restart do not extend authorization. `frely mcp stop|start` pauses or resumes the background service; `frely mcp remove` revokes access for every client and uninstalls the service (it keeps running provider-only when local Providers exist). Manage your devices in Frely → **Device MCP** (`/user/account/connections`).
 
 ### Invoke a Frely-hosted Agent
 
@@ -194,7 +194,7 @@ Storage, migration, service injection, release requirements and threat boundarie
 - Cloud commands and authorization: [docs/cloud.md](docs/cloud.md)
 - Frely Network commands (preview, not listed in `frely --help`): [docs/frely-network.md](docs/frely-network.md)
 
-The public MCP URL is the canonical resource returned by Relay, for example `https://connect.frely.cloud/mcp/<device-id>`. Use `frely mcp`; do not derive the URL from the control-plane hostname. The URL contains no bearer secret.
+The public MCP URL is the canonical resource returned by Relay, `https://connect.frely.cloud/mcp/devices` (one URL per account, shared by all your devices). Use `frely mcp`; do not derive the URL from the control-plane hostname. The URL contains no bearer secret.
 
 ## Commands
 

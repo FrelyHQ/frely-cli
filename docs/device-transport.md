@@ -87,10 +87,10 @@ CLI 不维护 Cloudflare 专用业务协议。
 
 ### 2.2 公网 MCP URL
 
-设备 MCP resource 保持：
+设备 MCP resource 为账户级地址（所有设备共用，由 `device` 工具参数选择设备）：
 
 ```text
-https://connect.frely.cloud/mcp/<device-id>
+https://connect.frely.cloud/mcp/devices
 ```
 
 OAuth resource、客户端配置、设备 URL 不因 transport 变化。
@@ -227,7 +227,7 @@ Worker 保存公网 HTTP 请求生命周期。
 ```text
 ChatGPT
    |
-   | POST /mcp/<device-id>
+   | POST /mcp/devices  (tools/call 带 device 参数)
    v
 Worker
    |

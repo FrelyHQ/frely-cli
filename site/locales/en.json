@@ -76,7 +76,7 @@
   "install.configure": "Enable device MCP",
   "setup.eyebrow": "SET UP DEVICE ACCESS",
   "tools.chatgpt": "Add a remote MCP connection with your device URL, select OAuth, and authorize with your Frely account. The same URL works for other compatible clients.",
-  "tools.claudePrepare": "On the calling computer, replace <MCP_URL> with the address from the controlled computer. Give each device a different server name.",
+  "tools.claudePrepare": "On the calling computer, replace <MCP_URL> with the address from the controlled computer. All devices on your account share this one address, so add it once.",
   "tools.claudeAuthorize": "Open /mcp in Claude Code to finish OAuth authorization. Ask the agent to use Frely tools for work on the target computer. Install Frely CLI on the target computer; the calling computer uses its MCP client.",
   "install.approval": "Approve the device, workspace and duration in your browser. Frely CLI starts a background service and prints the MCP address. Run frely mcp again any time to show the same address.",
   "copy.mcp": "Copy device MCP setup command",
@@ -100,6 +100,6 @@
   "more.eyebrow": "OPTIONAL FEATURES",
   "more.title": "More uses for Frely CLI",
   "tools.codexAuthorize": "Follow the OAuth prompt after adding the URL. Use this command to start authorization if needed.",
-  "tools.codexPrepare": "Run this command on the computer running Codex. Replace <MCP_URL> with the address from the target computer. Give each device a different server name.",
+  "tools.codexPrepare": "Run this command on the computer running Codex. Replace <MCP_URL> with the address from the target computer. All devices on your account share this one address, so add it once.",
   "tools.webTab": "Browser agents"
 }
