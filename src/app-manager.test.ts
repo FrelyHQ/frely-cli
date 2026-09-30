@@ -39,6 +39,10 @@ function releasesFixture(): AppRelease[] {
   ];
 }
 
+const darwinOnly = process.platform !== "darwin"
+  ? `frely app install flows exercise darwin paths and /Applications writability; skipped on ${process.platform}`
+  : false;
+
 test("listAppReleases maps GitHub releases and filters tag prefixes", async () => {
   const body = JSON.stringify([
     {
@@ -82,7 +86,7 @@ test("selectAssetForPlatform picks linux and windows assets", () => {
   assert.equal(selectAssetForPlatform(releases, "win32", "x64")?.asset.name, "Frely-App-0.2.0-windows-x64.zip");
 });
 
-test("appInstallStatus reports installed app details on darwin", async () => {
+test("appInstallStatus reports installed app details on darwin", { skip: darwinOnly }, async () => {
   const deps: AppManagerDeps = {
     platform: "darwin",
     arch: "arm64",
@@ -127,7 +131,7 @@ test("appInstallStatus reports not installed", async () => {
   assert.equal(status.managedBy, "none");
 });
 
-test("installApp returns early when already installed", async () => {
+test("installApp returns early when already installed", { skip: darwinOnly }, async () => {
   const logs: string[] = [];
   const deps: AppManagerDeps = {
     platform: "darwin",
@@ -141,7 +145,7 @@ test("installApp returns early when already installed", async () => {
   assert.ok(logs.some((line) => line.includes("already installed")));
 });
 
-test("installApp downloads, verifies sha256, and copies the app bundle (darwin zip)", async () => {
+test("installApp downloads, verifies sha256, and copies the app bundle (darwin zip)", { skip: darwinOnly }, async () => {
   const logs: string[] = [];
   const commands: Array<[string, string[]]> = [];
   const directory = await mkdtemp(join(tmpdir(), "app-manager-"));
