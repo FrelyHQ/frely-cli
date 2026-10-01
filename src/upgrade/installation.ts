@@ -104,10 +104,11 @@ export async function inspectInstallation(options: {
   return candidates.length === 1 ? candidates[0]! : { ...base, method: "unknown", reason: "This is a project, temporary runner, local link, or unrecognized global installation. Update it with the original installer." };
 }
 
+/** An explicit upgrade is exempt from release-age gates (npm min-release-age, bun minimumReleaseAge); older managers ignore the flag. */
 export function packageArguments(installation: Installation, version: string): string[] {
   return installation.method === "npm"
-    ? ["install", "--global", "--ignore-scripts", "--prefix", installation.prefix!, `frely-cli@${version}`]
-    : ["add", "--global", "--ignore-scripts", `frely-cli@${version}`];
+    ? ["install", "--global", "--ignore-scripts", "--min-release-age-exclude=frely-cli", "--prefix", installation.prefix!, `frely-cli@${version}`]
+    : ["add", "--global", "--ignore-scripts", "--minimum-release-age=0", `frely-cli@${version}`];
 }
 
 export function shellQuote(value: string, windows = false): string {

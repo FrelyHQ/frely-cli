@@ -64,6 +64,15 @@ test("release lookup pins stable official versions and never follows a metadata 
   for (const tag of ["v1.2.3-rc.1", "v1.2.3/evil", "v01.2.3", "../bad"]) {
     await assert.rejects(latestRelease(install, async () => Response.json({ draft: false, prerelease: false, tag_name: tag })));
   }
+  const npm = { method: "npm" as const, entry: "/frely", platform: "linux" as const, manager: "npm", prefix: "/p" };
+  const packument = (latest: string, versions: string[]) => async (url: string | URL | Request, init?: RequestInit) => {
+    assert.equal(String(url), "https://registry.npmjs.org/frely-cli");
+    assert.equal(new Headers(init?.headers).get("accept"), "application/vnd.npm.install-v1+json");
+    return Response.json({ name: "frely-cli", "dist-tags": { latest }, versions: Object.fromEntries(versions.map((v) => [v, {}])) });
+  };
+  assert.equal((await latestRelease(npm, packument("1.2.3", ["1.2.2", "1.2.3"]))).version, "1.2.3");
+  // A publish still processing on npm is not offered: the installer could not resolve it yet.
+  await assert.rejects(latestRelease(npm, packument("1.2.3", ["1.2.2"])));
   assert.equal(compareVersions("1.10.0", "1.9.0"), 1);
   assert.equal(compareVersions("1.2.3", "1.2.3-rc.1"), 1);
   assert.equal(compareVersions("1.2.3", "1.2.3"), 0);
@@ -173,6 +182,7 @@ test("Windows package instructions preserve manager and prefix, escape paths, an
   const installation = { method: "npm" as const, entry: "C:\\odd'name\\node_modules\\frely-cli\\dist\\index.js", manager: "C:\\odd'name\\npm.cmd", prefix: "C:\\odd'name", platform: "win32" as const };
   const command = manualUpgradeCommand(installation, "1.2.3", false);
   assert.match(command, /frely-cli@1\.2\.3/); assert.match(command, /--prefix/); assert.match(command, /--ignore-scripts/);
+  assert.match(command, /--min-release-age-exclude=frely-cli/);
   assert.doesNotMatch(command, /mcp start/);
   assert.match(manualUpgradeCommand(installation, "1.2.3", true), /finally/);
 });

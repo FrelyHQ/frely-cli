@@ -19,8 +19,9 @@ export async function latestRelease(installation: Installation, request: typeof 
   const standalone = installation.method === "standalone";
   const response = await request(standalone
     ? "https://api.github.com/repos/FrelyHQ/frely-cli/releases/latest"
-    : "https://registry.npmjs.org/frely-cli/latest", {
-    headers: { accept: "application/json", "user-agent": "frely-cli" },
+    // npm/bun resolve from the abbreviated packument, which can lag /latest after a publish; check what they will install.
+    : "https://registry.npmjs.org/frely-cli", {
+    headers: { accept: standalone ? "application/json" : "application/vnd.npm.install-v1+json", "user-agent": "frely-cli" },
     signal: AbortSignal.timeout(4000), redirect: "error",
   });
   if (!response.ok) throw new Error(`Release lookup failed (HTTP ${response.status}).`);
@@ -28,8 +29,10 @@ export async function latestRelease(installation: Installation, request: typeof 
   if (text.length > 1024 * 1024) throw new Error("Release metadata is too large.");
   const data = JSON.parse(text) as Record<string, unknown>;
   if (standalone && (data.draft !== false || data.prerelease !== false)) throw new Error("GitHub release is not a stable published release.");
-  const version = stableVersion(standalone ? String(data.tag_name).replace(/^v/u, "") : data.version);
   if (!standalone && data.name !== "frely-cli") throw new Error("Release package name does not match frely-cli.");
+  const latest = standalone ? undefined : (data["dist-tags"] as Record<string, unknown> | undefined)?.latest;
+  const version = stableVersion(standalone ? String(data.tag_name).replace(/^v/u, "") : latest);
+  if (!standalone && !(data.versions as Record<string, unknown> | undefined)?.[version]) throw new Error("Registry metadata does not list its latest version.");
   return { version, ...(standalone ? { baseUrl: `https://github.com/FrelyHQ/frely-cli/releases/download/v${version}` } : {}) };
 }
 
