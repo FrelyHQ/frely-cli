@@ -12,7 +12,7 @@ export interface WorkspaceCommandInput {
 export async function runWorkspaceCommand({ args, primary: primaryInput, write }: WorkspaceCommandInput): Promise<void> {
   if (!primaryInput) throw new Error("MCP is not enabled. Run frely mcp url.");
   const primary = await realpath(primaryInput);
-  // The primary workspace is always registered, so nesting checks also apply to it.
+  // The primary workspace is always registered, so it is listed and routed like any other root.
   await ensureWorkspaceRegistered(primary);
   const action = args[2];
   if (action === "add") {

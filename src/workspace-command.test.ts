@@ -33,16 +33,20 @@ test("workspace list works before any extra workspace is registered", async () =
   assert.deepEqual(JSON.parse(await run(primary, "list", "--json")), { primary, workspaces: [primary] });
 });
 
-test("workspace add rejects nested and containing directories, naming the conflict", async () => {
+test("workspace add accepts nested and containing directories", async () => {
   const primary = await dir("frely-ws-nest-");
   const child = join(primary, "child");
   await mkdir(child);
-  await assert.rejects(() => run(primary, "add", child), (error: Error) => error.message.includes("nested inside") && error.message.includes(primary));
+  assert.ok((await run(primary, "add", child)).includes(`Added workspace ${child}`));
   const other = await dir("frely-ws-other-");
   const inner = join(other, "inner");
   await mkdir(inner);
   await run(primary, "add", inner);
-  await assert.rejects(() => run(primary, "add", other), (error: Error) => error.message.includes("contains the registered workspace") && error.message.includes(inner));
+  await run(primary, "add", other);
+  const listed = JSON.parse(await run(primary, "list", "--json")) as { workspaces: string[] };
+  assert.deepEqual([...listed.workspaces].sort(), [primary, child, inner, other].sort());
+  await run(primary, "remove", other);
+  assert.ok((JSON.parse(await run(primary, "list", "--json")) as { workspaces: string[] }).workspaces.includes(inner));
 });
 
 test("workspace remove refuses the primary and removes other workspaces", async () => {

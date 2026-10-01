@@ -7,7 +7,7 @@ import { FairRwScheduler } from "./scheduler.js";
 import { safeEnv, Workspace } from "./workspace.js";
 import { VERSION } from "../version.js";
 import { ensureWorkspaceRegistered, listWorkspaces } from "./workspace-registry.js";
-import { resolveWorkspace } from "./workspace-router.js";
+import { resolveWorkspace, resolveWorkspacePair } from "./workspace-router.js";
 
 interface ToolFlags {
   readOnly: boolean;
@@ -215,12 +215,8 @@ async function dispatch(
   if (name === "create_directory") return write(() => workspace.createDirectory(relativeInput));
   if (name === "delete_path") return write(() => workspace.deletePath(relativeInput, boolArg(args, "recursive", false)));
   if (name === "move_path") {
-    const toPath = textArg(args, "to");
-    const { workspace: wsTo, relativeInput: relTo } = resolveWorkspace(workspaces as Map<string, Workspace>, toPath);
-    if (workspace !== wsTo) {
-      throw new Error("move_path: source and destination must be in the same workspace.");
-    }
-    return write(() => workspace.movePath(relativeInput, relTo, boolArg(args, "overwrite", false)));
+    const pair = resolveWorkspacePair(workspaces as Map<string, Workspace>, textArg(args, "from", "."), textArg(args, "to"));
+    return write(() => pair.workspace.movePath(pair.relativeFrom, pair.relativeTo, boolArg(args, "overwrite", false)));
   }
   if (name === "run_command") {
     const command = textArg(args, "command");

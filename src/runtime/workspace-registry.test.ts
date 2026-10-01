@@ -51,22 +51,17 @@ test("workspace registry: addWorkspace rejects duplicate paths", async () => {
   await assert.rejects(() => addWorkspace(root), /already registered/i);
 });
 
-test("workspace registry: addWorkspace rejects nested workspaces", async () => {
-  const parent = await mkdtemp(join(tmpdir(), "frely-registry-parent-"));
+test("workspace registry: addWorkspace allows nested workspaces in either order", async () => {
+  const parent = await realpath(await mkdtemp(join(tmpdir(), "frely-registry-parent-")));
   const child = join(parent, "child");
-  await mkdir(child, { recursive: true });
-
-  await addWorkspace(parent);
-  await assert.rejects(() => addWorkspace(child), /nested|contains/i);
-});
-
-test("workspace registry: addWorkspace rejects parent workspace after child", async () => {
-  const parent = await mkdtemp(join(tmpdir(), "frely-registry-parent2-"));
-  const child = join(parent, "child");
-  await mkdir(child, { recursive: true });
+  const grandchild = join(child, "deep");
+  await mkdir(grandchild, { recursive: true });
 
   await addWorkspace(child);
-  await assert.rejects(() => addWorkspace(parent), /nested|contains/i);
+  await addWorkspace(parent);
+  const roots = await addWorkspace(grandchild);
+  for (const root of [parent, child, grandchild]) assert.ok(roots.includes(root));
+  await assert.rejects(() => addWorkspace(child), /already registered/i);
 });
 
 test("workspace registry: removeWorkspace removes non-primary workspace", async () => {
