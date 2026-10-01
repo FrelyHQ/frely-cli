@@ -7,7 +7,9 @@ export const COMMANDS = [
   { id: "upgrade", usage: "frely upgrade", auth: "none", effect: "local-write", purpose: "Upgrade the current installation to the latest stable release. Windows prints a manual command; doctor checks versions." },
   { id: "help", usage: "frely help --agent --json", auth: "none", effect: "read", purpose: "Read this installed CLI's current Agent instructions." },
   { id: "mcp", usage: "frely mcp [--workspace <path>] [--days 1..180] [--json]", auth: "account-and-browser-if-needed", effect: "authorization-if-needed", purpose: "Enable, renew or read device MCP. Unconfigured: request browser approval for --workspace (default: current directory) and install the background service. Expired or --days given: renew with browser approval; the MCP URL stays the same. Otherwise print the MCP URL unchanged. Prompts go to stderr; stdout holds only the URL, or JSON with HTTP transport and OAuth details." },
-  { id: "mcp.workspace", usage: "frely mcp workspace [add|remove <path>] [--json]", auth: "mcp", effect: "subcommand-dependent", purpose: "List workspace directories for this device, or add/remove an additional one (the primary cannot be removed)." },
+  { id: "mcp.workspace.list", usage: "frely mcp workspace list [--json]", auth: "mcp", effect: "read", purpose: "List workspace directories for this device; the primary is marked." },
+  { id: "mcp.workspace.add", usage: "frely mcp workspace add <path>", auth: "mcp", effect: "local-write", purpose: "Add an additional workspace directory for this device." },
+  { id: "mcp.workspace.remove", usage: "frely mcp workspace remove <path>", auth: "mcp", effect: "local-write", purpose: "Remove an additional workspace directory (the primary cannot be removed)." },
   { id: "mcp.stop", usage: "frely mcp stop", auth: "none", effect: "local-service", purpose: "Pause the local MCP background service. Supported upgrades restore running services without this command." },
   { id: "mcp.start", usage: "frely mcp start", auth: "none", effect: "local-service", purpose: "Resume the local MCP background service." },
   { id: "mcp.remove", usage: "frely mcp remove", auth: "account", effect: "remote-write", purpose: "Revoke device MCP for every connected client and uninstall the background service (kept running provider-only when local Providers exist)." },
@@ -20,7 +22,9 @@ export const COMMANDS = [
   { id: "provider.share", usage: "frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]", auth: "account", effect: "remote-write", purpose: "Publish a local model Provider. If a prepared Provider on this device is not finished, resume it instead." },
   { id: "provider.list", usage: "frely provider list [--json]", auth: "account", effect: "read", purpose: "List configured local Providers." },
   { id: "cloud", usage: "frely cloud list|describe|call [--help]", auth: "cloud-oauth", effect: "subcommand-dependent", purpose: "Discover and call Frely cloud business operations at frely.cloud/mcp. The first call requests browser authorization. Use describe before call; parameters and results are JSON." },
-  { id: "app.remote", usage: "frely app remote enable|disable|status [--json]", auth: "local", effect: "local-write", purpose: "Toggle agent remote control for the Frely web app (app.frely.cloud). Disabled by default; enable before starting tasks from a phone." },
+  { id: "app.remote.enable", usage: "frely app remote enable", auth: "local", effect: "local-write", purpose: "Allow agent remote control from the Frely web app (app.frely.cloud). Disabled by default; enable before starting tasks from a phone." },
+  { id: "app.remote.disable", usage: "frely app remote disable", auth: "local", effect: "local-write", purpose: "Disallow agent remote control from the Frely web app." },
+  { id: "app.remote.status", usage: "frely app remote status [--json]", auth: "local", effect: "read", purpose: "Show whether agent remote control is enabled and the task budget limits." },
   { id: "app.ops", usage: "frely app ops", auth: "local", effect: "read-only", purpose: "Bridge the local agent ops socket to stdin/stdout (NDJSON, incl. tasks_changed pushes); used by the Frely App GUI task panel." },
   { id: "app.connectInfo", usage: "frely app connect-info [--json]", auth: "local", effect: "read-only", purpose: "Report the local agent ops socket path and whether a serving process is reachable (used by the Frely App GUI to find task control)." },
   { id: "app.key", usage: "frely app key [--lifetime-usd N] [--json]", auth: "user", effect: "account-write", purpose: "Provision a device-scoped Frely API key for app agent tasks (shown once, capped at a lifetime spend limit; default $50, max $500)." },
@@ -75,7 +79,7 @@ const SHORT_USAGE: Readonly<Record<string, string>> = {
   doctor: "frely doctor [-v] [--json]",
   upgrade: "frely upgrade",
   mcp: "frely mcp [--workspace <path>] [--days 1..180] [--json]",
-  "mcp.workspace": "frely mcp workspace [add|remove <path>]",
+  "mcp.workspace": "frely mcp workspace list|add <path>|remove <path>",
   "mcp.lifecycle": "frely mcp stop|start|remove",
   "agent.install": "frely agent install <distribution-id> [--host <host>] [--api-key-stdin]",
   "agent.run": "frely agent run <distribution-id> (--input <text>|--input-stdin)",
@@ -94,6 +98,17 @@ export function cliUsage(): string {
   }
   lines.push("\nFull flags and the machine-readable contract: frely help --agent --json\n");
   return lines.join("");
+}
+
+/**
+ * A command group without a direct action (`frely mcp workspace`, `frely agent`,
+ * ...) prints the subcommands under it instead of running one.
+ */
+export function subcommandUsage(group: string): string {
+  const prefix = `${group}.`;
+  const lines = COMMANDS.filter((command) => command.id.startsWith(prefix))
+    .map((command) => `  ${SHORT_USAGE[command.id] ?? command.usage}\n`);
+  return `Usage:\n${lines.join("")}`;
 }
 
 export function mcpUsage(): string {

@@ -15,7 +15,7 @@ import { installDeviceRelayService, startMcpService, stopMcpService, uninstallMc
 import { discoverLocalModels } from "./provider/local.js";
 import { finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider, waitForLocalProviderRelay } from "./provider/control.js";
 import { isSupportedLocalModelName, listLocalProviders, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider, type LocalProviderBinding } from "./provider/state.js";
-import { logoutCloud, runCloud } from "./cloud.js";
+import { CLOUD_USAGE, logoutCloud, runCloud } from "./cloud.js";
 import { createAgentService } from "./agent/compose.js";
 import { loadAgentConfig, saveAgentConfig } from "./agent/agent-service.js";
 import { readAppInstall } from "./agent/app-install.js";
@@ -28,7 +28,7 @@ import { pingAgentOpsSocket } from "./agent/ops-server.js";
 import { agentStateDir } from "./agent/task-store.js";
 import { TaskStore } from "./agent/task-store.js";
 import { VERSION } from "./version.js";
-import { agentHelp, cliUsage, mcpUsage } from "./agent-help.js";
+import { agentHelp, cliUsage, mcpUsage, subcommandUsage } from "./agent-help.js";
 import { ensureMcpAuthorization, normalizeMcpArgs } from "./mcp-command.js";
 import { getKeyBudget, KeyBudgetError, publicKeyBudgetError } from "./key-budget.js";
 import { runNetwork, publicNetworkError } from "./network.js";
@@ -57,6 +57,7 @@ async function main(): Promise<void> {
   if (!command || command === "help" || command === "--help" || command === "-h") return usage();
 
   if (command === "cloud") {
+    if (args[1] === undefined) { stdout.write(CLOUD_USAGE); return; }
     const result = await runCloud(args);
     stdout.write(result.text ?? JSON.stringify(result.value, null, 2) + "\n");
     if (result.failed) process.exitCode = 2;
@@ -72,6 +73,7 @@ async function main(): Promise<void> {
 
   if (command === "agent") {
     const action = args[1];
+    if (action === undefined) { stdout.write(subcommandUsage("agent")); return; }
     if (action === "install") {
       const target = args[2];
       if (!target || target.startsWith("-")) throw new Error("Usage: frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--api-key-stdin] [--json]");
@@ -123,7 +125,7 @@ async function main(): Promise<void> {
       else stdout.write(value.removed ? "Agent removed.\n" : "Agent was not installed.\n");
       return;
     }
-    throw new Error("Usage: frely agent install|run|status|remove ...");
+    throw new Error(`Unknown agent command.\n${subcommandUsage("agent")}`);
   }
 
   if (command === "login") {
@@ -165,6 +167,7 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "provider" && args[1] === undefined) { stdout.write(subcommandUsage("provider")); return; }
   if (command === "provider" && args[1] === "share") {
     const auth = await requireLogin();
     const device = await ensureDevice();
@@ -213,6 +216,7 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "app" && args[1] === undefined) { stdout.write(subcommandUsage("app")); return; }
   if (command === "app" && args[1] === "key") {
     const lifetime = Number(option(args, "--lifetime-usd") ?? 50);
     const key = await provisionAgentKey(lifetime);
@@ -238,6 +242,7 @@ async function main(): Promise<void> {
 
   if (command === "app" && args[1] === "remote") {
     const action = args[2];
+    if (action === undefined) { stdout.write(subcommandUsage("app.remote")); return; }
     const config = await loadAgentConfig();
     if (action === "enable") {
       await saveAgentConfig({ ...config, remoteControlEnabled: true });
@@ -245,11 +250,11 @@ async function main(): Promise<void> {
     } else if (action === "disable") {
       await saveAgentConfig({ ...config, remoteControlEnabled: false });
       stdout.write("Agent remote control disabled.\n");
-    } else if (action === "status" || action === undefined) {
+    } else if (action === "status") {
       const value = { remoteControlEnabled: config.remoteControlEnabled, defaultMaxCostUsd: config.defaultMaxCostUsd, maxCostUsdLimit: config.maxCostUsdLimit, maxConcurrentTasks: config.maxConcurrentTasks };
       if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
       else stdout.write(`Agent remote control: ${config.remoteControlEnabled ? "enabled" : "disabled"}\nDefault task budget: $${config.defaultMaxCostUsd} (limit $${config.maxCostUsdLimit})\nConcurrent tasks: up to ${config.maxConcurrentTasks}\n`);
-    } else throw new Error("Unknown app remote action. Use enable, disable, or status.");
+    } else throw new Error(`Unknown app remote command.\n${subcommandUsage("app.remote")}`);
     return;
   }
 
@@ -272,7 +277,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === "app" && (args[1] === "status" || args[1] === undefined)) {
+  if (command === "app" && args[1] === "status") {
     const status = await appInstallStatus({ log: () => {} });
     const value = { installed: status.installed, ...(status.path ? { path: status.path } : {}), ...(status.version ? { version: status.version } : {}), running: status.running, managedBy: status.managedBy };
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
@@ -331,6 +336,7 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "mcp" && args[1] === "workspace") {
+    if (args[2] === undefined) { stdout.write(subcommandUsage("mcp.workspace")); return; }
     const metadata = await inspectMcpMetadataOrQuarantine((message) => { process.stderr.write(message); });
     await runWorkspaceCommand({ args, primary: metadata?.grant.workspace ?? null, write: (text) => { stdout.write(text); } });
     return;
@@ -362,6 +368,7 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "provider" || command === "app") throw new Error(`Unknown ${command} command.\n${subcommandUsage(command)}`);
   usage();
   process.exitCode = 2;
 }

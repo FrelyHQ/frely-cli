@@ -7,6 +7,7 @@ import { agentHelp } from "./agent-help.js";
 import { VERSION } from "./version.js";
 
 const execute = promisify(execFile);
+const entry = fileURLToPath(new URL("./index.js", import.meta.url));
 test("Agent help runs offline without authentication or credential-store access", async () => {
   const result = await execute(process.execPath, [fileURLToPath(new URL("./index.js", import.meta.url)), "help", "--agent", "--json"], {
     env: { ...process.env, FRELY_CREDENTIAL_STORE: "intentionally-invalid", FRELY_RELAY_URL: "not-a-url" },
@@ -43,7 +44,26 @@ test("agent status argument failures are JSON and never echo unsupported secret 
   }
 });
 
-test("agent help lists the mcp workspace command", () => {
+test("agent help lists the mcp workspace subcommands", () => {
   const ids = agentHelp().commands.map((command: { id: string }) => command.id);
-  assert.ok(ids.includes("mcp.workspace"));
+  for (const id of ["mcp.workspace.list", "mcp.workspace.add", "mcp.workspace.remove"]) assert.ok(ids.includes(id));
+  assert.ok(!ids.includes("mcp.workspace"));
+});
+
+test("command groups without a direct action print their subcommands offline", async () => {
+  const cases: Array<[string[], RegExp]> = [
+    [["mcp", "workspace"], /frely mcp workspace list/],
+    [["agent"], /frely agent install/],
+    [["provider"], /frely provider list/],
+    [["cloud"], /frely cloud list/],
+    [["app"], /frely app status/],
+    [["app", "remote"], /frely app remote enable/],
+  ];
+  for (const [args, expected] of cases) {
+    const result = await execute(process.execPath, [entry, ...args], {
+      env: { ...process.env, FRELY_CREDENTIAL_STORE: "intentionally-invalid", FRELY_RELAY_URL: "not-a-url", XDG_CONFIG_HOME: "/nonexistent-frely-test" },
+    });
+    assert.equal(result.stderr, "", args.join(" "));
+    assert.match(result.stdout, expected, args.join(" "));
+  }
 });

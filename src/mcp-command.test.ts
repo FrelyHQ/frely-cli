@@ -12,11 +12,13 @@ test("device MCP accepts the documented short entry and explicit subcommands", (
   assert.deepEqual(normalizeMcpArgs(["mcp"]), ["mcp", "setup"]);
   assert.deepEqual(normalizeMcpArgs(["mcp", "--workspace", "/project with spaces", "--days", "90"]), ["mcp", "setup", "--workspace", "/project with spaces", "--days", "90"]);
   assert.deepEqual(normalizeMcpArgs(["mcp", "--json"]), ["mcp", "setup", "--json"]);
-  assert.deepEqual(normalizeMcpArgs(["mcp", "workspace"]), ["mcp", "workspace", "list"]);
-  assert.deepEqual(normalizeMcpArgs(["mcp", "workspace", "--json"]), ["mcp", "workspace", "list", "--json"]);
+  // A bare group stays bare; the CLI prints its subcommands instead of listing.
+  assert.deepEqual(normalizeMcpArgs(["mcp", "workspace"]), ["mcp", "workspace"]);
   // Upgrade bridge for Windows commands printed by 0.7.x.
   assert.deepEqual(normalizeMcpArgs(["mcp", "service", "start"]), ["mcp", "start"]);
   for (const args of [
+    ["mcp", "workspace", "list"],
+    ["mcp", "workspace", "list", "--json"],
     ["mcp", "workspace", "add", "/project"],
     ["mcp", "stop"],
     ["mcp", "start"],
@@ -50,7 +52,8 @@ test("invalid MCP arguments fail before login, authorization, service installati
     ["mcp", "renew"],
     ["mcp", "revoke"],
     ["mcp", "stop", "--force"],
-    ["mcp", "workspace", "list"],
+    ["mcp", "workspace", "--json"],
+    ["mcp", "workspace", "list", "--verbose"],
     ["mcp", "workspace", "add"],
     ["mcp", "typo"],
     ["mcp", "chatgpt"],

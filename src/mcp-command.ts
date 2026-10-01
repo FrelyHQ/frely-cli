@@ -21,14 +21,16 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
     return args;
   }
   if (action === "workspace") {
+    // A bare `mcp workspace` has no action of its own; the CLI prints its subcommands.
     const subaction = args[2];
-    if (subaction === undefined || subaction === "--json") {
-      if (args.length > 3 || (subaction !== undefined && subaction !== "--json")) throw new Error("Unsupported workspace option. Run frely mcp --help.");
-      return ["mcp", "workspace", "list", ...args.slice(2)];
+    if (subaction === undefined) return args;
+    if (subaction === "list") {
+      if (args.length > 4 || (args[3] !== undefined && args[3] !== "--json")) throw new Error("Unsupported workspace list option. Run frely mcp workspace.");
+      return args;
     }
-    if (subaction !== "add" && subaction !== "remove") throw new Error("Use frely mcp workspace [add|remove <path>]. Run frely mcp --help.");
+    if (subaction !== "add" && subaction !== "remove") throw new Error("Unknown workspace command. Run frely mcp workspace.");
     if (!args[3]) throw new Error(`frely mcp workspace ${subaction} requires a path argument.`);
-    if (args.length > 4) throw new Error(`Unsupported workspace ${subaction} option. Run frely mcp --help.`);
+    if (args.length > 4) throw new Error(`Unsupported workspace ${subaction} option. Run frely mcp workspace.`);
     return args;
   }
   const valueOptions: Record<string, readonly string[]> = {

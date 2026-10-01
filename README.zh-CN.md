@@ -77,7 +77,7 @@ frely mcp --workspace /path/to/project
 
 `frely login` 通过浏览器设备授权获取受限账号会话。首次运行 `frely mcp` 会初始化独立的 MCP 安全密钥、请求浏览器批准该设备与工作区（省略 `--workspace` 时为当前目录）、安装用户级 Device Relay 服务（macOS LaunchAgent、Linux systemd 用户单元或 Windows 任务计划程序），并打印 MCP URL。默认授权 90 天，`--days 1..180` 可选时长。
 
-`frely mcp` 是幂等的：启用后再次运行只打印同一个 URL，需要地址时直接再运行即可。提示走 stderr，stdout 保持单一 URL（或 `--json` 时一个 JSON 对象）；批准或安装失败则不打印 URL。要开放更多目录，用 `frely mcp workspace add <path>`；`frely mcp workspace` 列出所有目录。
+`frely mcp` 是幂等的：启用后再次运行只打印同一个 URL，需要地址时直接再运行即可。提示走 stderr，stdout 保持单一 URL（或 `--json` 时一个 JSON 对象）；批准或安装失败则不打印 URL。要开放更多目录，用 `frely mcp workspace add <path>`；`frely mcp workspace list` 列出所有目录。只输入命令组而不带子命令（如 `frely mcp workspace`、`frely agent`）时，会显示该组下可用的子命令。
 
 把打印的完整 URL 添加到支持 OAuth 的远程 MCP 客户端，选择 OAuth 并完成授权。保持电脑在线。验证首次连接：让客户端只列出所选工作区的顶层名称，不写文件、不跑 shell 命令——返回与目录一致的结果即连通。
 
@@ -204,7 +204,8 @@ frely logout
 frely doctor [-v] [--json]
 frely upgrade
 frely mcp [--workspace <path>] [--days 1..180] [--json]
-frely mcp workspace [add|remove <path>] [--json]
+frely mcp workspace list [--json]
+frely mcp workspace add|remove <path>
 frely mcp stop|start|remove
 frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--api-key-stdin] [--json]
 frely agent run <distribution-id> (--input <text>|--input-stdin) [--json]
