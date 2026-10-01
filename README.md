@@ -13,7 +13,7 @@ This repository contains the open-source Frely client and local MCP runtime. The
 
 ```text
 Remote Agent Skill: install -> frely login -> frely agent install -> frely agent run
-Device MCP:  install on target computer -> frely login -> frely mcp -> add MCP URL to client -> OAuth authorize
+Device MCP:  install on target computer -> frely login -> frely mcp url -> add MCP URL to client -> OAuth authorize
 ```
 
 ## Install
@@ -72,12 +72,12 @@ The browser opens automatically. To choose another browser or Frely account, run
 On the computer to control, enable file, shell and process access:
 
 ```sh
-frely mcp --workspace /path/to/project
+frely mcp url --workspace /path/to/project
 ```
 
-`frely login` requests a restricted account session through browser device authorization. The first `frely mcp` initializes a separate secure MCP key, requests browser approval for this device and workspace (the current directory when `--workspace` is omitted), installs the user-level Device Relay service (macOS LaunchAgent, Linux systemd user unit, or Windows Task Scheduler), and prints the MCP URL. The default authorization is 90 days; `--days 1..180` selects a duration.
+`frely login` requests a restricted account session through browser device authorization. The first `frely mcp url` initializes a separate secure MCP key, requests browser approval for this device and workspace (the current directory when `--workspace` is omitted), installs the user-level Device Relay service (macOS LaunchAgent, Linux systemd user unit, or Windows Task Scheduler), and prints the MCP URL. The default authorization is 90 days; `--days 1..180` selects a duration.
 
-`frely mcp` is idempotent: once enabled it only prints the same URL, so run it again whenever you need the address. Prompts go to stderr, so stdout remains a single URL or, with `--json`, a JSON object. No URL is printed if approval or service installation fails. To expose more directories, use `frely mcp workspace add <path>`; `frely mcp workspace` lists them.
+`frely mcp url` is idempotent: once enabled it only prints the same URL, so run it again whenever you need the address. Prompts go to stderr, so stdout remains a single URL or, with `--json`, a JSON object. No URL is printed if approval or service installation fails. To expose more directories, use `frely mcp workspace add <path>`; `frely mcp workspace list` lists them. A command group run without a subcommand (for example `frely mcp workspace` or `frely agent`) prints the subcommands under it.
 
 Add the exact printed URL to a remote MCP client with OAuth support, choose OAuth and complete authorization. Keep the computer online. Verify the first connection by asking the client to list the top-level names in your selected workspace, without writing files or running shell commands — a returned result that matches the folder confirms connectivity.
 
@@ -89,7 +89,7 @@ claude mcp add --transport http frely "<MCP_URL>"
 
 Open `/mcp` in Claude Code to complete OAuth authorization. One URL serves every device on your account with an active MCP permission: `list_devices` shows your devices and their workspaces, and every other tool takes a `device` argument (device name or id). Ask the Agent to use Frely tools for remote work; its built-in shell still runs on the calling computer. Clients share each device's workspaces and managed processes.
 
-Authorization lifecycle: when the authorization has expired, `frely mcp` asks for a new approval and rotates the MCP execution key; `frely mcp --days 180` renews early. The MCP URL is the same for all your devices and does not change on renewal. Login refresh, OAuth refresh and restart do not extend authorization. `frely mcp stop|start` pauses or resumes the background service; `frely mcp remove` revokes access for every client and uninstalls the service (it keeps running provider-only when local Providers exist). Manage your devices in Frely → **Device MCP** (`/user/account/connections`).
+Authorization lifecycle: when the authorization has expired, `frely mcp url` asks for a new approval and rotates the MCP execution key; `frely mcp url --days 180` renews early. The MCP URL is the same for all your devices and does not change on renewal. Login refresh, OAuth refresh and restart do not extend authorization. `frely mcp stop|start` pauses or resumes the background service; `frely mcp remove` revokes access for every client and uninstalls the service (it keeps running provider-only when local Providers exist). Manage your devices in Frely → **Device MCP** (`/user/account/connections`).
 
 ### Invoke a Frely-hosted Agent
 
@@ -194,7 +194,7 @@ Storage, migration, service injection, release requirements and threat boundarie
 - Cloud commands and authorization: [docs/cloud.md](docs/cloud.md)
 - Frely Network commands (preview, not listed in `frely --help`): [docs/frely-network.md](docs/frely-network.md)
 
-The public MCP URL is the canonical resource returned by Relay, `https://connect.frely.cloud/mcp/devices` (one URL per account, shared by all your devices). Use `frely mcp`; do not derive the URL from the control-plane hostname. The URL contains no bearer secret.
+The public MCP URL is the canonical resource returned by Relay, `https://connect.frely.cloud/mcp/devices` (one URL per account, shared by all your devices). Use `frely mcp url`; do not derive the URL from the control-plane hostname. The URL contains no bearer secret.
 
 ## Commands
 
@@ -203,8 +203,9 @@ frely login [--relay <https-url>] [--no-browser]
 frely logout
 frely doctor [-v] [--json]
 frely upgrade
-frely mcp [--workspace <path>] [--days 1..180] [--json]
-frely mcp workspace [add|remove <path>] [--json]
+frely mcp url [--workspace <path>] [--days 1..180] [--json]
+frely mcp workspace list [--json]
+frely mcp workspace add|remove <path>
 frely mcp stop|start|remove
 frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--api-key-stdin] [--json]
 frely agent run <distribution-id> (--input <text>|--input-stdin) [--json]

@@ -22,9 +22,9 @@ Old account cookies and old `frely-cli` secure-store records do not migrate to p
 
 ## Layer two: local MCP execution
 
-`frely mcp` initializes the MCP store and create a separate Ed25519 key. The CLI persists that key before opening the approval page. The page displays the device, key fingerprint, workspace, permissions and duration. Approval needs an account cookie and a user action; a basic bearer token is rejected even when accompanied by a cookie.
+`frely mcp url` initializes the MCP store and create a separate Ed25519 key. The CLI persists that key before opening the approval page. The page displays the device, key fingerprint, workspace, permissions and duration. Approval needs an account cookie and a user action; a basic bearer token is rejected even when accompanied by a cookie.
 
-`frely mcp` is idempotent. Without MCP metadata it runs setup for `--workspace` (default: the current directory). An existing active grant is validated and its URL printed without changing workspace, key or expiry; a different `--workspace` is rejected in favor of `frely mcp workspace add`. An expired grant, or an explicit `--days`, triggers renewal with browser approval. Invalid configuration, missing credentials and denial remain errors; they do not trigger replacement setup. Prompts go to stderr, preserving URL/JSON stdout.
+`frely mcp url` is idempotent. Without MCP metadata it runs setup for `--workspace` (default: the current directory). An existing active grant is validated and its URL printed without changing workspace, key or expiry; a different `--workspace` is rejected in favor of `frely mcp workspace add`. An expired grant, or an explicit `--days`, triggers renewal with browser approval. Invalid configuration, missing credentials and denial remain errors; they do not trigger replacement setup. Prompts go to stderr, preserving URL/JSON stdout.
 
 | Rule | Value |
 | --- | --- |
@@ -68,16 +68,16 @@ Completed writes are not rolled back. An arbitrary shell command can create effe
 ```sh
 frely login
 frely doctor
-frely mcp --workspace /path/to/project
-frely mcp --workspace /path/to/project --days 180
-frely mcp --days 180
+frely mcp url --workspace /path/to/project
+frely mcp url --workspace /path/to/project --days 180
+frely mcp url --days 180
 
 frely doctor --mcp
-frely mcp
+frely mcp url
 frely mcp remove
 ```
 
-Running `frely mcp` on a valid grant does not extend it. Changing the primary workspace requires `frely mcp remove` and a new approval. Renewal rotates the MCP execution key and preserves the device-bound MCP URL. Remote MCP OAuth credentials have a separate lifecycle and cannot extend the local execution grant.
+Running `frely mcp url` on a valid grant does not extend it. Changing the primary workspace requires `frely mcp remove` and a new approval. Renewal rotates the MCP execution key and preserves the device-bound MCP URL. Remote MCP OAuth credentials have a separate lifecycle and cannot extend the local execution grant.
 
 A failed or interrupted approval can be retried with setup. The server caps pending requests at eight per user and expires them after 15 minutes. Pending secure records are not a permission to execute. This implementation does not resume an interrupted pending request from another CLI invocation.
 

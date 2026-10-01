@@ -54,7 +54,7 @@ export async function inspectMcpMetadata(): Promise<McpMetadata | null> {
 }
 /**
  * Like inspectMcpMetadata, but moves invalid content aside (kept for inspection) and reports it as
- * unconfigured, so `frely mcp` can set up again instead of failing on the same file forever.
+ * unconfigured, so `frely mcp url` can set up again instead of failing on the same file forever.
  */
 export async function inspectMcpMetadataOrQuarantine(notify: (message: string) => void): Promise<McpMetadata | null> {
   try { return await inspectMcpMetadata(); }
@@ -82,7 +82,7 @@ export async function loadMcpAuthorization(): Promise<McpAuthorization | null> {
   const metadata = await inspectMcpMetadata();
   if (!metadata) return null;
   const raw = await credentialStore.getPassword(SERVICE, account(metadata));
-  if (!raw) throw new Error("MCP secure credential is unavailable. Run frely mcp --days 90 to renew; no replacement key was generated.");
+  if (!raw) throw new Error("MCP secure credential is unavailable. Run frely mcp url --days 90 to renew; no replacement key was generated.");
   const value = JSON.parse(raw) as McpSecret;
   if (value.version !== 1 || JSON.stringify(value.metadata) !== JSON.stringify(metadata) || typeof value.privateKeyPem !== "string") throw new Error("MCP credential does not match its authorization.");
   const identity = identityFromPrivateKey(value.privateKeyPem);
@@ -92,15 +92,15 @@ export async function loadMcpAuthorization(): Promise<McpAuthorization | null> {
 
 export async function requireMcpAuthorization(workspace?: string): Promise<McpAuthorization> {
   const authorization = await loadMcpAuthorization();
-  if (!authorization) throw new Error("MCP is not enabled. Run frely mcp.");
+  if (!authorization) throw new Error("MCP is not enabled. Run frely mcp url.");
   assertMcpActive(authorization.grant);
-  if (workspace !== undefined && await realpath(resolve(workspace)) !== authorization.grant.workspace) throw new Error("Workspace differs from the approved MCP workspace. Run frely mcp for the new workspace.");
+  if (workspace !== undefined && await realpath(resolve(workspace)) !== authorization.grant.workspace) throw new Error("Workspace differs from the approved MCP workspace. Run frely mcp url for the new workspace.");
   const auth = await requireLogin();
   if (authorization.relayUrl !== auth.config.relayUrl || authorization.userId !== auth.user.id) throw new Error("MCP authorization belongs to a different account.");
   const response = await relayFetch(auth.config.relayUrl, auth.credential, `${ENDPOINT}?requestId=${authorization.grant.id}`, { method: "GET" });
   const current = await readView(response);
   assertMcpActive(current);
-  if (JSON.stringify(current) !== JSON.stringify(authorization.grant)) throw new Error("MCP authorization changed. Run frely mcp --days 90 to renew.");
+  if (JSON.stringify(current) !== JSON.stringify(authorization.grant)) throw new Error("MCP authorization changed. Run frely mcp url --days 90 to renew.");
   return authorization;
 }
 
@@ -160,7 +160,7 @@ export async function setupMcpAuthorization(workspaceInput: string, daysInput?: 
     if (current.status !== "pending") throw new Error("MCP approval was denied or expired.");
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
-  throw new Error("MCP approval expired. Run frely mcp.");
+  throw new Error("MCP approval expired. Run frely mcp url.");
 }
 
 export async function revokeMcpAuthorization(notify: (message: string) => void = () => undefined): Promise<void> {
@@ -176,7 +176,7 @@ export async function revokeMcpAuthorization(notify: (message: string) => void =
 }
 export function assertMcpActive(view: McpAuthorizationView, now = Date.now()): void {
   if (view.status !== "active" || !view.expiresAt || !Number.isFinite(Date.parse(view.expiresAt)) || Date.parse(view.expiresAt) <= now) {
-    throw new Error("MCP_AUTHORIZATION_EXPIRED: run frely mcp to renew. Basic features remain available.");
+    throw new Error("MCP_AUTHORIZATION_EXPIRED: run frely mcp url to renew. Basic features remain available.");
   }
 }
 function validateView(input: unknown): McpAuthorizationView {

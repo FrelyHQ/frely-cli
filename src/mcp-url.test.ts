@@ -200,7 +200,7 @@ test("frely mcp keeps setup prompts off stdout, including JSON mode", async (t) 
   const directory = await mkdtemp(join(tmpdir(), "frely-mcp-url-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const entry = fileURLToPath(new URL("./index.js", import.meta.url));
-  for (const args of [["mcp"], ["mcp", "--json"]]) {
+  for (const args of [["mcp", "url"], ["mcp", "url", "--json"]]) {
     await assert.rejects(promisify(execFile)(process.execPath, [entry, ...args], {
       cwd: directory,
       env: { ...process.env, XDG_CONFIG_HOME: directory, FRELY_NO_BROWSER: "1" },

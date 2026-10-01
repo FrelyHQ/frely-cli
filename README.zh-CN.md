@@ -13,7 +13,7 @@
 
 ```text
 Remote Agent Skill: 安装 -> frely login -> frely agent install -> frely agent run
-Device MCP:  在被控电脑安装 -> frely login -> frely mcp -> 客户端添加 MCP URL -> OAuth 授权
+Device MCP:  在被控电脑安装 -> frely login -> frely mcp url -> 客户端添加 MCP URL -> OAuth 授权
 ```
 
 ## 安装
@@ -72,12 +72,12 @@ frely login
 在被控电脑上开启文件、shell 与进程访问：
 
 ```sh
-frely mcp --workspace /path/to/project
+frely mcp url --workspace /path/to/project
 ```
 
-`frely login` 通过浏览器设备授权获取受限账号会话。首次运行 `frely mcp` 会初始化独立的 MCP 安全密钥、请求浏览器批准该设备与工作区（省略 `--workspace` 时为当前目录）、安装用户级 Device Relay 服务（macOS LaunchAgent、Linux systemd 用户单元或 Windows 任务计划程序），并打印 MCP URL。默认授权 90 天，`--days 1..180` 可选时长。
+`frely login` 通过浏览器设备授权获取受限账号会话。首次运行 `frely mcp url` 会初始化独立的 MCP 安全密钥、请求浏览器批准该设备与工作区（省略 `--workspace` 时为当前目录）、安装用户级 Device Relay 服务（macOS LaunchAgent、Linux systemd 用户单元或 Windows 任务计划程序），并打印 MCP URL。默认授权 90 天，`--days 1..180` 可选时长。
 
-`frely mcp` 是幂等的：启用后再次运行只打印同一个 URL，需要地址时直接再运行即可。提示走 stderr，stdout 保持单一 URL（或 `--json` 时一个 JSON 对象）；批准或安装失败则不打印 URL。要开放更多目录，用 `frely mcp workspace add <path>`；`frely mcp workspace` 列出所有目录。
+`frely mcp url` 是幂等的：启用后再次运行只打印同一个 URL，需要地址时直接再运行即可。提示走 stderr，stdout 保持单一 URL（或 `--json` 时一个 JSON 对象）；批准或安装失败则不打印 URL。要开放更多目录，用 `frely mcp workspace add <path>`；`frely mcp workspace list` 列出所有目录。只输入命令组而不带子命令（如 `frely mcp workspace`、`frely agent`）时，会显示该组下可用的子命令。
 
 把打印的完整 URL 添加到支持 OAuth 的远程 MCP 客户端，选择 OAuth 并完成授权。保持电脑在线。验证首次连接：让客户端只列出所选工作区的顶层名称，不写文件、不跑 shell 命令——返回与目录一致的结果即连通。
 
@@ -89,7 +89,7 @@ claude mcp add --transport http frely "<MCP_URL>"
 
 在 Claude Code 中打开 `/mcp` 完成 OAuth 授权。一个 URL 覆盖账户下所有已开启 MCP 的设备：`list_devices` 列出设备及其工作区，其余工具都带 `device` 参数（设备名或 id）。让 Agent 用 Frely 工具做远程工作；它自带的 shell 仍跑在调用端电脑。客户端共享各设备的工作区与托管进程。
 
-授权生命周期：授权过期后，`frely mcp` 会请求新的批准并轮换 MCP 执行密钥；`frely mcp --days 180` 可提前续期。MCP URL 对你的所有设备相同，续期也不会改变。登录刷新、OAuth 刷新与重启都不延长授权。`frely mcp stop|start` 暂停或恢复后台服务；`frely mcp remove` 撤销所有客户端的访问并卸载服务（本机有本地 Provider 时服务改为仅 Provider 模式继续运行）。在 Frely → **Device MCP**（`/user/account/connections`）管理你的设备。
+授权生命周期：授权过期后，`frely mcp url` 会请求新的批准并轮换 MCP 执行密钥；`frely mcp url --days 180` 可提前续期。MCP URL 对你的所有设备相同，续期也不会改变。登录刷新、OAuth 刷新与重启都不延长授权。`frely mcp stop|start` 暂停或恢复后台服务；`frely mcp remove` 撤销所有客户端的访问并卸载服务（本机有本地 Provider 时服务改为仅 Provider 模式继续运行）。在 Frely → **Device MCP**（`/user/account/connections`）管理你的设备。
 
 ### 调用 Frely 托管的 Agent
 
@@ -194,7 +194,7 @@ MCP 密钥使用 AES-256-GCM 文件，主密钥存 macOS Keychain、Windows 凭�
 - Cloud 命令与授权：[docs/cloud.md](docs/cloud.md)
 - Frely Network 命令（预览，不在 `frely --help` 中列出）：[docs/frely-network.md](docs/frely-network.md)
 
-公网 MCP URL 是 Relay 返回的规范资源，即 `https://connect.frely.cloud/mcp/devices`（每个账户一个 URL，所有设备共用）。请使用 `frely mcp` 输出的地址，不要从控制面域名推导。URL 不含 bearer secret。
+公网 MCP URL 是 Relay 返回的规范资源，即 `https://connect.frely.cloud/mcp/devices`（每个账户一个 URL，所有设备共用）。请使用 `frely mcp url` 输出的地址，不要从控制面域名推导。URL 不含 bearer secret。
 
 ## 命令
 
@@ -203,8 +203,9 @@ frely login [--relay <https-url>] [--no-browser]
 frely logout
 frely doctor [-v] [--json]
 frely upgrade
-frely mcp [--workspace <path>] [--days 1..180] [--json]
-frely mcp workspace [add|remove <path>] [--json]
+frely mcp url [--workspace <path>] [--days 1..180] [--json]
+frely mcp workspace list [--json]
+frely mcp workspace add|remove <path>
 frely mcp stop|start|remove
 frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--api-key-stdin] [--json]
 frely agent run <distribution-id> (--input <text>|--input-stdin) [--json]

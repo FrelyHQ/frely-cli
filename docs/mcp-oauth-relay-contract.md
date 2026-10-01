@@ -264,7 +264,7 @@ FRELY_MCP_AUTHORIZATION_EXPIRED
 用户恢复路径：
 
 ```sh
-frely mcp
+frely mcp url
 ```
 
 完成批准后，客户端保留原 MCP URL 和 OAuth connection。
