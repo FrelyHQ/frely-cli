@@ -194,7 +194,7 @@ Storage, migration, service injection, release requirements and threat boundarie
 - Cloud commands and authorization: [docs/cloud.md](docs/cloud.md)
 - Frely Network commands (preview, not listed in `frely --help`): [docs/frely-network.md](docs/frely-network.md)
 
-The public MCP URL is the canonical resource returned by Relay, `https://connect.frely.cloud/mcp/devices` (one URL per account, shared by all your devices). Use `frely mcp url`; do not derive the URL from the control-plane hostname. The URL contains no bearer secret.
+The public MCP URL is the canonical resource returned by Relay, `https://mcp.frely.cloud/mcp` (one URL per account, shared by all your devices). Use `frely mcp url`; do not derive the URL from the control-plane hostname. The URL contains no bearer secret.
 
 ## Commands
 
