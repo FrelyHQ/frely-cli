@@ -16,7 +16,7 @@ async function run(primary: string | null, ...args: string[]): Promise<string> {
 }
 
 test("workspace commands require MCP to be enabled", async () => {
-  await assert.rejects(() => run(null, "list"), /MCP is not enabled\. Run frely mcp\./);
+  await assert.rejects(() => run(null, "list"), /MCP is not enabled\. Run frely mcp url\./);
 });
 
 test("workspace add registers a directory and list reports primary plus additions", async () => {

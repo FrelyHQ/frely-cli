@@ -4,8 +4,9 @@ import { inspectMcpMetadataOrQuarantine, requireMcpAuthorization, setupMcpAuthor
 import { installMcpService } from "./service.js";
 
 /**
- * Keep the public device-MCP entry client-neutral. A bare `frely mcp` is the
- * idempotent entry (internally `setup`); every other action must be named.
+ * Keep the public device-MCP entry client-neutral. `frely mcp url` is the
+ * idempotent enable/print-URL action; a bare `frely mcp` has no action of its
+ * own and prints the usage, and every other action must be named.
  */
 export function normalizeMcpArgs(input: readonly string[]): string[] {
   const args = [...input];
@@ -13,8 +14,8 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
   if (args.slice(1).some((arg) => arg === "--help" || arg === "-h") || args[1] === "help") return ["mcp", "help"];
   // Upgrade bridge: Windows upgrade commands printed by 0.7.x run `mcp service stop|start`.
   if (args[1] === "service" && args.length === 3 && (args[2] === "start" || args[2] === "stop")) return ["mcp", args[2]];
-  if (!args[1] || args[1].startsWith("-")) args.splice(1, 0, "setup");
-  else if (!["workspace", "stop", "start", "remove", "serve", "stdio"].includes(args[1])) throw new Error("Unknown device MCP command. Run frely mcp --help.");
+  if (!args[1]) return ["mcp", "help"];
+  if (!["url", "workspace", "stop", "start", "remove", "serve", "stdio"].includes(args[1])) throw new Error("Unknown device MCP command. Run frely mcp --help.");
   const action = args[1]!;
   if (action === "stop" || action === "start" || action === "remove") {
     if (args.length > 2) throw new Error("Unsupported MCP option. Run frely mcp --help.");
@@ -34,12 +35,12 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
     return args;
   }
   const valueOptions: Record<string, readonly string[]> = {
-    setup: ["--workspace", "--days"],
+    url: ["--workspace", "--days"],
     serve: ["--workspace", "--service-config-home", "--service-credential-store"],
     stdio: ["--workspace"],
   };
   const flags: Record<string, readonly string[]> = {
-    setup: ["--json"],
+    url: ["--json"],
     serve: ["--provider-only"],
   };
   const seen = new Set<string>();
@@ -63,7 +64,7 @@ function grantInactive(metadata: McpMetadata, now = Date.now()): boolean {
 }
 
 /**
- * `frely mcp`: set up an unconfigured device, renew an expired grant (or when
+ * `frely mcp url`: set up an unconfigured device, renew an expired grant (or when
  * `--days` is given), and otherwise return the existing authorization unchanged.
  * All prompts go through `notify` so stdout can carry only the URL or JSON.
  */

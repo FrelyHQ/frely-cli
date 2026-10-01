@@ -9,9 +9,10 @@ const execute = promisify(execFile);
 const entry = fileURLToPath(new URL("./index.js", import.meta.url));
 
 test("device MCP accepts the documented short entry and explicit subcommands", () => {
-  assert.deepEqual(normalizeMcpArgs(["mcp"]), ["mcp", "setup"]);
-  assert.deepEqual(normalizeMcpArgs(["mcp", "--workspace", "/project with spaces", "--days", "90"]), ["mcp", "setup", "--workspace", "/project with spaces", "--days", "90"]);
-  assert.deepEqual(normalizeMcpArgs(["mcp", "--json"]), ["mcp", "setup", "--json"]);
+  // A bare group has no action of its own and prints the usage.
+  assert.deepEqual(normalizeMcpArgs(["mcp"]), ["mcp", "help"]);
+  assert.deepEqual(normalizeMcpArgs(["mcp", "url", "--workspace", "/project with spaces", "--days", "90"]), ["mcp", "url", "--workspace", "/project with spaces", "--days", "90"]);
+  assert.deepEqual(normalizeMcpArgs(["mcp", "url", "--json"]), ["mcp", "url", "--json"]);
   // A bare group stays bare; the CLI prints its subcommands instead of listing.
   assert.deepEqual(normalizeMcpArgs(["mcp", "workspace"]), ["mcp", "workspace"]);
   // Upgrade bridge for Windows commands printed by 0.7.x.
@@ -34,7 +35,7 @@ test("MCP help works offline for the entry and subcommands", async () => {
       env: { ...process.env, FRELY_CREDENTIAL_STORE: "intentionally-invalid", FRELY_RELAY_URL: "not-a-url" },
     });
     assert.equal(result.stderr, "");
-    assert.match(result.stdout, /frely mcp \[--workspace <path>\]/);
+    assert.match(result.stdout, /frely mcp url \[--workspace <path>\]/);
     assert.match(result.stdout, /frely doctor/);
     assert.match(result.stdout, /Claude Code/);
     assert.doesNotMatch(result.stdout, /frely provider share/);
@@ -44,11 +45,12 @@ test("MCP help works offline for the entry and subcommands", async () => {
 test("invalid MCP arguments fail before login, authorization, service installation or credential access", async () => {
   for (const args of [
     ["mcp", "--workspace"],
-    ["mcp", "--workspace", "--days", "90"],
-    ["mcp", "--unknown", "synthetic-secret"],
-    ["mcp", "--days", "90", "--days", "180"],
+    ["mcp", "--json"],
+    ["mcp", "url", "--workspace"],
+    ["mcp", "url", "--workspace", "--days", "90"],
+    ["mcp", "url", "--unknown", "synthetic-secret"],
+    ["mcp", "url", "--days", "90", "--days", "180"],
     ["mcp", "setup"],
-    ["mcp", "url"],
     ["mcp", "renew"],
     ["mcp", "revoke"],
     ["mcp", "stop", "--force"],

@@ -6,7 +6,7 @@ export const COMMANDS = [
   { id: "doctor", usage: "frely doctor [-v] [--json]", auth: "optional-account", effect: "diagnostic", purpose: "Show the signed-in account, installation, available upgrades, MCP and connection status; -v verifies the account online and runs detailed diagnostics." },
   { id: "upgrade", usage: "frely upgrade", auth: "none", effect: "local-write", purpose: "Upgrade the current installation to the latest stable release. Windows prints a manual command; doctor checks versions." },
   { id: "help", usage: "frely help --agent --json", auth: "none", effect: "read", purpose: "Read this installed CLI's current Agent instructions." },
-  { id: "mcp", usage: "frely mcp [--workspace <path>] [--days 1..180] [--json]", auth: "account-and-browser-if-needed", effect: "authorization-if-needed", purpose: "Enable, renew or read device MCP. Unconfigured: request browser approval for --workspace (default: current directory) and install the background service. Expired or --days given: renew with browser approval; the MCP URL stays the same. Otherwise print the MCP URL unchanged. Prompts go to stderr; stdout holds only the URL, or JSON with HTTP transport and OAuth details." },
+  { id: "mcp.url", usage: "frely mcp url [--workspace <path>] [--days 1..180] [--json]", auth: "account-and-browser-if-needed", effect: "authorization-if-needed", purpose: "Enable, renew or read device MCP. Unconfigured: request browser approval for --workspace (default: current directory) and install the background service. Expired or --days given: renew with browser approval; the MCP URL stays the same. Otherwise print the MCP URL unchanged. Prompts go to stderr; stdout holds only the URL, or JSON with HTTP transport and OAuth details." },
   { id: "mcp.workspace.list", usage: "frely mcp workspace list [--json]", auth: "mcp", effect: "read", purpose: "List workspace directories for this device; the primary is marked." },
   { id: "mcp.workspace.add", usage: "frely mcp workspace add <path>", auth: "mcp", effect: "local-write", purpose: "Add an additional workspace directory for this device." },
   { id: "mcp.workspace.remove", usage: "frely mcp workspace remove <path>", auth: "mcp", effect: "local-write", purpose: "Remove an additional workspace directory (the primary cannot be removed)." },
@@ -53,8 +53,8 @@ export function agentHelp() {
       "Budget sources are independent constraints. Do not sum their remaining amounts or describe them as a Key balance.",
       "Installing a remote Agent Skill does not replace the host's current model provider.",
       "Device MCP exposes this computer to remote HTTP MCP clients with OAuth. Commands execute on the device, not on the calling computer.",
-      "Use frely mcp to enable device MCP or read its address, and frely doctor [-v] for status and diagnostics.",
-      "If MCP is unconfigured or expired, frely mcp requests browser approval; otherwise it only prints the URL. Existing workspaces stay unchanged.",
+      "Use frely mcp url to enable device MCP or read its address, and frely doctor [-v] for status and diagnostics.",
+      "If MCP is unconfigured or expired, frely mcp url requests browser approval; otherwise it only prints the URL. Existing workspaces stay unchanged.",
       "Remote clients of one device share its workspace and managed processes. Shell uses the device OS account; it is not a workspace sandbox.",
     ],
     commands: COMMANDS,
@@ -63,7 +63,7 @@ export function agentHelp() {
 
 const GROUPS: readonly { title: string; ids: readonly string[] }[] = [
   { title: "Account", ids: ["login", "logout", "doctor", "upgrade"] },
-  { title: "Device MCP", ids: ["mcp", "mcp.workspace", "mcp.lifecycle"] },
+  { title: "Device MCP", ids: ["mcp.url", "mcp.workspace", "mcp.lifecycle"] },
   { title: "Agents", ids: ["agent.install", "agent.run", "agent.status", "agent.remove"] },
   { title: "Providers", ids: ["provider.share", "provider.list"] },
   { title: "Cloud", ids: ["cloud"] },
@@ -78,7 +78,7 @@ const SHORT_USAGE: Readonly<Record<string, string>> = {
   logout: "frely logout",
   doctor: "frely doctor [-v] [--json]",
   upgrade: "frely upgrade",
-  mcp: "frely mcp [--workspace <path>] [--days 1..180] [--json]",
+  "mcp.url": "frely mcp url [--workspace <path>] [--days 1..180] [--json]",
   "mcp.workspace": "frely mcp workspace list|add <path>|remove <path>",
   "mcp.lifecycle": "frely mcp stop|start|remove",
   "agent.install": "frely agent install <distribution-id> [--host <host>] [--api-key-stdin]",
@@ -113,9 +113,9 @@ export function subcommandUsage(group: string): string {
 
 export function mcpUsage(): string {
   return "Device MCP — use this computer from a remote MCP client.\n\nUsage:\n"
-    + ["mcp", "mcp.workspace", "mcp.lifecycle"].map((id) => "  " + SHORT_USAGE[id] + "\n").join("")
+    + ["mcp.url", "mcp.workspace", "mcp.lifecycle"].map((id) => "  " + SHORT_USAGE[id] + "\n").join("")
     + "\nStatus and diagnostics: frely doctor [-v] [--json]\n\n"
-    + "Run frely mcp on the computer to control. It asks for browser approval the first time (current directory, or --workspace) and when authorization has expired, installs the background service, and prints the MCP URL. Add that URL to ChatGPT, Claude Code on another computer, or another HTTP MCP client, then authorize with OAuth.\n"
+    + "Run frely mcp url on the computer to control. It asks for browser approval the first time (current directory, or --workspace) and when authorization has expired, installs the background service, and prints the MCP URL. Add that URL to ChatGPT, Claude Code on another computer, or another HTTP MCP client, then authorize with OAuth.\n"
     + "Prompts go to stderr; stdout contains only the URL or JSON. --days 1..180 renews now; the URL stays the same.\n"
     + "frely mcp remove revokes access for every client. Clients share the device workspace and managed processes. Shell runs under the device OS account.\n";
 }

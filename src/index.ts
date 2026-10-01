@@ -145,7 +145,7 @@ async function main(): Promise<void> {
     if (!("sessionBound" in result) || !result.sessionBound) {
       stdout.write("Your server version is older and does not support logging out per device yet.\n");
     }
-    stdout.write("Run `frely mcp --workspace <path>` on the computer you want to control, then connect your MCP client with OAuth.\n");
+    stdout.write("Run `frely mcp url --workspace <path>` on the computer you want to control, then connect your MCP client with OAuth.\n");
     return;
   }
 
@@ -206,7 +206,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === "mcp" && args[1] === "setup") {
+  if (command === "mcp" && args[1] === "url") {
     const workspace = option(args, "--workspace");
     const days = option(args, "--days");
     const authorization = await ensureMcpAuthorization({ ...(workspace ? { workspace } : {}), ...(days ? { days } : {}), notify: (message) => { process.stderr.write(message); } });

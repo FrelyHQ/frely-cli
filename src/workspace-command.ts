@@ -10,7 +10,7 @@ export interface WorkspaceCommandInput {
 
 /** `frely mcp workspace list|add <path>|remove <path>`. `args` is the normalized argv, e.g. ["mcp", "workspace", "add", "/path"]. */
 export async function runWorkspaceCommand({ args, primary: primaryInput, write }: WorkspaceCommandInput): Promise<void> {
-  if (!primaryInput) throw new Error("MCP is not enabled. Run frely mcp.");
+  if (!primaryInput) throw new Error("MCP is not enabled. Run frely mcp url.");
   const primary = await realpath(primaryInput);
   // The primary workspace is always registered, so nesting checks also apply to it.
   await ensureWorkspaceRegistered(primary);
