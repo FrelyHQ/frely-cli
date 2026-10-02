@@ -114,38 +114,23 @@ export interface EmailDeviceChallenge {
   deviceCode: string;
   email: string;
   expiresIn: number;
+  /** Device MCP request prepared before the code is entered; `privateKeyPem` never leaves this machine. */
+  mcp?: { privateKeyPem: string; keyThumbprint: string; workspace: string; days: number };
 }
 
 export async function initEmailDeviceLogin(
   relayInput: string,
   email: string,
   invite?: string,
+  mcp?: EmailDeviceChallenge["mcp"],
 ): Promise<EmailDeviceChallenge> {
   const relayUrl = normalizeRelayUrl(relayInput);
   await probeCredentialStore();
 
-  // First, request device code from Better Auth
-  const deviceCodeResponse = await fetch(`${relayUrl}/api/auth/device/code`, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ client_id: OAUTH_CLIENT_ID }).toString(),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
-
-  if (!deviceCodeResponse.ok) {
-    const body = await deviceCodeResponse.json().catch(() => ({})) as Record<string, unknown>;
-    const message = typeof body.message === "string" ? body.message : `Failed to create device code (${deviceCodeResponse.status})`;
-    throw new Error(message);
-  }
-
-  const deviceCodeData = await deviceCodeResponse.json() as Record<string, unknown>;
-  const userCode = typeof deviceCodeData.user_code === "string" ? deviceCodeData.user_code : null;
-  const deviceCode = typeof deviceCodeData.device_code === "string" ? deviceCodeData.device_code : null;
-  const expiresIn = typeof deviceCodeData.expires_in === "number" ? deviceCodeData.expires_in : 900;
-
-  if (!userCode || !deviceCode) {
-    throw new Error("Failed to create device code: invalid response");
-  }
+  const device = await requestDeviceCode(relayUrl);
+  const userCode = device.user_code;
+  const deviceCode = device.device_code;
+  const expiresIn = device.expires_in;
 
   // Then, initiate email verification with the user code
   const response = await fetch(`${relayUrl}/api/auth/device/email/start`, {
@@ -172,6 +157,7 @@ export async function initEmailDeviceLogin(
     deviceCode,
     email: typeof data.email === "string" ? data.email : email,
     expiresIn: expiresIn,
+    ...(mcp ? { mcp } : {}),
   };
 }
 
@@ -179,7 +165,7 @@ export async function completeEmailDeviceLogin(
   relayInput: string,
   challenge: EmailDeviceChallenge,
   code: string,
-): Promise<{ user: PublicUser; sessionBound: boolean }> {
+): Promise<{ user: PublicUser; sessionBound: boolean; mcpPreapproval?: string }> {
   const relayUrl = normalizeRelayUrl(relayInput);
 
   const response = await fetch(`${relayUrl}/api/auth/device/email/verify`, {
@@ -189,6 +175,7 @@ export async function completeEmailDeviceLogin(
       userCode: challenge.userCode,
       challengeId: challenge.challengeId,
       code,
+      ...(challenge.mcp ? { mcp: { keyThumbprint: challenge.mcp.keyThumbprint, workspace: challenge.mcp.workspace, days: challenge.mcp.days } } : {}),
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
@@ -217,7 +204,7 @@ export async function completeEmailDeviceLogin(
 
   // After email verification, device code has been approved
   // Caller should poll /oauth2/token to get access token
-  return { user: publicUser, sessionBound: false };
+  return { user: publicUser, sessionBound: false, ...(typeof data.mcpPreapproval === "string" ? { mcpPreapproval: data.mcpPreapproval } : {}) };
 }
 
 export async function loginDevice(
@@ -232,6 +219,12 @@ export async function loginDevice(
   const verificationUri = validateVerificationUrl(device.verification_uri_complete || `${device.verification_uri}?user_code=${encodeURIComponent(device.user_code)}`, relayUrl);
   notify?.({ verificationUri, userCode: device.user_code });
   if (options.openBrowser !== false) openVerificationUrl(verificationUri);
+  const { user, sessionBound } = await finishDeviceLogin(relayUrl, device, deviceId);
+  return { user, verificationUri, userCode: device.user_code, sessionBound };
+}
+
+/** Poll the approved device code, then store the credentials and the signed-in user. */
+export async function finishDeviceLogin(relayUrl: string, device: DeviceCodeResponse | EmailDeviceChallenge, deviceId: string): Promise<{ user: PublicUser; sessionBound: boolean }> {
   const token = await pollDeviceToken(relayUrl, device, deviceId);
   const user = await fetchUser(relayUrl, { scheme: "bearer", value: token.accessToken, ...(token.refreshToken ? { refreshToken: token.refreshToken } : {}), expiresAt: token.expiresAt, ...(token.sessionBindingId ? { sessionBindingId: token.sessionBindingId } : {}) });
   const key = accountKey(relayUrl);
@@ -249,7 +242,7 @@ export async function loginDevice(
     await credentialStore.deletePassword(SERVICE, key).catch(() => false);
     throw error;
   }
-  return { user, verificationUri, userCode: device.user_code, sessionBound: Boolean(token.sessionBindingId) };
+  return { user, sessionBound: Boolean(token.sessionBindingId) };
 }
 
 /**

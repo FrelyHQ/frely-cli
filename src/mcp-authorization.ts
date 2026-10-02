@@ -28,6 +28,12 @@ export interface McpAuthorizationView {
 export interface McpMetadata { version: 1; relayUrl: string; mcpResource: string; userId: string; grant: McpAuthorizationView }
 interface McpSecret { version: 1; privateKeyPem: string; metadata: McpMetadata }
 export interface McpAuthorization extends McpMetadata { mcpUrl: string; sign(message: string): string }
+export interface McpPreset { privateKeyPem: string; preapproval: string }
+/** Generate the device MCP key ahead of setup so an email-code preapproval can be bound to it. */
+export function generateMcpKey(): { privateKeyPem: string; keyThumbprint: string } {
+  const privateKeyPem = generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  return { privateKeyPem, keyThumbprint: identityFromPrivateKey(privateKeyPem).keyThumbprint };
+}
 export function parseMcpDays(input?: string | number): number {
   const value = input === undefined ? MCP_DEFAULT_DAYS : typeof input === "string" && /^\d{1,3}$/u.test(input) ? Number(input) : input;
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > MCP_MAX_DAYS) throw new Error("MCP authorization must be 1 to 180 whole days.");
@@ -105,7 +111,8 @@ export async function requireMcpAuthorization(workspace?: string): Promise<McpAu
 }
 
 export async function setupMcpAuthorization(workspaceInput: string, daysInput?: string | number, renew = false,
-  notify?: (value: { verificationUri: string; keyThumbprint: string; days: number }) => void | Promise<void>): Promise<McpAuthorization> {
+  notify?: (value: { verificationUri: string; keyThumbprint: string; days: number }) => void | Promise<void>,
+  preset?: McpPreset): Promise<McpAuthorization> {
   const days = parseMcpDays(daysInput);
   const workspace = await realpath(resolve(workspaceInput));
   if (/[\x00-\x1f\x7f]/u.test(workspace)) throw new Error("MCP workspace contains control characters.");
@@ -127,20 +134,28 @@ export async function setupMcpAuthorization(workspaceInput: string, daysInput?: 
   try { if (await credentialStore.getPassword(SERVICE, probe) !== probe) throw new Error("MCP secure storage readback failed."); }
   finally { if (!await credentialStore.deletePassword(SERVICE, probe)) throw new Error("MCP secure storage deletion failed."); }
   const device = await ensureDevice();
-  const privateKeyPem = generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  const privateKeyPem = preset?.privateKeyPem ?? generateMcpKey().privateKeyPem;
   const identity = identityFromPrivateKey(privateKeyPem);
   const issuedAt = new Date().toISOString();
   const nonce = randomBytes(24).toString("base64url");
   const signature = identity.signMessage(JSON.stringify(["frely.mcp.request.v2", device.deviceId, identity.keyThumbprint, days, workspace, issuedAt, nonce]));
   const response = await relayFetch(auth.config.relayUrl, auth.credential, ENDPOINT, { method: "POST", body: JSON.stringify({ action: "request",
     deviceId: device.deviceId, publicKeySpki: identity.publicKeySpki, keyThumbprint: identity.keyThumbprint,
-    days, workspace, issuedAt, nonce, signature }) });
+    days, workspace, issuedAt, nonce, signature, ...(preset ? { preapproval: preset.preapproval } : {}) }) });
   const requested = await readRequest(response);
   const pending = requested.grant;
-  if (pending.status !== "pending" || pending.days !== days || pending.workspace !== workspace || pending.deviceId !== device.deviceId || pending.keyThumbprint !== identity.keyThumbprint) throw new Error("MCP approval response does not match this request.");
+  const approvedByEmailCode = preset !== undefined && pending.status === "active";
+  if ((pending.status !== "pending" && !approvedByEmailCode) || pending.days !== days || pending.workspace !== workspace || pending.deviceId !== device.deviceId || pending.keyThumbprint !== identity.keyThumbprint) throw new Error("MCP approval response does not match this request.");
   let metadata: McpMetadata = { version: 1, relayUrl: auth.config.relayUrl, mcpResource: requested.mcpResource, userId: auth.user.id, grant: pending };
   const save = () => credentialStore.setPassword(SERVICE, account(metadata), JSON.stringify({ version: 1, privateKeyPem, metadata } satisfies McpSecret));
   await save(); // Preserve the generated key before asking the user to approve it.
+  if (approvedByEmailCode) {
+    await writeMetadata(metadata);
+    if (old && old.grant.id !== pending.id) await credentialStore.deletePassword(SERVICE, account(old));
+    const enabled = await loadMcpAuthorization();
+    if (!enabled) throw new Error("MCP authorization could not be loaded.");
+    return enabled;
+  }
   const verificationUri = new URL(`/device?mcp_request=${pending.id}`, auth.config.relayUrl).toString();
   await notify?.({ verificationUri, keyThumbprint: identity.keyThumbprint, days });
   openVerificationUrl(verificationUri);

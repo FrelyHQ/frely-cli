@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 import { upgrade } from "./upgrade/update.js";
-import { requireMcpAuthorization, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization } from "./mcp-authorization.js";
+import { requireMcpAuthorization, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, generateMcpKey, parseMcpDays } from "./mcp-authorization.js";
+import { realpath } from "node:fs/promises";
 import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
 import { join, resolve } from "node:path";
 import { stdin, stdout } from "node:process";
-import { inspectAuth, loginDevice, logout, normalizeRelayUrl, requireLogin, initEmailDeviceLogin, completeEmailDeviceLogin, savePendingEmailChallenge, readPendingEmailChallenge, deletePendingEmailChallenge, localDeviceId, pollDeviceToken, SERVICE, accountKey, writeConfig, readConfig, CONFIG_VERSION } from "./auth.js";
+import { inspectAuth, loginDevice, logout, normalizeRelayUrl, requireLogin, initEmailDeviceLogin, completeEmailDeviceLogin, savePendingEmailChallenge, readPendingEmailChallenge, deletePendingEmailChallenge, localDeviceId, finishDeviceLogin, readConfig } from "./auth.js";
 import { basicCredentialStore as credentialStore } from "./credential-basic.js";
-import type { StoredOAuthCredential } from "./auth.js";
+import type { EmailDeviceChallenge } from "./auth.js";
 import { doctor, formatDoctor } from "./diagnostics.js";
 import { ensureDevice } from "./device/control.js";
 import { createLocalProviderToken, loadOrCreateDeviceIdentity } from "./device/identity.js";
@@ -37,6 +38,8 @@ import { runNetwork, publicNetworkError } from "./network.js";
 import { agentManifestUrl, installSkillAdapter, invokeInstalledAgent, publicSkillAccessError, removeSkillAdapter, skillAdapterStatus } from "./skill/access.js";
 import type { SkillHost, SkillScope } from "./skill/managed.js";
 
+
+const DEFAULT_EMAIL_LOGIN_MCP_DAYS = 30;
 
 async function main(): Promise<void> {
   const args = normalizeMcpArgs(process.argv.slice(2));
@@ -139,47 +142,35 @@ async function main(): Promise<void> {
     const invite = option(args, "--invite");
     const json = args.includes("--json");
 
-    // Email-based device login (two-step)
-    if (email) {
+    // Email-based device login (two steps): `--email` sends the code, `--code` finishes.
+    if (email || code) {
+      const relayUrl = normalizeRelayUrl(relay);
       if (code) {
-        // Step 2: Verify code and complete login
         try {
-          // Read pending challenge from state
-          const pendingChallenge = await readPendingEmailChallenge(relay || "https://frely.cloud");
+          const pendingChallenge = await readPendingEmailChallenge(relayUrl);
           if (!pendingChallenge) {
             stdout.write("No pending email verification. Run `frely login --email <email>` first.\n");
             process.exitCode = 1;
             return;
           }
-
-          // Complete email verification
-          const result = await completeEmailDeviceLogin(relay || "https://frely.cloud", pendingChallenge, code);
-          const user = result.user;
-
-          // Poll for access token
+          const result = await completeEmailDeviceLogin(relayUrl, pendingChallenge, code);
           const deviceId = localDeviceId((await readConfig().catch(() => null))?.deviceId);
-          const token = await pollDeviceToken(relay || "https://frely.cloud", pendingChallenge, deviceId);
-
-          // Store credentials
-          const relayUrl = normalizeRelayUrl(relay);
-          const key = accountKey(relayUrl);
-          await credentialStore.setPassword(SERVICE, key, JSON.stringify({
-            version: 1,
-            type: "basic-oauth",
-            accessToken: token.accessToken,
-            ...(token.refreshToken ? { refreshToken: token.refreshToken } : {}),
-            expiresAt: token.expiresAt,
-            ...(token.sessionBindingId ? { sessionBindingId: token.sessionBindingId } : {}),
-          } satisfies StoredOAuthCredential));
-
-          await writeConfig({ version: CONFIG_VERSION, relayUrl, user, deviceId });
+          const { user } = await finishDeviceLogin(relayUrl, pendingChallenge, deviceId);
           await deletePendingEmailChallenge(relayUrl);
-
           stdout.write(`Logged in as ${user.email}.\n`);
-          if (token.sessionBindingId) {
-            stdout.write("Your server supports per-device session management.\n");
+
+          const mcp = pendingChallenge.mcp;
+          if (mcp && result.mcpPreapproval) {
+            const authorization = await ensureMcpAuthorization({
+              workspace: mcp.workspace, days: String(mcp.days),
+              notify: (message) => { process.stderr.write(message); },
+              preset: { privateKeyPem: mcp.privateKeyPem, preapproval: result.mcpPreapproval },
+            });
+            stdout.write(`Device MCP enabled for ${authorization.grant.workspace} until ${authorization.grant.expiresAt}. Remove it any time with \`frely mcp remove\`.\n`);
+            stdout.write(`MCP address: ${authorization.mcpUrl}\n`);
+          } else {
+            stdout.write("Run `frely mcp url` on the computer you want to control, then connect your MCP client with OAuth.\n");
           }
-          stdout.write("Run `frely mcp url --workspace <path>` on the computer you want to control, then connect your MCP client with OAuth.\n");
         } catch (error) {
           stdout.write(`Verification failed: ${error instanceof Error ? error.message : String(error)}\n`);
           process.exitCode = 1;
@@ -187,11 +178,15 @@ async function main(): Promise<void> {
         return;
       }
 
-      // Step 1: Send verification code
       try {
-        const challenge = await initEmailDeviceLogin(relay || "https://frely.cloud", email, invite);
-        // Store challenge for step 2
-        await savePendingEmailChallenge(normalizeRelayUrl(relay), challenge);
+        let mcp: EmailDeviceChallenge["mcp"];
+        if (args.includes("--mcp")) {
+          const workspace = await realpath(resolve(option(args, "--workspace") || process.cwd()));
+          const days = parseMcpDays(option(args, "--days") ?? DEFAULT_EMAIL_LOGIN_MCP_DAYS);
+          mcp = { ...generateMcpKey(), workspace, days };
+        }
+        const challenge = await initEmailDeviceLogin(relayUrl, email!, invite, mcp);
+        await savePendingEmailChallenge(relayUrl, challenge);
 
         if (json) {
           stdout.write(JSON.stringify({
@@ -199,10 +194,14 @@ async function main(): Promise<void> {
             email: challenge.email,
             expiresIn: challenge.expiresIn,
             challengeId: challenge.challengeId,
+            ...(mcp ? { deviceMcp: { workspace: mcp.workspace, days: mcp.days } } : {}),
           }, null, 2) + "\n");
         } else {
           stdout.write(`Verification code sent to ${challenge.email}\n`);
           stdout.write(`Expires in: ${challenge.expiresIn} seconds\n`);
+          if (mcp) {
+            stdout.write(`Entering the code also lets remote agents read and write files and run commands in ${mcp.workspace} for ${mcp.days} days. Remove it later with \`frely mcp remove\`.\n`);
+          }
           stdout.write(`Run: frely login --code <code>\n`);
         }
       } catch (error) {
