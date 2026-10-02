@@ -194,7 +194,7 @@ MCP 密钥使用 AES-256-GCM 文件，主密钥存 macOS Keychain、Windows 凭�
 - Cloud 命令与授权：[docs/cloud.md](docs/cloud.md)
 - Frely Network 命令（预览，不在 `frely --help` 中列出）：[docs/frely-network.md](docs/frely-network.md)
 
-公网 MCP URL 是 Relay 返回的规范资源，即 `https://connect.frely.cloud/mcp/devices`（每个账户一个 URL，所有设备共用）。请使用 `frely mcp url` 输出的地址，不要从控制面域名推导。URL 不含 bearer secret。
+公网 MCP URL 是 Relay 返回的规范资源，即 `https://mcp.frely.cloud/mcp`（每个账户一个 URL，所有设备共用）。请使用 `frely mcp url` 输出的地址，不要从控制面域名推导。URL 不含 bearer secret。
 
 ## 命令
 

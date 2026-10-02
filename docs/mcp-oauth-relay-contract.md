@@ -1,6 +1,6 @@
 # MCP OAuth Relay Contract
 
-新地址使用 `connect.frely.cloud`；旧 `mcp.frely.cloud` 暂时继续服务，旧 URL、OAuth resource 与 token audience 保持原值，不重定向、不自动改写。
+新地址为 `https://mcp.frely.cloud/mcp`。旧地址 `connect.frely.cloud/mcp/devices` 与 `mcp.frely.cloud/mcp/devices` 继续服务，其 URL、OAuth resource 与 token audience 保持原值，不重定向、不自动改写。
 
 状态：Frely Relay 配套实现契约，目标 MCP 规范版本 `2026-07-28`。
 
@@ -9,7 +9,7 @@
 MCP endpoint 使用账户级稳定地址，覆盖该账户下所有 MCP 授权有效的设备：
 
 ```text
-https://connect.frely.cloud/mcp/devices
+https://mcp.frely.cloud/mcp
 ```
 
 Relay 自己处理 `initialize` 与 `tools/list`，为每个设备工具注入必填参数 `device`（设备名或 id），`tools/call` 去掉该参数后转发给对应设备；另提供 `list_devices` 工具。设备不可达、授权过期等路由错误以工具错误（`isError`）返回。
@@ -82,20 +82,20 @@ Relay 校验：
 MCP resource：
 
 ```text
-https://connect.frely.cloud/mcp/devices
+https://mcp.frely.cloud/mcp
 ```
 
 RFC 9728 metadata endpoint：
 
 ```text
-https://connect.frely.cloud/.well-known/oauth-protected-resource/mcp/devices
+https://mcp.frely.cloud/.well-known/oauth-protected-resource/mcp
 ```
 
 响应：
 
 ```json
 {
-  "resource": "https://connect.frely.cloud/mcp/devices",
+  "resource": "https://mcp.frely.cloud/mcp",
   "authorization_servers": [
     "https://frely.cloud/api/auth"
   ],
@@ -109,7 +109,7 @@ https://connect.frely.cloud/.well-known/oauth-protected-resource/mcp/devices
 
 ```http
 HTTP/1.1 401 Unauthorized
-WWW-Authenticate: Bearer resource_metadata="https://connect.frely.cloud/.well-known/oauth-protected-resource/mcp/devices"
+WWW-Authenticate: Bearer resource_metadata="https://mcp.frely.cloud/.well-known/oauth-protected-resource/mcp"
 ```
 
 错误响应不得把 device execution authorization 误报为 OAuth 登录状态。
@@ -150,7 +150,7 @@ CIMD 获取需要 URL 校验、DNS/IP 边界、超时、响应大小上限、red
 
 - `response_type=code`；
 - `code_challenge_method=S256`；
-- `resource=https://connect.frely.cloud/mcp/devices`；
+- `resource=https://mcp.frely.cloud/mcp`；
 - `scope` 包含 `mcp:invoke`；
 - `offline_access` 用于 refresh token；
 - `state` 原样返回；
