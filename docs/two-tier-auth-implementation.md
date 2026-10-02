@@ -6,7 +6,7 @@ CLI 与 Relay 使用分支 `T-feat-two-tier-auth-20260914`。原始工作树保�
 
 ## 实现
 
-基础层使用受限 OAuth 客户端 `frely-cli-basic` 与私有会话文件。MCP 采用独立密钥、浏览器批准和服务端授权记录。期限默认 90 天，上限 180 天；刷新、重启与重复批准不延期。续期轮换 MCP 执行密钥，MCP URL 绑定设备。远程客户端使用 OAuth。撤销保留 Provider 设备与服务。
+基础层使用受限 OAuth 客户端 `frely-cli-basic` 与私有会话文件。MCP 采用独立密钥、浏览器批准和服务端授权记录。期限默认 90 天，上限 365 天；刷新、重启与重复批准不延期。续期轮换 MCP 执行密钥，MCP URL 绑定设备。远程客户端使用 OAuth。撤销保留 Provider 设备与服务。
 
 独立程序、macOS/Linux 安装脚本、Windows 安装脚本、Windows 用户级服务适配器和三平台 CI 已加入源码。安装器不安装 Node.js/npm，不配置基础层密钥，不提升权限。MCP 存储检查属于启用流程。
 

@@ -14,7 +14,7 @@ https://mcp.frely.cloud/mcp
 
 Relay 自己处理 `initialize` 与 `tools/list`，为每个设备工具注入必填参数 `device`（设备名或 id），`tools/call` 去掉该参数后转发给对应设备；另提供 `list_devices` 工具。设备不可达、授权过期等路由错误以工具错误（`isError`）返回。
 
-地址不包含凭证。远程客户端通过 OAuth 访问该 resource。MCP 本机执行授权保留 90 天默认期限和 180 天上限。
+地址不包含凭证。远程客户端通过 OAuth 访问该 resource。MCP 本机执行授权保留 90 天默认期限和 365 天上限。
 
 OAuth connection 与 MCP execution authorization 分离：
 
@@ -72,7 +72,7 @@ Relay 校验：
 - `keyThumbprint` 与 `publicKeySpki` 一致；
 - Ed25519 signature 有效；
 - `issuedAt` 与 nonce 满足重放保护；
-- `days` 范围为 `1..180`；
+- `days` 范围为 `1..365`；
 - workspace 与批准页面展示值一致。
 
 续期创建新的 execution authorization 和新的 MCP execution key。设备 ID 不变，MCP URL 不变。

@@ -29,13 +29,15 @@ Old account cookies and old `frely-cli` secure-store records do not migrate to p
 | Rule | Value |
 | --- | --- |
 | Default authorization | 90 days |
-| Accepted duration | 1–180 whole days |
+| Accepted duration | 1–365 whole days |
 | Approval request window | 15 minutes |
 | Start time | Server approval time |
 | End time | Approval time + requested days × 24 hours |
 | Refresh, restart, reinstall | No extension |
 | Repeated approval | Same record and end time |
 | Renewal | New approval and key; stable device MCP URL; prior grant revoked |
+
+The 90-day default and 365-day maximum follow the validity periods GitHub offers for its access tokens.
 
 The secure namespace is `frely-cli-mcp-authorization-v1`. It contains the MCP execution private key and the authorization metadata binding. `frely/mcp-v1/authorization.json` contains the public projection; it contains no private key or remote OAuth token. Changes to that projection cannot extend the protected grant.
 
@@ -69,8 +71,8 @@ Completed writes are not rolled back. An arbitrary shell command can create effe
 frely login
 frely doctor
 frely mcp url --workspace /path/to/project
-frely mcp url --workspace /path/to/project --days 180
-frely mcp url --days 180
+frely mcp url --workspace /path/to/project --days 365
+frely mcp url --days 365
 
 frely doctor --mcp
 frely mcp url
