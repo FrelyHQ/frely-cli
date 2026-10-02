@@ -103,6 +103,112 @@ export async function login(relayOrEmail?: string, legacyPassword?: string, lega
   return (await loginDevice(relayOrEmail)).user;
 }
 
+/**
+ * Email-based device authorization (two-step for CLI).
+ * Step 1: initEmailDeviceLogin() sends code to email, returns challenge and device code.
+ * Step 2: completeEmailDeviceLogin() verifies code, issues token.
+ */
+export interface EmailDeviceChallenge {
+  challengeId: string;
+  userCode: string;
+  deviceCode: string;
+  email: string;
+  expiresIn: number;
+}
+
+export async function initEmailDeviceLogin(
+  relayInput: string,
+  email: string,
+  invite?: string,
+): Promise<EmailDeviceChallenge> {
+  const relayUrl = normalizeRelayUrl(relayInput);
+  await probeCredentialStore();
+
+  const response = await fetch(`${relayUrl}/api/auth/device/email/start`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email, ...(invite ? { invite } : {}) }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+    const message = typeof body.message === "string" ? body.message : `Failed to send verification code (${response.status})`;
+    throw new Error(message);
+  }
+
+  const data = await response.json() as Record<string, unknown>;
+  if (typeof data.challengeId !== "string" || typeof data.userCode !== "string") {
+    throw new Error("Invalid response from verification endpoint");
+  }
+
+  return {
+    challengeId: data.challengeId as string,
+    userCode: data.userCode as string,
+    deviceCode: data.userCode as string, // Same value for compatibility
+    email: typeof data.email === "string" ? data.email : email,
+    expiresIn: typeof data.expiresIn === "number" ? data.expiresIn : 600,
+  };
+}
+
+export async function completeEmailDeviceLogin(
+  relayInput: string,
+  challenge: EmailDeviceChallenge,
+  code: string,
+): Promise<{ user: PublicUser; sessionBound: boolean }> {
+  const relayUrl = normalizeRelayUrl(relayInput);
+
+  const response = await fetch(`${relayUrl}/api/auth/device/email/verify`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      userCode: challenge.userCode,
+      challengeId: challenge.challengeId,
+      code,
+    }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+    const message = typeof body.message === "string" ? body.message : `Verification failed (${response.status})`;
+    throw new Error(message);
+  }
+
+  const data = await response.json() as Record<string, unknown>;
+  if (typeof data.user !== "object" || data.user === null) {
+    throw new Error("Invalid user in response");
+  }
+
+  const user = data.user as Record<string, unknown>;
+  if (typeof user.id !== "string" || typeof user.email !== "string") {
+    throw new Error("Invalid user data in response");
+  }
+
+  const publicUser: PublicUser = {
+    id: user.id,
+    email: user.email,
+    name: typeof user.name === "string" ? user.name : undefined,
+  };
+
+  // Store credentials
+  const deviceId = localDeviceId((await readConfig().catch(() => null))?.deviceId);
+  const key = accountKey(relayUrl);
+
+  // For email device login, we need to extract the token from the device authorization
+  // This is a placeholder - actual implementation depends on how Better Auth handles this
+  const sessionBound = false; // To be determined after Better Auth integration
+
+  try {
+    await writeConfig({ version: CONFIG_VERSION, relayUrl, user: publicUser, deviceId });
+  } catch (error) {
+    await credentialStore.deletePassword(SERVICE, key).catch(() => false);
+    throw error;
+  }
+
+  return { user: publicUser, sessionBound };
+}
+
 export async function loginDevice(
   relayInput?: string,
   notify?: (details: { verificationUri: string; userCode: string }) => void,

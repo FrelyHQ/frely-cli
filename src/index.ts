@@ -5,7 +5,7 @@ import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
 import { join, resolve } from "node:path";
 import { stdin, stdout } from "node:process";
-import { inspectAuth, loginDevice, logout, normalizeRelayUrl, requireLogin } from "./auth.js";
+import { inspectAuth, loginDevice, logout, normalizeRelayUrl, requireLogin, initEmailDeviceLogin, completeEmailDeviceLogin } from "./auth.js";
 import { doctor, formatDoctor } from "./diagnostics.js";
 import { ensureDevice } from "./device/control.js";
 import { createLocalProviderToken, loadOrCreateDeviceIdentity } from "./device/identity.js";
@@ -132,6 +132,43 @@ async function main(): Promise<void> {
     if (args.includes("--help") || args.includes("-h")) return usage();
     const relay = option(args, "--relay");
     const noBrowser = args.includes("--no-browser") || process.env.FRELY_NO_BROWSER === "1";
+    const email = option(args, "--email");
+    const code = option(args, "--code");
+    const invite = option(args, "--invite");
+    const json = args.includes("--json");
+
+    // Email-based device login (two-step)
+    if (email) {
+      if (code) {
+        // Step 2: Verify code
+        // This is a placeholder - we need to store the challenge from step 1
+        // For now, this would need to read from a pending state file
+        stdout.write("Email verification not yet fully implemented\n");
+        return;
+      }
+
+      // Step 1: Send verification code
+      try {
+        const challenge = await initEmailDeviceLogin(relay || "https://frely.cloud", email, invite);
+        if (json) {
+          stdout.write(JSON.stringify({
+            state: "code_sent",
+            email: challenge.email,
+            expiresIn: challenge.expiresIn,
+            challengeId: challenge.challengeId,
+          }, null, 2) + "\n");
+        } else {
+          stdout.write(`Verification code sent to ${challenge.email}\n`);
+          stdout.write(`Expires in: ${challenge.expiresIn} seconds\n`);
+        }
+      } catch (error) {
+        stdout.write(`Failed to send verification code: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+      }
+      return;
+    }
+
+    // Browser-based device login (traditional)
     const result = await loginDevice(relay, ({ verificationUri, userCode }) => {
       stdout.write(`Open this URL to authorize Frely CLI:\n${verificationUri}\n`);
       stdout.write(`Device code: ${userCode}\n`);
