@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { basicCredentialStore as credentialStore, BASIC_CREDENTIAL_BACKEND } from "./credential-basic.js";
 
-const SERVICE = "frely-cli-basic-v1";
+export const SERVICE = "frely-cli-basic-v1";
 const SESSION_COOKIE_NAME = "friday_session_token";
 const CONFIG_VERSION = 3;
 const LEGACY_CONFIG_VERSION = 1;
@@ -55,7 +55,7 @@ interface DeviceCodeResponse {
   interval: number;
 }
 
-interface StoredOAuthCredential {
+export interface StoredOAuthCredential {
   version: 1;
   type: "basic-oauth";
   accessToken: string;
@@ -82,7 +82,7 @@ export function authConfigPath(): string {
   return join(root, "frely", "config.json");
 }
 
-function accountKey(relayUrl: string): string {
+export function accountKey(relayUrl: string): string {
   return new URL(relayUrl).origin;
 }
 
@@ -101,6 +101,123 @@ export function normalizeRelayUrl(value?: string): string {
 export async function login(relayOrEmail?: string, legacyPassword?: string, legacyRelayInput?: string): Promise<PublicUser> {
   if (legacyPassword !== undefined) throw new Error("Password/cookie login is not supported by basic storage. Run `frely login` for a restricted session.");
   return (await loginDevice(relayOrEmail)).user;
+}
+
+/**
+ * Email-based device authorization (two-step for CLI).
+ * Step 1: initEmailDeviceLogin() sends code to email, returns challenge and device code.
+ * Step 2: completeEmailDeviceLogin() verifies code, issues token.
+ */
+export interface EmailDeviceChallenge {
+  challengeId: string;
+  userCode: string;
+  deviceCode: string;
+  email: string;
+  expiresIn: number;
+}
+
+export async function initEmailDeviceLogin(
+  relayInput: string,
+  email: string,
+  invite?: string,
+): Promise<EmailDeviceChallenge> {
+  const relayUrl = normalizeRelayUrl(relayInput);
+  await probeCredentialStore();
+
+  // First, request device code from Better Auth
+  const deviceCodeResponse = await fetch(`${relayUrl}/api/auth/device/code`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ client_id: OAUTH_CLIENT_ID }).toString(),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  if (!deviceCodeResponse.ok) {
+    const body = await deviceCodeResponse.json().catch(() => ({})) as Record<string, unknown>;
+    const message = typeof body.message === "string" ? body.message : `Failed to create device code (${deviceCodeResponse.status})`;
+    throw new Error(message);
+  }
+
+  const deviceCodeData = await deviceCodeResponse.json() as Record<string, unknown>;
+  const userCode = typeof deviceCodeData.user_code === "string" ? deviceCodeData.user_code : null;
+  const deviceCode = typeof deviceCodeData.device_code === "string" ? deviceCodeData.device_code : null;
+  const expiresIn = typeof deviceCodeData.expires_in === "number" ? deviceCodeData.expires_in : 900;
+
+  if (!userCode || !deviceCode) {
+    throw new Error("Failed to create device code: invalid response");
+  }
+
+  // Then, initiate email verification with the user code
+  const response = await fetch(`${relayUrl}/api/auth/device/email/start`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email, userCode, ...(invite ? { invite } : {}) }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+    const message = typeof body.message === "string" ? body.message : `Failed to send verification code (${response.status})`;
+    throw new Error(message);
+  }
+
+  const data = await response.json() as Record<string, unknown>;
+  if (typeof data.challengeId !== "string") {
+    throw new Error("Invalid response from verification endpoint");
+  }
+
+  return {
+    challengeId: data.challengeId as string,
+    userCode,
+    deviceCode,
+    email: typeof data.email === "string" ? data.email : email,
+    expiresIn: expiresIn,
+  };
+}
+
+export async function completeEmailDeviceLogin(
+  relayInput: string,
+  challenge: EmailDeviceChallenge,
+  code: string,
+): Promise<{ user: PublicUser; sessionBound: boolean }> {
+  const relayUrl = normalizeRelayUrl(relayInput);
+
+  const response = await fetch(`${relayUrl}/api/auth/device/email/verify`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      userCode: challenge.userCode,
+      challengeId: challenge.challengeId,
+      code,
+    }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+    const message = typeof body.message === "string" ? body.message : `Verification failed (${response.status})`;
+    throw new Error(message);
+  }
+
+  const data = await response.json() as Record<string, unknown>;
+  if (typeof data.user !== "object" || data.user === null) {
+    throw new Error("Invalid user in response");
+  }
+
+  const user = data.user as Record<string, unknown>;
+  if (typeof user.id !== "string" || typeof user.email !== "string") {
+    throw new Error("Invalid user data in response");
+  }
+
+  const publicUser: PublicUser = {
+    id: user.id,
+    email: user.email,
+    name: typeof user.name === "string" ? user.name : undefined,
+  };
+
+  // After email verification, device code has been approved
+  // Caller should poll /oauth2/token to get access token
+  return { user: publicUser, sessionBound: false };
 }
 
 export async function loginDevice(
@@ -140,7 +257,7 @@ export async function loginDevice(
  * It is generated once and persisted in the CLI config so re-login reuses the
  * same id, enabling per-device session management on Relay versions that support it.
  */
-function localDeviceId(existing?: string | null): string {
+export function localDeviceId(existing?: string | null): string {
   if (typeof existing === "string" && existing.length > 0) return existing;
   return LOCAL_DEVICE_ID_PREFIX + randomUUID().replace(/-/g, "");
 }
@@ -282,7 +399,7 @@ function assertCurrentRelay(config: CliConfig): void {
   }
 }
 
-async function readConfig(): Promise<CliConfig> {
+export async function readConfig(): Promise<CliConfig> {
   const raw = await readFile(authConfigPath(), "utf8").catch(() => null);
   if (!raw) throw new Error("No Frely login is configured. Run `frely login`.");
   let value: Partial<CliConfig>;
@@ -315,11 +432,20 @@ async function requestDeviceCode(relayUrl: string): Promise<DeviceCodeResponse> 
   return { device_code: record.device_code, user_code: record.user_code, verification_uri: record.verification_uri, verification_uri_complete: record.verification_uri_complete, expires_in: expiresIn, interval };
 }
 
-async function pollDeviceToken(relayUrl: string, device: DeviceCodeResponse, deviceId?: string | null): Promise<{ accessToken: string; refreshToken?: string; expiresAt: number; sessionBindingId?: string }> {
-  const deadline = Date.now() + device.expires_in * 1000;
-  let intervalMs = device.interval * 1000;
+export async function pollDeviceToken(
+  relayUrl: string,
+  device: DeviceCodeResponse | EmailDeviceChallenge,
+  deviceId?: string | null,
+): Promise<{ accessToken: string; refreshToken?: string; expiresAt: number; sessionBindingId?: string }> {
+  // Support both DeviceCodeResponse and EmailDeviceChallenge
+  const deviceCode = "device_code" in device ? device.device_code : device.deviceCode;
+  const expiresIn = "expires_in" in device ? device.expires_in : device.expiresIn;
+  const interval = "interval" in device ? device.interval : 5;
+
+  const deadline = Date.now() + expiresIn * 1000;
+  let intervalMs = interval * 1000;
   while (Date.now() < deadline) {
-    const body = new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: device.device_code, client_id: OAUTH_CLIENT_ID, resource: `${relayUrl}/api` });
+    const body = new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: deviceCode, client_id: OAUTH_CLIENT_ID, resource: `${relayUrl}/api` });
     appendSessionBinding(body, deviceId);
     const response = await fetchWithTimeout(`${relayUrl}/api/auth/oauth2/token`, {
       method: "POST",
@@ -331,8 +457,8 @@ async function pollDeviceToken(relayUrl: string, device: DeviceCodeResponse, dev
     debugAuth(`stage=token status=${response.status}`);
     const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
     if (response.ok && isString(record.access_token) && (!record.token_type || String(record.token_type).toLowerCase() === "bearer")) {
-      const expiresIn = numberPayload(record.expires_in, 1, 86_400);
-      return { accessToken: record.access_token, ...(isString(record.refresh_token) ? { refreshToken: record.refresh_token } : {}), expiresAt: Date.now() + expiresIn * 1000, ...(isString(record[SESSION_BINDING_ID_FIELD]) ? { sessionBindingId: record[SESSION_BINDING_ID_FIELD] as string } : {}) };
+      const expiresInSeconds = numberPayload(record.expires_in, 1, 86_400);
+      return { accessToken: record.access_token, ...(isString(record.refresh_token) ? { refreshToken: record.refresh_token } : {}), expiresAt: Date.now() + expiresInSeconds * 1000, ...(isString(record[SESSION_BINDING_ID_FIELD]) ? { sessionBindingId: record[SESSION_BINDING_ID_FIELD] as string } : {}) };
     }
     const errorCode = typeof record.error === "string" ? record.error : "";
     if (errorCode === "authorization_pending") {
@@ -437,7 +563,7 @@ function numberPayload(value: unknown, min: number, max: number): number {
   return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max ? Math.floor(value) : (() => { throw new Error("Frely returned an invalid OAuth response."); })();
 }
 
-async function writeConfig(config: CliConfig): Promise<void> {
+export async function writeConfig(config: CliConfig): Promise<void> {
   const path = authConfigPath();
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   await chmod(dirname(path), 0o700).catch(() => undefined);
@@ -509,4 +635,44 @@ function publicError(payload: unknown, status: number): string {
   const error = root.error && typeof root.error === "object" ? root.error as Record<string, unknown> : root;
   const message = typeof error.message === "string" ? error.message : typeof error.error_description === "string" ? error.error_description : null;
   return message || `Frely request failed with HTTP ${status}.`;
+}
+
+function pendingEmailChallengePath(): string {
+  const root = process.env.XDG_RUNTIME_DIR || join(homedir(), ".cache");
+  return join(root, "frely", "pending-email-challenge.json");
+}
+
+export async function savePendingEmailChallenge(relayUrl: string, challenge: EmailDeviceChallenge): Promise<void> {
+  const path = pendingEmailChallengePath();
+  await mkdir(dirname(path), { recursive: true });
+  const data = {
+    relayUrl,
+    challenge,
+    savedAt: new Date().toISOString(),
+  };
+  await writeFile(path, JSON.stringify(data), { mode: 0o600 });
+}
+
+export async function readPendingEmailChallenge(relayInput: string): Promise<EmailDeviceChallenge | null> {
+  const relayUrl = normalizeRelayUrl(relayInput);
+  const path = pendingEmailChallengePath();
+  try {
+    const content = await readFile(path, "utf8");
+    const data = JSON.parse(content) as { relayUrl: string; challenge: EmailDeviceChallenge; savedAt: string };
+    if (data.relayUrl === relayUrl && data.challenge) {
+      return data.challenge as EmailDeviceChallenge;
+    }
+  } catch {
+    // File doesn't exist or is invalid
+  }
+  return null;
+}
+
+export async function deletePendingEmailChallenge(relayUrl: string): Promise<void> {
+  const path = pendingEmailChallengePath();
+  try {
+    await unlink(path);
+  } catch {
+    // File doesn't exist, which is fine
+  }
 }
