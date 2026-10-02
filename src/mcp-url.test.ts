@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import test, { type TestContext } from "node:test";
 import { basicCredentialStore } from "./credential-basic.js";
 import { credentialStore } from "./credential-store.js";
-import { inspectMcpMetadata, McpConfigInvalidError, mcpMetadataPath, setupMcpAuthorization, type McpAuthorizationView } from "./mcp-authorization.js";
+import { generateMcpKey, inspectMcpMetadata, McpConfigInvalidError, mcpMetadataPath, setupMcpAuthorization, type McpAuthorizationView } from "./mcp-authorization.js";
 import { ensureMcpAuthorization } from "./mcp-command.js";
 import { useMemoryCredentialStore } from "./test-support.js";
 
@@ -213,4 +213,34 @@ test("frely mcp keeps setup prompts off stdout, including JSON mode", async (t) 
       return true;
     });
   }
+});
+
+test("frely mcp enables a preapproved device with its pregenerated key and no browser approval", async (t) => {
+  const f = await fixture(t);
+  const inner = globalThis.fetch;
+  const bodies: Array<Record<string, unknown>> = [];
+  globalThis.fetch = async (url, options) => {
+    if (new URL(String(url)).pathname === "/api/user/device-relay/mcp" && options?.method === "POST") {
+      const body = JSON.parse(String(options.body));
+      bodies.push(body);
+      const now = Date.now();
+      return Response.json({
+        id: `mca_${"a".repeat(32)}`, deviceId: `drd_${"1".repeat(32)}`, workspace: body.workspace, keyThumbprint: body.keyThumbprint, days: body.days,
+        approvalDeadline: new Date(now + 900000).toISOString(), approvedAt: new Date(now).toISOString(),
+        expiresAt: new Date(now + body.days * 86400000).toISOString(), status: "active", mcpResource: f.mcpResource,
+      }, { status: 201 });
+    }
+    return inner(url, options);
+  };
+  const key = generateMcpKey();
+  const project = join(f.directory, "project");
+  await mkdir(project);
+  const authorization = await ensureMcpAuthorization({ workspace: project, days: "30", notify: f.notify, preset: { privateKeyPem: key.privateKeyPem, preapproval: "signed-token" } }, f.install);
+  assert.equal(authorization.grant.status, "active");
+  assert.equal(authorization.grant.keyThumbprint, key.keyThumbprint);
+  assert.equal(authorization.grant.days, 30);
+  assert.equal(bodies.length, 1);
+  assert.equal(bodies[0]!.preapproval, "signed-token");
+  assert.doesNotMatch(f.state.messages.join(""), /Approve:/);
+  assert.deepEqual(f.state.installations, [await realpath(project)]);
 });

@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
-import { inspectMcpMetadataOrQuarantine, requireMcpAuthorization, setupMcpAuthorization, type McpAuthorization, type McpMetadata } from "./mcp-authorization.js";
+import { inspectMcpMetadataOrQuarantine, requireMcpAuthorization, setupMcpAuthorization, type McpAuthorization, type McpMetadata, type McpPreset } from "./mcp-authorization.js";
 import { installMcpService } from "./service.js";
 
 /**
@@ -69,7 +69,7 @@ function grantInactive(metadata: McpMetadata, now = Date.now()): boolean {
  * All prompts go through `notify` so stdout can carry only the URL or JSON.
  */
 export async function ensureMcpAuthorization(
-  input: { workspace?: string; days?: string; notify: (message: string) => void },
+  input: { workspace?: string; days?: string; notify: (message: string) => void; preset?: McpPreset },
   installService: typeof installMcpService = installMcpService,
 ): Promise<McpAuthorization> {
   const metadata = await inspectMcpMetadataOrQuarantine(input.notify);
@@ -84,7 +84,7 @@ export async function ensureMcpAuthorization(
   input.notify(metadata ? `Renewing device MCP authorization for ${workspace}\n` : `Enabling device MCP for ${workspace}\n`);
   const authorization = await setupMcpAuthorization(workspace, input.days, Boolean(metadata), ({ verificationUri, keyThumbprint, days }) => {
     input.notify(`Device MCP execution authorization: ${days} days\nMCP key: ${keyThumbprint}\nApprove: ${verificationUri}\n`);
-  });
+  }, input.preset);
   const service = await installService(authorization.grant.workspace);
   input.notify(`Background service: ${service.active ? "running" : "installed"}\n`);
   return authorization;
