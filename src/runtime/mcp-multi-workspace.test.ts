@@ -61,3 +61,26 @@ test("multiple workspaces route absolute paths, reject relative/outside paths, k
     assert.equal(processes.isError, undefined);
   } finally { await close(); }
 });
+
+test("nested workspaces coexist: requests go to the deepest root, moves may cross the boundary", async () => {
+  const parent = await realpath(await mkdtemp(join(tmpdir(), "frely-mw-nested-")));
+  const child = join(parent, "__inner");
+  await mkdir(join(child, "src"), { recursive: true });
+  await writeFile(join(child, "src", "c.txt"), "inner\n");
+  await addWorkspace(child);
+  await addWorkspace(parent);
+  const { client, close } = await connect(parent);
+  try {
+    const info = JSON.parse(text(await client.callTool({ name: "workspace_info", arguments: {} })));
+    assert.ok(info.workspaces.includes(parent) && info.workspaces.includes(child));
+
+    assert.equal(text(await client.callTool({ name: "read_file", arguments: { path: join(child, "src", "c.txt") } })), "inner\n");
+    const listed = await client.callTool({ name: "list_directory", arguments: { path: parent } });
+    assert.equal(listed.isError, undefined);
+    assert.match(text(listed), /__inner/);
+
+    const moved = await client.callTool({ name: "move_path", arguments: { from: join(child, "src", "c.txt"), to: join(parent, "c.txt") } });
+    assert.equal(moved.isError, undefined, text(moved));
+    assert.equal(text(await client.callTool({ name: "read_file", arguments: { path: join(parent, "c.txt") } })), "inner\n");
+  } finally { await close(); }
+});

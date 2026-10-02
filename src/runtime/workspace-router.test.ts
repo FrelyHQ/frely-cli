@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import test from "node:test";
 import { Workspace } from "./workspace.js";
-import { resolveWorkspace } from "./workspace-router.js";
+import { resolveWorkspace, resolveWorkspacePair } from "./workspace-router.js";
 
 test("resolveWorkspace: single workspace is backward compatible", async () => {
   const root = await mkdtemp(join(tmpdir(), "frely-workspace-"));
@@ -91,4 +91,49 @@ test("resolveWorkspace: with multiple workspaces computes the path relative to t
   const result = resolveWorkspace(workspaces, deepPath);
   assert.equal(result.workspace, ws);
   assert.equal(result.relativeInput, join("a", "b", "c", "file.ts"));
+});
+
+test("resolveWorkspace: nested workspaces route to the deepest matching root", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "frely-workspace-parent-"));
+  const child = join(parent, "child");
+  await mkdir(child);
+  const parentWs = await Workspace.open(parent);
+  const childWs = await Workspace.open(child);
+  // Registration order must not matter: the parent comes first here.
+  const workspaces = new Map([[parent, parentWs], [child, childWs]]);
+
+  const inChild = resolveWorkspace(workspaces, join(child, "src", "a.ts"));
+  assert.equal(inChild.workspace, childWs);
+  assert.equal(inChild.relativeInput, join("src", "a.ts"));
+
+  assert.equal(resolveWorkspace(workspaces, child).workspace, childWs);
+  assert.equal(resolveWorkspace(workspaces, child).relativeInput, ".");
+
+  const inParent = resolveWorkspace(workspaces, join(parent, "README.md"));
+  assert.equal(inParent.workspace, parentWs);
+  assert.equal(inParent.relativeInput, "README.md");
+
+  // A sibling sharing the child's name prefix must not match the child.
+  const sibling = resolveWorkspace(workspaces, join(parent, "child-2", "x"));
+  assert.equal(sibling.workspace, parentWs);
+});
+
+test("resolveWorkspacePair: moves across a nested boundary use the deepest common root", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "frely-workspace-pair-"));
+  const child = join(parent, "child");
+  await mkdir(child);
+  const other = await mkdtemp(join(tmpdir(), "frely-workspace-pair-other-"));
+  const parentWs = await Workspace.open(parent);
+  const childWs = await Workspace.open(child);
+  const workspaces = new Map([[parent, parentWs], [child, childWs], [other, await Workspace.open(other)]]);
+
+  const within = resolveWorkspacePair(workspaces, join(child, "a"), join(child, "b"));
+  assert.equal(within.workspace, childWs);
+  assert.deepEqual([within.relativeFrom, within.relativeTo], ["a", "b"]);
+
+  const across = resolveWorkspacePair(workspaces, join(child, "a"), join(parent, "b"));
+  assert.equal(across.workspace, parentWs);
+  assert.deepEqual([across.relativeFrom, across.relativeTo], [join("child", "a"), "b"]);
+
+  assert.throws(() => resolveWorkspacePair(workspaces, join(child, "a"), join(other, "b")), /same workspace/);
 });

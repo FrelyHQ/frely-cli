@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 import { realpath, lstat } from "node:fs/promises";
 import { dirname } from "node:path";
 import { ensureCredentialDirectory, readPrivateFile, writePrivateFile } from "../credential-file.js";
@@ -63,22 +63,7 @@ export async function addWorkspace(input: string): Promise<string[]> {
     throw new Error(`Workspace already registered: ${path}`);
   }
 
-  // Check for nesting
-  for (const existing of registry.roots) {
-    const relExistingToNew = relative(existing, path);
-    const relNewToExisting = relative(path, existing);
-    
-    // Check if new path is nested under existing
-    if (relExistingToNew !== ".." && !relExistingToNew.startsWith(`..${sep}`)) {
-      throw new Error(`Cannot register workspace ${path}; it is nested inside ${existing}.`);
-    }
-    
-    // Check if existing is nested under new path
-    if (relNewToExisting !== ".." && !relNewToExisting.startsWith(`..${sep}`)) {
-      throw new Error(`Cannot register workspace ${path}; it contains the registered workspace ${existing}.`);
-    }
-  }
-
+  // Nested workspaces are allowed; requests route to the deepest matching root (see workspace-router).
   registry.roots.push(path);
   await writeRegistry(registry);
   return registry.roots;
