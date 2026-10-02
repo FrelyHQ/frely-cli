@@ -49,7 +49,7 @@ test("invalid MCP arguments fail before login, authorization, service installati
     ["mcp", "url", "--workspace"],
     ["mcp", "url", "--workspace", "--days", "90"],
     ["mcp", "url", "--unknown", "synthetic-secret"],
-    ["mcp", "url", "--days", "90", "--days", "180"],
+    ["mcp", "url", "--days", "90", "--days", "365"],
     ["mcp", "setup"],
     ["mcp", "renew"],
     ["mcp", "revoke"],

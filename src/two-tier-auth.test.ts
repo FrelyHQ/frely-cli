@@ -30,9 +30,9 @@ test("basic private files preserve values without a keyring or an external key",
 
 test("MCP days validation accepts the product limits and rejects ambiguous values", () => {
   assert.equal(parseMcpDays(), 90);
-  assert.equal(parseMcpDays("180"), 180);
+  assert.equal(parseMcpDays("365"), 365);
   assert.equal(parseMcpDays(1), 1);
-  for (const value of [0, 181, -1, NaN, Infinity, 1.5, "180days", "1e2", "", " 180", "--json"]) assert.throws(() => parseMcpDays(value));
+  for (const value of [0, 366, -1, NaN, Infinity, 1.5, "365days", "1e2", "", " 365", "--json"]) assert.throws(() => parseMcpDays(value));
 });
 
 test("MCP activation and renewal keep basic credentials and Provider identity separate", async (t) => {
@@ -99,8 +99,8 @@ test("MCP activation and renewal keep basic credentials and Provider identity se
   const repeated = await setupMcpAuthorization(directory);
   assert.equal(repeated.mcpUrl, first.mcpUrl); assert.equal(repeated.grant.expiresAt, first.grant.expiresAt);
   assert.equal(approvals, 1); assert.equal(sequence, 1);
-  const renewed = await setupMcpAuthorization(directory, 180, true, approve);
-  assert.equal(renewed.grant.days, 180); assert.equal(renewed.mcpUrl, first.mcpUrl);
+  const renewed = await setupMcpAuthorization(directory, 365, true, approve);
+  assert.equal(renewed.grant.days, 365); assert.equal(renewed.mcpUrl, first.mcpUrl);
   assert.notEqual(renewed.grant.keyThumbprint, first.grant.keyThumbprint);
   assert.equal(await credentialStore.getPassword("frely-cli-mcp-authorization-v1", `${relayUrl}|${userId}|${first.grant.id}`), null);
   await revokeMcpAuthorization();

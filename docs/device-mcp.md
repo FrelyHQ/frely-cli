@@ -109,14 +109,14 @@ frely network status --json
 ```sh
 frely mcp url
 frely mcp url --workspace /path/to/project --days 90
-frely mcp url --days 180
+frely mcp url --days 365
 ```
 
 `frely mcp url` 是启用入口，工作目录取当前目录；`--workspace` 指定目录，`--days` 指定授权天数（已启用时表示立即续期）。已启用时再次运行只输出 URL，授权过期时自动请求续期。`frely mcp --help` 提供本功能帮助，`frely doctor` 提供状态概览，`frely doctor -v` 提供诊断细节。
 
 启用流程检查 MCP 安全存储，创建独立 MCP 执行密钥，保存密钥，再展示浏览器批准地址。批准页面显示设备、公钥指纹、工作目录、执行能力和授权天数。用户确认后，服务端记录批准时间与到期时间，CLI 配置用户级服务并输出稳定 MCP URL。
 
-默认期限为 90 天，允许 1—180 个整天。起算点是服务端批准时间。普通令牌刷新、OAuth 刷新、服务重启、升级、重复批准和重复运行 `frely mcp url` 不延长期限。续期创建新授权和新 MCP 执行密钥，新期限从本次批准时间起算。
+默认期限为 90 天，允许 1—365 个整天。默认 90 天和 365 天上限参考 GitHub 密钥（access token）的有效期设定。起算点是服务端批准时间。普通令牌刷新、OAuth 刷新、服务重启、升级、重复批准和重复运行 `frely mcp url` 不延长期限。续期创建新授权和新 MCP 执行密钥，新期限从本次批准时间起算。
 
 续期不改变 MCP URL。OAuth connection 与 MCP 执行授权属于两个生命周期。
 

@@ -47,7 +47,7 @@
   "install.step2": "登录或注册",
   "copy.loginEmail": "复制邮箱注册命令",
   "copy.loginCode": "复制验证码命令",
-  "install.emailStep": "输入邮箱。Frely 向该邮箱发送验证码；没有账户时会创建账户。带 --mcp 时，输入验证码即授权你连接的 Agent 在当前文件夹读写文件、运行命令，有效期 30 天，可随时用 frely mcp remove 移除。",
+  "install.emailStep": "输入邮箱。Frely 向该邮箱发送验证码；没有账户时会创建账户。带 --mcp 时，输入验证码即授权你连接的 Agent 在当前文件夹读写文件、运行命令，有效期 90 天，可随时用 frely mcp remove 移除。",
   "install.codeStep": "输入邮件中的验证码，完成登录。Frely CLI 随后输出你的 MCP 地址。",
   "install.aiOrder": "AI 助手执行这些步骤时，如果还没有邮箱，先安装 Frely CLI，装好后再询问邮箱，不会在安装前索要邮箱。",
   "install.browserLogin": "改用浏览器登录：",

@@ -21,8 +21,8 @@ test("MCP lease expires at the boundary and clock rollback cannot extend a runni
   } finally { lease.close(); }
 });
 
-test("a 180-day lease does not overflow a Node timer", async () => {
-  const lease = new McpLease("synthetic", Date.now() + 180 * 86400000);
+test("a 365-day lease does not overflow a Node timer", async () => {
+  const lease = new McpLease("synthetic", Date.now() + 365 * 86400000);
   try { await sleep(15); assert.equal(lease.controller.signal.aborted, false); lease.assert(); }
   finally { lease.close(); }
 });

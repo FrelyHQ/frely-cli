@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { upgrade } from "./upgrade/update.js";
-import { requireMcpAuthorization, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, generateMcpKey, parseMcpDays } from "./mcp-authorization.js";
+import { requireMcpAuthorization, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, generateMcpKey, parseMcpDays, MCP_DEFAULT_DAYS } from "./mcp-authorization.js";
 import { realpath } from "node:fs/promises";
 import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
@@ -39,7 +39,7 @@ import { agentManifestUrl, installSkillAdapter, invokeInstalledAgent, publicSkil
 import type { SkillHost, SkillScope } from "./skill/managed.js";
 
 
-const DEFAULT_EMAIL_LOGIN_MCP_DAYS = 30;
+const DEFAULT_EMAIL_LOGIN_MCP_DAYS = MCP_DEFAULT_DAYS;
 
 async function main(): Promise<void> {
   const args = normalizeMcpArgs(process.argv.slice(2));

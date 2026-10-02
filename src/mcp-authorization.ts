@@ -9,7 +9,7 @@ import { ensureDevice, relayFetch, resetDeviceRegistration } from "./device/cont
 import { identityFromPrivateKey } from "./device/identity.js";
 
 export const MCP_DEFAULT_DAYS = 90;
-export const MCP_MAX_DAYS = 180;
+export const MCP_MAX_DAYS = 365;
 const SERVICE = "frely-cli-mcp-authorization-v1";
 const ENDPOINT = "/api/user/device-relay/mcp";
 const RECOVERABLE_CODES = new Set(["mcp_authorization_not_found", "mcp_authorization_invalid", "device_not_found", "device_revoked"]);
@@ -36,7 +36,7 @@ export function generateMcpKey(): { privateKeyPem: string; keyThumbprint: string
 }
 export function parseMcpDays(input?: string | number): number {
   const value = input === undefined ? MCP_DEFAULT_DAYS : typeof input === "string" && /^\d{1,3}$/u.test(input) ? Number(input) : input;
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > MCP_MAX_DAYS) throw new Error("MCP authorization must be 1 to 180 whole days.");
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > MCP_MAX_DAYS) throw new Error("MCP authorization must be 1 to 365 whole days.");
   return value;
 }
 export function mcpMetadataPath(): string { return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "frely", "mcp-v1", "authorization.json"); }

@@ -120,10 +120,10 @@ test("frely mcp renews an expired grant or an explicit --days for the same works
       const f = await fixture(t);
       const original = await setupMcpAuthorization(f.directory, 30);
       if (scenario === "expired") t.mock.timers.enable({ apis: ["Date"], now: Date.parse(original.grant.expiresAt!) + 1 });
-      const renewed = await ensureMcpAuthorization({ ...(scenario === "days" ? { days: "180" } : {}), notify: f.notify }, f.install);
+      const renewed = await ensureMcpAuthorization({ ...(scenario === "days" ? { days: "365" } : {}), notify: f.notify }, f.install);
       assert.notEqual(renewed.grant.id, original.grant.id);
       assert.equal(renewed.grant.workspace, original.grant.workspace);
-      assert.equal(renewed.grant.days, scenario === "days" ? 180 : 90);
+      assert.equal(renewed.grant.days, scenario === "days" ? 365 : 90);
       assert.equal(renewed.mcpUrl, original.mcpUrl);
       assert.equal(f.state.requests, 2);
       assert.deepEqual(f.state.installations, [original.grant.workspace]);
