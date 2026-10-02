@@ -115,7 +115,7 @@ export interface EmailDeviceChallenge {
   email: string;
   expiresIn: number;
   /** Device MCP request prepared before the code is entered; `privateKeyPem` never leaves this machine. */
-  mcp?: { privateKeyPem: string; keyThumbprint: string; workspace: string; days: number; explicit: boolean };
+  mcp?: { privateKeyPem: string; keyThumbprint: string; workspace: string; days: number };
 }
 
 export async function initEmailDeviceLogin(
@@ -175,7 +175,7 @@ export async function completeEmailDeviceLogin(
       userCode: challenge.userCode,
       challengeId: challenge.challengeId,
       code,
-      ...(challenge.mcp ? { mcp: { keyThumbprint: challenge.mcp.keyThumbprint, workspace: challenge.mcp.workspace, days: challenge.mcp.days, explicit: challenge.mcp.explicit } } : {}),
+      ...(challenge.mcp ? { mcp: { keyThumbprint: challenge.mcp.keyThumbprint, workspace: challenge.mcp.workspace, days: challenge.mcp.days } } : {}),
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });

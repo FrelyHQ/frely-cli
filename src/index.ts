@@ -180,10 +180,10 @@ async function main(): Promise<void> {
 
       try {
         let mcp: EmailDeviceChallenge["mcp"];
-        if (!args.includes("--no-mcp")) {
+        if (args.includes("--mcp")) {
           const workspace = await realpath(resolve(option(args, "--workspace") || process.cwd()));
           const days = parseMcpDays(option(args, "--days") ?? DEFAULT_EMAIL_LOGIN_MCP_DAYS);
-          mcp = { ...generateMcpKey(), workspace, days, explicit: args.includes("--mcp") };
+          mcp = { ...generateMcpKey(), workspace, days };
         }
         const challenge = await initEmailDeviceLogin(relayUrl, email!, invite, mcp);
         await savePendingEmailChallenge(relayUrl, challenge);
@@ -194,13 +194,13 @@ async function main(): Promise<void> {
             email: challenge.email,
             expiresIn: challenge.expiresIn,
             challengeId: challenge.challengeId,
-            ...(mcp ? { deviceMcp: { workspace: mcp.workspace, days: mcp.days, appliesTo: mcp.explicit ? "always" : "new_accounts" } } : {}),
+            ...(mcp ? { deviceMcp: { workspace: mcp.workspace, days: mcp.days } } : {}),
           }, null, 2) + "\n");
         } else {
           stdout.write(`Verification code sent to ${challenge.email}\n`);
           stdout.write(`Expires in: ${challenge.expiresIn} seconds\n`);
           if (mcp) {
-            stdout.write(`Entering the code ${mcp.explicit ? "also" : "for a new account also"} lets remote agents read and write files and run commands in ${mcp.workspace} for ${mcp.days} days. Add --no-mcp to skip this; remove it later with \`frely mcp remove\`.\n`);
+            stdout.write(`Entering the code also lets remote agents read and write files and run commands in ${mcp.workspace} for ${mcp.days} days. Remove it later with \`frely mcp remove\`.\n`);
           }
           stdout.write(`Run: frely login --code <code>\n`);
         }
