@@ -49,7 +49,7 @@ test("MCP activation and renewal keep basic credentials and Provider identity se
   });
   assert.equal((await doctor()).ok, true);
   const relayUrl = "https://test.invalid", userId = "user_test", deviceId = `drd_${"1".repeat(32)}`;
-  const mcpResource = "https://mcp.test.invalid/mcp/devices";
+  const mcpResource = "https://mcp.test.invalid/mcp";
   await mkdir(join(directory, "frely"), { recursive: true, mode: 0o700 });
   await writeFile(join(directory, "frely", "config.json"), JSON.stringify({ version: 3, relayUrl, user: { id: userId, email: "user@example.com" } }), { mode: 0o600 });
   const basic = JSON.stringify({ version: 1, type: "basic-oauth", accessToken: "synthetic-basic", expiresAt: Date.now() + 3600000 });

@@ -21,4 +21,4 @@ The first catalog includes Agent listing, prompt/Skill creation, publication sta
 
 Calls can create resources or incur usage. Failed business calls are not automatically replayed. A timeout does not prove that a mutation failed; inspect the account state before issuing another call. For creation, preserve the original idempotency key when reconciling an uncertain result.
 
-New device URLs use `connect.frely.cloud`. Existing `mcp.frely.cloud` device URLs remain valid through the compatibility hostname and are not rewritten by this CLI.
+New device URLs are `https://mcp.frely.cloud/mcp`. Earlier `connect.frely.cloud/mcp/devices` and `mcp.frely.cloud/mcp/devices` URLs remain valid and are not rewritten by this CLI.
