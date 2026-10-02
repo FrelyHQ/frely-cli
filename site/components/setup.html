@@ -10,6 +10,18 @@
     <ol class="setup-steps" start="2">
       <li class="setup-step">
         <div class="step-heading"><span aria-hidden="true">02</span><h3>{{install.step2}}</h3></div>
+        <p class="fineprint">{{install.emailStep}}</p>
+        <div class="command">
+          <code id="login-email-command">{{command.loginEmail}}</code>
+          <button class="copy-button" data-copy="login-email-command" aria-label="{{copy.loginEmail}}">{{copy.idle}}</button>
+        </div>
+        <p class="fineprint">{{install.codeStep}}</p>
+        <div class="command">
+          <code id="login-code-command">{{command.loginCode}}</code>
+          <button class="copy-button" data-copy="login-code-command" aria-label="{{copy.loginCode}}">{{copy.idle}}</button>
+        </div>
+        <p class="fineprint">{{install.aiOrder}}</p>
+        <p class="fineprint">{{install.browserLogin}}</p>
         <div class="command">
           <code id="login-command">{{command.login}}</code>
           <button class="copy-button" data-copy="login-command" aria-label="{{copy.login}}">{{copy.idle}}</button>

@@ -5,7 +5,7 @@ import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
 import { join, resolve } from "node:path";
 import { stdin, stdout } from "node:process";
-import { inspectAuth, loginDevice, logout, normalizeRelayUrl, requireLogin, initEmailDeviceLogin, completeEmailDeviceLogin, savePendingEmailChallenge, readPendingEmailChallenge, deletePendingEmailChallenge, localDeviceId, pollDeviceToken, SERVICE, accountKey, writeConfig, readConfig } from "./auth.js";
+import { inspectAuth, loginDevice, logout, normalizeRelayUrl, requireLogin, initEmailDeviceLogin, completeEmailDeviceLogin, savePendingEmailChallenge, readPendingEmailChallenge, deletePendingEmailChallenge, localDeviceId, pollDeviceToken, SERVICE, accountKey, writeConfig, readConfig, CONFIG_VERSION } from "./auth.js";
 import { basicCredentialStore as credentialStore } from "./credential-basic.js";
 import type { StoredOAuthCredential } from "./auth.js";
 import { doctor, formatDoctor } from "./diagnostics.js";

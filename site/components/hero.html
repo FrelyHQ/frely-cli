@@ -17,6 +17,16 @@
       <span class="platform-note">macOS · Linux · Windows</span>
     </div>
     <h2 id="install-title">{{install.step1}}</h2>
+    <div class="command-label"><span>macOS / Linux</span></div>
+    <div class="command">
+      <code id="install-unix-command">{{command.installUnix}}</code>
+      <button class="copy-button" data-copy="install-unix-command" aria-label="{{copy.installUnix}}">{{copy.idle}}</button>
+    </div>
+    <div class="command-label"><span>Windows (PowerShell)</span></div>
+    <div class="command">
+      <code id="install-windows-command">{{command.installWindows}}</code>
+      <button class="copy-button" data-copy="install-windows-command" aria-label="{{copy.installWindows}}">{{copy.idle}}</button>
+    </div>
     <div class="command-label"><span>npm</span><span class="fineprint">{{install.node}}</span></div>
     <div class="command">
       <code id="install-command">{{command.install}}</code>
