@@ -74,7 +74,7 @@
   "copy.selected": "Selected",
   "copy.success": "Command copied to clipboard.",
   "copy.failure": "Copy unavailable. The command is selected; use your device’s copy action.",
-  "tools.connect": "Use the complete address printed by frely mcp. Each calling client signs in with your Frely account through OAuth; the address contains no access token.",
+  "tools.connect": "Add the fixed address https://mcp.frely.cloud/mcp. It is the same for every device on your account and contains no access token. Each calling client signs in with your Frely account through OAuth.",
   "tools.verify": "Ask the agent to use the Frely workspace_info and list_directory tools. Check that the returned folder and names match the target computer. The command-line agent's built-in shell runs on the calling computer.",
   "tools.diagnostics": "Use frely doctor for configuration and connection status, or frely doctor -v for diagnostic details. A real tool result from the target computer verifies the client-to-device connection.",
   "install.diagnostics": "Need to check the connection? Run frely doctor on the controlled computer. Add -v for detailed diagnostics.",
@@ -84,9 +84,9 @@
   "install.configure": "Enable device MCP",
   "setup.eyebrow": "SET UP DEVICE ACCESS",
   "tools.chatgpt": "Add a remote MCP connection with your device URL, select OAuth, and authorize with your Frely account. The same URL works for other compatible clients.",
-  "tools.claudePrepare": "On the calling computer, replace <MCP_URL> with the address from the controlled computer. All devices on your account share this one address, so add it once.",
+  "tools.claudePrepare": "Run this command on the calling computer. All devices on your account share this one address, so add it once.",
   "tools.claudeAuthorize": "Open /mcp in Claude Code to finish OAuth authorization. Ask the agent to use Frely tools for work on the target computer. Install Frely CLI on the target computer; the calling computer uses its MCP client.",
-  "install.approval": "Approve the device, workspace and duration in your browser. Frely CLI starts a background service and prints the MCP address. Run frely mcp again any time to show the same address.",
+  "install.approval": "Approve the device, workspace and duration in your browser. Frely CLI starts a background service. The MCP address is fixed (https://mcp.frely.cloud/mcp); frely mcp url prints it.",
   "copy.mcp": "Copy device MCP setup command",
   "device.eyebrow": "WHERE AGENTS CONNECT FROM",
   "device.line1": "Agents in your browser.",
@@ -108,6 +108,6 @@
   "more.eyebrow": "OPTIONAL FEATURES",
   "more.title": "More uses for Frely CLI",
   "tools.codexAuthorize": "Follow the OAuth prompt after adding the URL. Use this command to start authorization if needed.",
-  "tools.codexPrepare": "Run this command on the computer running Codex. Replace <MCP_URL> with the address from the target computer. All devices on your account share this one address, so add it once.",
+  "tools.codexPrepare": "Run this command on the computer running Codex. All devices on your account share this one address, so add it once.",
   "tools.webTab": "Browser agents"
 }
