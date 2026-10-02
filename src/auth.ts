@@ -7,7 +7,7 @@ import { basicCredentialStore as credentialStore, BASIC_CREDENTIAL_BACKEND } fro
 
 export const SERVICE = "frely-cli-basic-v1";
 const SESSION_COOKIE_NAME = "friday_session_token";
-const CONFIG_VERSION = 3;
+export const CONFIG_VERSION = 3;
 const LEGACY_CONFIG_VERSION = 1;
 const OAUTH_CLIENT_ID = "frely-cli-basic";
 const OAUTH_SCOPE = "openid profile profile:read email offline_access device-relay:provider";

@@ -209,13 +209,14 @@ function validateView(input: unknown): McpAuthorizationView {
     days: value.days, approvalDeadline: value.approvalDeadline, approvedAt: value.approvedAt, expiresAt: value.expiresAt, status: value.status };
 }
 // One account-level URL reaches every MCP-enabled device; tools select a device by argument.
-const DEVICE_MCP_PATH = "/mcp/devices";
+// "/mcp" is current; "/mcp/devices" is kept for configurations written before the move.
+const DEVICE_MCP_PATHS = ["/mcp", "/mcp/devices"];
 function validateMcpResource(input: unknown): string {
   if (typeof input !== "string" || input.length > 4096) throw new Error("MCP resource URL is invalid.");
   let url: URL;
   try { url = new URL(input); } catch { throw new Error("MCP resource URL is invalid."); }
   const loopbackHttp = url.protocol === "http:" && ["127.0.0.1", "localhost", "::1"].includes(url.hostname);
-  if ((url.protocol !== "https:" && !loopbackHttp) || url.username || url.password || url.search || url.hash || url.pathname !== DEVICE_MCP_PATH) {
+  if ((url.protocol !== "https:" && !loopbackHttp) || url.username || url.password || url.search || url.hash || !DEVICE_MCP_PATHS.includes(url.pathname)) {
     throw new Error("MCP resource URL is invalid.");
   }
   return url.toString();

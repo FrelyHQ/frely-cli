@@ -90,7 +90,7 @@ CLI 不维护 Cloudflare 专用业务协议。
 设备 MCP resource 为账户级地址（所有设备共用，由 `device` 工具参数选择设备）：
 
 ```text
-https://connect.frely.cloud/mcp/devices
+https://mcp.frely.cloud/mcp
 ```
 
 OAuth resource、客户端配置、设备 URL 不因 transport 变化。
@@ -227,7 +227,7 @@ Worker 保存公网 HTTP 请求生命周期。
 ```text
 ChatGPT
    |
-   | POST /mcp/devices  (tools/call 带 device 参数)
+   | POST /mcp  (tools/call 带 device 参数)
    v
 Worker
    |
@@ -318,7 +318,7 @@ POST /api/user/device-relay/connect
   "transports": [
     {
       "kind": "cloudflare_do",
-      "websocketUrl": "wss://connect.frely.cloud/edge/device-relay/ws?deviceId=...",
+      "websocketUrl": "wss://mcp.frely.cloud/edge/device-relay/ws?deviceId=...",
       "accessToken": "<edge-token>",
       "expiresAt": "2026-09-19T00:00:00Z"
     },
@@ -490,7 +490,7 @@ DO route
    +-- transport lost after dispatch -> error, no replay
 ```
 
-Legacy fallback 入口使用独立 origin 或 service binding。Public `connect.frely.cloud` 不回源到自身。
+Legacy fallback 入口使用独立 origin 或 service binding。Public `mcp.frely.cloud` 不回源到自身。
 
 ## 9. Heartbeat
 

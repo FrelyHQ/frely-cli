@@ -9,7 +9,7 @@ function fixture() {
   const binding: DeviceBinding = { version: 2, relayUrl: "https://test.invalid", userId: "user_test",
     deviceId: "drd_" + "a".repeat(32), publicKeySpki: "synthetic", keyThumbprint: "synthetic", updatedAt: new Date().toISOString() };
   const metadata: McpMetadata = { version: 1, relayUrl: binding.relayUrl, userId: binding.userId,
-    mcpResource: "https://mcp.test.invalid/mcp/devices",
+    mcpResource: "https://mcp.test.invalid/mcp",
     grant: { id: "mca_" + "b".repeat(32), deviceId: binding.deviceId, keyThumbprint: "synthetic",
       workspace: "/test/workspace", days: 1, approvalDeadline: new Date().toISOString(),
       approvedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 86_400_000).toISOString(), status: "active" } };

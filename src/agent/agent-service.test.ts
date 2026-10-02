@@ -23,6 +23,14 @@ import net from "node:net";
 
 const socket = new net.Socket({ fd: 3, readable: true, writable: true });
 const output = { write: (chunk) => socket.write(chunk) };
+// Gracefully close the fd-3 socket on termination so the supervisor reads a clean
+// EOF instead of an ECONNRESET-derived uncaughtException during teardown.
+function gracefulShutdown() {
+  try { socket.end(); } catch { /* ignore */ }
+  setTimeout(() => process.exit(0), 50);
+}
+process.on("SIGTERM", gracefulShutdown);
+process.on("SIGINT", gracefulShutdown);
 let nextId = 1;
 const pending = new Map();
 function send(message) { output.write(JSON.stringify(message) + "\\n"); }

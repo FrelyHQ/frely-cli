@@ -28,7 +28,7 @@ async function fixture(t: TestContext, denied = false) {
     await rm(directory, { recursive: true, force: true });
   });
   const relayUrl = "https://test.invalid", userId = "user_test", deviceId = `drd_${"1".repeat(32)}`;
-  const mcpResource = "https://mcp.test.invalid/mcp/devices";
+  const mcpResource = "https://mcp.test.invalid/mcp";
   await mkdir(join(directory, "frely"), { recursive: true, mode: 0o700 });
   await writeFile(join(directory, "frely", "config.json"), JSON.stringify({
     version: 3, relayUrl, user: { id: userId, email: "user@example.com" },
@@ -167,6 +167,15 @@ test("frely mcp moves invalid or legacy configuration aside and sets up again", 
       assert.equal(await readFile(join(dirname(mcpMetadataPath()), backups[0]!), "utf8"), content);
     });
   }
+});
+
+test("frely mcp keeps a configuration written with the previous /mcp/devices URL", async (t) => {
+  const f = await fixture(t);
+  await setupMcpAuthorization(f.directory);
+  const stored = JSON.parse(await readFile(mcpMetadataPath(), "utf8"));
+  const previous = "https://mcp.test.invalid/mcp/devices";
+  await writeFile(mcpMetadataPath(), JSON.stringify({ ...stored, mcpResource: previous }) + "\n", { mode: 0o600 });
+  assert.equal((await inspectMcpMetadata())?.mcpResource, previous);
 });
 
 test("frely mcp leaves unreadable configuration untouched", { skip: process.platform === "win32" }, async (t) => {
