@@ -26,7 +26,7 @@ export async function inspectUpgrade(): Promise<UpgradeInspection> {
     const release = await latestRelease(installation);
     const available = compareVersions(release.version, VERSION) > 0;
     return { currentVersion: VERSION, latestVersion: release.version, installation, state: available ? "available" as const : "current" as const,
-      message: available ? `${VERSION} → ${release.version}. Run frely upgrade.` : `${VERSION} is up to date.` };
+      message: available ? `${VERSION} → ${release.version}. Run frely update.` : `${VERSION} is up to date.` };
   } catch {
     return { currentVersion: VERSION, installation, state: "unavailable" as const, message: "Version lookup unavailable. Check connectivity and run frely doctor again." };
   }

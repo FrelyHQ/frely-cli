@@ -84,7 +84,7 @@ export async function acquireMaintenance(pid: number, path = maintenancePath(pid
   }
   return new Promise((resolve, reject) => {
     const socket = createConnection(path);
-    const fail = () => { socket.destroy(); reject(new Error("The service is busy or cannot enter maintenance. Finish its tasks, then run frely upgrade in a local terminal.")); };
+    const fail = () => { socket.destroy(); reject(new Error("The service is busy or cannot enter maintenance. Finish its tasks, then run frely update in a local terminal.")); };
     socket.setTimeout(5000, fail);
     socket.once("error", fail);
     socket.once("connect", () => socket.write("drain\n"));

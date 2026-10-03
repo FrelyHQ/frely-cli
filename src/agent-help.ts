@@ -4,7 +4,7 @@ export const COMMANDS = [
   { id: "login", usage: "frely login [--relay <url>] [--no-browser] | frely login --email <address> [--invite <link>] [--mcp] [--workspace <path>] [--days <n>] then frely login --code <6-digit code>", auth: "browser-or-email", effect: "authorization", purpose: "Authorize the CLI for the user's Frely account. With --email, Frely emails a code; the user pastes it into `frely login --code`. Add --mcp to also enable device MCP for the workspace (default 90 days) once the code is verified; do this when the user is registering for the first time, and tell them before asking for the code." },
   { id: "logout", usage: "frely logout", auth: "none", effect: "local-write", purpose: "Remove login, revoke Cloud authorization and stop the MCP background service." },
   { id: "doctor", usage: "frely doctor [-v] [--json]", auth: "optional-account", effect: "diagnostic", purpose: "Show the signed-in account, installation, available upgrades, MCP and connection status; -v verifies the account online and runs detailed diagnostics." },
-  { id: "upgrade", usage: "frely upgrade", auth: "none", effect: "local-write", purpose: "Upgrade the current installation to the latest stable release. Windows prints a manual command; doctor checks versions." },
+  { id: "update", usage: "frely update", auth: "none", effect: "local-write", purpose: "Update the current installation to the latest stable release. Windows prints a manual command; doctor checks versions. (`frely upgrade` is a hidden alias.)" },
   { id: "help", usage: "frely help --agent --json", auth: "none", effect: "read", purpose: "Read this installed CLI's current Agent instructions." },
   { id: "mcp.url", usage: "frely mcp url [--workspace <path>] [--days 1..365] [--json]", auth: "account-and-browser-if-needed", effect: "authorization-if-needed", purpose: "Enable, renew or read device MCP. Unconfigured: request browser approval for --workspace (default: current directory) and install the background service. Expired or --days given: renew with browser approval; the MCP URL stays the same. Otherwise print the MCP URL unchanged. Prompts go to stderr; stdout holds only the URL, or JSON with HTTP transport and OAuth details." },
   { id: "mcp.workspace.list", usage: "frely mcp workspace list [--json]", auth: "mcp", effect: "read", purpose: "List workspace directories for this device; the primary is marked." },
@@ -70,7 +70,7 @@ export function agentHelp() {
 }
 
 const GROUPS: readonly { title: string; ids: readonly string[] }[] = [
-  { title: "Account", ids: ["login", "logout", "doctor", "upgrade"] },
+  { title: "Account", ids: ["login", "logout", "doctor", "update"] },
   { title: "Device MCP", ids: ["mcp.url", "mcp.workspace", "mcp.local", "mcp.lifecycle"] },
   { title: "Agents", ids: ["agent.install", "agent.run", "agent.status", "agent.remove"] },
   { title: "Marketplace items", ids: ["item.install"] },
@@ -86,7 +86,7 @@ const SHORT_USAGE: Readonly<Record<string, string>> = {
   login: "frely login [--no-browser]",
   logout: "frely logout",
   doctor: "frely doctor [-v] [--json]",
-  upgrade: "frely upgrade",
+  update: "frely update",
   "mcp.url": "frely mcp url [--workspace <path>] [--days 1..365] [--json]",
   "mcp.workspace": "frely mcp workspace list|add <path>|remove <path>",
   "mcp.local": "frely mcp local list|add <name> (--url <address>|-- <command>)|remove <name>",

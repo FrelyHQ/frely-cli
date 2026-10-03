@@ -50,8 +50,8 @@ const DEFAULT_EMAIL_LOGIN_MCP_DAYS = MCP_DEFAULT_DAYS;
 async function main(): Promise<void> {
   const args = normalizeMcpArgs(process.argv.slice(2));
   const command = args[0];
-  if (command === "upgrade") {
-    if (args.length !== 1) throw new Error("Usage: frely upgrade. Version checks are available in frely doctor.");
+  if (command === "update" || command === "upgrade") {
+    if (args.length !== 1) throw new Error("Usage: frely update. Version checks are available in frely doctor. (`upgrade` is a hidden alias for `update`.)");
     const result = await upgrade((message) => process.stderr.write(message));
     stdout.write(result.message + "\n");
     return;

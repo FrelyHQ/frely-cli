@@ -1,6 +1,6 @@
 # Device Relay service maintenance
 
-Normal upgrades on supported macOS/Linux installations preserve device identity, the MCP address, credentials, workspace and authorization expiry. `frely upgrade` restores a matching service that was running. A runtime with automatic refresh support also loads updates made by its original installer at the same path after active work finishes. No extra stop/start commands are part of that normal flow.
+Normal upgrades on supported macOS/Linux installations preserve device identity, the MCP address, credentials, workspace and authorization expiry. `frely update` restores a matching service that was running. A runtime with automatic refresh support also loads updates made by its original installer at the same path after active work finishes. No extra stop/start commands are part of that normal flow.
 
 ## Manual pause and resume
 
@@ -18,7 +18,7 @@ Use stop to pause the device's shared remote service and start to resume it. Thi
 
 An already-running old process cannot gain automatic refresh code merely because files on disk changed. If doctor shows an old runtime without refresh support, finish its tasks, update using the original installer and perform one stop/start in a local terminal. Subsequent supported upgrades handle service switching.
 
-An old service without a private maintenance endpoint also cannot be drained by `frely upgrade`; it gives local-terminal guidance. Do not restart the service through the MCP session that depends on it.
+An old service without a private maintenance endpoint also cannot be drained by `frely update`; it gives local-terminal guidance. Do not restart the service through the MCP session that depends on it.
 
 ## Boundaries and diagnosis
 
@@ -28,4 +28,4 @@ An old service without a private maintenance endpoint also cannot be drained by 
 - The transport reconnects using existing identity and authorization. A short disconnection is possible. Heartbeats confirm device-to-Relay transport; verify client OAuth and an end-to-end call separately when diagnosing a failure.
 - Runtime restart does not preserve process handles/output stored in the previous runtime, renew expired authorization, or replay writes with unknown outcomes.
 - Keep the existing installer and path. Switching npm/Bun/standalone installations, changing Node paths, and source/link or foreground runs require their own maintenance. Setup with the original workspace can regenerate a service definition when the launch path needs changing; routine upgrades do not run setup or renew.
-- Windows `frely upgrade` prints installation-specific PowerShell instructions. Automatic external-install refresh is currently limited to macOS/Linux services.
+- Windows `frely update` prints installation-specific PowerShell instructions. Automatic external-install refresh is currently limited to macOS/Linux services.

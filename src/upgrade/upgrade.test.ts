@@ -187,10 +187,10 @@ test("Windows package instructions preserve manager and prefix, escape paths, an
   assert.match(manualUpgradeCommand(installation, "1.2.3", true), /finally/);
 });
 
-test("upgrade accepts no switches and directs version checks to doctor", async () => {
+test("update accepts no switches and directs version checks to doctor", async () => {
   const entry = fileURLToPath(new URL("../index.js", import.meta.url));
   for (const flag of ["--check", "--version", "--json"]) {
-    await assert.rejects(execFile(process.execPath, [entry, "upgrade", flag]), (error: unknown) => {
+    await assert.rejects(execFile(process.execPath, [entry, "update", flag]), (error: unknown) => {
       const result = error as { stderr: string; code: number };
       return result.code === 1 && /frely doctor/.test(result.stderr);
     });

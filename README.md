@@ -177,10 +177,10 @@ If setup stops after the Provider was prepared, run `frely provider share` again
 ```sh
 frely doctor      # signed-in account, installation path, distribution, latest stable, MCP/service state
 frely doctor -v   # + config paths, runtime details, authorization expiry, last heartbeat, sanitized errors
-frely upgrade     # updates the running installation in place
+frely update     # updates the running installation in place
 ```
 
-`frely upgrade` never changes to a different installer, edits PATH or downgrades a newer installation. Standalone downloads are checksum-checked and tested before the installed executable is replaced. npm/Bun installations keep their original global directory. A matching, running Device Relay service is paused for maintenance, restarted and checked after installation; credentials, device identity, MCP URL, workspace and authorization expiry are preserved. On Windows, `upgrade` prints a PowerShell command for the detected installation to run in a local terminal.
+`frely update` never changes to a different installer, edits PATH or downgrades a newer installation. Standalone downloads are checksum-checked and tested before the installed executable is replaced. npm/Bun installations keep their original global directory. A matching, running Device Relay service is paused for maintenance, restarted and checked after installation; credentials, device identity, MCP URL, workspace and authorization expiry are preserved. On Windows, `update` prints a PowerShell command for the detected installation to run in a local terminal. (`frely upgrade` is a hidden alias.)
 
 `frely doctor` is the single diagnostic entry point and never restarts the service. `Connected` means the matching account/device process has received a WebSocket heartbeat within 75 seconds and the MCP authorization and workspace match the running relay. Neither mode completes client OAuth authorization or executes a tool call through the client. `frely doctor --mcp` is the recommended way to check the protected credential and server state.
 
@@ -220,7 +220,7 @@ The public MCP URL is the canonical resource returned by Relay, `https://mcp.fre
 frely login [--relay <https-url>] [--no-browser]
 frely logout
 frely doctor [-v] [--json]
-frely upgrade
+frely update
 frely mcp url [--workspace <path>] [--days 1..365] [--json]
 frely mcp workspace list [--json]
 frely mcp workspace add|remove <path>

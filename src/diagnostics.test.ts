@@ -132,7 +132,7 @@ test("doctor exposes version checks as informational when an update is available
   for (const state of ["available", "unavailable"] as const) {
     const f = fixture();
     f.dependencies.inspectUpgrade = async () => ({ currentVersion: "0.6.2", state,
-      message: state === "available" ? "0.6.2 → 0.7.0. Run frely upgrade." : "Version lookup unavailable.",
+      message: state === "available" ? "0.6.2 → 0.7.0. Run frely update." : "Version lookup unavailable.",
       installation: { method: "npm", entry: "/test/npm/frely", platform: process.platform } });
     const result = await doctor({}, f.dependencies);
     assert.equal(result.ok, true);

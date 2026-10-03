@@ -167,10 +167,10 @@ frely provider list
 ```sh
 frely doctor      # 当前账号、安装路径、发行形态、最新稳定版、MCP/服务状态
 frely doctor -v   # 另加配置路径、运行时细节、授权到期、最近心跳、脱敏错误
-frely upgrade     # 原地升级当前正在运行的安装
+frely update     # 原地升级当前正在运行的安装
 ```
 
-`frely upgrade` 永不换安装器、不改 PATH、不降级更新版本。standalone 下载会先校验 SHA-256 并做启动测试再替换可执行文件；npm/Bun 安装保持原全局目录。匹配的、正在运行的 Device Relay 服务会被暂停维护、重启并在安装后检查；凭证、设备身份、MCP URL、工作区与授权到期均保留。Windows 上 `upgrade` 打印检测到安装方式对应的 PowerShell 命令，请在本地终端执行。
+`frely update` 永不换安装器、不改 PATH、不降级更新版本。standalone 下载会先校验 SHA-256 并做启动测试再替换可执行文件；npm/Bun 安装保持原全局目录。匹配的、正在运行的 Device Relay 服务会被暂停维护、重启并在安装后检查；凭证、设备身份、MCP URL、工作区与授权到期均保留。Windows 上 `update` 打印检测到安装方式对应的 PowerShell 命令，请在本地终端执行。（`frely upgrade` 是其隐藏别名。）
 
 `frely doctor` 是唯一诊断入口，永不重启服务。“Connected” 表示匹配的账号/设备进程在 75 秒内收到 WebSocket 心跳，且 MCP 授权与工作区与运行中的 relay 匹配。两种模式都不代替客户端完成 OAuth 授权，也不代替执行工具调用。`frely doctor --mcp` 是检查受保护凭证和服务端授权状态的推荐方式。
 
@@ -210,7 +210,7 @@ MCP 密钥使用 AES-256-GCM 文件，主密钥存 macOS Keychain、Windows 凭�
 frely login [--relay <https-url>] [--no-browser]
 frely logout
 frely doctor [-v] [--json]
-frely upgrade
+frely update
 frely mcp url [--workspace <path>] [--days 1..365] [--json]
 frely mcp workspace list [--json]
 frely mcp workspace add|remove <path>
