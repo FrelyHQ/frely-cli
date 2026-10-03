@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
+import { dirname, join, posix, resolve, win32 } from "node:path";
 import { assertManagedSkillPath, managedSkillRoot, type SkillHost, type SkillScope } from "./managed.js";
 
 export const CLOUD_SKILL_ID = /^cloud_skill_[0-9a-f]{24}$/u;
@@ -128,9 +128,10 @@ function parseContent(value: Record<string, unknown>, skillId: string): { manife
   };
 }
 
+/** Item paths are canonical forward-slash relative paths on every platform; `join` maps them to the OS. */
 function safeRelativePath(path: string): string {
-  const normalized = normalize(path);
-  if (!path || path.includes("\0") || path.includes("\\") || isAbsolute(path) || normalized.startsWith("..") || normalized.split(sep).some((part) => part === ".." || part === "" || part === ".frely-managed.json")) {
+  const normalized = posix.normalize(path);
+  if (!path || path.includes("\0") || path.includes("\\") || posix.isAbsolute(path) || win32.isAbsolute(path) || normalized.split("/").some((part) => part === ".." || part === "" || part === "." || part.includes(":") || part === ".frely-managed.json")) {
     throw new CloudItemError("item_invalid", "Frely returned an unsafe file path.");
   }
   return normalized;

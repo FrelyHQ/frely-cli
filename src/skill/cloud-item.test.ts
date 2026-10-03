@@ -50,6 +50,7 @@ test("refuses unsafe paths, unmanaged folders and edited files", async () => {
   const home = await realpath(await mkdtemp(join(tmpdir(), "frely-item-")));
   try {
     await assert.rejects(installCloudItem({ skillId, call: caller({ paths: ["../escape.md"] }), home }), (error: unknown) => error instanceof CloudItemError && error.code === "item_invalid");
+    await assert.rejects(installCloudItem({ skillId, call: caller({ paths: ["C:/escape.md"] }), home }), (error: unknown) => error instanceof CloudItemError && error.code === "item_invalid");
     await assert.rejects(installCloudItem({ skillId: "../x", call: caller(), home }), (error: unknown) => error instanceof CloudItemError && error.code === "input_invalid");
     const result = await installCloudItem({ skillId, call: caller(), home });
     await writeFile(join(result.path, "SKILL.md"), "edited");
