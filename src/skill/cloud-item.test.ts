@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -24,7 +24,7 @@ function caller(options: { kind?: "prompt" | "skill"; premium?: "ok" | "pass" | 
 }
 
 test("installs a Skill with its paid part into the host Skill folder without execute permission", async () => {
-  const home = await mkdtemp(join(tmpdir(), "frely-item-"));
+  const home = await realpath(await mkdtemp(join(tmpdir(), "frely-item-")));
   try {
     const result = await installCloudItem({ skillId, call: caller({ premium: "ok" }), host: "claude-code", scope: "global", home });
     assert.equal(result.path, join(home, ".claude", "skills", "frely-review-01234567"));
@@ -38,7 +38,7 @@ test("installs a Skill with its paid part into the host Skill folder without exe
 });
 
 test("installs the free part of a Prompt and reports a missing pass", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "frely-item-"));
+  const cwd = await realpath(await mkdtemp(join(tmpdir(), "frely-item-")));
   try {
     const result = await installCloudItem({ skillId, call: caller({ kind: "prompt", premium: "pass" }), cwd });
     assert.equal(result.premium, "pass_required");
@@ -47,7 +47,7 @@ test("installs the free part of a Prompt and reports a missing pass", async () =
 });
 
 test("refuses unsafe paths, unmanaged folders and edited files", async () => {
-  const home = await mkdtemp(join(tmpdir(), "frely-item-"));
+  const home = await realpath(await mkdtemp(join(tmpdir(), "frely-item-")));
   try {
     await assert.rejects(installCloudItem({ skillId, call: caller({ paths: ["../escape.md"] }), home }), (error: unknown) => error instanceof CloudItemError && error.code === "item_invalid");
     await assert.rejects(installCloudItem({ skillId: "../x", call: caller(), home }), (error: unknown) => error instanceof CloudItemError && error.code === "input_invalid");
