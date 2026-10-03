@@ -22,6 +22,7 @@ import { RelayMcpSession } from "../runtime/relay-mcp.js";
 import { executeAgentRequest, createAgentCallBridge } from "../runtime/relay-agent.js";
 import type { AgentService } from "../agent/agent-service.js";
 import type { RelaySession } from "../runtime/relay-session.js";
+import { createComputerToolset } from "../computer/index.js";
 import { openLocalProviderRequest, readLocalProviderBody } from "../provider/local.js";
 
 export interface RelayServeOptions {
@@ -96,6 +97,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
             session = await RelayMcpSession.create(options.workspace, {
               assertAuthorized: () => guard.assert(), signal: guard.controller.signal, log, ...(maintenance ? { maintenance } : {}),
               ...(options.agent ? { callAgent: createAgentCallBridge(options.agent, { workspace: options.workspace }) } : {}),
+              computer: createComputerToolset(),
             });
             const activeSession = session;
             guard.controller.signal.addEventListener("abort", () => { void activeSession.close(); }, { once: true });

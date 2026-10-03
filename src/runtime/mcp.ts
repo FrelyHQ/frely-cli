@@ -8,6 +8,7 @@ import { safeEnv, Workspace } from "./workspace.js";
 import { VERSION } from "../version.js";
 import { ensureWorkspaceRegistered, listWorkspaces } from "./workspace-registry.js";
 import { resolveWorkspace, resolveWorkspacePair } from "./workspace-router.js";
+import { COMPUTER_TOOL_PREFIX, COMPUTER_TOOLSET_ID, type ComputerToolset } from "../computer/toolset.js";
 
 interface ToolFlags {
   readOnly: boolean;
@@ -25,6 +26,8 @@ export interface McpRuntimeOptions {
   getToolsets?: () => string[];
   /** Bridge for agent_* tools (frely-app toolset). Without it agent tools stay hidden. */
   callAgent?: (op: string, args: Record<string, unknown>) => Promise<unknown>;
+  /** Desktop control (computer_* tools). Exposed only when the `computer` toolset is enabled on the authorization and locally on this device. */
+  computer?: ComputerToolset;
 }
 
 /** agent_* MCP tools exposed when the frely-app toolset is enabled (plan §5). */
@@ -80,6 +83,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
       await Promise.allSettled([...activeCalls]);
     }
     await processes.close();
+    await options.computer?.close().catch(() => undefined);
     unregister?.();
   })();
   const stop = () => {
@@ -100,6 +104,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
   server.onclose = () => { options.signal?.removeEventListener("abort", stop); stop(); };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
+    ...((enabledToolsets(options).includes(COMPUTER_TOOLSET_ID) && options.computer) ? await options.computer.listTools().catch(() => []) : []),
     ...((enabledToolsets(options).includes("frely-app") && options.callAgent)
       ? AGENT_TOOLS.map((entry) => tool(entry.op, entry.description, entry.properties, { readOnly: entry.op === "agent_get_task" || entry.op === "agent_get_events" || entry.op === "agent_list_tasks" }))
       : []),
@@ -141,6 +146,13 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
     const name = request.params.name;
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
     try {
+      if (name.startsWith(COMPUTER_TOOL_PREFIX)) {
+        if (!enabledToolsets(options).includes(COMPUTER_TOOLSET_ID) || !options.computer) {
+          throw new Error("Computer use is not enabled for this MCP permission. Enable it on the Frely connections page.");
+        }
+        const result = await options.computer.call(name, args, AbortSignal.any([lifecycle.signal, extra.signal]));
+        return { content: result.content, ...(result.isError ? { isError: true } : {}) } as { content: { type: "text"; text: string }[]; isError?: boolean };
+      }
       if (name.startsWith("agent_")) {
         if (!enabledToolsets(options).includes("frely-app") || !options.callAgent) {
           throw new Error("Agent tools are not enabled for this MCP permission. Enable Frely app tools on the Frely connections page.");
