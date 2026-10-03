@@ -150,6 +150,10 @@ frely provider share openai-compatible \
 
 该命令创建服务端管理的 `openai-compatible` 个人 Provider，把本地端点存入仅属主可读的 CLI 状态，启动 Device Relay 服务，用设备 Ed25519 key 签署 Provider 凭证，配置 CPA 并启用声明的模型。现有 Frely Access Point 与 API-key 流程即可消费该 Provider。
 
+### 用本地模型作为自己 Agent 的底座（Creator）
+
+没有空闲的个人 Provider 名额，或加上 `--creator` 时，`frely provider share` 会创建 Creator Provider，计入 Creator 套餐名额（Creator 3 个，Creator Plus 100 个）。它启用的模型会出现在 Frely 创建 Agent 的模型选择里。Provider 本身不对外售卖：买家调用的是你的 Agent，由你的模型驱动。Agent 被使用期间本机需保持在线，并且本地运行时的响应需包含 `usage`。
+
 Provider 检查：
 
 ```sh
@@ -218,7 +222,7 @@ frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-
 frely agent run <distribution-id> (--input <text>|--input-stdin) [--json]
 frely agent status (<distribution-id>|--api-key-stdin [--relay <url>]) [--json]
 frely agent remove <distribution-id> [--json]
-frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]
+frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id> | --creator] [--name <name>]
 frely provider list [--json]
 frely cloud list|describe|call
 ```

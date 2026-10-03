@@ -146,9 +146,13 @@ frely provider share openai-compatible \
   --name "Local GPU"
 ```
 
-Requirements: Frely login, one empty active personal Provider slot, loopback HTTP, OpenAI-compatible `/v1` (default Ollama endpoint `http://127.0.0.1:11434/v1`). Model names cannot contain whitespace or `/`.
+Requirements: Frely login, one empty active personal Provider slot (or a Creator plan, see below), loopback HTTP, OpenAI-compatible `/v1` (default Ollama endpoint `http://127.0.0.1:11434/v1`). Model names cannot contain whitespace or `/`.
 
 The command creates a server-managed `openai-compatible` personal Provider, stores the local endpoint in owner-only CLI state, starts the Device Relay service, signs a Provider credential with the device Ed25519 key, configures CPA, and enables the declared models. Existing Frely Access Point and API-key flows consume the Provider.
+
+### Use a local model as the base of your own Agent (Creator)
+
+With no empty personal Provider slot, or with `--creator`, `frely provider share` creates a Creator Provider instead, counted against your Creator plan (Creator 3, Creator Plus 100). Its enabled models appear in Frely when you create an Agent. You do not sell the Provider: buyers call your Agent, which runs on your model. Keep this device online while the Agent is used, and make sure the local runtime returns `usage` in its responses.
 
 Provider inspection:
 
@@ -218,7 +222,7 @@ frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-
 frely agent run <distribution-id> (--input <text>|--input-stdin) [--json]
 frely agent status (<distribution-id>|--api-key-stdin [--relay <url>]) [--json]
 frely agent remove <distribution-id> [--json]
-frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]
+frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id> | --creator] [--name <name>]
 frely provider list [--json]
 frely cloud list|describe|call
 ```
