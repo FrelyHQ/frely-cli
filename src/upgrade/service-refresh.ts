@@ -93,7 +93,7 @@ export class ServiceRefresh {
         }
         return;
       }
-      // An explicit frely upgrade may already own maintenance. Never resume another owner's gate.
+      // An explicit frely update may already own maintenance. Never resume another owner's gate.
       try { gate.pause(); paused = true; } catch { return; }
       if (!await probe.verify(candidate) || signal.aborted || !gate.idle) return;
       diagnostic(log, "relay.upgrade_restart");

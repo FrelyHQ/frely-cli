@@ -4,7 +4,7 @@ Status: implemented and verified on macOS 2026-09-17. Approved command simplific
 
 ## User contract
 
-- `frely update` is the only upgrade command. No check, version, force, channel or JSON switches. (`frely upgrade` is a hidden alias.)
+- `frely update` is the only upgrade command. No check, version, force, channel or JSON switches.
 - `frely doctor` checks the installed version, installation source and latest stable release. `doctor --json` provides structured diagnostics. Release lookup has a deadline; an unavailable release source is informational and does not break offline diagnostics.
 - Update the installation being executed, using its original distribution and prefix. Do not migrate npm, Bun or standalone installations, change PATH, edit project dependencies or repair a package manager's global lockfile.
 - macOS/Linux perform supported upgrades. Windows prints an installation-specific PowerShell command; no replacement helper, scheduled upgrade task or new resident updater.

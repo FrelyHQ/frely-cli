@@ -121,7 +121,7 @@ export async function upgrade(write: (message: string) => void, dependencies: Up
   const release = await d.latestRelease(installation);
   if (compareVersions(release.version, VERSION) <= 0) return { state: "current", message: `Frely ${VERSION} is up to date.` };
   const service = await d.serviceStatus();
-  if (installation.platform === "win32") return { state: "manual", message: `Update ${VERSION} → ${release.version}. Finish any running Frely tasks, then run this command in a local PowerShell terminal:\n\n${manualUpgradeCommand(installation, release.version, service.active)}\n\nAfter installation, run frely doctor. No files or services were changed by frely upgrade.` };
+  if (installation.platform === "win32") return { state: "manual", message: `Update ${VERSION} → ${release.version}. Finish any running Frely tasks, then run this command in a local PowerShell terminal:\n\n${manualUpgradeCommand(installation, release.version, service.active)}\n\nAfter installation, run frely doctor. No files or services were changed by frely update.` };
   if (!["darwin", "linux"].includes(installation.platform)) throw new Error("This platform requires a manual update.");
   if (service.active) {
     const command = await d.serviceCommand();
