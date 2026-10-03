@@ -10,6 +10,7 @@ import type { OAuthClientInformationMixed, OAuthTokens } from "@modelcontextprot
 import { credentialStore } from "./credential-store.js";
 import { inspectAuth, normalizeRelayUrl, openVerificationUrl } from "./auth.js";
 import { VERSION } from "./version.js";
+import { CloudToolError } from "./skill/cloud-item.js";
 
 const SERVICE = "frely-cli-cloud-v1";
 /** Names this installation on the web console ("Frely CLI Cloud (host)"); the "Frely CLI" prefix selects per-device permissions on the server. */
@@ -250,5 +251,28 @@ export async function runCloud(args: readonly string[]): Promise<{ value?: unkno
     const hint = permissionHint(result);
     if (hint) process.stderr.write(hint + "\n");
     return { value: result, failed: result.isError === true };
+  } finally { await session.close(); }
+}
+
+/**
+ * Call one Cloud tool for another command (for example skill install). The
+ * result is the tool's JSON; a failed call throws CloudToolError with the
+ * server's error code. Writes are never retried.
+ */
+export async function callCloudTool(name: string, input: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const session = await connectCloud();
+  try {
+    const result = await session.client.callTool({ name, arguments: input }, undefined, { timeout: 180000 });
+    const hint = permissionHint(result);
+    if (hint) process.stderr.write(hint + "\n");
+    const text = Array.isArray(result.content) ? (result.content as Array<{ type?: unknown; text?: unknown }>).find(part => part.type === "text")?.text : undefined;
+    if (result.isError === true) {
+      let code = "operation_failed";
+      try { const parsed = (JSON.parse(String(text)) as { error?: { code?: unknown } }).error?.code; if (typeof parsed === "string") code = parsed; } catch { /* Keep the generic code. */ }
+      throw new CloudToolError(code);
+    }
+    const value: unknown = result.structuredContent ?? (typeof text === "string" ? JSON.parse(text) : null);
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new CloudToolError("invalid_operation_output");
+    return value as Record<string, unknown>;
   } finally { await session.close(); }
 }

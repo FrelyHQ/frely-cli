@@ -128,6 +128,17 @@ printf '%s' 'Your complete task' | \
 
 `frely agent status <distribution-id>` shows the installed Skill and, for API-key installs, the Key's budget. `frely agent remove <distribution-id>` removes the Skill and its saved key.
 
+### Install marketplace Prompts and Skills, connect remote MCPs
+
+```sh
+frely item install <item-id> --host claude-code
+frely mcp connect <remote-mcp-id> --host claude-code
+```
+
+`frely item install` downloads a Prompt or Skill through Frely Cloud (the first call opens a browser for Cloud authorization). A paid part is installed only when your account holds a pass; otherwise the command prints how to buy one. Skills go to the host's Skill folder, Prompts to `--dir` (default: current directory), and scripts are saved without execute permission. Frely never overwrites a folder it did not install or a file you edited.
+
+`frely mcp connect` prints the MCP URL and the client command or config. The API key is referenced as `$FRELY_API_KEY` and is never written to config files.
+
 ## Local model sharing
 
 Publish a loopback OpenAI-compatible runtime as a Frely personal Provider. Ollama is the default driver:
@@ -222,6 +233,8 @@ frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-
 frely agent run <distribution-id> (--input <text>|--input-stdin) [--json]
 frely agent status (<distribution-id>|--api-key-stdin [--relay <url>]) [--json]
 frely agent remove <distribution-id> [--json]
+frely item install <item-id> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--json]
+frely mcp connect <remote-mcp-id> [--host claude-code|codex|generic] [--gateway <url>] [--json]
 frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id> | --creator] [--name <name>]
 frely provider list [--json]
 frely cloud list|describe|call
