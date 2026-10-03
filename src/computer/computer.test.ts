@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assertAppAllowed, isBlockedApp, redactBlockedAppLines } from "./guard.js";
@@ -12,6 +14,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createComputerMcpServer } from "./server.js";
 import { runComputerCommand } from "./command.js";
+import { installOcuRuntime, OcuRuntimeError } from "./runtime.js";
 import { loadManualEntries } from "../runtime/local-mcp.js";
 
 test("blocklist covers terminals, password managers, OS prompts, settings and Frely, by name and bundle id", () => {
@@ -149,7 +152,10 @@ test("the MCP server lists the reviewed tools and passes image blocks through in
 test("enable registers the local MCP entry, disable removes it, status reports both", async () => {
   const home = await mkdtemp(join(tmpdir(), "frely-computer-cmd-"));
   const previous = process.env.XDG_CONFIG_HOME;
+  const previousBin = process.env.FRELY_COMPUTER_BIN;
   process.env.XDG_CONFIG_HOME = home;
+  process.env.FRELY_COMPUTER_BIN = join(home, "ocu-stub");
+  await writeFile(process.env.FRELY_COMPUTER_BIN, "stub");
   try {
     assert.match(await runComputerCommand(["status"]), /Computer use: off/);
     assert.match(await runComputerCommand(["enable"]), /local MCP "computer"/);
@@ -165,6 +171,51 @@ test("enable registers the local MCP entry, disable removes it, status reports b
     assert.match(await runComputerCommand(["disable"]), /already off/);
   } finally {
     if (previous === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = previous;
+    if (previousBin === undefined) delete process.env.FRELY_COMPUTER_BIN; else process.env.FRELY_COMPUTER_BIN = previousBin;
     await rm(home, { recursive: true, force: true });
   }
+});
+
+async function runtimeFixture(platform: NodeJS.Platform, arch: string) {
+  const root = await mkdtemp(join(tmpdir(), "frely-computer-rt-"));
+  const pkg = join(root, "package", "dist");
+  const cpu = arch === "arm64" ? "arm64" : "amd64";
+  if (platform === "darwin") { await mkdir(join(pkg, "Open Computer Use.app", "Contents", "MacOS"), { recursive: true }); await writeFile(join(pkg, "Open Computer Use.app", "Contents", "MacOS", "OpenComputerUse"), "mac"); }
+  else if (platform === "win32") { await mkdir(join(pkg, "windows", cpu), { recursive: true }); await writeFile(join(pkg, "windows", cpu, "open-computer-use.exe"), "win"); }
+  else { await mkdir(join(pkg, "linux", cpu), { recursive: true }); await writeFile(join(pkg, "linux", cpu, "open-computer-use"), "linux"); }
+  await mkdir(join(pkg, "other"), { recursive: true }); await writeFile(join(pkg, "other", "x"), "x");
+  execFileSync("tar", ["-czf", join(root, "pkg.tgz"), "-C", root, "package"]);
+  const bytes = await readFile(join(root, "pkg.tgz"));
+  return { root, bytes, integrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}` };
+}
+
+test("runtime install verifies the pinned checksum and installs only this platform's binary", async () => {
+  for (const [platform, arch, relative, content] of [["linux", "x64", "open-computer-use", "linux"], ["win32", "arm64", "open-computer-use.exe", "win"], ["darwin", "arm64", join("Open Computer Use.app", "Contents", "MacOS", "OpenComputerUse"), "mac"]] as const) {
+    const fixture = await runtimeFixture(platform, arch);
+    const home = await mkdtemp(join(tmpdir(), "frely-computer-bin-"));
+    try {
+      const binaryPath = join(home, "bin", "0.0.0", relative);
+      const fetchImpl = (async () => new Response(fixture.bytes)) as typeof fetch;
+      const installed = await installOcuRuntime({ fetchImpl, url: "http://fixture/pkg.tgz", integrity: fixture.integrity, platform, arch, binaryPath });
+      assert.equal(installed, binaryPath);
+      assert.equal(await readFile(binaryPath, "utf8"), content);
+      await assert.rejects(access(join(home, "bin", "0.0.0", "other")));
+      if (platform === "linux") assert.notEqual((await stat(binaryPath)).mode & 0o111, 0);
+      await installOcuRuntime({ fetchImpl, url: "http://fixture/pkg.tgz", integrity: fixture.integrity, platform, arch, binaryPath });
+    } finally { await rm(home, { recursive: true, force: true }); await rm(fixture.root, { recursive: true, force: true }); }
+  }
+});
+
+test("runtime install refuses a wrong checksum, a failed download and unsupported platforms", async () => {
+  const fixture = await runtimeFixture("linux", "x64");
+  const home = await mkdtemp(join(tmpdir(), "frely-computer-bin-"));
+  const binaryPath = join(home, "bin", "0.0.0", "open-computer-use");
+  try {
+    const good = (async () => new Response(fixture.bytes)) as typeof fetch;
+    await assert.rejects(installOcuRuntime({ fetchImpl: good, url: "http://fixture/pkg.tgz", integrity: "sha512-AAAA", platform: "linux", arch: "x64", binaryPath }), (error: unknown) => error instanceof OcuRuntimeError && error.code === "integrity_mismatch");
+    await assert.rejects(access(binaryPath));
+    await assert.rejects(installOcuRuntime({ fetchImpl: (async () => new Response("no", { status: 503 })) as typeof fetch, url: "http://fixture/pkg.tgz", integrity: fixture.integrity, platform: "linux", arch: "x64", binaryPath }), (error: unknown) => error instanceof OcuRuntimeError && error.code === "download_failed");
+    await assert.rejects(installOcuRuntime({ fetchImpl: good, url: "http://fixture/pkg.tgz", integrity: fixture.integrity, platform: "freebsd", arch: "x64", binaryPath }), (error: unknown) => error instanceof OcuRuntimeError && error.code === "unsupported_platform");
+    await assert.rejects(installOcuRuntime({ url: "http://example.invalid/pkg.tgz", platform: "linux", arch: "x64", binaryPath }), (error: unknown) => error instanceof OcuRuntimeError && error.code === "download_failed");
+  } finally { await rm(home, { recursive: true, force: true }); await rm(fixture.root, { recursive: true, force: true }); }
 });
