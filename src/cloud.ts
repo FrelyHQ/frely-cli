@@ -1,5 +1,6 @@
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 import { createServer, type Server as HttpServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -11,6 +12,31 @@ import { inspectAuth, normalizeRelayUrl, openVerificationUrl } from "./auth.js";
 import { VERSION } from "./version.js";
 
 const SERVICE = "frely-cli-cloud-v1";
+/** Names this installation on the web console ("Frely CLI Cloud (host)"); the "Frely CLI" prefix selects per-device permissions on the server. */
+export function cloudClientName(host = hostname()): string {
+  const safe = host.replace(/[^A-Za-z0-9._ -]/g, "").trim().slice(0, 40);
+  return safe ? `Frely CLI Cloud (${safe})` : "Frely CLI Cloud";
+}
+
+/** The server's `permission_required` tool failure as a one-line hint, or null for any other result. */
+export function permissionHint(result: object): string | null {
+  const { isError, content } = result as { isError?: unknown; content?: unknown };
+  if (isError !== true || !Array.isArray(content)) return null;
+  for (const part of content) {
+    const text = (part as { type?: unknown; text?: unknown }).type === "text" ? (part as { text?: unknown }).text : undefined;
+    if (typeof text !== "string") continue;
+    try {
+      const error = (JSON.parse(text) as { error?: { code?: unknown; need?: unknown; group?: unknown; url?: unknown } }).error;
+      if (error?.code !== "permission_required" || typeof error.url !== "string") continue;
+      const need = error.need === "write" ? "write access" : error.need === "sensitive" ? "sensitive read access" : "read access";
+      const url = new URL(error.url);
+      if (url.protocol !== "https:" && url.hostname !== "127.0.0.1" && url.hostname !== "localhost") continue;
+      return `This device needs ${need}${typeof error.group === "string" ? " to " + error.group : ""}. Grant it in your browser (passkey or authenticator code required): ${url.toString()}`;
+    } catch { /* Not a permission failure. */ }
+  }
+  return null;
+}
+
 const SCOPE = "openid profile offline_access cloud:read cloud:write cloud:execute cloud:publish";
 export const CLOUD_USAGE = `Frely Cloud — call your Frely application.
   frely cloud list [--group <name>]
@@ -20,6 +46,8 @@ export const CLOUD_USAGE = `Frely Cloud — call your Frely application.
 Results are JSON. The first command opens a browser for Cloud authorization;
 frely logout also revokes it. Cloud authorization is separate from device MCP.
 Calls may create resources or incur usage. Failed writes are never replayed automatically.
+A new device may only read non-sensitive data; for anything else the error links to the web
+console page where you grant it (passkey or authenticator code required).
 `;
 interface StoredCloud {
   version: 1;
@@ -104,7 +132,7 @@ async function connectCloud() {
   const save = () => credentialStore.setPassword(SERVICE, identity.key, JSON.stringify(stored));
   const provider: OAuthClientProvider = {
     redirectUrl: stored.redirectUrl,
-    clientMetadata: { client_name: "Frely CLI Cloud", redirect_uris: [stored.redirectUrl],
+    clientMetadata: { client_name: cloudClientName(), redirect_uris: [stored.redirectUrl],
       grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], token_endpoint_auth_method: "none", scope: SCOPE },
     state: () => state,
     clientInformation: () => stored.client,
@@ -219,6 +247,8 @@ export async function runCloud(args: readonly string[]): Promise<{ value?: unkno
     if (!tool) throw new Error("Cloud tool is unavailable or not authorized: " + name);
     if (action === "describe") return { value: tool };
     const result = await session.client.callTool({ name: name!, arguments: input }, undefined, { timeout: 180000 });
+    const hint = permissionHint(result);
+    if (hint) process.stderr.write(hint + "\n");
     return { value: result, failed: result.isError === true };
   } finally { await session.close(); }
 }
