@@ -79,6 +79,10 @@ frely mcp url --workspace /path/to/project
 
 `frely mcp url` 是幂等的：启用后再次运行只打印同一个 URL，需要地址时直接再运行即可。提示走 stderr，stdout 保持单一 URL（或 `--json` 时一个 JSON 对象）；批准或安装失败则不打印 URL。要开放更多目录，用 `frely mcp workspace add <path>`；`frely mcp workspace list` 列出所有目录。只输入命令组而不带子命令（如 `frely mcp workspace`、`frely agent`）时，会显示该组下可用的子命令。
 
+### 这台电脑上的本机 MCP 服务
+
+远程 MCP 客户端也能访问只在这台电脑上运行的 MCP 服务，例如只监听 `127.0.0.1` 的浏览器插件 MCP。只监听本机回环地址的服务会被自动发现（`frely mcp local list`）；其他服务用 `frely mcp local add <name> --url http://127.0.0.1:<port>/mcp`，或 `frely mcp local add <name> [--env KEY=VALUE] -- <命令> [参数...]`（stdio）手动添加。每个服务默认对远程客户端关闭，需要在 Frely 连接页面逐个开启。开启后通过两个设备工具 `local_mcp_list` 和 `local_mcp_call` 访问，运行在命令沙箱之外，使用你的用户账号。只会连接回环地址；请求头和环境变量的值只保存在本机。
+
 把打印的完整 URL 添加到支持 OAuth 的远程 MCP 客户端，选择 OAuth 并完成授权。保持电脑在线。验证首次连接：让客户端只列出所选工作区的顶层名称，不写文件、不跑 shell 命令——返回与目录一致的结果即连通。
 
 调用端的 Claude Code：
@@ -206,6 +210,9 @@ frely upgrade
 frely mcp url [--workspace <path>] [--days 1..365] [--json]
 frely mcp workspace list [--json]
 frely mcp workspace add|remove <path>
+frely mcp local list [--json]
+frely mcp local add <name> (--url <address> | -- <command> [args...])
+frely mcp local remove <name>
 frely mcp stop|start|remove
 frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--api-key-stdin] [--json]
 frely agent run <distribution-id> (--input <text>|--input-stdin) [--json]

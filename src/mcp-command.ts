@@ -15,7 +15,7 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
   // Upgrade bridge: Windows upgrade commands printed by 0.7.x run `mcp service stop|start`.
   if (args[1] === "service" && args.length === 3 && (args[2] === "start" || args[2] === "stop")) return ["mcp", args[2]];
   if (!args[1]) return ["mcp", "help"];
-  if (!["url", "workspace", "stop", "start", "remove", "serve", "stdio"].includes(args[1])) throw new Error("Unknown device MCP command. Run frely mcp --help.");
+  if (!["url", "workspace", "local", "stop", "start", "remove", "serve", "stdio"].includes(args[1])) throw new Error("Unknown device MCP command. Run frely mcp --help.");
   const action = args[1]!;
   if (action === "stop" || action === "start" || action === "remove") {
     if (args.length > 2) throw new Error("Unsupported MCP option. Run frely mcp --help.");
@@ -32,6 +32,18 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
     if (subaction !== "add" && subaction !== "remove") throw new Error("Unknown workspace command. Run frely mcp workspace.");
     if (!args[3]) throw new Error(`frely mcp workspace ${subaction} requires a path argument.`);
     if (args.length > 4) throw new Error(`Unsupported workspace ${subaction} option. Run frely mcp workspace.`);
+    return args;
+  }
+  if (action === "local") {
+    // Arguments after `--` belong to the local server's own command line and are not validated here.
+    const subaction = args[2];
+    if (subaction === undefined) return args;
+    if (subaction === "list") {
+      if (args.length > 4 || (args[3] !== undefined && args[3] !== "--json")) throw new Error("Unsupported local list option. Run frely mcp local.");
+      return args;
+    }
+    if (subaction !== "add" && subaction !== "remove") throw new Error("Unknown local MCP command. Run frely mcp local.");
+    if (!args[3]) throw new Error(`frely mcp local ${subaction} requires a name argument.`);
     return args;
   }
   const valueOptions: Record<string, readonly string[]> = {

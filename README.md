@@ -79,6 +79,10 @@ frely mcp url --workspace /path/to/project
 
 `frely mcp url` is idempotent: once enabled it only prints the same URL, so run it again whenever you need the address. Prompts go to stderr, so stdout remains a single URL or, with `--json`, a JSON object. No URL is printed if approval or service installation fails. To expose more directories, use `frely mcp workspace add <path>`; `frely mcp workspace list` lists them. A command group run without a subcommand (for example `frely mcp workspace` or `frely agent`) prints the subcommands under it.
 
+### Local MCP servers on this computer
+
+Remote MCP clients can also reach MCP servers that only run on this computer, such as a browser-extension server listening on `127.0.0.1`. Servers listening only on loopback are found automatically (`frely mcp local list`); add others with `frely mcp local add <name> --url http://127.0.0.1:<port>/mcp` or `frely mcp local add <name> [--env KEY=VALUE] -- <command> [args...]` (stdio). Every server stays off for remote clients until you turn it on, one by one, on the Frely connections page. Enabled servers are then reachable through two device tools, `local_mcp_list` and `local_mcp_call`, and run outside the command sandbox with your user account. Only loopback addresses are ever contacted; headers and environment values stay on this computer.
+
 Add the exact printed URL to a remote MCP client with OAuth support, choose OAuth and complete authorization. Keep the computer online. Verify the first connection by asking the client to list the top-level names in your selected workspace, without writing files or running shell commands — a returned result that matches the folder confirms connectivity.
 
 For Claude Code on the calling computer:
@@ -206,6 +210,9 @@ frely upgrade
 frely mcp url [--workspace <path>] [--days 1..365] [--json]
 frely mcp workspace list [--json]
 frely mcp workspace add|remove <path>
+frely mcp local list [--json]
+frely mcp local add <name> (--url <address> | -- <command> [args...])
+frely mcp local remove <name>
 frely mcp stop|start|remove
 frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--api-key-stdin] [--json]
 frely agent run <distribution-id> (--input <text>|--input-stdin) [--json]
