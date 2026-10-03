@@ -200,7 +200,7 @@ test("runtime install verifies the pinned checksum and installs only this platfo
       assert.equal(installed, binaryPath);
       assert.equal(await readFile(binaryPath, "utf8"), content);
       await assert.rejects(access(join(home, "bin", "0.0.0", "other")));
-      if (platform === "linux") assert.notEqual((await stat(binaryPath)).mode & 0o111, 0);
+      if (platform === "linux" && process.platform !== "win32") assert.notEqual((await stat(binaryPath)).mode & 0o111, 0);
       await installOcuRuntime({ fetchImpl, url: "http://fixture/pkg.tgz", integrity: fixture.integrity, platform, arch, binaryPath });
     } finally { await rm(home, { recursive: true, force: true }); await rm(fixture.root, { recursive: true, force: true }); }
   }
