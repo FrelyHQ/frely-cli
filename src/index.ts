@@ -37,6 +37,8 @@ import { agentHelp, cliUsage, mcpUsage, subcommandUsage } from "./agent-help.js"
 import { ensureMcpAuthorization, normalizeMcpArgs } from "./mcp-command.js";
 import { getKeyBudget, KeyBudgetError, publicKeyBudgetError } from "./key-budget.js";
 import { runNetwork, publicNetworkError } from "./network.js";
+import { runComputerCommand } from "./computer/command.js";
+import { runComputerMcpServer } from "./computer/server.js";
 import { agentManifestUrl, installSkillAdapter, invokeInstalledAgent, publicSkillAccessError, removeSkillAdapter, skillAdapterStatus } from "./skill/access.js";
 import type { SkillHost, SkillScope } from "./skill/managed.js";
 
@@ -323,6 +325,12 @@ async function main(): Promise<void> {
     const value = { opsSocketPath: socketPath, running: probe.running, ...(probe.version ? { version: probe.version } : {}), ...(probe.pid ? { pid: probe.pid } : {}) };
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
     else stdout.write(`Ops socket: ${socketPath}\nStatus: ${probe.running ? "running" : "stopped (start with frely mcp serve)"}\n`);
+    return;
+  }
+
+  if (command === "computer") {
+    if (args[1] === "mcp") { await runComputerMcpServer(); return; }
+    stdout.write(await runComputerCommand(args.slice(1)));
     return;
   }
 

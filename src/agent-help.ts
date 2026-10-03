@@ -37,6 +37,10 @@ export const COMMANDS = [
   { id: "app.status", usage: "frely app status [--json]", auth: "local", effect: "read", purpose: "Show whether the Frely App is installed, its version, install path, running state and how it is managed." },
   { id: "app.update", usage: "frely app update [--json]", auth: "local", effect: "local-write", purpose: "Update the Frely App through Homebrew or by re-downloading the latest release." },
   { id: "app.uninstall", usage: "frely app uninstall", auth: "local", effect: "local-write", purpose: "Uninstall the Frely App. Tasks, credentials and worktrees stay with frely-cli." },
+  { id: "computer.enable", usage: "frely computer enable", auth: "local", effect: "local-write", purpose: "Register computer use (desktop control by a remote MCP client) as the local MCP \"computer\" on this device. Run it only on a device you are sitting at. It still has to be turned on for remote clients on the Frely connections page; registering alone never exposes it." },
+  { id: "computer.disable", usage: "frely computer disable", auth: "local", effect: "local-write", purpose: "Remove the local MCP \"computer\" so computer use stops working on this device at once, whatever the web page says." },
+  { id: "computer.status", usage: "frely computer status [--json]", auth: "local", effect: "read", purpose: "Show whether computer use is registered locally, the runtime version it needs and whether it is installed." },
+  { id: "computer.mcp", usage: "frely computer mcp", auth: "local", effect: "local-execution", purpose: "Stdio MCP server for computer use; local MCP forwarding starts it. Not needed for normal use." },
   { id: "network", usage: "frely network setup|status|find|use|logout [--json]", auth: "network", effect: "subcommand-dependent", purpose: "Access Frely Network (preview) using its separate setup and credentials." },
 ] as const;
 
