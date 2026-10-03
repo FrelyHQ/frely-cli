@@ -22,6 +22,8 @@ export class RelayMcpSession implements RelaySession {
   private server: Awaited<ReturnType<typeof createMcpServer>> | undefined;
   /** Latest toolsets observed on an incoming mcp frame; absent (older relays) means workspace only. */
   private toolsets: string[] = ["workspace"];
+  /** Local MCP names enabled on the latest mcp frame. Unlike toolsets, an absent field means none, so revoking takes effect on the next request. */
+  private localMcps: string[] = [];
   private constructor(private readonly log?: DiagnosticLog) {}
 
   static async create(workspace: string, options: McpRuntimeOptions & { log?: DiagnosticLog } = {}): Promise<RelayMcpSession> {
@@ -29,6 +31,7 @@ export class RelayMcpSession implements RelaySession {
     const server = await createMcpServer(workspace, {
       ...options,
       getToolsets: options.getToolsets ?? (() => session.toolsets),
+      getLocalMcps: options.getLocalMcps ?? (() => session.localMcps),
       onToolError: (requestId, tool, error) => {
         const pending = session.pending.get(requestId);
         if (pending) diagnostic(options.log, "mcp.tool_failed", { requestId: pending.relayId, tool }, error);
@@ -40,8 +43,9 @@ export class RelayMcpSession implements RelaySession {
     return session;
   }
 
-  async execute(payload: unknown, relayId: string = randomUUID(), toolsets?: string[]): Promise<unknown> {
+  async execute(payload: unknown, relayId: string = randomUUID(), toolsets?: string[], localMcps?: string[]): Promise<unknown> {
     if (Array.isArray(toolsets) && toolsets.length > 0) this.toolsets = toolsets;
+    this.localMcps = Array.isArray(localMcps) ? localMcps : [];
     const context = { requestId: relayId, ...mcpDiagnosticContext(payload) };
     const started = performance.now();
     diagnostic(this.log, "mcp.request_started", context);

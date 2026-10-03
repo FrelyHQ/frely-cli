@@ -38,6 +38,9 @@ const SENSITIVE_READ_PATHS = [
   "~/.kube",
   "~/.config/gcloud",
   "~/.config/gh",
+  // Frely's own device credentials and local MCP list (which can hold headers and env values):
+  // a remote client running commands must not read them back.
+  "~/.config/frely",
   "~/.netrc",
   "~/.git-credentials",
   "~/.npmrc",

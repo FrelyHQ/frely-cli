@@ -8,6 +8,7 @@ import { safeEnv, Workspace } from "./workspace.js";
 import { VERSION } from "../version.js";
 import { ensureWorkspaceRegistered, listWorkspaces } from "./workspace-registry.js";
 import { resolveWorkspace, resolveWorkspacePair } from "./workspace-router.js";
+import type { LocalMcpHub } from "./local-mcp.js";
 
 interface ToolFlags {
   readOnly: boolean;
@@ -25,6 +26,10 @@ export interface McpRuntimeOptions {
   getToolsets?: () => string[];
   /** Bridge for agent_* tools (frely-app toolset). Without it agent tools stay hidden. */
   callAgent?: (op: string, args: Record<string, unknown>) => Promise<unknown>;
+  /** Device-local MCP servers (plan mcp/本机MCP转发-方案.md). Without a hub the local_mcp_* tools stay hidden. */
+  localMcp?: LocalMcpHub;
+  /** Names the owner enabled on the current MCP authorization; absent or empty hides the local_mcp_* tools. */
+  getLocalMcps?: () => string[];
 }
 
 /** agent_* MCP tools exposed when the frely-app toolset is enabled (plan §5). */
@@ -40,9 +45,19 @@ export const AGENT_TOOLS = [
   { op: "agent_cancel_task", description: "Cancel a task; the worktree is kept.", properties: { taskId: stringSchema("Task id") }, required: ["taskId"] },
 ] as const;
 
+function enabledLocalMcps(options: McpRuntimeOptions): string[] {
+  try { return options.localMcp ? options.getLocalMcps?.() ?? [] : []; } catch { return []; }
+}
+
 function enabledToolsets(options: McpRuntimeOptions): string[] {
   try { return options.getToolsets?.() ?? ["workspace"]; } catch { return ["workspace"]; }
 }
+
+/** Gateway tools for device-local MCP servers (plan F1): one pair, whatever number of servers or transports sit behind them. */
+export const LOCAL_MCP_TOOLS = [
+  tool("local_mcp_list", "List the MCP servers running on this device that the owner enabled. With `server`, list that server's tools and their input schemas.", { server: stringSchema("Server name from the list; omit to list servers") }, { readOnly: true }),
+  tool("local_mcp_call", "Call one tool of an enabled MCP server running on this device (for example a browser extension that only listens on 127.0.0.1). Use local_mcp_list with `server` first to see the tools and arguments.", { server: stringSchema("Server name"), tool: stringSchema("Tool name on that server"), arguments: { type: "object", description: "Arguments for the tool", additionalProperties: true }, timeoutMs: intSchema(60000, 100, 120000) }, { readOnly: false, destructive: true, idempotent: false }),
+];
 
 export async function createMcpServer(workspaceInput: string, options: McpRuntimeOptions = {}): Promise<Server> {
   // Ensure the primary workspace is registered
@@ -103,6 +118,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
     ...((enabledToolsets(options).includes("frely-app") && options.callAgent)
       ? AGENT_TOOLS.map((entry) => tool(entry.op, entry.description, entry.properties, { readOnly: entry.op === "agent_get_task" || entry.op === "agent_get_events" || entry.op === "agent_list_tasks" }))
       : []),
+    ...(enabledLocalMcps(options).length > 0 ? LOCAL_MCP_TOOLS : []),
     tool("workspace_info", "Return the active workspace root.", {}, { readOnly: true }),
     tool("list_directory", "List one workspace directory.", { path: stringSchema("Relative directory path", ".") }, { readOnly: true }),
     tool("stat_path", "Inspect one workspace file or directory.", { path: stringSchema("Relative path") }, { readOnly: true }),
@@ -147,6 +163,19 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
         }
         const result = await options.callAgent(name, args);
         return { content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result) }] };
+      }
+      if (name === "local_mcp_list" || name === "local_mcp_call") {
+        const enabled = enabledLocalMcps(options);
+        if (enabled.length === 0 || !options.localMcp) throw new Error("Local MCP access is not enabled for this device. Enable a local MCP on the Frely connections page.");
+        const signal = AbortSignal.any([lifecycle.signal, extra.signal]);
+        if (name === "local_mcp_list") {
+          const server = optionalTextArg(args, "server");
+          return { content: [{ type: "text" as const, text: JSON.stringify(await options.localMcp.list(enabled, server, signal)) }] };
+        }
+        const callArgs = args.arguments ?? {};
+        if (!callArgs || typeof callArgs !== "object" || Array.isArray(callArgs)) throw new Error("arguments must be an object.");
+        const result = await options.localMcp.call(enabled, textArg(args, "server"), textArg(args, "tool"), callArgs as Record<string, unknown>, { timeoutMs: intArg(args, "timeoutMs", 60000, 100, 120000), signal });
+        return result as { content: Array<{ type: "text"; text: string }>; isError?: boolean };
       }
       const result = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]));
       return { content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result) }] };

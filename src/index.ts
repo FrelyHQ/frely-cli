@@ -2,6 +2,7 @@
 import { upgrade } from "./upgrade/update.js";
 import { requireMcpAuthorization, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, generateMcpKey, parseMcpDays, MCP_DEFAULT_DAYS } from "./mcp-authorization.js";
 import { realpath } from "node:fs/promises";
+import { runLocalMcpCommand } from "./local-mcp-command.js";
 import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
 import { join, resolve } from "node:path";
@@ -24,6 +25,7 @@ import { loadAgentConfig, saveAgentConfig } from "./agent/agent-service.js";
 import { readAppInstall } from "./agent/app-install.js";
 import { appInstallStatus, installApp, openApp, uninstallApp, updateApp } from "./app-manager.js";
 import { detectSandboxBackend } from "./runtime/sandbox.js";
+import { LocalMcpHub } from "./runtime/local-mcp.js";
 import { provisionAgentKey } from "./agent/app-key.js";
 import { startAgentOpsServer } from "./agent/ops-server.js";
 import { runAgentOpsStdioBridge } from "./agent/ops-stdio.js";
@@ -391,28 +393,39 @@ async function main(): Promise<void> {
     const stop = () => controller.abort();
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
+    // Device-local MCP servers are only served with device MCP, never for a provider-only relay.
+    const localMcp = providerOnly ? undefined : new LocalMcpHub({ log: agentLog });
+    localMcp?.start();
     try {
       const capabilities = async () => {
         const install = await readAppInstall().then((value) => value, () => null);
         const config = await loadAgentConfig();
+        await localMcp?.ensureFresh(5 * 60_000).catch(() => undefined);
         return {
           app: { ...(install ? { installed: true, version: install.appVersion } : { installed: false }) },
           sandbox: detectSandboxBackend(),
           agentHost: true,
           remoteControl: config.remoteControlEnabled,
+          ...(localMcp ? { localMcp: localMcp.capabilities() } : {}),
         };
       };
       const ops = await startAgentOpsServer(agent, { workspace: workspace ?? process.cwd(), log: agentLog });
       process.stderr.write(`Agent ops socket: ${ops.path}\n`);
       try {
-        await serveDeviceRelay({ ...(workspace ? { workspace } : {}), agent, capabilities, managedService: Boolean(serviceConfigHome), restartForUpgrade: stop, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
+        await serveDeviceRelay({ ...(workspace ? { workspace } : {}), ...(localMcp ? { localMcp } : {}), agent, capabilities, managedService: Boolean(serviceConfigHome), restartForUpgrade: stop, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
       } finally {
         await ops.close().catch(() => undefined);
       }
     } finally {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
+      await localMcp?.close();
     }
+    return;
+  }
+  if (command === "mcp" && args[1] === "local") {
+    if (args[2] === undefined) { stdout.write(subcommandUsage("mcp.local")); return; }
+    await runLocalMcpCommand({ args, write: (text) => { stdout.write(text); } });
     return;
   }
   if (command === "mcp" && args[1] === "workspace") {
