@@ -10,6 +10,8 @@ export type DeviceRelayRequest = {
   authorizationId?: string;
   /** Enabled MCP toolsets on the authorization (relay server -> device). Absent means ["workspace"] (older relays). */
   toolsets?: string[];
+  /** Device-local MCP servers the owner enabled on the authorization (relay server -> device). Absent means none. */
+  localMcps?: string[];
   payload: unknown;
 };
 
@@ -93,9 +95,10 @@ export function validateDeviceRelayEnvelope(value: unknown): asserts value is De
   if (record.protocol !== DEVICE_RELAY_PROTOCOL || typeof record.type !== "string" || typeof record.id !== "string") throw new DeviceRelayProtocolError("frame_invalid");
   assertRequestId(record.id);
   if (record.type === "request") {
-    exactKeys(record, ["protocol", "type", "id", "method", "payload", ...(record.authorizationId !== undefined ? ["authorizationId"] : []), ...(record.toolsets !== undefined ? ["toolsets"] : [])]);
+    exactKeys(record, ["protocol", "type", "id", "method", "payload", ...(record.authorizationId !== undefined ? ["authorizationId"] : []), ...(record.toolsets !== undefined ? ["toolsets"] : []), ...(record.localMcps !== undefined ? ["localMcps"] : [])]);
     if (record.authorizationId !== undefined && (record.method !== "mcp" || typeof record.authorizationId !== "string" || !/^mca_[a-f0-9]{32}$/u.test(record.authorizationId))) throw new DeviceRelayProtocolError("frame_invalid");
     if (record.toolsets !== undefined && (record.method !== "mcp" || !isToolsetList(record.toolsets))) throw new DeviceRelayProtocolError("frame_invalid");
+    if (record.localMcps !== undefined && (record.method !== "mcp" || !isLocalMcpList(record.localMcps))) throw new DeviceRelayProtocolError("frame_invalid");
     if (record.method !== "mcp" && record.method !== "provider" && record.method !== "node" && record.method !== "agent") throw new DeviceRelayProtocolError("frame_invalid");
     return;
   }
@@ -142,6 +145,11 @@ export function validateDeviceRelayEnvelope(value: unknown): asserts value is De
     return;
   }
   throw new DeviceRelayProtocolError("frame_invalid");
+}
+
+function isLocalMcpList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length >= 1 && value.length <= 32 && new Set(value).size === value.length
+    && value.every((item) => typeof item === "string" && /^[a-z0-9][a-z0-9-]{0,31}$/u.test(item));
 }
 
 function isToolsetList(value: unknown): value is string[] {

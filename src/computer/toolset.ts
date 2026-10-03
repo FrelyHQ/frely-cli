@@ -3,9 +3,6 @@ import { downscalePng, pngSize } from "./image.js";
 import type { OcuBackend, OcuContent, OcuResult, OcuTool } from "./ocu.js";
 import { appendComputerAudit, type ComputerAuditEntry } from "./state.js";
 
-export const COMPUTER_TOOLSET_ID = "computer";
-export const COMPUTER_TOOL_PREFIX = "computer_";
-
 /** Only these open-computer-use tools are ever exposed; a future upstream tool stays hidden until reviewed. */
 const ALLOWED_TOOLS = new Set(["list_apps", "get_app_state", "click", "perform_secondary_action", "scroll", "drag", "type_text", "press_key", "set_value"]);
 const COORDINATE_ARGS: Record<string, string[]> = { click: ["x", "y"], drag: ["from_x", "from_y", "to_x", "to_y"] };
@@ -14,7 +11,7 @@ const MAX_RESULT_BYTES = 6 * 1024 * 1024;
 
 export interface ComputerToolsetOptions {
   backend: OcuBackend;
-  /** Local key of the two-key rule; checked on every list and call so `frely computer disable` takes effect at once. */
+  /** Local key of the two-key rule (the registered local MCP entry); checked on every list and call so `frely computer disable` takes effect at once. */
   isLocallyEnabled: () => Promise<boolean>;
   audit?: (entry: ComputerAuditEntry) => Promise<void>;
 }
@@ -41,14 +38,13 @@ export class ComputerToolset {
     const tools = await this.backend.listTools();
     return tools.filter((tool) => ALLOWED_TOOLS.has(tool.name)).map((tool) => ({
       ...tool,
-      name: `${COMPUTER_TOOL_PREFIX}${tool.name}`,
       description: `${(tool.description ?? "").replace(/\s*This tool is part of plugin `Computer Use`\./u, "")} Controls the user's real desktop on this device.`.trim(),
     }));
   }
 
   async call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<OcuResult> {
     const started = performance.now();
-    const tool = name.startsWith(COMPUTER_TOOL_PREFIX) ? name.slice(COMPUTER_TOOL_PREFIX.length) : "";
+    const tool = name;
     const app = typeof args.app === "string" ? args.app : undefined;
     const finish = (result: OcuResult, reason?: string): OcuResult => {
       void this.audit({ ts: new Date().toISOString(), tool, ...(app ? { app } : {}), ok: !result.isError, ms: Math.round(performance.now() - started), ...(reason ? { reason } : {}) });
@@ -58,7 +54,12 @@ export class ComputerToolset {
     if (!ALLOWED_TOOLS.has(tool)) return fail(`Unknown tool: ${name}`, "unknown_tool");
     if (!(await this.available())) return fail("Computer use is turned off on this device. Run `frely computer enable` on it first.", "locally_disabled");
     try {
-      if (tool !== "list_apps") assertAppAllowed(args.app);
+      if (tool !== "list_apps") {
+        try { assertAppAllowed(args.app); } catch (error) {
+          if (error instanceof ComputerBlockedError) throw error;
+          return fail(error instanceof Error ? error.message : "Invalid app.", "invalid_app");
+        }
+      }
       const sent = this.scaleCoordinates(tool, args);
       const result = await this.backend.callTool(tool, sent, signal);
       const shaped = tool === "list_apps" ? redactList(result) : this.shapeScreenshots(result, app);

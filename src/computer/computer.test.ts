@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assertAppAllowed, isBlockedApp, redactBlockedAppLines } from "./guard.js";
@@ -8,7 +8,11 @@ import { decodePngPixels, downscalePng, encodeRgbaPng } from "./image.js";
 import type { OcuBackend, OcuResult, OcuTool } from "./ocu.js";
 import { ComputerToolset } from "./toolset.js";
 import type { ComputerAuditEntry } from "./state.js";
-import { RelayMcpSession } from "../runtime/relay-mcp.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { createComputerMcpServer } from "./server.js";
+import { runComputerCommand } from "./command.js";
+import { loadManualEntries } from "../runtime/local-mcp.js";
 
 test("blocklist covers terminals, password managers, OS prompts, settings and Frely, by name and bundle id", () => {
   for (const app of ["Terminal", "com.apple.Terminal", "iTerm2", "com.googlecode.iterm2", "Windows Terminal", "powershell.exe", "gnome-terminal", "1Password", "com.1password.1password", "Bitwarden", "KeePassXC", "Keychain Access", "SecurityAgent", "consent.exe", "System Settings", "com.apple.systempreferences", "Frely", "com.frely.app", "  TERMINAL  "]) {
@@ -78,28 +82,28 @@ test("toolset exposes only the reviewed tools, prefixed, and only while locally 
   let enabled = false;
   const toolset = new ComputerToolset({ backend: fakeBackend(checker(100, 100)), isLocallyEnabled: async () => enabled, audit: async () => undefined });
   assert.deepEqual(await toolset.listTools(), []);
-  const refused = await toolset.call("computer_click", { app: "Safari", x: 1, y: 1 });
+  const refused = await toolset.call("click", { app: "Safari", x: 1, y: 1 });
   assert.equal(refused.isError, true);
   assert.match(refused.content[0]!.text!, /turned off/);
   enabled = true;
   const names = (await toolset.listTools()).map((tool) => tool.name);
   assert.equal(names.length, 9);
-  assert.ok(names.every((name) => name.startsWith("computer_")));
-  assert.ok(!names.includes("computer_run_shell"));
+  assert.ok(names.every((name) => name.startsWith("")));
+  assert.ok(!names.includes("run_shell"));
   assert.ok(!(await toolset.listTools())[0]!.description!.includes("plugin"));
-  assert.equal((await toolset.call("computer_run_shell", {})).isError, true);
+  assert.equal((await toolset.call("run_shell", {})).isError, true);
 });
 
 test("blocked apps never reach the backend; list is redacted; audit holds metadata only", async () => {
   const backend = fakeBackend(checker(100, 100));
   const audit: ComputerAuditEntry[] = [];
   const toolset = new ComputerToolset({ backend, isLocallyEnabled: async () => true, audit: async (entry) => { audit.push(entry); } });
-  const blocked = await toolset.call("computer_type_text", { app: "com.apple.Terminal", text: "rm -rf ~" });
+  const blocked = await toolset.call("type_text", { app: "com.apple.Terminal", text: "rm -rf ~" });
   assert.equal(blocked.isError, true);
   assert.equal(backend.calls.length, 0);
-  const list = await toolset.call("computer_list_apps", {});
+  const list = await toolset.call("list_apps", {});
   assert.equal(list.content[0]!.text, "Safari — com.apple.Safari");
-  await toolset.call("computer_type_text", { app: "Safari", text: "secret typed text" });
+  await toolset.call("type_text", { app: "Safari", text: "secret typed text" });
   assert.equal(audit.length, 3);
   assert.deepEqual(audit.map((entry) => entry.ok), [false, true, true]);
   assert.equal(audit[0]!.reason, "blocked");
@@ -109,37 +113,58 @@ test("blocked apps never reach the backend; list is redacted; audit holds metada
 test("model coordinates are mapped back to device pixels using the latest screenshot scale of that app", async () => {
   const backend = fakeBackend(checker(2560, 1600));
   const toolset = new ComputerToolset({ backend, isLocallyEnabled: async () => true, audit: async () => undefined });
-  const state = await toolset.call("computer_get_app_state", { app: "Safari" });
+  const state = await toolset.call("get_app_state", { app: "Safari" });
   const image = state.content.find((item) => item.type === "image")!;
   assert.deepEqual([decodePngPixels(Buffer.from(image.data!, "base64"))!.width], [1280]);
-  await toolset.call("computer_click", { app: "Safari", x: 100, y: 50 });
-  await toolset.call("computer_drag", { app: "Safari", from_x: 10, from_y: 20, to_x: 30, to_y: 40 });
-  await toolset.call("computer_click", { app: "Notes", x: 100, y: 50 });
+  await toolset.call("click", { app: "Safari", x: 100, y: 50 });
+  await toolset.call("drag", { app: "Safari", from_x: 10, from_y: 20, to_x: 30, to_y: 40 });
+  await toolset.call("click", { app: "Notes", x: 100, y: 50 });
   assert.deepEqual(backend.calls[1]!.args, { app: "Safari", x: 200, y: 100 });
   assert.deepEqual(backend.calls[2]!.args, { app: "Safari", from_x: 20, from_y: 40, to_x: 60, to_y: 80 });
   assert.deepEqual(backend.calls[3]!.args, { app: "Notes", x: 100, y: 50 });
 });
 
-test("through the relay MCP session: hidden without the toolset, image blocks pass through with it", async () => {
-  const workspace = await mkdtemp(join(tmpdir(), "frely-computer-"));
-  await writeFile(join(workspace, "a.txt"), "x");
+test("the MCP server lists the reviewed tools and passes image blocks through intact", async () => {
   const toolset = new ComputerToolset({ backend: fakeBackend(checker(2560, 1600)), isLocallyEnabled: async () => true, audit: async () => undefined });
-  const session = await RelayMcpSession.create(workspace, { computer: toolset });
+  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+  const server = createComputerMcpServer(toolset);
+  const client = new Client({ name: "t", version: "1" });
+  await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
   try {
-    await session.execute({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } });
-    await session.execute({ jsonrpc: "2.0", method: "notifications/initialized" });
-    const without = await session.execute({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }, "r2", ["workspace"]) as { result: { tools: { name: string }[] } };
-    assert.ok(!without.result.tools.some((tool) => tool.name.startsWith("computer_")));
-    const denied = await session.execute({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "computer_list_apps", arguments: {} } }, "r3", ["workspace"]) as { result: { isError?: boolean } };
-    assert.equal(denied.result.isError, true);
-    const withTools = await session.execute({ jsonrpc: "2.0", id: 4, method: "tools/list", params: {} }, "r4", ["workspace", "computer"]) as { result: { tools: { name: string }[] } };
-    assert.equal(withTools.result.tools.filter((tool) => tool.name.startsWith("computer_")).length, 9);
-    const called = await session.execute({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "computer_get_app_state", arguments: { app: "Safari" } } }, "r5", ["workspace", "computer"]) as { result: { content: { type: string; data?: string }[] } };
-    const image = called.result.content.find((item) => item.type === "image");
-    assert.ok(image?.data);
+    const { tools } = await client.listTools();
+    assert.equal(tools.length, 9);
+    assert.ok(!tools.some((tool) => tool.name === "run_shell"));
+    const blocked = await client.callTool({ name: "click", arguments: { app: "Terminal", x: 1, y: 1 } });
+    assert.equal(blocked.isError, true);
+    const called = await client.callTool({ name: "get_app_state", arguments: { app: "Safari" } });
+    const image = (called.content as { type: string; data?: string; mimeType?: string }[]).find((item) => item.type === "image");
+    assert.equal(image?.mimeType, "image/png");
+    assert.equal(decodePngPixels(Buffer.from(image!.data!, "base64"))!.width, 1280);
     assert.ok(Buffer.byteLength(JSON.stringify(called)) < 6 * 1024 * 1024);
   } finally {
-    await session.close();
-    await rm(workspace, { recursive: true, force: true });
+    await client.close();
+  }
+});
+
+test("enable registers the local MCP entry, disable removes it, status reports both", async () => {
+  const home = await mkdtemp(join(tmpdir(), "frely-computer-cmd-"));
+  const previous = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = home;
+  try {
+    assert.match(await runComputerCommand(["status"]), /Computer use: off/);
+    assert.match(await runComputerCommand(["enable"]), /local MCP "computer"/);
+    const entries = await loadManualEntries();
+    const entry = entries.find((item) => item.name === "computer");
+    assert.equal(entry?.transport, "stdio");
+    assert.deepEqual(entry && entry.transport === "stdio" ? entry.args.slice(-2) : [], ["computer", "mcp"]);
+    assert.equal(JSON.parse(await runComputerCommand(["status", "--json"])).enabled, true);
+    await runComputerCommand(["enable"]);
+    assert.equal((await loadManualEntries()).filter((item) => item.name === "computer").length, 1);
+    assert.match(await runComputerCommand(["disable"]), /turned off/);
+    assert.equal((await loadManualEntries()).some((item) => item.name === "computer"), false);
+    assert.match(await runComputerCommand(["disable"]), /already off/);
+  } finally {
+    if (previous === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = previous;
+    await rm(home, { recursive: true, force: true });
   }
 });

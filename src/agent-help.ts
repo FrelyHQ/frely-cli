@@ -10,6 +10,9 @@ export const COMMANDS = [
   { id: "mcp.workspace.list", usage: "frely mcp workspace list [--json]", auth: "mcp", effect: "read", purpose: "List workspace directories for this device; the primary is marked." },
   { id: "mcp.workspace.add", usage: "frely mcp workspace add <path>", auth: "mcp", effect: "local-write", purpose: "Add an additional workspace directory for this device." },
   { id: "mcp.workspace.remove", usage: "frely mcp workspace remove <path>", auth: "mcp", effect: "local-write", purpose: "Remove an additional workspace directory (the primary cannot be removed)." },
+  { id: "mcp.local.list", usage: "frely mcp local list [--json]", auth: "none", effect: "read", purpose: "List MCP servers on this device that remote clients could use: loopback HTTP servers found automatically plus ones added by hand. Every server is off for remote clients until the owner turns it on in the web console." },
+  { id: "mcp.local.add", usage: "frely mcp local add <name> --url <http://127.0.0.1:port/path> [--header K=V] | frely mcp local add <name> [--env K=V] -- <command> [args...]", auth: "none", effect: "local-write", purpose: "Add a local MCP server by loopback URL or by the command that starts it (stdio). It is connected once to check it works; it stays off for remote clients until the owner turns it on in the web console." },
+  { id: "mcp.local.remove", usage: "frely mcp local remove <name>", auth: "none", effect: "local-write", purpose: "Remove a manually added local MCP server." },
   { id: "mcp.stop", usage: "frely mcp stop", auth: "none", effect: "local-service", purpose: "Pause the local MCP background service. Supported upgrades restore running services without this command." },
   { id: "mcp.start", usage: "frely mcp start", auth: "none", effect: "local-service", purpose: "Resume the local MCP background service." },
   { id: "mcp.remove", usage: "frely mcp remove", auth: "account", effect: "remote-write", purpose: "Revoke device MCP for every connected client and uninstall the background service (kept running provider-only when local Providers exist)." },
@@ -34,9 +37,10 @@ export const COMMANDS = [
   { id: "app.status", usage: "frely app status [--json]", auth: "local", effect: "read", purpose: "Show whether the Frely App is installed, its version, install path, running state and how it is managed." },
   { id: "app.update", usage: "frely app update [--json]", auth: "local", effect: "local-write", purpose: "Update the Frely App through Homebrew or by re-downloading the latest release." },
   { id: "app.uninstall", usage: "frely app uninstall", auth: "local", effect: "local-write", purpose: "Uninstall the Frely App. Tasks, credentials and worktrees stay with frely-cli." },
-  { id: "computer.enable", usage: "frely computer enable", auth: "local", effect: "local-write", purpose: "Local key for computer use (desktop control by a remote MCP client). Run it only on a device you are sitting at. It also needs the Computer use permission granted on the Frely connections page; the web grant alone never turns it on." },
-  { id: "computer.disable", usage: "frely computer disable", auth: "local", effect: "local-write", purpose: "Turn computer use off on this device at once, whatever the web permission says." },
-  { id: "computer.status", usage: "frely computer status [--json]", auth: "local", effect: "read", purpose: "Show whether computer use is turned on locally, the runtime version it needs and whether it is installed." },
+  { id: "computer.enable", usage: "frely computer enable", auth: "local", effect: "local-write", purpose: "Register computer use (desktop control by a remote MCP client) as the local MCP \"computer\" on this device. Run it only on a device you are sitting at. It still has to be turned on for remote clients on the Frely connections page; registering alone never exposes it." },
+  { id: "computer.disable", usage: "frely computer disable", auth: "local", effect: "local-write", purpose: "Remove the local MCP \"computer\" so computer use stops working on this device at once, whatever the web page says." },
+  { id: "computer.status", usage: "frely computer status [--json]", auth: "local", effect: "read", purpose: "Show whether computer use is registered locally, the runtime version it needs and whether it is installed." },
+  { id: "computer.mcp", usage: "frely computer mcp", auth: "local", effect: "local-execution", purpose: "Stdio MCP server for computer use; local MCP forwarding starts it. Not needed for normal use." },
   { id: "network", usage: "frely network setup|status|find|use|logout [--json]", auth: "network", effect: "subcommand-dependent", purpose: "Access Frely Network (preview) using its separate setup and credentials." },
 ] as const;
 
@@ -66,7 +70,7 @@ export function agentHelp() {
 
 const GROUPS: readonly { title: string; ids: readonly string[] }[] = [
   { title: "Account", ids: ["login", "logout", "doctor", "upgrade"] },
-  { title: "Device MCP", ids: ["mcp.url", "mcp.workspace", "mcp.lifecycle"] },
+  { title: "Device MCP", ids: ["mcp.url", "mcp.workspace", "mcp.local", "mcp.lifecycle"] },
   { title: "Agents", ids: ["agent.install", "agent.run", "agent.status", "agent.remove"] },
   { title: "Providers", ids: ["provider.share", "provider.list"] },
   { title: "Cloud", ids: ["cloud"] },
@@ -83,6 +87,7 @@ const SHORT_USAGE: Readonly<Record<string, string>> = {
   upgrade: "frely upgrade",
   "mcp.url": "frely mcp url [--workspace <path>] [--days 1..365] [--json]",
   "mcp.workspace": "frely mcp workspace list|add <path>|remove <path>",
+  "mcp.local": "frely mcp local list|add <name> (--url <address>|-- <command>)|remove <name>",
   "mcp.lifecycle": "frely mcp stop|start|remove",
   "agent.install": "frely agent install <distribution-id> [--host <host>] [--api-key-stdin]",
   "agent.run": "frely agent run <distribution-id> (--input <text>|--input-stdin)",
@@ -116,7 +121,7 @@ export function subcommandUsage(group: string): string {
 
 export function mcpUsage(): string {
   return "Device MCP — use this computer from a remote MCP client.\n\nUsage:\n"
-    + ["mcp.url", "mcp.workspace", "mcp.lifecycle"].map((id) => "  " + SHORT_USAGE[id] + "\n").join("")
+    + ["mcp.url", "mcp.workspace", "mcp.local", "mcp.lifecycle"].map((id) => "  " + SHORT_USAGE[id] + "\n").join("")
     + "\nStatus and diagnostics: frely doctor [-v] [--json]\n\n"
     + "Run frely mcp url on the computer to control. It asks for browser approval the first time (current directory, or --workspace) and when authorization has expired, installs the background service, and prints the MCP URL. Add that URL to ChatGPT, Claude Code on another computer, or another HTTP MCP client, then authorize with OAuth.\n"
     + "Prompts go to stderr; stdout contains only the URL or JSON. --days 1..365 renews now; the URL stays the same.\n"

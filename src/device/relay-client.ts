@@ -20,9 +20,9 @@ import {
 import { diagnostic, mcpDiagnosticContext, type DiagnosticLog } from "../runtime/diagnostics.js";
 import { RelayMcpSession } from "../runtime/relay-mcp.js";
 import { executeAgentRequest, createAgentCallBridge } from "../runtime/relay-agent.js";
+import type { LocalMcpHub } from "../runtime/local-mcp.js";
 import type { AgentService } from "../agent/agent-service.js";
 import type { RelaySession } from "../runtime/relay-session.js";
-import { createComputerToolset } from "../computer/index.js";
 import { openLocalProviderRequest, readLocalProviderBody } from "../provider/local.js";
 
 export interface RelayServeOptions {
@@ -47,6 +47,8 @@ export interface RelayServeOptions {
   agent?: AgentService;
   /** Device capability report sent once per connection for the web console (plan §6.4). */
   capabilities?: () => Record<string, unknown> | Promise<Record<string, unknown>> | undefined;
+  /** Device-local MCP servers; enabled names arrive on each mcp request (plan mcp/本机MCP转发-方案.md). */
+  localMcp?: LocalMcpHub;
 }
 
 interface InflightRequest {
@@ -97,7 +99,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
             session = await RelayMcpSession.create(options.workspace, {
               assertAuthorized: () => guard.assert(), signal: guard.controller.signal, log, ...(maintenance ? { maintenance } : {}),
               ...(options.agent ? { callAgent: createAgentCallBridge(options.agent, { workspace: options.workspace }) } : {}),
-              computer: createComputerToolset(),
+              ...(options.localMcp ? { localMcp: options.localMcp } : {}),
             });
             const activeSession = session;
             guard.controller.signal.addEventListener("abort", () => { void activeSession.close(); }, { once: true });
@@ -218,12 +220,16 @@ export async function serveConnection(
     };
     const heartbeat = setInterval(ping, 30_000);
     heartbeat.unref?.();
+    // Device-local MCP servers come and go, so the report is refreshed while connected.
+    const capabilityTimer = capabilities ? setInterval(() => { void sendCapabilities(socket, capabilities); }, 60_000) : undefined;
+    capabilityTimer?.unref?.();
 
     const finish = (error?: unknown) => {
       if (finished) return;
       finished = true;
       unregisterOutput?.();
       clearInterval(heartbeat);
+      if (capabilityTimer) clearInterval(capabilityTimer);
       for (const [id, item] of inflight) {
         cancelled.add(id);
         item.controller.abort();
@@ -320,7 +326,7 @@ async function handleFrame(
 async function executeMcpRequest(request: DeviceRelayRequest, session: RelaySession | null, lease: McpLease | null): Promise<unknown> {
   if (!session || !lease || request.authorizationId !== lease.authorizationId) throw new Error("MCP execution authorization is missing or mismatched.");
   lease.assert();
-  return session.execute(request.payload, request.id, request.toolsets);
+  return session.execute(request.payload, request.id, request.toolsets, request.localMcps);
 }
 
 async function executeNodeRequest(request: DeviceRelayRequest, session: RelaySession | null): Promise<unknown> {

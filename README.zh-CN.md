@@ -79,6 +79,10 @@ frely mcp url --workspace /path/to/project
 
 `frely mcp url` 是幂等的：启用后再次运行只打印同一个 URL，需要地址时直接再运行即可。提示走 stderr，stdout 保持单一 URL（或 `--json` 时一个 JSON 对象）；批准或安装失败则不打印 URL。要开放更多目录，用 `frely mcp workspace add <path>`；`frely mcp workspace list` 列出所有目录。只输入命令组而不带子命令（如 `frely mcp workspace`、`frely agent`）时，会显示该组下可用的子命令。
 
+### 这台电脑上的本机 MCP 服务
+
+远程 MCP 客户端也能访问只在这台电脑上运行的 MCP 服务，例如只监听 `127.0.0.1` 的浏览器插件 MCP。只监听本机回环地址的服务会被自动发现（`frely mcp local list`）；其他服务用 `frely mcp local add <name> --url http://127.0.0.1:<port>/mcp`，或 `frely mcp local add <name> [--env KEY=VALUE] -- <命令> [参数...]`（stdio）手动添加。每个服务默认对远程客户端关闭，需要在 Frely 连接页面逐个开启。开启后通过两个设备工具 `local_mcp_list` 和 `local_mcp_call` 访问，运行在命令沙箱之外，使用你的用户账号。只会连接回环地址；请求头和环境变量的值只保存在本机。
+
 把打印的完整 URL 添加到支持 OAuth 的远程 MCP 客户端，选择 OAuth 并完成授权。保持电脑在线。验证首次连接：让客户端只列出所选工作区的顶层名称，不写文件、不跑 shell 命令——返回与目录一致的结果即连通。
 
 调用端的 Claude Code：
@@ -146,6 +150,10 @@ frely provider share openai-compatible \
 
 该命令创建服务端管理的 `openai-compatible` 个人 Provider，把本地端点存入仅属主可读的 CLI 状态，启动 Device Relay 服务，用设备 Ed25519 key 签署 Provider 凭证，配置 CPA 并启用声明的模型。现有 Frely Access Point 与 API-key 流程即可消费该 Provider。
 
+### 用本地模型作为自己 Agent 的底座（Creator）
+
+没有空闲的个人 Provider 名额，或加上 `--creator` 时，`frely provider share` 会创建 Creator Provider，计入 Creator 套餐名额（Creator 3 个，Creator Plus 100 个）。它启用的模型会出现在 Frely 创建 Agent 的模型选择里。Provider 本身不对外售卖：买家调用的是你的 Agent，由你的模型驱动。Agent 被使用期间本机需保持在线，并且本地运行时的响应需包含 `usage`。
+
 Provider 检查：
 
 ```sh
@@ -206,12 +214,15 @@ frely upgrade
 frely mcp url [--workspace <path>] [--days 1..365] [--json]
 frely mcp workspace list [--json]
 frely mcp workspace add|remove <path>
+frely mcp local list [--json]
+frely mcp local add <name> (--url <address> | -- <command> [args...])
+frely mcp local remove <name>
 frely mcp stop|start|remove
 frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--api-key-stdin] [--json]
 frely agent run <distribution-id> (--input <text>|--input-stdin) [--json]
 frely agent status (<distribution-id>|--api-key-stdin [--relay <url>]) [--json]
 frely agent remove <distribution-id> [--json]
-frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]
+frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id> | --creator] [--name <name>]
 frely provider list [--json]
 frely cloud list|describe|call
 ```

@@ -45,6 +45,23 @@ test("device relay request toolsets round trip and validate", () => {
   assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...good, method: "provider", authorizationId: undefined, toolsets: ["workspace"] })));
 });
 
+test("device relay request localMcps round trip, validate and stay mcp-only", () => {
+  const good = {
+    protocol: DEVICE_RELAY_PROTOCOL,
+    type: "request" as const,
+    id: "abcdefghijklmnop",
+    method: "mcp" as const,
+    authorizationId: "mca_" + "a".repeat(32),
+    localMcps: ["browser-bridge", "notes"],
+    payload: { jsonrpc: "2.0", id: 1, method: "tools/list" },
+  };
+  assert.deepEqual(decodeDeviceRelayEnvelope(encodeDeviceRelayEnvelope(good)), good);
+  for (const localMcps of [[], ["a", "a"], ["Upper"], ["-lead"], ["x".repeat(33)], "notes", [1]]) {
+    assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...good, localMcps })), /frame_invalid/);
+  }
+  assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...good, method: "provider", authorizationId: undefined })));
+});
+
 test("device relay capabilities envelope round trips within 4KB", () => {
   const report = {
     protocol: DEVICE_RELAY_PROTOCOL,

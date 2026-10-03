@@ -2,6 +2,7 @@
 import { upgrade } from "./upgrade/update.js";
 import { requireMcpAuthorization, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, generateMcpKey, parseMcpDays, MCP_DEFAULT_DAYS } from "./mcp-authorization.js";
 import { realpath } from "node:fs/promises";
+import { runLocalMcpCommand } from "./local-mcp-command.js";
 import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
 import { join, resolve } from "node:path";
@@ -24,6 +25,7 @@ import { loadAgentConfig, saveAgentConfig } from "./agent/agent-service.js";
 import { readAppInstall } from "./agent/app-install.js";
 import { appInstallStatus, installApp, openApp, uninstallApp, updateApp } from "./app-manager.js";
 import { detectSandboxBackend } from "./runtime/sandbox.js";
+import { LocalMcpHub } from "./runtime/local-mcp.js";
 import { provisionAgentKey } from "./agent/app-key.js";
 import { startAgentOpsServer } from "./agent/ops-server.js";
 import { runAgentOpsStdioBridge } from "./agent/ops-stdio.js";
@@ -36,6 +38,7 @@ import { ensureMcpAuthorization, normalizeMcpArgs } from "./mcp-command.js";
 import { getKeyBudget, KeyBudgetError, publicKeyBudgetError } from "./key-budget.js";
 import { runNetwork, publicNetworkError } from "./network.js";
 import { runComputerCommand } from "./computer/command.js";
+import { runComputerMcpServer } from "./computer/server.js";
 import { agentManifestUrl, installSkillAdapter, invokeInstalledAgent, publicSkillAccessError, removeSkillAdapter, skillAdapterStatus } from "./skill/access.js";
 import type { SkillHost, SkillScope } from "./skill/managed.js";
 
@@ -265,13 +268,17 @@ async function main(): Promise<void> {
     const selectedModels = option(args, "--models")?.split(",").map((value) => value.trim()).filter(Boolean);
     const models = selectedModels?.length ? [...new Set(selectedModels)] : await discoverLocalModels(baseUrl);
     if (models.length < 1 || models.length > 256 || models.some((model) => !isSupportedLocalModelName(model))) throw new Error("At least one valid model is required; model names cannot contain whitespace or `/`.");
-    const slots = await listPersonalProviderSlots();
     const requestedSlot = option(args, "--slot");
+    const forceCreator = args.includes("--creator");
+    if (forceCreator && requestedSlot) throw new Error("Use either --slot or --creator, not both.");
+    const slots = forceCreator ? [] : await listPersonalProviderSlots();
     const slot = requestedSlot ? slots.find((candidate) => candidate.id === requestedSlot) : slots.find((candidate) => candidate.lifecycle === "active" && candidate.provider === null);
-    if (!slot) throw new Error(requestedSlot ? "The requested personal Provider slot is unavailable." : "No empty active personal Provider slot is available.");
-    if (slot.lifecycle !== "active" || slot.provider !== null) throw new Error("The selected personal Provider slot is not empty and active.");
+    if (requestedSlot && !slot) throw new Error("The requested personal Provider slot is unavailable.");
+    if (slot && (slot.lifecycle !== "active" || slot.provider !== null)) throw new Error("The selected personal Provider slot is not empty and active.");
     const name = (option(args, "--name") ?? `${driver === "ollama" ? "Ollama" : "Local"}: ${models[0]}`).slice(0, 128);
-    const prepared = await prepareLocalProvider({ deviceId: device.deviceId, slotId: slot.id, name, models });
+    // Without an empty personal slot the Provider counts against the Creator Plan Provider limit.
+    const prepared = await prepareLocalProvider(slot ? { deviceId: device.deviceId, slotId: slot.id, name, models } : { deviceId: device.deviceId, source: "creator", name, models });
+    if (!slot) stdout.write("Created as a Creator Provider. Pick these models when you create a Frely Agent; buyers call the Agent, and this device must stay online.\n");
     const provider = { providerId: prepared.providerId, name, driver, baseUrl, providerBaseUrl: prepared.providerBaseUrl, models, createdAt: new Date().toISOString(), pending: true } as const;
     await saveLocalProvider(provider);
     await activateLocalProvider(auth, device.deviceId, provider);
@@ -322,6 +329,7 @@ async function main(): Promise<void> {
   }
 
   if (command === "computer") {
+    if (args[1] === "mcp") { await runComputerMcpServer(); return; }
     stdout.write(await runComputerCommand(args.slice(1)));
     return;
   }
@@ -397,28 +405,39 @@ async function main(): Promise<void> {
     const stop = () => controller.abort();
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
+    // Device-local MCP servers are only served with device MCP, never for a provider-only relay.
+    const localMcp = providerOnly ? undefined : new LocalMcpHub({ log: agentLog });
+    localMcp?.start();
     try {
       const capabilities = async () => {
         const install = await readAppInstall().then((value) => value, () => null);
         const config = await loadAgentConfig();
+        await localMcp?.ensureFresh(5 * 60_000).catch(() => undefined);
         return {
           app: { ...(install ? { installed: true, version: install.appVersion } : { installed: false }) },
           sandbox: detectSandboxBackend(),
           agentHost: true,
           remoteControl: config.remoteControlEnabled,
+          ...(localMcp ? { localMcp: localMcp.capabilities() } : {}),
         };
       };
       const ops = await startAgentOpsServer(agent, { workspace: workspace ?? process.cwd(), log: agentLog });
       process.stderr.write(`Agent ops socket: ${ops.path}\n`);
       try {
-        await serveDeviceRelay({ ...(workspace ? { workspace } : {}), agent, capabilities, managedService: Boolean(serviceConfigHome), restartForUpgrade: stop, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
+        await serveDeviceRelay({ ...(workspace ? { workspace } : {}), ...(localMcp ? { localMcp } : {}), agent, capabilities, managedService: Boolean(serviceConfigHome), restartForUpgrade: stop, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
       } finally {
         await ops.close().catch(() => undefined);
       }
     } finally {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
+      await localMcp?.close();
     }
+    return;
+  }
+  if (command === "mcp" && args[1] === "local") {
+    if (args[2] === undefined) { stdout.write(subcommandUsage("mcp.local")); return; }
+    await runLocalMcpCommand({ args, write: (text) => { stdout.write(text); } });
     return;
   }
   if (command === "mcp" && args[1] === "workspace") {

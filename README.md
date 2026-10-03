@@ -79,6 +79,10 @@ frely mcp url --workspace /path/to/project
 
 `frely mcp url` is idempotent: once enabled it only prints the same URL, so run it again whenever you need the address. Prompts go to stderr, so stdout remains a single URL or, with `--json`, a JSON object. No URL is printed if approval or service installation fails. To expose more directories, use `frely mcp workspace add <path>`; `frely mcp workspace list` lists them. A command group run without a subcommand (for example `frely mcp workspace` or `frely agent`) prints the subcommands under it.
 
+### Local MCP servers on this computer
+
+Remote MCP clients can also reach MCP servers that only run on this computer, such as a browser-extension server listening on `127.0.0.1`. Servers listening only on loopback are found automatically (`frely mcp local list`); add others with `frely mcp local add <name> --url http://127.0.0.1:<port>/mcp` or `frely mcp local add <name> [--env KEY=VALUE] -- <command> [args...]` (stdio). Every server stays off for remote clients until you turn it on, one by one, on the Frely connections page. Enabled servers are then reachable through two device tools, `local_mcp_list` and `local_mcp_call`, and run outside the command sandbox with your user account. Only loopback addresses are ever contacted; headers and environment values stay on this computer.
+
 Add the exact printed URL to a remote MCP client with OAuth support, choose OAuth and complete authorization. Keep the computer online. Verify the first connection by asking the client to list the top-level names in your selected workspace, without writing files or running shell commands — a returned result that matches the folder confirms connectivity.
 
 For Claude Code on the calling computer:
@@ -142,9 +146,13 @@ frely provider share openai-compatible \
   --name "Local GPU"
 ```
 
-Requirements: Frely login, one empty active personal Provider slot, loopback HTTP, OpenAI-compatible `/v1` (default Ollama endpoint `http://127.0.0.1:11434/v1`). Model names cannot contain whitespace or `/`.
+Requirements: Frely login, one empty active personal Provider slot (or a Creator plan, see below), loopback HTTP, OpenAI-compatible `/v1` (default Ollama endpoint `http://127.0.0.1:11434/v1`). Model names cannot contain whitespace or `/`.
 
 The command creates a server-managed `openai-compatible` personal Provider, stores the local endpoint in owner-only CLI state, starts the Device Relay service, signs a Provider credential with the device Ed25519 key, configures CPA, and enables the declared models. Existing Frely Access Point and API-key flows consume the Provider.
+
+### Use a local model as the base of your own Agent (Creator)
+
+With no empty personal Provider slot, or with `--creator`, `frely provider share` creates a Creator Provider instead, counted against your Creator plan (Creator 3, Creator Plus 100). Its enabled models appear in Frely when you create an Agent. You do not sell the Provider: buyers call your Agent, which runs on your model. Keep this device online while the Agent is used, and make sure the local runtime returns `usage` in its responses.
 
 Provider inspection:
 
@@ -206,12 +214,15 @@ frely upgrade
 frely mcp url [--workspace <path>] [--days 1..365] [--json]
 frely mcp workspace list [--json]
 frely mcp workspace add|remove <path>
+frely mcp local list [--json]
+frely mcp local add <name> (--url <address> | -- <command> [args...])
+frely mcp local remove <name>
 frely mcp stop|start|remove
 frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--api-key-stdin] [--json]
 frely agent run <distribution-id> (--input <text>|--input-stdin) [--json]
 frely agent status (<distribution-id>|--api-key-stdin [--relay <url>]) [--json]
 frely agent remove <distribution-id> [--json]
-frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]
+frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id> | --creator] [--name <name>]
 frely provider list [--json]
 frely cloud list|describe|call
 ```

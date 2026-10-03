@@ -46,7 +46,7 @@ test("agent status argument failures are JSON and never echo unsupported secret 
 
 test("agent help lists the mcp workspace subcommands", () => {
   const ids = agentHelp().commands.map((command: { id: string }) => command.id);
-  for (const id of ["mcp.workspace.list", "mcp.workspace.add", "mcp.workspace.remove"]) assert.ok(ids.includes(id));
+  for (const id of ["mcp.workspace.list", "mcp.workspace.add", "mcp.workspace.remove", "mcp.local.list", "mcp.local.add", "mcp.local.remove"]) assert.ok(ids.includes(id));
   assert.ok(!ids.includes("mcp.workspace"));
 });
 
@@ -54,6 +54,7 @@ test("command groups without a direct action print their subcommands offline", a
   const cases: Array<[string[], RegExp]> = [
     [["mcp"], /frely mcp url/],
     [["mcp", "workspace"], /frely mcp workspace list/],
+    [["mcp", "local"], /frely mcp local list/],
     [["agent"], /frely agent install/],
     [["provider"], /frely provider list/],
     [["cloud"], /frely cloud list/],

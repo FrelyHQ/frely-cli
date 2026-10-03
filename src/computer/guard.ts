@@ -54,7 +54,7 @@ export function isBlockedApp(app: string): boolean {
  */
 export function assertAppAllowed(app: unknown): string {
   if (typeof app !== "string" || app.trim() === "") throw new Error("app must be a non-empty app name or bundle identifier.");
-  if (/^\d+$/u.test(app.trim())) throw new Error("Process ids are not accepted; pass the app name or bundle identifier from computer_list_apps.");
+  if (/^\d+$/u.test(app.trim())) throw new Error("Process ids are not accepted; pass the app name or bundle identifier from list_apps.");
   if (app.length > 200) throw new Error("app is too long; pass the app name or bundle identifier.");
   if (isBlockedApp(app)) throw new ComputerBlockedError(app);
   return app;
