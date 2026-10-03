@@ -264,13 +264,17 @@ async function main(): Promise<void> {
     const selectedModels = option(args, "--models")?.split(",").map((value) => value.trim()).filter(Boolean);
     const models = selectedModels?.length ? [...new Set(selectedModels)] : await discoverLocalModels(baseUrl);
     if (models.length < 1 || models.length > 256 || models.some((model) => !isSupportedLocalModelName(model))) throw new Error("At least one valid model is required; model names cannot contain whitespace or `/`.");
-    const slots = await listPersonalProviderSlots();
     const requestedSlot = option(args, "--slot");
+    const forceCreator = args.includes("--creator");
+    if (forceCreator && requestedSlot) throw new Error("Use either --slot or --creator, not both.");
+    const slots = forceCreator ? [] : await listPersonalProviderSlots();
     const slot = requestedSlot ? slots.find((candidate) => candidate.id === requestedSlot) : slots.find((candidate) => candidate.lifecycle === "active" && candidate.provider === null);
-    if (!slot) throw new Error(requestedSlot ? "The requested personal Provider slot is unavailable." : "No empty active personal Provider slot is available.");
-    if (slot.lifecycle !== "active" || slot.provider !== null) throw new Error("The selected personal Provider slot is not empty and active.");
+    if (requestedSlot && !slot) throw new Error("The requested personal Provider slot is unavailable.");
+    if (slot && (slot.lifecycle !== "active" || slot.provider !== null)) throw new Error("The selected personal Provider slot is not empty and active.");
     const name = (option(args, "--name") ?? `${driver === "ollama" ? "Ollama" : "Local"}: ${models[0]}`).slice(0, 128);
-    const prepared = await prepareLocalProvider({ deviceId: device.deviceId, slotId: slot.id, name, models });
+    // Without an empty personal slot the Provider counts against the Creator Plan Provider limit.
+    const prepared = await prepareLocalProvider(slot ? { deviceId: device.deviceId, slotId: slot.id, name, models } : { deviceId: device.deviceId, source: "creator", name, models });
+    if (!slot) stdout.write("Created as a Creator Provider. Pick these models when you create a Frely Agent; buyers call the Agent, and this device must stay online.\n");
     const provider = { providerId: prepared.providerId, name, driver, baseUrl, providerBaseUrl: prepared.providerBaseUrl, models, createdAt: new Date().toISOString(), pending: true } as const;
     await saveLocalProvider(provider);
     await activateLocalProvider(auth, device.deviceId, provider);

@@ -19,7 +19,11 @@ export async function listPersonalProviderSlots(): Promise<PersonalProviderSlot[
   });
 }
 
-export async function prepareLocalProvider(input: { deviceId: string; slotId: string; name: string; models: string[] }): Promise<{ providerId: string; providerBaseUrl: string }> {
+export type PrepareLocalProviderInput =
+  | { deviceId: string; slotId: string; name: string; models: string[] }
+  | { deviceId: string; source: "creator"; name: string; models: string[] };
+
+export async function prepareLocalProvider(input: PrepareLocalProviderInput): Promise<{ providerId: string; providerBaseUrl: string }> {
   const auth = await requireLogin();
   const response = await relayFetch(auth.config.relayUrl, auth.credential, "/api/user/local-providers/prepare", { method: "POST", body: JSON.stringify(input) });
   const payload = await responseJson(response);
