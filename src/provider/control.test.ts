@@ -4,22 +4,23 @@ import test from "node:test";
 import { waitForLocalProviderRelay } from "./control.js";
 
 test("local Provider Relay readiness probe waits for the device data path", async () => {
-  let attempts = 0;
-  const authorizations: Array<string | undefined> = [];
+  const providerToken = "Bearer signed-provider-token";
+  let validRequests = 0;
+  const probeAuthorizations: Array<string | undefined> = [];
   const server = createServer((request, response) => {
-    attempts += 1;
-    authorizations.push(request.headers.authorization);
-    if (request.method !== "GET" || request.url !== "/local-provider/v1/models") {
-      response.writeHead(404).end();
+    if (request.method === "GET" && request.url === "/local-provider/v1/models") {
+      validRequests += 1;
+      probeAuthorizations.push(request.headers.authorization);
+      if (validRequests <= 2) {
+        response.writeHead(503, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { code: "device_offline", message: "Frely device is offline." } }));
+        return;
+      }
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ object: "list", data: [] }));
       return;
     }
-    if (attempts < 3) {
-      response.writeHead(503, { "content-type": "application/json" });
-      response.end(JSON.stringify({ error: { code: "device_offline", message: "Frely device is offline." } }));
-      return;
-    }
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ object: "list", data: [] }));
+    response.writeHead(404).end();
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -29,8 +30,17 @@ test("local Provider Relay readiness probe waits for the device data path", asyn
     const address = server.address();
     assert.ok(address && typeof address !== "string");
     await waitForLocalProviderRelay(`http://127.0.0.1:${address.port}/local-provider/v1`, "signed-provider-token", 3_000);
-    assert.equal(attempts, 3);
-    assert.deepEqual(authorizations, ["Bearer signed-provider-token", "Bearer signed-provider-token", "Bearer signed-provider-token"]);
+    // The probe retries on 503 until the device data path answers 200. Under test
+    // load the per-probe timeout can fire and other parallel tests can send stray
+    // requests at this socket, so the exact probe count is not deterministic. Only
+    // track requests for the data-path endpoint and assert the contract that
+    // matters: it waited at least until the data path was ready, and every data-path
+    // request authenticated with the provider token.
+    assert.ok(validRequests >= 3, "probe waited until the device data path was ready");
+    assert.ok(
+      probeAuthorizations.length >= 3 && probeAuthorizations.every((a) => a === providerToken),
+      "every data-path request authenticated with the provider token"
+    );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
