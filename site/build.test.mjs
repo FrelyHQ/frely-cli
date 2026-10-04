@@ -12,7 +12,7 @@ test('new HTML requests changed assets under new URLs, consistently across all l
   const temp = await mkdtemp(resolve(tmpdir(), 'frely-site-assets-'));
   try {
     await cp(resolve(root, 'site'), resolve(temp, 'site'), { recursive: true });
-    for (const name of ['LICENSE', 'NOTICE', 'TRADEMARKS.md']) await cp(resolve(root, name), resolve(temp, name));
+    for (const name of ['LICENSE', 'NOTICE', 'TRADEMARKS.md', 'install.sh', 'install.ps1']) await cp(resolve(root, name), resolve(temp, name));
     const assets = ['app.js', 'locale.js', 'styles.css'];
     async function build() {
       execFileSync(process.execPath, [resolve(temp, 'site/build.mjs')]);
@@ -47,7 +47,7 @@ test('component, command and translation errors preserve the last valid site out
   const temp = await mkdtemp(resolve(tmpdir(), 'frely-site-validation-'));
   try {
     await cp(resolve(root, 'site'), resolve(temp, 'site'), { recursive: true });
-    for (const name of ['LICENSE', 'NOTICE', 'TRADEMARKS.md']) await cp(resolve(root, name), resolve(temp, name));
+    for (const name of ['LICENSE', 'NOTICE', 'TRADEMARKS.md', 'install.sh', 'install.ps1']) await cp(resolve(root, name), resolve(temp, name));
     const build = () => execFileSync(process.execPath, [resolve(temp, 'site/build.mjs')], { stdio: 'pipe' });
     build();
     const output = resolve(temp, '_site/zh/index.html');
