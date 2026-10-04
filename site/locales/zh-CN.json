@@ -43,6 +43,7 @@
   "install.standalone": "下载独立可执行文件",
   "install.runtime": "独立安装器自带运行时，不需要 Node.js。",
   "install.node": "npm 安装需要 Node.js 22+。",
+  "install.platformLabel": "选择你的系统",
   "install.step1": "在目标电脑上安装",
   "install.step2": "登录或注册",
   "copy.loginEmail": "复制邮箱注册命令",

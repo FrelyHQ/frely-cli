@@ -68,6 +68,10 @@ for (const { directory, html } of pages) {
 for (const asset of ['styles.css', 'app.js', 'locale.js']) {
   await copyFile(resolve(root, 'site', asset), resolve(output, asset));
 }
+// The one-line installers are served from the landing domain so both commands share one host.
+for (const installer of ['install.sh', 'install.ps1']) {
+  await copyFile(resolve(root, installer), resolve(output, installer));
+}
 for (const notice of ['LICENSE', 'NOTICE', 'TRADEMARKS.md']) {
   await copyFile(resolve(root, notice), resolve(output, notice));
 }

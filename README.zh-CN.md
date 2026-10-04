@@ -22,12 +22,12 @@ Device MCP:  在被控电脑安装 -> frely login -> frely mcp url -> 客户端�
 
 ```sh
 # macOS / Linux
-curl -fsSL https://frely.cloud/install.sh | sh
+curl -fsSL https://cli.frely.cloud/install.sh | sh
 ```
 
 ```powershell
 # Windows
-irm https://github.com/FrelyHQ/frely-cli/releases/latest/download/install.ps1 | iex
+irm https://cli.frely.cloud/install.ps1 | iex
 ```
 
 或使用 npm（需要 Node.js 22 或更新版本）：

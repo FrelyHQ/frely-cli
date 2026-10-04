@@ -22,6 +22,22 @@ for (const tab of tabs) {
     selectTab(tabs[index], true);
   });
 }
+// Show the install command for the visitor's system. Without JavaScript every command stays visible.
+const osButtons = Array.from(document.querySelectorAll('[data-os-select]'));
+const osOptions = Array.from(document.querySelectorAll('[data-os]'));
+function selectOs(os) {
+  for (const button of osButtons) button.setAttribute('aria-pressed', String(button.dataset.osSelect === os));
+  for (const option of osOptions) option.hidden = option.dataset.os !== os;
+}
+if (osButtons.length > 0) {
+  const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || '';
+  const osSwitch = document.getElementById('os-switch');
+  const note = document.getElementById('platform-note');
+  if (osSwitch) osSwitch.hidden = false;
+  if (note) note.hidden = true;
+  for (const button of osButtons) button.addEventListener('click', () => selectOs(button.dataset.osSelect));
+  selectOs(/\bwin/i.test(platform) ? 'windows' : 'unix');
+}
 for (const button of document.querySelectorAll('[data-copy]')) {
   button.addEventListener('click', async () => {
     const command = document.getElementById(button.dataset.copy);

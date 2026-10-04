@@ -1,6 +1,6 @@
 {
-  "installUnix": "curl -fsSL https://frely.cloud/install.sh | sh",
-  "installWindows": "irm https://github.com/FrelyHQ/frely-cli/releases/latest/download/install.ps1 | iex",
+  "installUnix": "curl -fsSL https://cli.frely.cloud/install.sh | sh",
+  "installWindows": "irm https://cli.frely.cloud/install.ps1 | iex",
   "install": "npm install --global --ignore-scripts frely-cli@latest",
   "login": "frely login",
   "loginEmail": "frely login --email <EMAIL> --mcp",

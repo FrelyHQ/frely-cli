@@ -88,7 +88,7 @@ is needed.
 
 The workflow validates the scripts, runs language, interaction, component-validation and asset-version checks and builds the
 static pages. It publishes only the generated HTML pages, `styles.css`, `app.js`,
-`locale.js`, `sitemap.xml`, `.nojekyll`, the repository license and trademark notices,
+`locale.js`, the `install.sh` and `install.ps1` one-line installers, `sitemap.xml`, `.nojekyll`, the repository license and trademark notices,
 and a generated `release.json` containing the source commit SHA. It does not publish
 the template, translation catalogs, repository or CLI build output.
 The root `npm run build` still builds only the CLI.

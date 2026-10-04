@@ -43,6 +43,7 @@
   "install.standalone": "Download a standalone executable",
   "install.runtime": "Standalone installers include their runtime and do not need Node.js.",
   "install.node": "The npm package requires Node.js 22+.",
+  "install.platformLabel": "Choose your system",
   "install.step1": "Install on the target computer",
   "install.step2": "Sign in or sign up",
   "copy.loginEmail": "Copy email sign-up command",

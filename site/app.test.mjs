@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 const script = readFileSync(new URL('./app.js', import.meta.url), 'utf8');
-function fixture({ url = 'https://cli.frely.cloud/zh/?ref=docs#install', lang = 'zh-CN', copyFails = false, storageBlocked = false } = {}) {
+function fixture({ url = 'https://cli.frely.cloud/zh/?ref=docs#install', lang = 'zh-CN', copyFails = false, storageBlocked = false, platform = 'MacIntel' } = {}) {
   const messages = JSON.parse(readFileSync(new URL('./locales/' + lang + '.json', import.meta.url), 'utf8'));
   const location = new URL(url);
   const events = new Map();
@@ -24,17 +24,20 @@ function fixture({ url = 'https://cli.frely.cloud/zh/?ref=docs#install', lang = 
   const tabs = ['codex', 'claude', 'web'].map((name) => element({ 'aria-controls': 'client-' + name, 'aria-selected': String(name === 'codex') }));
   const panels = Object.fromEntries(tabs.map((tab, index) => [tab.getAttribute('aria-controls'), element({}, { hidden: index !== 0 })]));
   const links = ['en', 'zh'].map((language) => element({}, { href: new URL('../' + language + '/', location).href, dataset: { language } }));
+  const osButtons = ['unix', 'windows', 'npm'].map((os) => element({ 'aria-pressed': String(os === 'unix') }, { dataset: { osSelect: os } }));
+  const osOptions = ['unix', 'windows', 'npm'].map((os) => element({}, { dataset: { os }, hidden: false }));
+  const osSwitch = element({}, { hidden: true });
   const command = { textContent: ' frely doctor ' };
   const button = element({}, { dataset: { copy: 'doctor-command' }, textContent: messages['copy.idle'] });
   const status = { textContent: '', dataset: Object.fromEntries(['idle', 'copied', 'selected', 'success', 'failure'].map((key) => [key, messages['copy.' + key]])) };
   runInNewContext(script, {
     URL,
     document: {
-      querySelectorAll(selector) { return selector === '[role="tab"]' ? tabs : selector === '[data-copy]' ? [button] : links; },
-      getElementById(id) { return id === 'copy-status' ? status : id === 'doctor-command' ? command : panels[id]; },
+      querySelectorAll(selector) { return selector === '[role="tab"]' ? tabs : selector === '[data-copy]' ? [button] : selector === '[data-os-select]' ? osButtons : selector === '[data-os]' ? osOptions : links; },
+      getElementById(id) { return id === 'copy-status' ? status : id === 'doctor-command' ? command : id === 'os-switch' ? osSwitch : panels[id]; },
       createRange() { return { selectNodeContents(node) { selected = node; } }; },
     },
-    navigator: { clipboard: { async writeText(value) { if (copyFails) throw new Error('Denied'); copied = value; } } },
+    navigator: { platform, clipboard: { async writeText(value) { if (copyFails) throw new Error('Denied'); copied = value; } } },
     window: {
       location,
       localStorage: { setItem(key, value) { if (storageBlocked) throw new Error('Blocked'); saved.push([key, value]); } },
@@ -43,7 +46,7 @@ function fixture({ url = 'https://cli.frely.cloud/zh/?ref=docs#install', lang = 
       setTimeout(callback) { timers.push(callback); },
     },
   });
-  return { location, links, tabs, panels, button, status, command, saved, timers,
+  return { location, links, tabs, panels, osButtons, osOptions, osSwitch, button, status, command, saved, timers,
     copied: () => copied, selected: () => selected,
     hash(value) { location.hash = value; events.get('hashchange')(); },
   };
@@ -95,3 +98,18 @@ for (const lang of ['en', 'zh-CN']) {
     assert.equal(failure.button.textContent, messages['copy.selected']);
   });
 }
+
+test('the install card shows the command for the visitor system and lets them switch', () => {
+  const shown = (f) => f.osOptions.filter((option) => !option.hidden).map((option) => option.dataset.os);
+  const mac = fixture({ platform: 'MacIntel' });
+  assert.equal(mac.osSwitch.hidden, false);
+  assert.deepEqual(shown(mac), ['unix']);
+  assert.deepEqual(shown(fixture({ platform: 'Linux x86_64' })), ['unix']);
+  const windows = fixture({ platform: 'Win32' });
+  assert.deepEqual(shown(windows), ['windows']);
+  assert.equal(windows.osButtons[1].attrs['aria-pressed'], 'true');
+  assert.equal(windows.osButtons[0].attrs['aria-pressed'], 'false');
+  windows.osButtons[2].events.get('click')();
+  assert.deepEqual(shown(windows), ['npm']);
+  assert.equal(windows.osButtons[2].attrs['aria-pressed'], 'true');
+});

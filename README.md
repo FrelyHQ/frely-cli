@@ -22,12 +22,12 @@ The standalone installers select the platform executable, verify a SHA-256 check
 
 ```sh
 # macOS / Linux
-curl -fsSL https://frely.cloud/install.sh | sh
+curl -fsSL https://cli.frely.cloud/install.sh | sh
 ```
 
 ```powershell
 # Windows
-irm https://github.com/FrelyHQ/frely-cli/releases/latest/download/install.ps1 | iex
+irm https://cli.frely.cloud/install.ps1 | iex
 ```
 
 Or with npm (Node.js 22 or newer required):
