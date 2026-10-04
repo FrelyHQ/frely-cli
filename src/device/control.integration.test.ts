@@ -9,6 +9,7 @@ import { basicCredentialStore as credentialStore } from "../credential-basic.js"
 import { connectionGrant, ensureDevice, revokeDevice } from "./control.js";
 import { connectionProofMessage } from "./identity.js";
 import { useMemoryCredentialStore } from "../test-support.js";
+import { VERSION } from "../version.js";
 
 const ACCOUNT_SERVICE = "frely-cli-basic-v1";
 
@@ -36,6 +37,7 @@ test("account session enrolls device, gets signed legacy and edge connection gra
       const message = connectionProofMessage(String(body?.deviceId ?? ""), String(body?.issuedAt ?? ""), String(body?.nonce ?? ""));
       const key = createPublicKey({ key: Buffer.from(publicKeySpki, "base64url"), type: "spki", format: "der" });
       assert.equal(verify(null, Buffer.from(message), key, Buffer.from(String(body?.signature ?? ""), "base64url")), true);
+      assert.equal(body?.cliVersion, VERSION);
       connectCalls += 1;
       const relayTarget = `ws://127.0.0.1:${(server.address() as { port: number }).port}/device-relay`;
       if (connectCalls === 1) {
