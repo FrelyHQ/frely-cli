@@ -15,7 +15,7 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
   // Upgrade bridge: Windows upgrade commands printed by 0.7.x run `mcp service stop|start`.
   if (args[1] === "service" && args.length === 3 && (args[2] === "start" || args[2] === "stop")) return ["mcp", args[2]];
   if (!args[1]) return ["mcp", "help"];
-  if (!["url", "workspace", "local", "connect", "stop", "start", "remove", "serve", "stdio"].includes(args[1])) throw new Error("Unknown device MCP command. Run frely mcp --help.");
+  if (!["url", "workspace", "local", "stop", "start", "remove", "serve", "stdio"].includes(args[1])) throw new Error("Unknown device MCP command. Run frely mcp --help.");
   const action = args[1]!;
   if (action === "stop" || action === "start" || action === "remove") {
     if (args.length > 2) throw new Error("Unsupported MCP option. Run frely mcp --help.");
@@ -34,8 +34,6 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
     if (args.length > 4) throw new Error(`Unsupported workspace ${subaction} option. Run frely mcp workspace.`);
     return args;
   }
-  // `connect` prints how to add a remote MCP product; its options are checked by the command.
-  if (action === "connect") return args;
   if (action === "local") {
     // Arguments after `--` belong to the local server's own command line and are not validated here.
     const subaction = args[2];

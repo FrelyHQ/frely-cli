@@ -6,8 +6,6 @@ import { dirname, join, posix, resolve, win32 } from "node:path";
 import { assertManagedSkillPath, managedSkillRoot, type SkillHost, type SkillScope } from "./managed.js";
 
 export const CLOUD_SKILL_ID = /^cloud_skill_[0-9a-f]{24}$/u;
-export const REMOTE_MCP_ID = /^remote_mcp_[0-9a-f]{24}$/u;
-export const DEFAULT_GATEWAY_URL = "https://api.frely.cloud";
 const MAX_FILES = 512;
 const MAX_TOTAL_BYTES = 8 * 1024 * 1024;
 
@@ -81,25 +79,6 @@ export async function installCloudItem(input: {
   return Object.freeze({
     id: manifest.id, kind: manifest.kind, name: manifest.displayName, version: manifest.version,
     path: target, files: files.length, premium, hasScripts: manifest.hasScripts,
-  });
-}
-
-/** How to add a remote MCP product to an MCP client; the API key stays in an environment variable. */
-export function remoteMcpConnection(remoteMcpId: string, host: SkillHost | "generic" = "generic", gatewayUrl = DEFAULT_GATEWAY_URL) {
-  if (!REMOTE_MCP_ID.test(remoteMcpId)) throw new CloudItemError("input_invalid", "Use the MCP id shown in the marketplace, for example remote_mcp_0123456789abcdef01234567.");
-  const gateway = new URL(gatewayUrl);
-  if (gateway.protocol !== "https:" || gateway.username || gateway.password || gateway.search || gateway.hash) throw new CloudItemError("input_invalid", "The gateway URL must be https.");
-  const mcpUrl = `${gateway.origin}${gateway.pathname.replace(/\/+$/u, "")}/mcp/remote/${remoteMcpId}`;
-  const name = `frely-${remoteMcpId.slice(-8)}`;
-  const header = "Authorization: Bearer ${FRELY_API_KEY}";
-  const command = host === "claude-code"
-    ? `claude mcp add --transport http ${name} ${mcpUrl} --header "Authorization: Bearer $FRELY_API_KEY"`
-    : host === "codex"
-      ? `codex mcp add ${name} --url ${mcpUrl} --bearer-token-env-var FRELY_API_KEY`
-      : null;
-  return Object.freeze({
-    id: remoteMcpId, name, mcpUrl, transport: "http" as const, header, command,
-    config: { mcpServers: { [name]: { type: "http", url: mcpUrl, headers: { Authorization: "Bearer ${FRELY_API_KEY}" } } } },
   });
 }
 
