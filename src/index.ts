@@ -41,7 +41,7 @@ import { runComputerCommand } from "./computer/command.js";
 import { runComputerMcpServer } from "./computer/server.js";
 import { agentManifestUrl, installSkillAdapter, invokeInstalledAgent, publicSkillAccessError, removeSkillAdapter, skillAdapterStatus } from "./skill/access.js";
 import type { SkillHost, SkillScope } from "./skill/managed.js";
-import { installCloudItem, remoteMcpConnection } from "./skill/cloud-item.js";
+import { installCloudItem } from "./skill/cloud-item.js";
 import { callCloudTool } from "./cloud.js";
 
 
@@ -153,20 +153,6 @@ async function main(): Promise<void> {
     if (value.premium === "pass_required") stdout.write(`Paid part: not installed. Buy a pass in the marketplace or with frely cloud call passes.buy --json '{"productKind":"cloud_skill","productId":"${value.id}","duration":"30d"}', then run this command again.\n`);
     if (value.hasScripts) stdout.write("This item contains scripts. Read them before you let an agent run them; they were saved without execute permission.\n");
     if (value.kind === "skill") stdout.write("Restart or reload the agent session so it rescans Skills.\n");
-    return;
-  }
-
-  if (command === "mcp" && args[1] === "connect") {
-    const remoteMcpId = args[2];
-    if (!remoteMcpId || remoteMcpId.startsWith("-")) throw new Error("Usage: frely mcp connect <remote-mcp-id> [--host claude-code|codex|generic] [--gateway <url>] [--json]");
-    const host = option(args, "--host") ?? "generic";
-    if (!["claude-code", "codex", "generic"].includes(host)) throw new Error("--host must be claude-code, codex, or generic.");
-    const value = remoteMcpConnection(remoteMcpId, host as SkillHost, option(args, "--gateway"));
-    if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
-    stdout.write(`MCP URL: ${value.mcpUrl}\nTransport: Streamable HTTP\nHeader: ${value.header}\n`);
-    if (value.command) stdout.write(`\nRun:\n  ${value.command}\n`);
-    else stdout.write(`\nMCP client config:\n${JSON.stringify(value.config, null, 2)}\n`);
-    stdout.write("\nSet FRELY_API_KEY to a Frely API key in your environment; do not paste the key into config files. Each tool call is billed to that key's account unless you hold a pass.\n");
     return;
   }
 

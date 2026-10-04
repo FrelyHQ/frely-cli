@@ -3,7 +3,7 @@ import { mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { CloudItemError, CloudToolError, installCloudItem, remoteMcpConnection, type CloudToolCaller } from "./cloud-item.js";
+import { CloudItemError, CloudToolError, installCloudItem, type CloudToolCaller } from "./cloud-item.js";
 
 const skillId = "cloud_skill_0123456789abcdef01234567";
 const b64 = (text: string) => Buffer.from(text).toString("base64");
@@ -58,12 +58,4 @@ test("refuses unsafe paths, unmanaged folders and edited files", async () => {
     await rm(join(result.path, ".frely-managed.json"));
     await assert.rejects(installCloudItem({ skillId, call: caller(), home }), (error: unknown) => error instanceof CloudItemError && error.code === "unmanaged_item_exists");
   } finally { await rm(home, { recursive: true, force: true }); }
-});
-
-test("remote MCP connection references the API key only by environment variable", () => {
-  const value = remoteMcpConnection("remote_mcp_0123456789abcdef01234567", "claude-code");
-  assert.equal(value.mcpUrl, "https://api.frely.cloud/mcp/remote/remote_mcp_0123456789abcdef01234567");
-  assert.match(value.command ?? "", /\$FRELY_API_KEY/u);
-  assert.throws(() => remoteMcpConnection("remote_mcp_bad"), CloudItemError);
-  assert.throws(() => remoteMcpConnection("remote_mcp_0123456789abcdef01234567", "generic", "http://example.com"), CloudItemError);
 });
