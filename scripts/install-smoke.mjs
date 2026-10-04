@@ -34,7 +34,7 @@ try {
   const diagnostic = JSON.parse((await run(process.execPath, [entry, "doctor", "--json"], { env, timeout: 20000 })).stdout);
   assert.equal(diagnostic.update.installation.method, "npm");
   assert.equal(await realpath(diagnostic.update.installation.prefix), await realpath(prefix));
-  assert.ok(help.stdout.includes("frely upgrade"));
+  assert.ok(help.stdout.includes("frely update"));
   console.log(`Packed install passed (${process.platform}): global wrapper, --ignore-scripts, --version, --help, no credential backend.`);
 } finally {
   await rm(directory, { recursive: true, force: true });
