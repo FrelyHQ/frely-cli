@@ -1,6 +1,6 @@
 # Frely 设备 MCP 服务
 
-新地址为 `https://mcp.frely.cloud/mcp`。旧地址 `connect.frely.cloud/mcp/devices` 与 `mcp.frely.cloud/mcp/devices` 继续服务，其 URL、OAuth resource 与 token audience 保持原值，不重定向、不自动改写。
+新地址为 `https://mcp.frely.cloud/mcp`。旧地址 `connect.frely.cloud/mcp/devices` 与 `mcp.frely.cloud/mcp/devices` 继续服务，其 URL、OAuth resource 与 token audience 保持原值，不重定向。本地保存的地址只是缓存：CLI 每次查询授权时以 Relay 返回的 `mcpResource` 为准并覆盖本地值，升级后无需重新批准即输出新地址；Relay 未返回该字段时保留原值。
 
 状态：本文描述当前源码的两层授权、稳定 MCP URL 与 OAuth 契约。2026-09-17 核验 npm registry 与 0.6.2 发行包：设备 MCP、Provider、Agent install/invoke 命令均包含在发行包中。CLI 命令发布与服务端部署、真实调用验收分别判断。
 

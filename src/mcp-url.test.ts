@@ -178,6 +178,26 @@ test("frely mcp keeps a configuration written with the previous /mcp/devices URL
   assert.equal((await inspectMcpMetadata())?.mcpResource, previous);
 });
 
+test("frely mcp follows the address the relay reports and keeps the stored one when it reports none", async (t) => {
+  const f = await fixture(t);
+  const original = await setupMcpAuthorization(f.directory, 30);
+  assert.equal((await ensureMcpAuthorization({ notify: f.notify }, f.install)).mcpUrl, f.mcpResource);
+  const relayFetch = globalThis.fetch;
+  const reported = "https://mcp.moved.invalid/mcp";
+  globalThis.fetch = async (url, options) => {
+    const response = await relayFetch(url, options);
+    if (options?.method !== "GET" || new URL(String(url)).pathname !== "/api/user/device-relay/mcp") return response;
+    return Response.json({ ...await response.json(), mcpResource: reported });
+  };
+  const moved = await ensureMcpAuthorization({ notify: f.notify }, f.install);
+  assert.equal(moved.mcpUrl, reported);
+  assert.equal(moved.grant.id, original.grant.id);
+  assert.equal((await inspectMcpMetadata())?.mcpResource, reported);
+  globalThis.fetch = relayFetch;
+  assert.equal((await ensureMcpAuthorization({ notify: f.notify }, f.install)).mcpUrl, reported);
+  assert.equal(f.state.requests, 1);
+});
+
 test("frely mcp leaves unreadable configuration untouched", { skip: process.platform === "win32" }, async (t) => {
   const f = await fixture(t);
   await setupMcpAuthorization(f.directory);

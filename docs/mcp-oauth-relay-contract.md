@@ -1,6 +1,6 @@
 # MCP OAuth Relay Contract
 
-新地址为 `https://mcp.frely.cloud/mcp`。旧地址 `connect.frely.cloud/mcp/devices` 与 `mcp.frely.cloud/mcp/devices` 继续服务，其 URL、OAuth resource 与 token audience 保持原值，不重定向、不自动改写。
+新地址为 `https://mcp.frely.cloud/mcp`。旧地址 `connect.frely.cloud/mcp/devices` 与 `mcp.frely.cloud/mcp/devices` 继续服务，其 URL、OAuth resource 与 token audience 保持原值，不重定向。`GET ?requestId=` 返回 `mcpResource`，CLI 视为不透明字符串并覆盖本地缓存；缺失时保留原值。
 
 状态：Frely Relay 配套实现契约，目标 MCP 规范版本 `2026-07-28`。
 

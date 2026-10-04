@@ -104,10 +104,23 @@ export async function requireMcpAuthorization(workspace?: string): Promise<McpAu
   const auth = await requireLogin();
   if (authorization.relayUrl !== auth.config.relayUrl || authorization.userId !== auth.user.id) throw new Error("MCP authorization belongs to a different account.");
   const response = await relayFetch(auth.config.relayUrl, auth.credential, `${ENDPOINT}?requestId=${authorization.grant.id}`, { method: "GET" });
-  const current = await readView(response);
+  const { grant: current, mcpResource } = await readViewWithResource(response);
   assertMcpActive(current);
   if (JSON.stringify(current) !== JSON.stringify(authorization.grant)) throw new Error("MCP authorization changed. Run frely mcp url --days 90 to renew.");
+  // The relay owns the address; the stored copy is only a cache, so follow the relay when it moves.
+  if (mcpResource && mcpResource !== authorization.mcpResource) return await refreshMcpResource(authorization, mcpResource);
   return authorization;
+}
+
+async function refreshMcpResource(authorization: McpAuthorization, mcpResource: string): Promise<McpAuthorization> {
+  const { sign, mcpUrl: _mcpUrl, ...previous } = authorization;
+  const metadata: McpMetadata = { ...previous, mcpResource };
+  const raw = await credentialStore.getPassword(SERVICE, account(previous));
+  if (!raw) throw new Error("MCP secure credential is unavailable. Run frely mcp url --days 90 to renew; no replacement key was generated.");
+  const secret = JSON.parse(raw) as McpSecret;
+  await credentialStore.setPassword(SERVICE, account(metadata), JSON.stringify({ ...secret, metadata } satisfies McpSecret));
+  await writeMetadata(metadata);
+  return { ...metadata, mcpUrl: mcpResource, sign };
 }
 
 export async function setupMcpAuthorization(workspaceInput: string, daysInput?: string | number, renew = false,
@@ -229,8 +242,15 @@ async function readRequest(response: Response): Promise<{ grant: McpAuthorizatio
   return { grant, mcpResource: validateMcpResource(record.mcpResource) };
 }
 async function readView(response: Response): Promise<McpAuthorizationView> {
+  return (await readViewWithResource(response)).grant;
+}
+// Older relays omit mcpResource from the query response; an absent or invalid value keeps the stored one.
+async function readViewWithResource(response: Response): Promise<{ grant: McpAuthorizationView; mcpResource?: string }> {
   if (!response.ok) await throwMcpAuthorizationError(response);
-  return validateView(await response.json());
+  const payload = await response.json();
+  const grant = validateView(payload);
+  try { return { grant, mcpResource: validateMcpResource((payload as Record<string, unknown>).mcpResource) }; }
+  catch { return { grant }; }
 }
 
 async function throwMcpAuthorizationError(response: Response): Promise<never> {
