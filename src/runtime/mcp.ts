@@ -9,6 +9,7 @@ import { VERSION } from "../version.js";
 import { ensureWorkspaceRegistered, listWorkspaces } from "./workspace-registry.js";
 import { resolveWorkspace, resolveWorkspacePair } from "./workspace-router.js";
 import type { LocalMcpHub } from "./local-mcp.js";
+import { pathGrantsFromMeta } from "./sandbox.js";
 
 interface ToolFlags {
   readOnly: boolean;
@@ -179,7 +180,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
       }
       // `frely mcp workspace add|remove` edits the registry while this runtime keeps running; pick the change up per call.
       await syncWorkspaces(workspaces, primaryRoot);
-      const result = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]));
+      const result = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]), pathGrantsFromMeta(request.params._meta));
       return { content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result) }] };
     } catch (error) {
       try { options.onToolError?.(extra.requestId, name, error); } catch { /* Diagnostics cannot change tool results. */ }
@@ -221,6 +222,7 @@ async function dispatch(
   commandScheduler: FairRwScheduler,
   processScheduler: FairRwScheduler,
   signal: AbortSignal,
+  pathGrants: readonly string[] = [],
 ): Promise<unknown> {
   const guarded = <T>(work: () => Promise<T>) => async () => { signal.throwIfAborted(); return work(); };
   const read = <T>(work: () => Promise<T>) => workspaceScheduler.read(guarded(work));
@@ -263,7 +265,7 @@ async function dispatch(
   }
   if (name === "run_command") {
     const command = textArg(args, "command");
-    const work = () => workspace.runCommand(command, relativeInput, intArg(args, "timeoutMs", 30000, 100, 120000), signal);
+    const work = () => workspace.runCommand(command, relativeInput, intArg(args, "timeoutMs", 30000, 100, 120000), signal, pathGrants);
     return concurrencyArg(args) === "exclusive" ? commandScheduler.write(guarded(work)) : commandScheduler.read(guarded(work));
   }
   if (name === "start_process") {
@@ -271,7 +273,7 @@ async function dispatch(
     return processRead(async () => {
       const cwdPath = await workspace.processCwd(relativeInput);
       signal.throwIfAborted();
-      return processes.start(command, cwdPath, safeEnv(), workspace.root);
+      return processes.start(command, cwdPath, safeEnv(), workspace.root, pathGrants);
     });
   }
   throw new Error(`Unknown tool: ${name}`);

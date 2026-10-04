@@ -30,24 +30,41 @@ import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox
  * or while diagnosing whether the sandbox itself is the cause of a failure.
  */
 
-const SENSITIVE_READ_PATHS = [
-  "~/.ssh",
-  "~/.aws",
-  "~/.gnupg",
-  "~/.docker/config.json",
-  "~/.kube",
-  "~/.config/gcloud",
-  "~/.config/gh",
-  // Frely's own device credentials and local MCP list (which can hold headers and env values):
-  // a remote client running commands must not read them back.
-  "~/.config/frely",
-  "~/.netrc",
-  "~/.git-credentials",
-  "~/.npmrc",
-  "~/.pypirc",
-  "~/.cargo/credentials.toml",
-  "~/Library/Application Support/gcloud",
-];
+/**
+ * Credential stores a remote client may be allowed to read after the owner approves it on the web
+ * (relay `request_permission`). The group names are the relay's catalog; the paths stay on the device.
+ */
+export const SENSITIVE_PATH_GROUPS: Readonly<Record<string, readonly string[]>> = {
+  ssh: ["~/.ssh"],
+  aws: ["~/.aws"],
+  gcloud: ["~/.config/gcloud", "~/Library/Application Support/gcloud"],
+  kube: ["~/.kube"],
+  gh: ["~/.config/gh"],
+  gnupg: ["~/.gnupg"],
+  "git-credentials": ["~/.git-credentials", "~/.netrc"],
+  "npm-tokens": ["~/.npmrc", "~/.pypirc", "~/.cargo/credentials.toml"],
+};
+
+/** Never openable by a grant. Frely's own device credentials and local MCP list (which can hold headers and env values): a remote client running commands must not read them back. */
+const ALWAYS_DENIED_READ_PATHS = ["~/.docker/config.json", "~/.config/frely"];
+
+/** Request `_meta` key the relay sets on a tools/call with the approved group names; the relay overwrites anything a client sent. */
+export const PATH_GRANTS_META_KEY = "frely/pathGrants";
+
+/** Approved group names from a tools/call `_meta`; unknown names are dropped. */
+export function pathGrantsFromMeta(meta: unknown): string[] {
+  const value = meta && typeof meta === "object" ? (meta as Record<string, unknown>)[PATH_GRANTS_META_KEY] : undefined;
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((name): name is string => typeof name === "string" && Object.hasOwn(SENSITIVE_PATH_GROUPS, name)))];
+}
+
+export function sensitiveReadPaths(allowedGroups: readonly string[] = []): string[] {
+  const allowed = new Set(allowedGroups);
+  return [
+    ...Object.entries(SENSITIVE_PATH_GROUPS).filter(([name]) => !allowed.has(name)).flatMap(([, paths]) => paths),
+    ...ALWAYS_DENIED_READ_PATHS,
+  ];
+}
 
 let initialized: Promise<boolean> | undefined;
 let warned = false;
@@ -73,7 +90,7 @@ export function detectSandboxBackend(): "srt" | "off" | "none" {
   }
 }
 
-export function buildSandboxConfig(workspaceRoot: string): SandboxRuntimeConfig {
+export function buildSandboxConfig(workspaceRoot: string, allowedGroups: readonly string[] = []): SandboxRuntimeConfig {
   return {
     network: {
       // Left open by default: an empty allowlist would break ordinary
@@ -85,7 +102,7 @@ export function buildSandboxConfig(workspaceRoot: string): SandboxRuntimeConfig 
       deniedDomains: [],
     },
     filesystem: {
-      denyRead: SENSITIVE_READ_PATHS,
+      denyRead: sensitiveReadPaths(allowedGroups),
       allowWrite: [workspaceRoot, tmpdir()],
       denyWrite: [],
     },
@@ -128,7 +145,7 @@ async function ensureInitialized(workspaceRoot: string): Promise<boolean> {
  * In strict mode (`FRELY_SANDBOX_STRICT=1`), any of those failures throws
  * instead of silently running the command unsandboxed.
  */
-export async function sandboxCommand(command: string, workspaceRoot: string): Promise<string> {
+export async function sandboxCommand(command: string, workspaceRoot: string, allowedGroups: readonly string[] = []): Promise<string> {
   if (isSandboxDisabled()) return command;
   const ready = await ensureInitialized(workspaceRoot);
   if (!ready) {
@@ -137,7 +154,7 @@ export async function sandboxCommand(command: string, workspaceRoot: string): Pr
   }
   try {
     // initialize() fixed allowWrite to the first workspace that ran a command; give every call its own workspace.
-    return await SandboxManager.wrapWithSandbox(command, undefined, { filesystem: buildSandboxConfig(workspaceRoot).filesystem });
+    return await SandboxManager.wrapWithSandbox(command, undefined, { filesystem: buildSandboxConfig(workspaceRoot, allowedGroups).filesystem });
   } catch (error) {
     if (isSandboxStrict()) throw error instanceof Error ? error : new Error(String(error));
     warnOnce(`failed to sandbox a command (${error instanceof Error ? error.message : String(error)}); it ran unsandboxed this time. Set FRELY_SANDBOX_STRICT=1 to refuse instead.`);

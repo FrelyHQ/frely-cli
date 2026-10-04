@@ -202,10 +202,10 @@ export class Workspace {
     return { from: portableRelative(this.root, from), to: portableRelative(this.root, to) };
   }
 
-  async runCommand(command: string, cwdInput: string, timeoutMs: number, signal?: AbortSignal) {
+  async runCommand(command: string, cwdInput: string, timeoutMs: number, signal?: AbortSignal, pathGrants: readonly string[] = []) {
     if (!command.trim()) throw new Error("command is required.");
     const cwd = await this.existingPath(cwdInput || ".", "directory");
-    const sandboxed = await sandboxCommand(command, this.root);
+    const sandboxed = await sandboxCommand(command, this.root, pathGrants);
     const { stdout, stderr } = await runShellCommand(sandboxed, cwd, safeEnv(), timeoutMs, MAX_OUTPUT_BYTES, signal);
     return { stdout: truncate(stdout), stderr: truncate(stderr) };
   }
