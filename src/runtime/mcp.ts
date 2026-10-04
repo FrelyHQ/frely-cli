@@ -177,6 +177,8 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
         const result = await options.localMcp.call(enabled, textArg(args, "server"), textArg(args, "tool"), callArgs as Record<string, unknown>, { timeoutMs: intArg(args, "timeoutMs", 60000, 100, 120000), signal });
         return result as { content: Array<{ type: "text"; text: string }>; isError?: boolean };
       }
+      // `frely mcp workspace add|remove` edits the registry while this runtime keeps running; pick the change up per call.
+      await syncWorkspaces(workspaces, primaryRoot);
       const result = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]));
       return { content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result) }] };
     } catch (error) {
@@ -190,6 +192,18 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
   });
 
   return server;
+}
+
+/** Make `workspaces` match the registry: open added roots, drop removed ones. The primary root always stays. */
+async function syncWorkspaces(workspaces: Map<string, Workspace>, primaryRoot: string): Promise<void> {
+  const roots = new Set(await listWorkspaces());
+  roots.add(primaryRoot);
+  for (const root of [...workspaces.keys()]) if (!roots.has(root)) workspaces.delete(root);
+  for (const root of roots) {
+    if (workspaces.has(root)) continue;
+    // A root that vanished from disk must not break calls to the other workspaces.
+    try { workspaces.set(root, await Workspace.open(root)); } catch { /* skipped until it is valid again */ }
+  }
 }
 
 export async function startStdioMcp(workspaceInput: string, options: McpRuntimeOptions = {}): Promise<void> {

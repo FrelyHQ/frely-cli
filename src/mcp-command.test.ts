@@ -42,6 +42,10 @@ test("MCP help works offline for the entry and subcommands", async () => {
   }
 });
 
+test("a bare workspace add means the current directory", () => {
+  assert.deepEqual(normalizeMcpArgs(["mcp", "workspace", "add"]), ["mcp", "workspace", "add", "."]);
+});
+
 test("invalid MCP arguments fail before login, authorization, service installation or credential access", async () => {
   for (const args of [
     ["mcp", "--workspace"],
@@ -56,7 +60,7 @@ test("invalid MCP arguments fail before login, authorization, service installati
     ["mcp", "stop", "--force"],
     ["mcp", "workspace", "--json"],
     ["mcp", "workspace", "list", "--verbose"],
-    ["mcp", "workspace", "add"],
+    ["mcp", "workspace", "remove"],
     ["mcp", "typo"],
     ["mcp", "chatgpt"],
     ["mcp", "status"],

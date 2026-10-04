@@ -30,6 +30,8 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
       return args;
     }
     if (subaction !== "add" && subaction !== "remove") throw new Error("Unknown workspace command. Run frely mcp workspace.");
+    // A bare `workspace add` means the current directory.
+    if (subaction === "add" && args.length === 3) return [...args, "."];
     if (!args[3]) throw new Error(`frely mcp workspace ${subaction} requires a path argument.`);
     if (args.length > 4) throw new Error(`Unsupported workspace ${subaction} option. Run frely mcp workspace.`);
     return args;

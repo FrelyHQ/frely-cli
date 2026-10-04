@@ -6,7 +6,7 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMcpServer } from "./mcp.js";
-import { addWorkspace } from "./workspace-registry.js";
+import { addWorkspace, removeWorkspace } from "./workspace-registry.js";
 
 async function connect(root: string) {
   const server = await createMcpServer(root);
@@ -82,5 +82,26 @@ test("nested workspaces coexist: requests go to the deepest root, moves may cros
     const moved = await client.callTool({ name: "move_path", arguments: { from: join(child, "src", "c.txt"), to: join(parent, "c.txt") } });
     assert.equal(moved.isError, undefined, text(moved));
     assert.equal(text(await client.callTool({ name: "read_file", arguments: { path: join(parent, "c.txt") } })), "inner\n");
+  } finally { await close(); }
+});
+
+test("workspaces added or removed while the runtime is running take effect without a restart", async () => {
+  const primary = await realpath(await mkdtemp(join(tmpdir(), "frely-mw-hot-primary-")));
+  const later = await realpath(await mkdtemp(join(tmpdir(), "frely-mw-hot-later-")));
+  await writeFile(join(later, "d.txt"), "hot\n");
+  const { client, close } = await connect(primary);
+  try {
+    const before = JSON.parse(text(await client.callTool({ name: "workspace_info", arguments: {} })));
+    assert.deepEqual(before.workspaces, [primary]);
+
+    await addWorkspace(later);
+    const added = JSON.parse(text(await client.callTool({ name: "workspace_info", arguments: {} })));
+    assert.deepEqual([...added.workspaces].sort(), [primary, later].sort());
+    assert.equal(text(await client.callTool({ name: "read_file", arguments: { path: join(later, "d.txt") } })), "hot\n");
+
+    await removeWorkspace(later, primary);
+    const removed = await client.callTool({ name: "read_file", arguments: { path: join(later, "d.txt") } });
+    assert.equal(removed.isError, true);
+    assert.deepEqual(JSON.parse(text(await client.callTool({ name: "workspace_info", arguments: {} }))).workspaces, [primary]);
   } finally { await close(); }
 });
