@@ -136,7 +136,8 @@ export async function sandboxCommand(command: string, workspaceRoot: string): Pr
     return command;
   }
   try {
-    return await SandboxManager.wrapWithSandbox(command);
+    // initialize() fixed allowWrite to the first workspace that ran a command; give every call its own workspace.
+    return await SandboxManager.wrapWithSandbox(command, undefined, { filesystem: buildSandboxConfig(workspaceRoot).filesystem });
   } catch (error) {
     if (isSandboxStrict()) throw error instanceof Error ? error : new Error(String(error));
     warnOnce(`failed to sandbox a command (${error instanceof Error ? error.message : String(error)}); it ran unsandboxed this time. Set FRELY_SANDBOX_STRICT=1 to refuse instead.`);
