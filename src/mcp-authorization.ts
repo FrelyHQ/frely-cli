@@ -90,6 +90,7 @@ export async function loadMcpAuthorization(): Promise<McpAuthorization | null> {
   const raw = await credentialStore.getPassword(SERVICE, account(metadata));
   if (!raw) throw new Error("MCP secure credential is unavailable. Run frely mcp url --days 90 to renew; no replacement key was generated.");
   const value = JSON.parse(raw) as McpSecret;
+  try { value.metadata.mcpResource = validateMcpResource(value.metadata.mcpResource); } catch { /* the comparison below rejects it */ }
   if (value.version !== 1 || JSON.stringify(value.metadata) !== JSON.stringify(metadata) || typeof value.privateKeyPem !== "string") throw new Error("MCP credential does not match its authorization.");
   const identity = identityFromPrivateKey(value.privateKeyPem);
   if (identity.keyThumbprint !== metadata.grant.keyThumbprint) throw new Error("MCP private key does not match its authorization.");
@@ -209,7 +210,7 @@ function validateView(input: unknown): McpAuthorizationView {
     days: value.days, approvalDeadline: value.approvalDeadline, approvedAt: value.approvedAt, expiresAt: value.expiresAt, status: value.status };
 }
 // One account-level URL reaches every MCP-enabled device; tools select a device by argument.
-// "/mcp" is current; "/mcp/devices" is kept for configurations written before the move.
+// "/mcp" is current; "/mcp/devices" is still accepted and reported as "/mcp" for configurations written before the move.
 const DEVICE_MCP_PATHS = ["/mcp", "/mcp/devices"];
 function validateMcpResource(input: unknown): string {
   if (typeof input !== "string" || input.length > 4096) throw new Error("MCP resource URL is invalid.");
@@ -219,6 +220,12 @@ function validateMcpResource(input: unknown): string {
   if ((url.protocol !== "https:" && !loopbackHttp) || url.username || url.password || url.search || url.hash || !DEVICE_MCP_PATHS.includes(url.pathname)) {
     throw new Error("MCP resource URL is invalid.");
   }
+  return canonicalMcpResource(url);
+}
+/** Configurations written by earlier CLIs point at connect.frely.cloud and/or /mcp/devices; report the current address. */
+function canonicalMcpResource(url: URL): string {
+  if (url.hostname === "connect.frely.cloud") url.hostname = "mcp.frely.cloud";
+  if (url.pathname === "/mcp/devices") url.pathname = "/mcp";
   return url.toString();
 }
 async function readRequest(response: Response): Promise<{ grant: McpAuthorizationView; mcpResource: string }> {

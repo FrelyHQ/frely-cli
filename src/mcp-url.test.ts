@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import test, { type TestContext } from "node:test";
 import { basicCredentialStore } from "./credential-basic.js";
 import { credentialStore } from "./credential-store.js";
-import { generateMcpKey, inspectMcpMetadata, McpConfigInvalidError, mcpMetadataPath, setupMcpAuthorization, type McpAuthorizationView } from "./mcp-authorization.js";
+import { generateMcpKey, inspectMcpMetadata, loadMcpAuthorization, McpConfigInvalidError, mcpMetadataPath, setupMcpAuthorization, type McpAuthorizationView } from "./mcp-authorization.js";
 import { ensureMcpAuthorization } from "./mcp-command.js";
 import { useMemoryCredentialStore } from "./test-support.js";
 
@@ -169,13 +169,28 @@ test("frely mcp moves invalid or legacy configuration aside and sets up again", 
   }
 });
 
-test("frely mcp keeps a configuration written with the previous /mcp/devices URL", async (t) => {
+test("frely mcp reports the current address for a configuration written with a previous URL", async (t) => {
   const f = await fixture(t);
   await setupMcpAuthorization(f.directory);
   const stored = JSON.parse(await readFile(mcpMetadataPath(), "utf8"));
-  const previous = "https://mcp.test.invalid/mcp/devices";
+  for (const [previous, current] of [["https://mcp.test.invalid/mcp/devices", "https://mcp.test.invalid/mcp"],
+    ["https://connect.frely.cloud/mcp/devices", "https://mcp.frely.cloud/mcp"], ["https://connect.frely.cloud/mcp", "https://mcp.frely.cloud/mcp"]] as const) {
+    await writeFile(mcpMetadataPath(), JSON.stringify({ ...stored, mcpResource: previous }) + "\n", { mode: 0o600 });
+    assert.equal((await inspectMcpMetadata())?.mcpResource, current);
+  }
+});
+
+test("frely mcp loads a configuration whose stored secret also has the previous URL", async (t) => {
+  const f = await fixture(t);
+  const original = await setupMcpAuthorization(f.directory);
+  const previous = "https://connect.frely.cloud/mcp/devices";
+  const key = ["frely-cli-mcp-authorization-v1", `${f.relayUrl}|${f.userId}|${original.grant.id}`] as const;
+  const secret = JSON.parse((await credentialStore.getPassword(...key))!);
+  secret.metadata.mcpResource = previous;
+  await credentialStore.setPassword(...key, JSON.stringify(secret));
+  const stored = JSON.parse(await readFile(mcpMetadataPath(), "utf8"));
   await writeFile(mcpMetadataPath(), JSON.stringify({ ...stored, mcpResource: previous }) + "\n", { mode: 0o600 });
-  assert.equal((await inspectMcpMetadata())?.mcpResource, previous);
+  assert.equal((await loadMcpAuthorization())?.mcpUrl, "https://mcp.frely.cloud/mcp");
 });
 
 test("frely mcp leaves unreadable configuration untouched", { skip: process.platform === "win32" }, async (t) => {
