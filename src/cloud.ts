@@ -19,7 +19,7 @@ export function cloudClientName(host = hostname()): string {
   return safe ? `Frely CLI Cloud (${safe})` : "Frely CLI Cloud";
 }
 
-/** The server's `permission_required` tool failure as a one-line hint, or null for any other result. */
+/** The server's `permission_required` or `confirmation_required` tool failure as a one-line hint, or null for any other result. */
 export function permissionHint(result: object): string | null {
   const { isError, content } = result as { isError?: unknown; content?: unknown };
   if (isError !== true || !Array.isArray(content)) return null;
@@ -27,11 +27,15 @@ export function permissionHint(result: object): string | null {
     const text = (part as { type?: unknown; text?: unknown }).type === "text" ? (part as { text?: unknown }).text : undefined;
     if (typeof text !== "string") continue;
     try {
-      const error = (JSON.parse(text) as { error?: { code?: unknown; need?: unknown; group?: unknown; url?: unknown } }).error;
-      if (error?.code !== "permission_required" || typeof error.url !== "string") continue;
+      const error = (JSON.parse(text) as { error?: { code?: unknown; need?: unknown; group?: unknown; url?: unknown; confirmationId?: unknown; summary?: unknown } }).error;
+      if (typeof error?.url !== "string" || (error.code !== "permission_required" && error.code !== "confirmation_required")) continue;
       const need = error.need === "write" ? "write access" : error.need === "sensitive" ? "sensitive read access" : "read access";
       const url = new URL(error.url);
       if (url.protocol !== "https:" && url.hostname !== "127.0.0.1" && url.hostname !== "localhost") continue;
+      if (error.code === "confirmation_required") {
+        if (typeof error.confirmationId !== "string" || !/^[A-Za-z0-9_-]{1,80}$/.test(error.confirmationId)) continue;
+        return `${typeof error.summary === "string" ? error.summary + "\n" : ""}Approve this in your browser (passkey or authenticator code required): ${url.toString()}\nThen run the same call again with "confirmationId":"${error.confirmationId}" added to the input.`;
+      }
       return `This device needs ${need}${typeof error.group === "string" ? " to " + error.group : ""}. Grant it in your browser (passkey or authenticator code required): ${url.toString()}`;
     } catch { /* Not a permission failure. */ }
   }
