@@ -61,7 +61,7 @@ export async function connectionGrant(binding?: DeviceBinding, mcp?: { authoriza
   const proof = createConnectionProof(identity, device.deviceId);
   const response = await relayFetch(auth.config.relayUrl, auth.credential, "/api/user/device-relay/connect", {
     method: "POST",
-    body: JSON.stringify({ ...proof, ...(mcp ? {
+    body: JSON.stringify({ ...proof, cliVersion: CLIENT_VERSION, ...(mcp ? {
       mcpAuthorizationId: mcp.authorizationId,
       mcpSignature: mcp.sign(["frely.mcp.connect.v1", device.deviceId, mcp.authorizationId, proof.issuedAt, proof.nonce].join("\n")),
     } : {}) }),
