@@ -161,6 +161,7 @@ async function main(): Promise<void> {
     if (value.premium === "installed") stdout.write("Paid part: installed\n");
     if (value.premium === "pass_required") stdout.write(`Paid part: not installed. Buy a pass in the marketplace or with frely cloud call passes.buy --json '{"productKind":"cloud_skill","productId":"${value.id}","duration":"30d"}', then run this command again.\n`);
     if (value.hasScripts) stdout.write("This item contains scripts. Read them before you let an agent run them; they were saved without execute permission.\n");
+    if (value.scanned) stdout.write("Passed Frely automated scan for this version. This is an automated check, not a guarantee.\n");
     if (value.guarded) stdout.write("Frely has not scanned this Skill. Your agent reviews it with the frely-item-guard Skill before first use.\n");
     if (value.kind === "skill") stdout.write("Restart or reload the agent session so it rescans Skills.\n");
     return;
