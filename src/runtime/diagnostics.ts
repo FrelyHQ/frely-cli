@@ -11,7 +11,7 @@ export interface DiagnosticContext {
 }
 
 const methods = new Set(["initialize", "ping", "tools/list", "tools/call", "notifications/initialized", "notifications/cancelled"]);
-const tools = new Set(["workspace_info", "list_directory", "stat_path", "find_files", "search_files", "read_file", "read_file_lines", "write_file", "apply_patch", "create_directory", "delete_path", "move_path", "run_command", "start_process", "list_processes", "read_process", "write_process", "stop_process"]);
+const tools = new Set(["process", "web_fetch", "workspace_info", "list_directory", "stat_path", "find_files", "search_files", "read_file", "read_file_lines", "write_file", "apply_patch", "create_directory", "delete_path", "move_path", "run_command", "start_process", "list_processes", "read_process", "write_process", "stop_process"]);
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const codes = new Set(["ENOENT", "EACCES", "EPERM", "EEXIST", "ENOTDIR", "EISDIR", "ENOTFOUND", "EAI_AGAIN", "ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "ABORT_ERR", "frame_invalid", "frame_too_large", "duplicate_request", "inflight_limit"]);
 const messages = new Set([

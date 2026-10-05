@@ -57,7 +57,7 @@ test("multiple workspaces route absolute paths, reject relative/outside paths, k
     assert.match(text(missing), /not inside any registered workspace/);
     assert.ok(text(missing).includes(primary) && text(missing).includes(second));
 
-    const processes = await client.callTool({ name: "list_processes", arguments: {} });
+    const processes = await client.callTool({ name: "process", arguments: { action: "list" } });
     assert.equal(processes.isError, undefined);
   } finally { await close(); }
 });
