@@ -174,7 +174,7 @@ frely update     # 原地升级当前正在运行的安装
 
 `frely doctor` 是唯一诊断入口，永不重启服务。“Connected” 表示匹配的账号/设备进程在 75 秒内收到 WebSocket 心跳，且 MCP 授权与工作区与运行中的 relay 匹配。两种模式都不代替客户端完成 OAuth 授权，也不代替执行工具调用。`frely doctor --mcp` 是检查受保护凭证和服务端授权状态的推荐方式。
 
-完整行为：[self-upgrade 契约](docs/self-upgrade.md) 与[服务维护与旧版本迁移](docs/service-maintenance.md)。若安装了多个 `frely`，升级前先查看 `doctor` 显示的路径。
+完整行为：[self-update 契约](docs/self-update.md) 与[服务维护与旧版本迁移](docs/service-maintenance.md)。若安装了多个 `frely`，升级前先查看 `doctor` 显示的路径。
 
 ## 本地执行边界
 

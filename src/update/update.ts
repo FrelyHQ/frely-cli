@@ -8,16 +8,16 @@ import { VERSION } from "../version.js";
 import { readDeviceBinding } from "../device/state.js";
 import { connectionIsLive, readConnectionStatus } from "../device/connection-status.js";
 import { serviceCommand, serviceStatus, startMcpService, stopMcpService } from "../service.js";
-import { inspectInstallation, manualUpgradeCommand, packageArguments, type Installation } from "./installation.js";
-import { compareVersions, latestRelease, standaloneAsset, type Release } from "./release.js";
+import { inspectInstallation, manualUpdateCommand, packageArguments, type Installation } from "./installation.js";
+import { compareVersions, latestRelease, releaseMirror, standaloneAsset, type Release } from "./release.js";
 import { acquireMaintenance } from "./maintenance.js";
 
 const execFile = promisify(execFileCallback);
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-export interface UpgradeResult { state: "current" | "manual" | "upgraded"; message: string }
+export interface UpdateResult { state: "current" | "manual" | "updated"; message: string }
 
-export interface UpgradeInspection { currentVersion: string; latestVersion?: string; installation: Installation; state: "unsupported" | "available" | "current" | "unavailable"; message: string }
-export async function inspectUpgrade(): Promise<UpgradeInspection> {
+export interface UpdateInspection { currentVersion: string; latestVersion?: string; installation: Installation; state: "unsupported" | "available" | "current" | "unavailable"; message: string }
+export async function inspectUpdate(): Promise<UpdateInspection> {
   const installation = await inspectInstallation().catch((): Installation => ({ method: "unknown", entry: process.argv[1] ?? process.execPath, platform: process.platform, reason: "Installation could not be inspected." }));
   if (installation.method === "unknown" || installation.method === "source") {
     return { currentVersion: VERSION, installation, state: "unsupported" as const, message: installation.reason! };
@@ -38,12 +38,17 @@ export async function installedVersion(installation: Installation): Promise<stri
   return (await execFile(file, args, { cwd: homedir(), timeout: 10000, maxBuffer: 65536 })).stdout.trim();
 }
 
+const DOWNLOAD_HOSTS = ["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"];
+function mirrorHosts(): string[] {
+  try { const mirror = releaseMirror(); return mirror ? [new URL(mirror).hostname] : []; } catch { return []; }
+}
+
 async function download(url: string, destination: string, maxBytes: number): Promise<void> {
   const signal = AbortSignal.timeout(60000);
   let response: Response | undefined;
   for (let redirects = 0; redirects < 5; redirects++) {
     const parsed = new URL(url);
-    if (parsed.protocol !== "https:" || parsed.username || parsed.password || !["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"].includes(parsed.hostname)) throw new Error("Unsupported release download location.");
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password || ![...DOWNLOAD_HOSTS, ...mirrorHosts()].includes(parsed.hostname)) throw new Error("Unsupported release download location.");
     response = await fetch(url, { signal, redirect: "manual" });
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.get("location");
@@ -79,13 +84,19 @@ export async function prepareStandalone(installation: Installation, release: Rel
   fetchFile = download, execute = installedVersion): Promise<PreparedUpdate> {
   const target = installation.entry;
   if (!(await lstat(target)).isFile()) throw new Error("The installation is not a regular file.");
-  const stage = await mkdtemp(join(dirname(target), ".frely-upgrade-"));
+  const stage = await mkdtemp(join(dirname(target), ".frely-update-"));
   const next = join(stage, "frely"), backup = join(stage, "previous");
   try {
     const asset = standaloneAsset();
-    await fetchFile(`${release.baseUrl}/${asset}.sha256`, join(stage, "checksum"), 1024);
-    await fetchFile(`${release.baseUrl}/${asset}`, next, 200 * 1024 * 1024);
-    await validateStandalone(next, await readFile(join(stage, "checksum"), "utf8"), release.version, execute);
+    // Checksum and executable must come from the same source; a mirror failure of any kind falls back to GitHub as a whole.
+    const fromBase = async (base: string) => {
+      await rm(join(stage, "checksum"), { force: true }); await rm(next, { force: true });
+      await fetchFile(`${base}/${asset}.sha256`, join(stage, "checksum"), 1024);
+      await fetchFile(`${base}/${asset}`, next, 200 * 1024 * 1024);
+      await validateStandalone(next, await readFile(join(stage, "checksum"), "utf8"), release.version, execute);
+    };
+    try { await fromBase(release.baseUrl!); }
+    catch (error) { if (!release.fallbackBaseUrl) throw error; await fromBase(release.fallbackBaseUrl); }
     await copyFile(target, backup);
     return {
       apply: () => rename(next, target),
@@ -104,29 +115,29 @@ async function installPackage(installation: Installation, version: string): Prom
 
 async function lockInstallation(installation: Installation): Promise<() => Promise<void>> {
   const directory = installation.method === "standalone" ? dirname(installation.entry) : dirname(dirname(dirname(installation.entry)));
-  const path = join(directory, ".frely-upgrade.lock");
-  const file = await open(path, "wx", 0o600).catch(() => { throw new Error(`Cannot acquire upgrade lock: ${path}. Check directory permissions or another upgrade. Remove a stale lock only after confirming no upgrade is running.`); });
+  const path = join(directory, ".frely-update.lock");
+  const file = await open(path, "wx", 0o600).catch(() => { throw new Error(`Cannot acquire update lock: ${path}. Check directory permissions or another update. Remove a stale lock only after confirming no update is running.`); });
   await file.writeFile(`${process.pid}\n`);
   return async () => { await file.close(); await rm(path, { force: true }); };
 }
 
 const defaults = { inspectInstallation, latestRelease, installedVersion, serviceStatus, serviceCommand, stopMcpService, startMcpService,
   readDeviceBinding, readConnectionStatus, acquireMaintenance, prepareStandalone, installPackage, lockInstallation, pause };
-export type UpgradeDependencies = typeof defaults;
+export type UpdateDependencies = typeof defaults;
 
-/** Upgrade in the calling terminal. Busy MCP callers fail before any service stop or package write. */
-export async function upgrade(write: (message: string) => void, dependencies: UpgradeDependencies = defaults): Promise<UpgradeResult> {
+/** Update in the calling terminal. Busy MCP callers fail before any service stop or package write. */
+export async function update(write: (message: string) => void, dependencies: UpdateDependencies = defaults): Promise<UpdateResult> {
   const d = dependencies, installation = await d.inspectInstallation();
   if (installation.method === "source" || installation.method === "unknown") throw new Error(installation.reason);
   const release = await d.latestRelease(installation);
   if (compareVersions(release.version, VERSION) <= 0) return { state: "current", message: `Frely ${VERSION} is up to date.` };
   const service = await d.serviceStatus();
-  if (installation.platform === "win32") return { state: "manual", message: `Update ${VERSION} → ${release.version}. Finish any running Frely tasks, then run this command in a local PowerShell terminal:\n\n${manualUpgradeCommand(installation, release.version, service.active)}\n\nAfter installation, run frely doctor. No files or services were changed by frely update.` };
+  if (installation.platform === "win32") return { state: "manual", message: `Update ${VERSION} → ${release.version}. Finish any running Frely tasks, then run this command in a local PowerShell terminal:\n\n${manualUpdateCommand(installation, release.version, service.active)}\n\nAfter installation, run frely doctor. No files or services were changed by frely update.` };
   if (!["darwin", "linux"].includes(installation.platform)) throw new Error("This platform requires a manual update.");
   if (service.active) {
     const command = await d.serviceCommand();
     const entry = command?.[installation.method === "standalone" ? 0 : 1];
-    if (!service.pid || !entry || await realpath(entry).catch(() => entry) !== installation.entry) throw new Error("The running service does not match this installation. Inspect frely doctor -v before upgrading.");
+    if (!service.pid || !entry || await realpath(entry).catch(() => entry) !== installation.entry) throw new Error("The running service does not match this installation. Inspect frely doctor -v before updating.");
   }
   const unlock = await d.lockInstallation(installation);
   let prepared: PreparedUpdate | undefined, releaseMaintenance: (() => void) | undefined;
@@ -140,7 +151,7 @@ export async function upgrade(write: (message: string) => void, dependencies: Up
     if (service.active) releaseMaintenance = await d.acquireMaintenance(service.pid!);
     if (service.active) {
       const current = await d.serviceStatus();
-      if (!current.active || current.pid !== service.pid) throw new Error("The service changed during upgrade preparation. Run frely doctor, then retry.");
+      if (!current.active || current.pid !== service.pid) throw new Error("The service changed during update preparation. Run frely doctor, then retry.");
       stopped = true;
       await d.stopMcpService();
       for (let i = 0; i < 30 && (await d.serviceStatus()).active; i++) await d.pause(100);
@@ -165,11 +176,11 @@ export async function upgrade(write: (message: string) => void, dependencies: Up
       }
       if (!started) {
         // Authentication/network can prevent ensureDevice and its reporter. Keep a verified installed binary.
-        return { state: "upgraded", message: `Frely ${release.version} is installed. A service restart was requested, but its new runtime could not be verified. Run frely doctor -v.` };
+        return { state: "updated", message: `Frely ${release.version} is installed. A service restart was requested, but its new runtime could not be verified. Run frely doctor -v.` };
       }
-      return { state: "upgraded", message: `Frely ${release.version} is installed; the service is using the new version. ${connected ? "Relay connection verified." : "Relay connection is not yet verified. Run frely doctor."}` };
+      return { state: "updated", message: `Frely ${release.version} is installed; the service is using the new version. ${connected ? "Relay connection verified." : "Relay connection is not yet verified. Run frely doctor."}` };
     }
-    return { state: "upgraded", message: `Frely ${release.version} is installed. The background service remains ${service.installed ? "stopped" : "uninstalled"}.` };
+    return { state: "updated", message: `Frely ${release.version} is installed. The background service remains ${service.installed ? "stopped" : "uninstalled"}.` };
   } catch (error) {
     let recovery = "";
     if (attempted && prepared) {
@@ -183,7 +194,7 @@ export async function upgrade(write: (message: string) => void, dependencies: Up
       try { await d.startMcpService(); recovery += " Requested restart of the original service."; }
       catch { recovery += " The service could not restart. Run frely doctor -v."; }
     }
-    throw new Error(`${error instanceof Error ? error.message : "Upgrade failed."}${recovery}`);
+    throw new Error(`${error instanceof Error ? error.message : "Update failed."}${recovery}`);
   } finally {
     releaseMaintenance?.();
     try { if (!preserveRecovery) await prepared?.cleanup(); } finally { await unlock(); }

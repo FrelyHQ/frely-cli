@@ -88,7 +88,7 @@ export class ServiceRefresh {
       if (signal.aborted) return;
       if (!gate.idle) {
         if (this.deferredFingerprint !== candidate.fingerprint) {
-          diagnostic(log, "relay.upgrade_deferred");
+          diagnostic(log, "relay.update_deferred");
           this.deferredFingerprint = candidate.fingerprint;
         }
         return;
@@ -96,7 +96,7 @@ export class ServiceRefresh {
       // An explicit frely update may already own maintenance. Never resume another owner's gate.
       try { gate.pause(); paused = true; } catch { return; }
       if (!await probe.verify(candidate) || signal.aborted || !gate.idle) return;
-      diagnostic(log, "relay.upgrade_restart");
+      diagnostic(log, "relay.update_restart");
       restart();
       this.restarting = true;
       // Keep admission closed while the relay flushes and exits. Its existing supervisor restarts it.

@@ -18,7 +18,7 @@ function fixture() {
     state: "connected", mcpEnabled: true, updatedAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() };
   const calls = { session: 0, mcp: 0, storage: 0 };
   const dependencies: NonNullable<Parameters<typeof doctor>[1]> = {
-    inspectUpgrade: async () => ({ currentVersion: "0.6.2", latestVersion: "0.6.2", state: "current" as const, message: "Up to date.", installation: { method: "npm" as const, entry: "/test/npm/frely", platform: process.platform } }),
+    inspectUpdate: async () => ({ currentVersion: "0.6.2", latestVersion: "0.6.2", state: "current" as const, message: "Up to date.", installation: { method: "npm" as const, entry: "/test/npm/frely", platform: process.platform } }),
     inspectAuth: async () => ({ configured: true, credentialStored: true, relayUrl: binding.relayUrl,
       user: { id: binding.userId, email: "user@example.com" }, configPath: "/test/config.json" }),
     inspectMcpMetadata: async () => metadata, readDeviceBinding: async () => binding,
@@ -131,13 +131,13 @@ test("doctor names invalid MCP configuration and points to frely mcp url", async
 test("doctor exposes version checks as informational when an update is available or the registry is offline", async () => {
   for (const state of ["available", "unavailable"] as const) {
     const f = fixture();
-    f.dependencies.inspectUpgrade = async () => ({ currentVersion: "0.6.2", state,
+    f.dependencies.inspectUpdate = async () => ({ currentVersion: "0.6.2", state,
       message: state === "available" ? "0.6.2 → 0.7.0. Run frely update." : "Version lookup unavailable.",
       installation: { method: "npm", entry: "/test/npm/frely", platform: process.platform } });
     const result = await doctor({}, f.dependencies);
     assert.equal(result.ok, true);
     assert.equal(result.update.state, state);
-    assert.equal(result.checks.find((check) => check.name === "upgrade")?.status, "info");
+    assert.equal(result.checks.find((check) => check.name === "update")?.status, "info");
     assert.equal(result.summary.installation, "npm: /test/npm/frely");
   }
 });

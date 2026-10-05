@@ -1,4 +1,4 @@
-import { inspectUpgrade } from "./upgrade/update.js";
+import { inspectUpdate } from "./update/update.js";
 import { authConfigPath, inspectAuth, probeCredentialStore, whoami, type AuthSnapshot } from "./auth.js";
 import { clearMcpAuthorization, inspectMcpMetadata, McpAuthorizationError, McpConfigInvalidError, mcpMetadataPath, requireMcpAuthorization } from "./mcp-authorization.js";
 import { resetDeviceRegistration } from "./device/control.js";
@@ -19,7 +19,7 @@ const defaultDependencies = { inspectAuth, probeCredentialStore, whoami, inspect
     await clearMcpAuthorization(metadata);
     if (code === "device_not_found" || code === "device_revoked") await resetDeviceRegistration();
   },
-  readDeviceBinding, readConnectionStatus, serviceStatus, inspectUpgrade };
+  readDeviceBinding, readConnectionStatus, serviceStatus, inspectUpdate };
 type DoctorDependencies = Omit<typeof defaultDependencies, "reconcileMcpAuthorization"> & {
   reconcileMcpAuthorization?: typeof defaultDependencies.reconcileMcpAuthorization;
 };
@@ -34,7 +34,7 @@ export async function statusSnapshot() {
 
 /** Release checks are bounded and informational; verbose also validates account/MCP online. */
 export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDependencies = defaultDependencies) {
-  const upgradePromise = dependencies.inspectUpgrade();
+  const updatePromise = dependencies.inspectUpdate();
   const verbose = options.verbose === true || options.mcp === true;
   const checks: DiagnosticCheck[] = [];
   const add = (name: string, status: DiagnosticCheck["status"], detail: string) =>
@@ -98,9 +98,9 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
       : connectionState === "stopped" ? "Device transport stopped. Run frely mcp start."
       : "Unknown: no recent heartbeat for this account/device. Run frely doctor -v.");
 
-  const update = await upgradePromise;
+  const update = await updatePromise;
   add("installation", "info", `${update.installation.method}: ${update.installation.entry}`);
-  add("upgrade", update.state === "current" ? "pass" : "info", update.message);
+  add("update", update.state === "current" ? "pass" : "info", update.message);
 
   const agentConfig = await loadAgentConfig().catch(() => null);
   const appInstall = await readAppInstall().then((install) => verifyCapsule(install).then(() => install)).catch(() => null);
@@ -142,7 +142,7 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
     update,
     summary: {
       installation: `${update.installation.method}: ${update.installation.entry}`,
-      upgrade: update.message,
+      update: update.message,
       account: auth.credentialError ? "Configuration unreadable" : auth.credentialStored
         ? (auth.user?.email ?? "Configured") + " (stored)" : "Not logged in",
       mcp: metadataIssue ?? (!metadata ? "Not enabled" : expired ? "Expired or inactive"

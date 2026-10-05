@@ -8,10 +8,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { VERSION } from "../version.js";
-import { inspectInstallation, manualUpgradeCommand } from "./installation.js";
+import { inspectInstallation, manualUpdateCommand } from "./installation.js";
 import { compareVersions, latestRelease } from "./release.js";
 import { acquireMaintenance, MaintenanceGate, serveMaintenance } from "./maintenance.js";
-import { prepareStandalone, upgrade, validateStandalone, type UpgradeDependencies } from "./update.js";
+import { prepareStandalone, update, validateStandalone, type UpdateDependencies } from "./update.js";
 
 const execFile = promisify(execFileCallback);
 const NEW = "999.0.0";
@@ -60,9 +60,9 @@ test("release lookup pins stable official versions and never follows a metadata 
     assert.equal(init?.redirect, "error"); assert.ok(init?.signal);
     return Response.json({ draft: false, prerelease: false, tag_name: "v1.2.3" });
   };
-  assert.equal((await latestRelease(install, request)).baseUrl, "https://github.com/FrelyHQ/frely-cli/releases/download/v1.2.3");
+  assert.equal((await latestRelease(install, request, null)).baseUrl, "https://github.com/FrelyHQ/frely-cli/releases/download/v1.2.3");
   for (const tag of ["v1.2.3-rc.1", "v1.2.3/evil", "v01.2.3", "../bad"]) {
-    await assert.rejects(latestRelease(install, async () => Response.json({ draft: false, prerelease: false, tag_name: tag })));
+    await assert.rejects(latestRelease(install, async () => Response.json({ draft: false, prerelease: false, tag_name: tag }), null));
   }
   const npm = { method: "npm" as const, entry: "/frely", platform: "linux" as const, manager: "npm", prefix: "/p" };
   const packument = (latest: string, versions: string[]) => async (url: string | URL | Request, init?: RequestInit) => {
@@ -97,13 +97,13 @@ test("standalone preparation leaves original intact; replacement and recovery us
 test("private maintenance pauses new work, waits for inflight completion and resumes on disconnect", { skip: process.platform === "win32" }, async (t) => {
   // macOS AF_UNIX paths must stay short, even when the OS temp directory is long.
   const root = await mkdtemp("/tmp/frely-gate-");
-  const gate = new MaintenanceGate(), path = join(root, "upgrade.sock");
+  const gate = new MaintenanceGate(), path = join(root, "update.sock");
   const close = await serveMaintenance(gate, path);
   t.after(async () => { await close(); await rm(root, { recursive: true, force: true }); });
   const finish = gate.enter();
   const pending = acquireMaintenance(process.pid, path);
   await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.throws(() => gate.enter(), /preparing an upgrade/);
+  assert.throws(() => gate.enter(), /preparing an update/);
   finish();
   const release = await pending;
   assert.equal(gate.idle, true); release();
@@ -120,11 +120,11 @@ function fixture(active = true) {
   const calls: string[] = [];
   let version = VERSION, running = active;
   const installation = { method: "standalone" as const, entry: "/synthetic/frely", platform: "linux" as const };
-  const d: UpgradeDependencies = {
+  const d: UpdateDependencies = {
     inspectInstallation: async () => installation,
     latestRelease: async () => ({ version: NEW }),
     installedVersion: async () => version,
-    serviceStatus: async () => ({ installed: true, active: running, platform: "linux", pid: running ? 123 : undefined } as Awaited<ReturnType<UpgradeDependencies["serviceStatus"]>>),
+    serviceStatus: async () => ({ installed: true, active: running, platform: "linux", pid: running ? 123 : undefined } as Awaited<ReturnType<UpdateDependencies["serviceStatus"]>>),
     serviceCommand: async () => [installation.entry, "mcp", "serve"],
     stopMcpService: async () => { calls.push("stop"); running = false; return d.serviceStatus(); },
     startMcpService: async () => { calls.push("start"); running = true; return d.serviceStatus(); },
@@ -138,11 +138,11 @@ function fixture(active = true) {
   return { d, calls, installation };
 }
 
-test("upgrade restores active service, preserves stopped service and does not mistake offline for install failure", async () => {
+test("update restores active service, preserves stopped service and does not mistake offline for install failure", async () => {
   for (const active of [false, true]) {
     const { d, calls } = fixture(active);
-    const result = await upgrade(() => {}, d);
-    assert.equal(result.state, "upgraded");
+    const result = await update(() => {}, d);
+    assert.equal(result.state, "updated");
     assert.equal(calls.includes("start"), active); assert.equal(calls.includes("stop"), active);
     assert.equal(calls.includes("restore"), false);
     assert.equal(calls.at(-1), "unlock");
@@ -154,7 +154,7 @@ test("busy or mismatched service cancels before replacement or stop", async () =
     const { d, calls } = fixture();
     if (mismatch) d.serviceCommand = async () => ["/another/frely"];
     else d.acquireMaintenance = async () => { throw new Error("busy"); };
-    await assert.rejects(upgrade(() => {}, d), mismatch ? /does not match/ : /busy/);
+    await assert.rejects(update(() => {}, d), mismatch ? /does not match/ : /busy/);
     assert.equal(calls.includes("stop"), false); assert.equal(calls.includes("apply"), false);
   }
 });
@@ -162,29 +162,29 @@ test("busy or mismatched service cancels before replacement or stop", async () =
 test("failed installation attempts recovery and restarts the original service", async () => {
   const { d, calls } = fixture();
   d.prepareStandalone = async () => ({ apply: async () => { throw new Error("install failed"); }, restore: async () => { calls.push("restore"); }, cleanup: async () => {} });
-  await assert.rejects(upgrade(() => {}, d), /Restored Frely/);
+  await assert.rejects(update(() => {}, d), /Restored Frely/);
   assert.ok(calls.indexOf("restore") > calls.indexOf("stop"));
   assert.ok(calls.indexOf("start") > calls.indexOf("restore"));
   assert.equal(calls.at(-1), "unlock");
 });
 
-test("Windows upgrade and current-version no-op never acquire a lock, install or stop a service", async () => {
+test("Windows update and current-version no-op never acquire a lock, install or stop a service", async () => {
   const f = fixture();
   f.d.inspectInstallation = async () => ({ ...f.installation, platform: "win32" });
-  const result = await upgrade(() => {}, f.d);
+  const result = await update(() => {}, f.d);
   assert.equal(result.state, "manual"); assert.match(result.message, /powershell -NoProfile/);
   assert.match(result.message, /install\.ps1/); assert.deepEqual(f.calls, []);
   const old = fixture(); old.d.latestRelease = async () => ({ version: VERSION });
-  assert.equal((await upgrade(() => {}, old.d)).state, "current"); assert.deepEqual(old.calls, []);
+  assert.equal((await update(() => {}, old.d)).state, "current"); assert.deepEqual(old.calls, []);
 });
 
 test("Windows package instructions preserve manager and prefix, escape paths, and restore only a running service", () => {
   const installation = { method: "npm" as const, entry: "C:\\odd'name\\node_modules\\frely-cli\\dist\\index.js", manager: "C:\\odd'name\\npm.cmd", prefix: "C:\\odd'name", platform: "win32" as const };
-  const command = manualUpgradeCommand(installation, "1.2.3", false);
+  const command = manualUpdateCommand(installation, "1.2.3", false);
   assert.match(command, /frely-cli@1\.2\.3/); assert.match(command, /--prefix/); assert.match(command, /--ignore-scripts/);
   assert.match(command, /--min-release-age-exclude=frely-cli/);
   assert.doesNotMatch(command, /mcp start/);
-  assert.match(manualUpgradeCommand(installation, "1.2.3", true), /finally/);
+  assert.match(manualUpdateCommand(installation, "1.2.3", true), /finally/);
 });
 
 test("update accepts no switches and directs version checks to doctor", async () => {
@@ -202,7 +202,38 @@ test("service identity changes during preparation cancel before stop or install"
   const { d, calls } = fixture();
   let observations = 0;
   d.serviceStatus = async () => ({ installed: true, active: true, platform: "linux", pid: ++observations === 1 ? 123 : 456 });
-  await assert.rejects(upgrade(() => {}, d), /service changed/);
+  await assert.rejects(update(() => {}, d), /service changed/);
   assert.equal(calls.includes("stop"), false); assert.equal(calls.includes("apply"), false);
   assert.equal(calls.at(-1), "unlock");
+});
+
+test("standalone lookup prefers the mirror, falls back to GitHub, and download falls back as a whole", async (t) => {
+  const install = { method: "standalone" as const, entry: "/frely", platform: "linux" as const };
+  const mirror = "https://mirror.example/cli";
+  const viaMirror = await latestRelease(install, async (url) => {
+    assert.equal(String(url), `${mirror}/latest`);
+    return new Response("1.2.3\n");
+  }, mirror);
+  assert.deepEqual(viaMirror, { version: "1.2.3", baseUrl: `${mirror}/v1.2.3`, fallbackBaseUrl: "https://github.com/FrelyHQ/frely-cli/releases/download/v1.2.3" });
+  const viaGithub = await latestRelease(install, async (url) => String(url).startsWith(mirror)
+    ? new Response("down", { status: 503 })
+    : Response.json({ draft: false, prerelease: false, tag_name: "v1.2.4" }), mirror);
+  assert.equal(viaGithub.version, "1.2.4");
+  assert.match(viaGithub.baseUrl!, /^https:\/\/github\.com\//u);
+
+  const root = await mkdtemp(join(tmpdir(), "frely-mirror-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const entry = join(root, "frely"); await writeFile(entry, "old");
+  const hash = createHash("sha256").update("new").digest("hex");
+  const seen: string[] = [];
+  const prepared = await prepareStandalone({ method: "standalone", entry, platform: "linux" },
+    { version: "1.2.3", baseUrl: `${mirror}/v1.2.3`, fallbackBaseUrl: "https://github.com/x/v1.2.3" },
+    async (url, path) => {
+      seen.push(url);
+      if (url.startsWith(mirror) && !url.endsWith(".sha256")) throw new Error("mirror cut off");
+      await writeFile(path, url.endsWith(".sha256") ? `${hash}  frely\n` : "new");
+    }, async () => "1.2.3");
+  assert.ok(seen.some((url) => url.startsWith(mirror)) && seen.some((url) => url.startsWith("https://github.com/")));
+  await prepared.apply(); assert.equal(await readFile(entry, "utf8"), "new");
+  await prepared.cleanup();
 });

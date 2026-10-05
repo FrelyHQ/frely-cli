@@ -46,7 +46,7 @@ test("Windows task requests carry paths as stdin data, not PowerShell code", asy
 });
 
 
-test("upgrade reads the existing service command without changing escaped paths", () => {
+test("update reads the existing service command without changing escaped paths", () => {
   const command = ["/bin/node", '/odd path/quote"slash\\%$&<name>/index.js', "mcp", "serve", "--workspace", "/workspace"];
   assert.deepEqual(parseServiceCommand("darwin", launchAgentPlist(command, "/state")), command);
   assert.deepEqual(parseServiceCommand("linux", systemdUnit(command)), command);

@@ -15,7 +15,7 @@ test("device MCP accepts the documented short entry and explicit subcommands", (
   assert.deepEqual(normalizeMcpArgs(["mcp", "url", "--json"]), ["mcp", "url", "--json"]);
   // A bare group stays bare; the CLI prints its subcommands instead of listing.
   assert.deepEqual(normalizeMcpArgs(["mcp", "workspace"]), ["mcp", "workspace"]);
-  // Upgrade bridge for Windows commands printed by 0.7.x.
+  // Update bridge for Windows commands printed by 0.7.x.
   assert.deepEqual(normalizeMcpArgs(["mcp", "service", "start"]), ["mcp", "start"]);
   for (const args of [
     ["mcp", "workspace", "list"],

@@ -1,4 +1,4 @@
-import type { MaintenanceGate } from "../upgrade/maintenance.js";
+import type { MaintenanceGate } from "../update/maintenance.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -244,10 +244,11 @@ async function dispatch(
   if (name === "stop_process") return processRead(() => processes.stop(textArg(args, "processId")));
 
   // For all other tools, resolve the workspace based on the input path/cwd
-  const { workspace, relativeInput } = resolveWorkspace(
+  const resolved = resolveWorkspace(
     workspaces as Map<string, Workspace>,
     name === "run_command" || name === "start_process" ? textArg(args, "cwd", ".") : (name === "move_path" ? textArg(args, "from", ".") : textArg(args, "path", ".")),
   );
+  const workspace = resolved.workspace.withGrants(pathGrants), relativeInput = resolved.relativeInput;
 
   if (name === "list_directory") return read(() => workspace.listDirectory(relativeInput));
   if (name === "stat_path") return read(() => workspace.statPath(relativeInput));
@@ -261,7 +262,7 @@ async function dispatch(
   if (name === "delete_path") return write(() => workspace.deletePath(relativeInput, boolArg(args, "recursive", false)));
   if (name === "move_path") {
     const pair = resolveWorkspacePair(workspaces as Map<string, Workspace>, textArg(args, "from", "."), textArg(args, "to"));
-    return write(() => pair.workspace.movePath(pair.relativeFrom, pair.relativeTo, boolArg(args, "overwrite", false)));
+    return write(() => pair.workspace.withGrants(pathGrants).movePath(pair.relativeFrom, pair.relativeTo, boolArg(args, "overwrite", false)));
   }
   if (name === "run_command") {
     const command = textArg(args, "command");

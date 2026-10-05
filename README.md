@@ -30,6 +30,20 @@ curl -fsSL https://cli.frely.cloud/install.sh | sh
 irm https://cli.frely.cloud/install.ps1 | iex
 ```
 
+To install and continue straight into Device MCP setup (sign in in the browser, new accounts can register there, then the MCP URL is printed), use `start.sh` / `start.ps1` instead. The workspace is the directory the command ran in (override with `FRELY_WORKSPACE`); without a terminal it only installs and prints the next commands. `install.sh` / `install.ps1` stay install-only, for scripts and Skills that need the CLI.
+
+```sh
+# macOS / Linux
+curl -fsSL https://cli.frely.cloud/start.sh | sh
+```
+
+```powershell
+# Windows
+irm https://cli.frely.cloud/start.ps1 | iex
+```
+
+The installers and `frely update` download from a static mirror (`https://dl.frely.cloud/cli`, reachable from mainland China) and fall back to GitHub Releases as a whole when the mirror cannot supply the version or its checksum does not match. `FRELY_RELEASE_MIRROR=<https URL>` replaces the mirror and `FRELY_RELEASE_MIRROR=off` uses GitHub only.
+
 Or with npm (Node.js 22 or newer required):
 
 ```sh
@@ -184,7 +198,7 @@ frely update     # updates the running installation in place
 
 `frely doctor` is the single diagnostic entry point and never restarts the service. `Connected` means the matching account/device process has received a WebSocket heartbeat within 75 seconds and the MCP authorization and workspace match the running relay. Neither mode completes client OAuth authorization or executes a tool call through the client. `frely doctor --mcp` is the recommended way to check the protected credential and server state.
 
-Full behavior: [the self-upgrade contract](docs/self-upgrade.md) and [service maintenance and legacy upgrades](docs/service-maintenance.md). If more than one `frely` is installed, check the path shown by `doctor` before upgrading.
+Full behavior: [the self-update contract](docs/self-update.md) and [service maintenance and legacy updates](docs/service-maintenance.md). If more than one `frely` is installed, check the path shown by `doctor` before updating.
 
 ## Local execution boundaries
 

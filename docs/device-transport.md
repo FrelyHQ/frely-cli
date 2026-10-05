@@ -231,7 +231,7 @@ ChatGPT
    v
 Worker
    |
-   | WebSocket Upgrade
+   | WebSocket Update
    v
 DeviceSessionDO
    |

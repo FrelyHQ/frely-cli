@@ -158,7 +158,7 @@ jobs:
             test -f "artifacts/frely-${target}${suffix}.sha256"
           done
           (cd artifacts && for checksum in frely-*.sha256; do sha256sum -c "$checksum"; done)
-          cp install.sh install.ps1 artifacts/
+          cp install.sh install.ps1 start.sh start.ps1 artifacts/
           find artifacts -maxdepth 1 -type f -print | sort
 
       - name: Create GitHub Release
@@ -171,3 +171,41 @@ jobs:
             --verify-tag \
             --title "frely-cli $GITHUB_REF_NAME" \
             --generate-notes
+
+  mirror:
+    # Static mirror of the release assets for networks that cannot reach GitHub (mainland China).
+    # Skipped until the MIRROR_* secrets exist; the GitHub release above is the source of truth.
+    needs: [github-release]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      MIRROR_HOST: ${{ secrets.MIRROR_HOST }}
+    steps:
+      - name: Check out release tag
+        if: env.MIRROR_HOST != ''
+        uses: actions/checkout@v5
+
+      - name: Download standalone artifacts
+        if: env.MIRROR_HOST != ''
+        uses: actions/download-artifact@v6
+        with:
+          pattern: release-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Upload to the mirror
+        if: env.MIRROR_HOST != ''
+        env:
+          MIRROR_USER: ${{ secrets.MIRROR_USER }}
+          MIRROR_PATH: ${{ secrets.MIRROR_PATH }}
+          MIRROR_SSH_KEY: ${{ secrets.MIRROR_SSH_KEY }}
+          MIRROR_KNOWN_HOSTS: ${{ secrets.MIRROR_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp install.sh install.ps1 start.sh start.ps1 artifacts/
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$MIRROR_SSH_KEY" > ~/.ssh/mirror_key && chmod 600 ~/.ssh/mirror_key
+          printf '%s\n' "$MIRROR_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          node scripts/release-mirror.mjs artifacts "${GITHUB_REF_NAME#v}"

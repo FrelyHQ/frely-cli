@@ -3,13 +3,13 @@ import { chmod, lstat, mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-/** An existing relay owns this gate; no updater daemon or remote upgrade jobs. */
+/** An existing relay owns this gate; no updater daemon or remote update jobs. */
 export class MaintenanceGate {
   private paused = false;
   private requests = 0;
   private readonly processes = new Set<() => number>();
   enter(): () => void {
-    if (this.paused) throw new Error("Frely is preparing an upgrade. Retry after it completes.");
+    if (this.paused) throw new Error("Frely is preparing an update. Retry after it completes.");
     return this.track();
   }
   track(): () => void {
@@ -22,7 +22,7 @@ export class MaintenanceGate {
     return () => this.processes.delete(count);
   }
   pause(): void {
-    if (this.paused) throw new Error("Another upgrade holds this service.");
+    if (this.paused) throw new Error("Another update holds this service.");
     this.paused = true;
   }
   resume(): void { this.paused = false; }
@@ -80,7 +80,7 @@ export async function serveMaintenance(gate: MaintenanceGate, path = maintenance
 export async function acquireMaintenance(pid: number, path = maintenancePath(pid)): Promise<() => void> {
   const info = await lstat(path).catch(() => null);
   if (!info?.isSocket() || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0) {
-    throw new Error("The running service has no private upgrade endpoint. Finish its tasks and restart it from a local terminal before upgrading.");
+    throw new Error("The running service has no private update endpoint. Finish its tasks and restart it from a local terminal before updating.");
   }
   return new Promise((resolve, reject) => {
     const socket = createConnection(path);
