@@ -122,15 +122,11 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
       : []),
     ...(enabledLocalMcps(options).length > 0 ? LOCAL_MCP_TOOLS : []),
     tool("workspace_info", "Return the active workspace root.", {}, { readOnly: true }),
-    tool("list_directory", "List one workspace directory.", { path: stringSchema("Relative directory path", ".") }, { readOnly: true }),
-    tool("stat_path", "Inspect one workspace file or directory.", { path: stringSchema("Relative path") }, { readOnly: true }),
-    tool("find_files", "Find workspace files using *, ** and ? wildcards.", { path: stringSchema("Relative directory path", "."), pattern: stringSchema("Wildcard pattern"), maxResults: intSchema(100, 1, 1000) }, { readOnly: true }),
-    tool("search_files", "Search UTF-8 workspace files.", { path: stringSchema("Relative directory path", "."), query: stringSchema("Search text or regex"), regex: boolSchema(false), caseSensitive: boolSchema(false), maxResults: intSchema(100, 1, 500), contextLines: intSchema(0, 0, 10) }, { readOnly: true }),
-    tool("read_file", "Read a UTF-8 workspace file up to 1 MiB.", { path: stringSchema("Relative file path") }, { readOnly: true }),
-    tool("read_file_lines", "Read a line range from a UTF-8 workspace file.", { path: stringSchema("Relative file path"), startLine: intSchema(1, 1, Number.MAX_SAFE_INTEGER), endLine: { type: "integer", minimum: 1 } }, { readOnly: true }),
-    tool("write_file", "Atomically write a UTF-8 workspace file.", { path: stringSchema("Relative file path"), content: stringSchema("Complete file content"), overwrite: boolSchema(false) }, { readOnly: false, idempotent: false }),
+    tool("list_directory", "List a workspace directory, or inspect a file or directory (type, size, mode, modified time) when `path` is a file.", { path: stringSchema("Relative path", "."), stat: boolSchema(false) }, { readOnly: true }),
+    tool("search_files", "Search UTF-8 workspace file contents (mode=content), or find files by name with *, ** and ? wildcards (mode=name).", { path: stringSchema("Relative directory path", "."), query: stringSchema("Search text or regex; a wildcard pattern in name mode"), mode: { type: "string", enum: ["content", "name"], default: "content" }, regex: boolSchema(false), caseSensitive: boolSchema(false), maxResults: intSchema(100, 1, 1000), contextLines: intSchema(0, 0, 10) }, { readOnly: true }),
+    tool("read_file", "Read a UTF-8 workspace file up to 1 MiB; with startLine/endLine, read only that line range.", { path: stringSchema("Relative file path"), startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 } }, { readOnly: true }),
+    tool("write_file", "Atomically write a UTF-8 workspace file, creating parent directories; or, with directory=true, create an empty directory.", { path: stringSchema("Relative path"), content: stringSchema("Complete file content"), overwrite: boolSchema(false), directory: boolSchema(false) }, { readOnly: false, idempotent: false }),
     tool("apply_patch", "Apply non-overlapping line replacements to a UTF-8 workspace file.", { path: stringSchema("Relative file path"), expectedSha256: { type: "string", pattern: "^[a-f0-9]{64}$" }, edits: { type: "array", minItems: 1, maxItems: 100, items: { type: "object", additionalProperties: false, required: ["startLine", "endLine", "replacement"], properties: { startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, replacement: { type: "string" } } } } }, { readOnly: false, idempotent: false }),
-    tool("create_directory", "Create a workspace directory.", { path: stringSchema("Relative directory path") }, { readOnly: false, idempotent: true }),
     tool("delete_path", "Delete a workspace path. Recursive directory deletion requires recursive=true.", { path: stringSchema("Relative path"), recursive: boolSchema(false) }, { readOnly: false, destructive: true, idempotent: false }),
     tool("move_path", "Move or rename a workspace path.", { from: stringSchema("Source path"), to: stringSchema("Destination path"), overwrite: boolSchema(false) }, { readOnly: false, destructive: true, idempotent: false }),
     tool(
@@ -145,11 +141,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
       { readOnly: false, destructive: true, idempotent: false },
     ),
     tool("web_fetch", "Fetch a public web page or API from this device's own network connection (GET, HEAD or POST over http/https, ports 80 and 443). Addresses on private or local networks are refused. Returns status, content type and the body as text, up to maxBytes.", { url: stringSchema("http or https URL"), method: { type: "string", enum: ["GET", "HEAD", "POST"], default: "GET" }, headers: { type: "object", description: "Extra request headers", additionalProperties: { type: "string" } }, body: stringSchema("Request body for POST"), maxBytes: intSchema(262144, 1, 1048576), timeoutMs: intSchema(30000, 100, 120000) }, { readOnly: false, idempotent: false }),
-    tool("start_process", "Start a persistent shell process as the current OS user.", { command: stringSchema("Shell command"), cwd: stringSchema("Relative working directory", ".") }, { readOnly: false, destructive: true, idempotent: false }),
-    tool("list_processes", "List processes started by this MCP runtime.", {}, { readOnly: true }),
-    tool("read_process", "Read process output using absolute cursors.", { processId: stringSchema("Process id"), stdoutCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), stderrCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER) }, { readOnly: true }),
-    tool("write_process", "Write stdin to a running process.", { processId: stringSchema("Process id"), input: stringSchema("Input text") }, { readOnly: false, destructive: true, idempotent: false }),
-    tool("stop_process", "Stop a process started by this MCP runtime.", { processId: stringSchema("Process id") }, { readOnly: false, destructive: true, idempotent: true }),
+    tool("process", "Manage persistent shell processes as the current OS user. action=start runs `command` in `cwd` and returns a process id; list shows processes started by this runtime; read returns output after the absolute stdoutCursor/stderrCursor; write sends `input` to stdin; stop ends the process.", { action: { type: "string", enum: ["start", "list", "read", "write", "stop"] }, command: stringSchema("Shell command (start)"), cwd: stringSchema("Relative working directory (start)", "."), processId: stringSchema("Process id (read, write, stop)"), stdoutCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), stderrCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), input: stringSchema("Input text (write)") }, { readOnly: false, destructive: true, idempotent: false }),
   ] }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
@@ -240,6 +232,13 @@ async function dispatch(
     }));
   }
 
+  if (name === "process") {
+    const action = textArg(args, "action");
+    const mapped = ({ start: "start_process", list: "list_processes", read: "read_process", write: "write_process", stop: "stop_process" } as Record<string, string>)[action];
+    if (!mapped) throw new Error("action must be start, list, read, write or stop.");
+    return dispatch(mapped, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow);
+  }
+
   // Process-management tools address a process id, not a path: no workspace routing.
   if (name === "list_processes") return processRead(async () => processes.list());
   if (name === "read_process") return processRead(async () => processes.read(textArg(args, "processId"), intArg(args, "stdoutCursor", 0, 0, Number.MAX_SAFE_INTEGER), intArg(args, "stderrCursor", 0, 0, Number.MAX_SAFE_INTEGER)));
@@ -269,12 +268,20 @@ async function dispatch(
   );
   const workspace = resolved.workspace.withGrants(pathGrants), relativeInput = resolved.relativeInput;
 
-  if (name === "list_directory") return read(() => workspace.listDirectory(relativeInput));
+  if (name === "list_directory") {
+    return read(async () => {
+      const info = await workspace.statPath(relativeInput);
+      return info.type === "directory" && !boolArg(args, "stat", false) ? workspace.listDirectory(relativeInput) : info;
+    });
+  }
   if (name === "stat_path") return read(() => workspace.statPath(relativeInput));
   if (name === "find_files") return read(() => workspace.findFiles(relativeInput, textArg(args, "pattern"), intArg(args, "maxResults", 100, 1, 1000)));
+  if (name === "search_files" && args.mode === "name") return read(() => workspace.findFiles(relativeInput, textArg(args, "query"), intArg(args, "maxResults", 100, 1, 1000)));
   if (name === "search_files") return read(() => workspace.searchFiles(relativeInput, textArg(args, "query"), { regex: boolArg(args, "regex", false), caseSensitive: boolArg(args, "caseSensitive", false), maxResults: intArg(args, "maxResults", 100, 1, 500), contextLines: intArg(args, "contextLines", 0, 0, 10) }));
+  if (name === "read_file" && (args.startLine !== undefined || args.endLine !== undefined)) return read(() => workspace.readFileLines(relativeInput, intArg(args, "startLine", 1, 1, Number.MAX_SAFE_INTEGER), optionalIntArg(args, "endLine", 1, Number.MAX_SAFE_INTEGER)));
   if (name === "read_file") return read(() => workspace.readFile(relativeInput));
   if (name === "read_file_lines") return read(() => workspace.readFileLines(relativeInput, intArg(args, "startLine", 1, 1, Number.MAX_SAFE_INTEGER), optionalIntArg(args, "endLine", 1, Number.MAX_SAFE_INTEGER)));
+  if (name === "write_file" && boolArg(args, "directory", false)) return write(() => workspace.createDirectory(relativeInput));
   if (name === "write_file") return write(() => workspace.writeFile(relativeInput, textArg(args, "content"), boolArg(args, "overwrite", false)));
   if (name === "apply_patch") return write(() => workspace.applyPatch(relativeInput, arrayArg(args, "edits", 1, 100), optionalTextArg(args, "expectedSha256")));
   if (name === "create_directory") return write(() => workspace.createDirectory(relativeInput));

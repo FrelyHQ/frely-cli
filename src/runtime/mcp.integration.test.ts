@@ -17,13 +17,52 @@ test("MCP client can list and call frely-cli tools", async () => {
   try {
     const tools = await client.listTools();
     assert.ok(tools.tools.some((tool) => tool.name === "read_file"));
-    assert.ok(tools.tools.some((tool) => tool.name === "start_process"));
+    assert.ok(tools.tools.some((tool) => tool.name === "process"));
+    for (const merged of ["read_file_lines", "stat_path", "find_files", "create_directory", "start_process", "list_processes", "read_process", "write_process", "stop_process"]) {
+      assert.ok(!tools.tools.some((tool) => tool.name === merged), `${merged} is merged into another tool`);
+    }
     const result = await client.callTool({ name: "read_file", arguments: { path: "hello.txt" } });
     assert.equal(result.isError, undefined);
     assert.deepEqual(result.content, [{ type: "text", text: "hello from frely\n" }]);
   } finally {
     await client.close();
     await server.close();
+  }
+});
+
+test("merged tools cover the former separate tools and old names still answer", async () => {
+  const root = await mkdtemp(join(tmpdir(), "frely-cli-mcp-merged-"));
+  await writeFile(join(root, "a.txt"), "one\ntwo\nthree\n");
+  const server = await createMcpServer(root);
+  const client = new Client({ name: "frely-cli-test", version: "1.0.0" }, { capabilities: {} });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  const text = async (name: string, args: Record<string, unknown>) => {
+    const result = await client.callTool({ name, arguments: args });
+    assert.equal(result.isError, undefined, JSON.stringify(result.content));
+    return (result.content as Array<{ text: string }>)[0]!.text;
+  };
+  try {
+    assert.equal(await text("read_file", { path: "a.txt", startLine: 2, endLine: 2 }), await text("read_file_lines", { path: "a.txt", startLine: 2, endLine: 2 }));
+    assert.equal(JSON.parse(await text("list_directory", { path: "a.txt" })).type, "file");
+    assert.equal(JSON.parse(await text("list_directory", { path: "." })).length, 1);
+    assert.equal(JSON.parse(await text("list_directory", { path: ".", stat: true })).type, "directory");
+    assert.deepEqual(JSON.parse(await text("search_files", { query: "*.txt", mode: "name" })), ["a.txt"]);
+    assert.ok(JSON.parse(await text("search_files", { query: "two" })).length > 0);
+    await text("write_file", { path: "sub/dir", directory: true });
+    assert.equal(JSON.parse(await text("list_directory", { path: "sub/dir", stat: true })).type, "directory");
+    assert.deepEqual(JSON.parse(await text("process", { action: "list" })), []);
+    const started = JSON.parse(await text("process", { action: "start", command: "echo hi; sleep 5" }));
+    const id = started.id ?? started.processId;
+    assert.ok(id, JSON.stringify(started));
+    assert.equal(JSON.parse(await text("list_processes", {})).length, 1);
+    await text("process", { action: "stop", processId: id });
+    const bad = await client.callTool({ name: "process", arguments: { action: "nope" } });
+    assert.equal(bad.isError, true);
+  } finally {
+    await client.close();
+    await server.close();
+    await rm(root, { recursive: true, force: true });
   }
 });
 
@@ -108,8 +147,8 @@ setInterval(() => {}, 1000);
   let running: Promise<unknown> | undefined;
   try {
     const persistent = await client.callTool({
-      name: "start_process",
-      arguments: { command: "node hold.cjs persistent.ready" },
+      name: "process",
+      arguments: { action: "start", command: "node hold.cjs persistent.ready" },
     });
     assert.equal(persistent.isError, undefined, JSON.stringify(persistent.content));
 
