@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { upgrade } from "./upgrade/update.js";
+import { update } from "./update/update.js";
 import { requireMcpAuthorization, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, generateMcpKey, parseMcpDays, MCP_DEFAULT_DAYS } from "./mcp-authorization.js";
 import { realpath } from "node:fs/promises";
 import { runLocalMcpCommand } from "./local-mcp-command.js";
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
   const command = args[0];
   if (command === "update") {
     if (args.length !== 1) throw new Error("Usage: frely update. Version checks are available in frely doctor.");
-    const result = await upgrade((message) => process.stderr.write(message));
+    const result = await update((message) => process.stderr.write(message));
     stdout.write(result.message + "\n");
     return;
   }
@@ -443,7 +443,7 @@ async function main(): Promise<void> {
       const ops = await startAgentOpsServer(agent, { workspace: workspace ?? process.cwd(), log: agentLog });
       process.stderr.write(`Agent ops socket: ${ops.path}\n`);
       try {
-        await serveDeviceRelay({ ...(workspace ? { workspace } : {}), ...(localMcp ? { localMcp } : {}), agent, capabilities, managedService: Boolean(serviceConfigHome), restartForUpgrade: stop, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
+        await serveDeviceRelay({ ...(workspace ? { workspace } : {}), ...(localMcp ? { localMcp } : {}), agent, capabilities, managedService: Boolean(serviceConfigHome), restartForUpdate: stop, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
       } finally {
         await ops.close().catch(() => undefined);
       }

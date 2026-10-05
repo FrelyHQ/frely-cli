@@ -11,7 +11,7 @@ frely cloud call usage.summary
 frely cloud call agents.create --input ./agent.json
 ```
 
-The CLI discovers tool names, input/output schemas and descriptions from the server on each command. Use `describe` to inspect the deployed contract before preparing input. Tool additions do not need a CLI upgrade.
+The CLI discovers tool names, input/output schemas and descriptions from the server on each command. Use `describe` to inspect the deployed contract before preparing input. Tool additions do not need a CLI update.
 
 The first Cloud command opens a browser for separate OAuth authorization. If basic login has selected an account, authorize that same account. Cloud credentials use encrypted storage independent of basic and device credentials; `frely logout` also revokes the Cloud authorization.
 

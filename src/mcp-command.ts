@@ -12,7 +12,7 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
   const args = [...input];
   if (args[0] !== "mcp") return args;
   if (args.slice(1).some((arg) => arg === "--help" || arg === "-h") || args[1] === "help") return ["mcp", "help"];
-  // Upgrade bridge: Windows upgrade commands printed by 0.7.x run `mcp service stop|start`.
+  // Update bridge: Windows update commands printed by 0.7.x run `mcp service stop|start`.
   if (args[1] === "service" && args.length === 3 && (args[2] === "start" || args[2] === "stop")) return ["mcp", args[2]];
   if (!args[1]) return ["mcp", "help"];
   if (!["url", "workspace", "local", "stop", "start", "remove", "serve", "stdio"].includes(args[1])) throw new Error("Unknown device MCP command. Run frely mcp --help.");

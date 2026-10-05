@@ -1,5 +1,6 @@
 import { runShellCommand } from "./process-tree.js";
 import { sandboxCommand } from "./sandbox.js";
+import { pathProtection, type PathProtection } from "./protected-paths.js";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from "node:fs/promises";
@@ -8,9 +9,19 @@ import { promisify } from "node:util";
 
 export const MAX_FILE_BYTES = 1024 * 1024;
 export const MAX_OUTPUT_BYTES = 1024 * 1024;
+const PROTECTED_MESSAGE = "This path holds credentials or shell start-up files and is protected. If the owner needs a credential store opened for reading, call request_permission.";
 
 export class Workspace {
-  private constructor(readonly root: string) {}
+  private readonly protection: PathProtection;
+
+  private constructor(readonly root: string, readonly grants: readonly string[] = []) {
+    this.protection = pathProtection(grants);
+  }
+
+  /** The same workspace for one tool call, with the credential groups the owner approved for it. */
+  withGrants(grants: readonly string[]): Workspace {
+    return grants.length === 0 ? this : new Workspace(this.root, grants);
+  }
 
   static async open(input: string): Promise<Workspace> {
     const root = await realpath(resolve(input));
@@ -179,6 +190,7 @@ export class Workspace {
 
   async deletePath(input: string, recursive: boolean) {
     const path = await this.existingPath(input);
+    this.assertWritable(path);
     if (path === this.root) throw new Error("Workspace root cannot be deleted.");
     const stat = await lstat(path);
     if (stat.isDirectory() && !recursive && (await readdir(path)).length > 0) {
@@ -190,6 +202,7 @@ export class Workspace {
 
   async movePath(fromInput: string, toInput: string, overwrite: boolean) {
     const from = await this.existingPath(fromInput);
+    this.assertWritable(from);
     if (from === this.root) throw new Error("Workspace root cannot be moved.");
     const to = await this.createPath(toInput);
     const target = await lstat(to).catch(() => null);
@@ -221,7 +234,7 @@ export class Workspace {
       for (const entry of await readdir(dir, { withFileTypes: true })) {
         if (entry.name === ".git" || entry.name === "node_modules") continue;
         const full = resolve(dir, entry.name);
-        if (entry.isSymbolicLink()) continue;
+        if (entry.isSymbolicLink() || this.protection.readBlocked(full)) continue;
         if (entry.isDirectory()) stack.push(full);
         else if (entry.isFile() && !(await visitor(full))) return;
       }
@@ -240,11 +253,13 @@ export class Workspace {
 
   private async createPath(input: string): Promise<string> {
     const target = this.lexicalPath(input);
+    this.assertWritable(target);
     let cursor = dirname(target);
     while (true) {
       const canonical = await realpath(cursor).catch(() => null);
       if (canonical) {
         await this.assertCanonicalInside(canonical);
+        this.assertWritable(canonical);
         break;
       }
       const parent = dirname(cursor);
@@ -259,12 +274,22 @@ export class Workspace {
     const target = resolve(this.root, input);
     const rel = relative(this.root, target);
     if (rel === ".." || rel.startsWith(`..${sep}`)) throw new Error("Path escapes workspace.");
+    this.assertReadable(target);
     return target;
   }
 
   private async assertCanonicalInside(target: string): Promise<void> {
     const rel = relative(this.root, target);
     if (rel === ".." || rel.startsWith(`..${sep}`)) throw new Error("Path escapes workspace.");
+    this.assertReadable(target);
+  }
+
+  private assertReadable(path: string): void {
+    if (this.protection.readBlocked(path)) throw new Error(PROTECTED_MESSAGE);
+  }
+
+  private assertWritable(path: string): void {
+    if (this.protection.writeBlocked(path)) throw new Error(PROTECTED_MESSAGE);
   }
 }
 

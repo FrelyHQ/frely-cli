@@ -26,7 +26,7 @@ test("external update waits for two stable observations and restarts once with a
   f.gate.enter()();
   await f.refresh.check();
   assert.equal(f.counts().restarts, 1);
-  assert.throws(() => f.gate.enter(), /preparing an upgrade/);
+  assert.throws(() => f.gate.enter(), /preparing an update/);
   await f.refresh.check();
   assert.equal(f.counts().restarts, 1);
 });
@@ -87,7 +87,7 @@ test("manual stop during candidate verification prevents automatic restart", asy
   assert.equal(f.counts().reads, reads);
 });
 
-test("a concurrent explicit upgrade keeps ownership of maintenance", async () => {
+test("a concurrent explicit update keeps ownership of maintenance", async () => {
   const f = fixture();
   f.gate.pause();
   await f.refresh.check(); await f.refresh.check();

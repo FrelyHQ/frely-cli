@@ -1,5 +1,5 @@
-import { watchServiceInstallation } from "../upgrade/service-refresh.js";
-import { MaintenanceGate, serveMaintenance } from "../upgrade/maintenance.js";
+import { watchServiceInstallation } from "../update/service-refresh.js";
+import { MaintenanceGate, serveMaintenance } from "../update/maintenance.js";
 import { requireMcpAuthorization } from "../mcp-authorization.js";
 import { McpLease } from "../runtime/mcp-lease.js";
 import WebSocket, { type RawData } from "ws";
@@ -28,7 +28,7 @@ import { openLocalProviderRequest, readLocalProviderBody } from "../provider/loc
 export interface RelayServeOptions {
   workspace?: string;
   managedService?: boolean;
-  restartForUpgrade?: () => void;
+  restartForUpdate?: () => void;
   signal: AbortSignal;
   log?: (message: string) => void;
   /**
@@ -64,8 +64,8 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
   const maintenance = options.managedService && process.platform !== "win32" ? new MaintenanceGate() : undefined;
   const closeMaintenance = maintenance ? await serveMaintenance(maintenance) : undefined;
   // Watch the current installation from the existing runtime, without an updater daemon.
-  const closeRefresh = maintenance && options.restartForUpgrade
-    ? watchServiceInstallation({ gate: maintenance, signal: options.signal, restart: options.restartForUpgrade, log, onEnabled: () => reporter.report({ type: "upgrade_watch", enabled: true }) })
+  const closeRefresh = maintenance && options.restartForUpdate
+    ? watchServiceInstallation({ gate: maintenance, signal: options.signal, restart: options.restartForUpdate, log, onEnabled: () => reporter.report({ type: "upgrade_watch", enabled: true }) })
       .catch((error) => { diagnostic(log, "relay.upgrade_watch_unavailable", {}, error); return () => {}; })
     : Promise.resolve(() => {});
   let delayMs = 1000;
@@ -301,7 +301,7 @@ async function handleFrame(
   if (inflight.size >= DEVICE_RELAY_DEFAULT_MAX_INFLIGHT) { diagnostic(log, "relay.request_rejected", { requestId: envelope.id }); send(socket, errorResponse(envelope.id, "inflight_limit", "Device Relay request window is full."), log); return; }
   let release: (() => void) | undefined;
   try { release = maintenance?.enter(); }
-  catch { send(socket, errorResponse(envelope.id, "upgrade_in_progress", "Frely is preparing an upgrade. Retry after it completes."), log); return; }
+  catch { send(socket, errorResponse(envelope.id, "upgrade_in_progress", "Frely is preparing an update. Retry after it completes."), log); return; }
   const controller = new AbortController();
   inflight.set(envelope.id, { request: envelope, controller });
   const operation = envelope.method === "provider"

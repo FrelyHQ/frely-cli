@@ -1,6 +1,6 @@
 # Device Relay service maintenance
 
-Normal upgrades on supported macOS/Linux installations preserve device identity, the MCP address, credentials, workspace and authorization expiry. `frely update` restores a matching service that was running. A runtime with automatic refresh support also loads updates made by its original installer at the same path after active work finishes. No extra stop/start commands are part of that normal flow.
+Normal updates on supported macOS/Linux installations preserve device identity, the MCP address, credentials, workspace and authorization expiry. `frely update` restores a matching service that was running. A runtime with automatic refresh support also loads updates made by its original installer at the same path after active work finishes. No extra stop/start commands are part of that normal flow.
 
 ## Manual pause and resume
 
@@ -12,11 +12,11 @@ frely doctor
 
 Use stop to pause the device's shared remote service and start to resume it. This service also carries any configured local Provider traffic. These commands do not revoke server authorization. Stop is an explicit service operation and can interrupt work; finish tasks before using it. A stopped service is not revived by installation refresh.
 
-`frely mcp remove` revokes device MCP execution authorization and uninstalls the background service; when local Providers exist, the service keeps running in provider-only mode. Upgrade commands printed by 0.7.x still run `frely mcp service stop|start`, which newer versions accept as a hidden alias.
+`frely mcp remove` revokes device MCP execution authorization and uninstalls the background service; when local Providers exist, the service keeps running in provider-only mode. Update commands printed by 0.7.x still run `frely mcp service stop|start`, which newer versions accept as a hidden alias.
 
 ## One-time transition from older runtimes
 
-An already-running old process cannot gain automatic refresh code merely because files on disk changed. If doctor shows an old runtime without refresh support, finish its tasks, update using the original installer and perform one stop/start in a local terminal. Subsequent supported upgrades handle service switching.
+An already-running old process cannot gain automatic refresh code merely because files on disk changed. If doctor shows an old runtime without refresh support, finish its tasks, update using the original installer and perform one stop/start in a local terminal. Subsequent supported updates handle service switching.
 
 An old service without a private maintenance endpoint also cannot be drained by `frely update`; it gives local-terminal guidance. Do not restart the service through the MCP session that depends on it.
 
@@ -27,5 +27,5 @@ An old service without a private maintenance endpoint also cannot be drained by 
 - Calls, managed processes and buffered response output defer switching. This includes work started through MCP. Persistent tasks can postpone activation until they end; control calls remain available while waiting.
 - The transport reconnects using existing identity and authorization. A short disconnection is possible. Heartbeats confirm device-to-Relay transport; verify client OAuth and an end-to-end call separately when diagnosing a failure.
 - Runtime restart does not preserve process handles/output stored in the previous runtime, renew expired authorization, or replay writes with unknown outcomes.
-- Keep the existing installer and path. Switching npm/Bun/standalone installations, changing Node paths, and source/link or foreground runs require their own maintenance. Setup with the original workspace can regenerate a service definition when the launch path needs changing; routine upgrades do not run setup or renew.
+- Keep the existing installer and path. Switching npm/Bun/standalone installations, changing Node paths, and source/link or foreground runs require their own maintenance. Setup with the original workspace can regenerate a service definition when the launch path needs changing; routine updates do not run setup or renew.
 - Windows `frely update` prints installation-specific PowerShell instructions. Automatic external-install refresh is currently limited to macOS/Linux services.

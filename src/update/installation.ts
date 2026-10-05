@@ -104,7 +104,7 @@ export async function inspectInstallation(options: {
   return candidates.length === 1 ? candidates[0]! : { ...base, method: "unknown", reason: "This is a project, temporary runner, local link, or unrecognized global installation. Update it with the original installer." };
 }
 
-/** An explicit upgrade is exempt from release-age gates (npm min-release-age, bun minimumReleaseAge); older managers ignore the flag. */
+/** An explicit update is exempt from release-age gates (npm min-release-age, bun minimumReleaseAge); older managers ignore the flag. */
 export function packageArguments(installation: Installation, version: string): string[] {
   return installation.method === "npm"
     ? ["install", "--global", "--ignore-scripts", "--min-release-age-exclude=frely-cli", "--prefix", installation.prefix!, `frely-cli@${version}`]
@@ -116,7 +116,7 @@ export function shellQuote(value: string, windows = false): string {
 }
 
 /** Copyable instructions only: no self-replacement process on Windows. */
-export function manualUpgradeCommand(installation: Installation, version: string, serviceActive = false): string {
+export function manualUpdateCommand(installation: Installation, version: string, serviceActive = false): string {
   const windows = installation.platform === "win32";
   const quote = (s: string) => shellQuote(s, windows);
   let command: string;
