@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 
 export const MAX_FILE_BYTES = 1024 * 1024;
 export const MAX_OUTPUT_BYTES = 1024 * 1024;
-const PROTECTED_MESSAGE = "This path holds credentials or shell start-up files and is protected. If the owner needs a credential store opened for reading, call request_permission.";
+const PROTECTED_MESSAGE = "This path holds credentials or shell start-up files and is protected from file tools. To read a credential store, call request_permission for it (the owner approves on the web), then read it with run_command, for example `cat ~/.ssh/config`.";
 
 export class Workspace {
   private readonly protection: PathProtection;
