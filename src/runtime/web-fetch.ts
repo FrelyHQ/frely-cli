@@ -7,10 +7,14 @@ import { BlockList, isIP } from "node:net";
  * `web_fetch`: an HTTP request made from this device, so a hosted Agent's web access leaves from the owner's own network
  * instead of Frely's servers (plan mcp/云Agent借用户本机磁盘与网络).
  *
- * The request reaches only the public internet. Every address the host name resolves to is checked, the connection is pinned to
+ * By default the request reaches only the public internet. Every address the host name resolves to is checked, the connection is pinned to
  * the checked address, ports are limited to 80/443, and each redirect is checked again. Loopback, private, link-local, CGNAT,
  * cloud-metadata and other special-purpose ranges are refused, so a prompt-injected Agent cannot use the owner's machine to
  * reach their router, NAS, local services or cloud metadata endpoint.
+ *
+ * The owner can open specific targets for one Agent (`allow`, set in Frely > Connections and passed by the relay): "lan" opens
+ * the private LAN ranges (never loopback or the cloud-metadata address), and a host name, IP or CIDR opens exactly that, so
+ * network diagnosis of the owner's own machine or network is possible when the owner chose it. An opened target may use any port.
  */
 
 export const WEB_FETCH_DEFAULT_BYTES = 256 * 1024;
@@ -46,6 +50,38 @@ export function isBlockedAddress(address: string): boolean {
   return blocked.check(address, "ipv6");
 }
 
+/** Request `_meta` key the relay sets on a web_fetch call with the targets the owner opened; the relay overwrites anything a client sent. */
+export const NETWORK_ALLOW_META_KEY = "frely/networkAllow";
+
+/** Entries from a tools/call `_meta`: strings only, at most 32. Which entries mean what is decided in `allowEntryMatches`. */
+export function networkAllowFromMeta(meta: unknown): string[] {
+  const value = meta && typeof meta === "object" ? (meta as Record<string, unknown>)[NETWORK_ALLOW_META_KEY] : undefined;
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && entry.length <= 260).slice(0, 32) : [];
+}
+
+const lan = new BlockList();
+for (const [network, prefix] of [["10.0.0.0", 8], ["100.64.0.0", 10], ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.168.0.0", 16]] as const) lan.addSubnet(network, prefix, "ipv4");
+for (const [network, prefix] of [["fc00::", 7], ["fe80::", 10]] as const) lan.addSubnet(network, prefix, "ipv6");
+const METADATA_ADDRESSES = new Set(["169.254.169.254", "169.254.170.2", "fd00:ec2::254"]);
+
+/** True when one `allow` entry opens this host name or address. "lan" covers the private ranges, not loopback or metadata. */
+export function allowEntryMatches(entry: string, hostname: string, address: string): boolean {
+  const value = entry.trim().toLowerCase();
+  if (value === "lan") return !METADATA_ADDRESSES.has(address) && lan.check(address, isIP(address) === 6 ? "ipv6" : "ipv4");
+  if (value === hostname.toLowerCase()) return true;
+  const [base, prefix] = value.split("/");
+  const family = base ? isIP(base) : 0;
+  if (!base || family === 0 || isIP(address) !== family) return false;
+  const list = new BlockList();
+  if (prefix === undefined) list.addAddress(base, family === 6 ? "ipv6" : "ipv4");
+  else {
+    const bits = Number(prefix);
+    if (!Number.isInteger(bits) || bits < 0 || bits > (family === 6 ? 128 : 32)) return false;
+    list.addSubnet(base, bits, family === 6 ? "ipv6" : "ipv4");
+  }
+  return list.check(address, family === 6 ? "ipv6" : "ipv4");
+}
+
 export interface WebFetchArgs {
   url: string;
   method?: WebFetchMethod;
@@ -67,6 +103,8 @@ export interface WebFetchResult {
 
 export interface WebFetchOptions {
   signal?: AbortSignal;
+  /** Targets the owner opened for this Agent (see the header). Empty means the public internet only. */
+  allow?: readonly string[];
   /** Test seam: replaces DNS. Production always resolves through the system resolver. */
   resolve?: (hostname: string) => Promise<string[]>;
   /** Test seam: host names exempt from the address and port checks so a loopback test server can answer. Never set in production. */
@@ -85,11 +123,13 @@ async function checkedTarget(url: URL, options: WebFetchOptions): Promise<{ addr
   const port = url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
   const hostname = url.hostname.startsWith("[") ? url.hostname.slice(1, -1) : url.hostname;
   const trusted = options.trustedTestHosts?.includes(hostname) === true;
-  if (!trusted && !ALLOWED_PORTS.has(port)) throw new Error("Only ports 80 and 443 can be fetched.");
   const addresses = await resolveHost(hostname, options);
   if (addresses.length === 0) throw new Error(`Could not resolve ${hostname}.`);
-  if (!trusted && addresses.some(isBlockedAddress)) {
-    throw new Error("This address is on a private or local network, which web_fetch does not reach.");
+  const allow = options.allow ?? [];
+  const opened = (address: string) => allow.some((entry) => allowEntryMatches(entry, hostname, address));
+  if (!trusted && !ALLOWED_PORTS.has(port) && !addresses.some(opened)) throw new Error("Only ports 80 and 443 can be fetched.");
+  if (!trusted && addresses.some((address) => isBlockedAddress(address) && !opened(address))) {
+    throw new Error("This address is on a private or local network, which this Agent has not been allowed to reach. The owner can allow it for this Agent in Frely > Connections.");
   }
   return { address: addresses[0]! };
 }

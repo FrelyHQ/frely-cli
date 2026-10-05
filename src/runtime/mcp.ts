@@ -10,7 +10,7 @@ import { ensureWorkspaceRegistered, listWorkspaces } from "./workspace-registry.
 import { resolveWorkspace, resolveWorkspacePair } from "./workspace-router.js";
 import type { LocalMcpHub } from "./local-mcp.js";
 import { pathGrantsFromMeta } from "./sandbox.js";
-import { webFetch } from "./web-fetch.js";
+import { networkAllowFromMeta, webFetch } from "./web-fetch.js";
 
 interface ToolFlags {
   readOnly: boolean;
@@ -182,7 +182,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
       }
       // `frely mcp workspace add|remove` edits the registry while this runtime keeps running; pick the change up per call.
       await syncWorkspaces(workspaces, primaryRoot);
-      const result = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]), pathGrantsFromMeta(request.params._meta));
+      const result = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]), pathGrantsFromMeta(request.params._meta), networkAllowFromMeta(request.params._meta));
       return { content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result) }] };
     } catch (error) {
       try { options.onToolError?.(extra.requestId, name, error); } catch { /* Diagnostics cannot change tool results. */ }
@@ -225,6 +225,7 @@ async function dispatch(
   processScheduler: FairRwScheduler,
   signal: AbortSignal,
   pathGrants: readonly string[] = [],
+  networkAllow: readonly string[] = [],
 ): Promise<unknown> {
   const guarded = <T>(work: () => Promise<T>) => async () => { signal.throwIfAborted(); return work(); };
   const read = <T>(work: () => Promise<T>) => workspaceScheduler.read(guarded(work));
@@ -258,7 +259,7 @@ async function dispatch(
       ...(body !== undefined ? { body } : {}),
       maxBytes: intArg(args, "maxBytes", 262144, 1, 1048576),
       timeoutMs: intArg(args, "timeoutMs", 30000, 100, 120000),
-    }, { signal });
+    }, { signal, allow: networkAllow });
   }
 
   // For all other tools, resolve the workspace based on the input path/cwd
