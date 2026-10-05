@@ -10,6 +10,7 @@ import { ensureWorkspaceRegistered, listWorkspaces } from "./workspace-registry.
 import { resolveWorkspace, resolveWorkspacePair } from "./workspace-router.js";
 import type { LocalMcpHub } from "./local-mcp.js";
 import { pathGrantsFromMeta } from "./sandbox.js";
+import { webFetch } from "./web-fetch.js";
 
 interface ToolFlags {
   readOnly: boolean;
@@ -143,6 +144,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
       },
       { readOnly: false, destructive: true, idempotent: false },
     ),
+    tool("web_fetch", "Fetch a public web page or API from this device's own network connection (GET, HEAD or POST over http/https, ports 80 and 443). Addresses on private or local networks are refused. Returns status, content type and the body as text, up to maxBytes.", { url: stringSchema("http or https URL"), method: { type: "string", enum: ["GET", "HEAD", "POST"], default: "GET" }, headers: { type: "object", description: "Extra request headers", additionalProperties: { type: "string" } }, body: stringSchema("Request body for POST"), maxBytes: intSchema(262144, 1, 1048576), timeoutMs: intSchema(30000, 100, 120000) }, { readOnly: false, idempotent: false }),
     tool("start_process", "Start a persistent shell process as the current OS user.", { command: stringSchema("Shell command"), cwd: stringSchema("Relative working directory", ".") }, { readOnly: false, destructive: true, idempotent: false }),
     tool("list_processes", "List processes started by this MCP runtime.", {}, { readOnly: true }),
     tool("read_process", "Read process output using absolute cursors.", { processId: stringSchema("Process id"), stdoutCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), stderrCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER) }, { readOnly: true }),
@@ -242,6 +244,22 @@ async function dispatch(
   if (name === "read_process") return processRead(async () => processes.read(textArg(args, "processId"), intArg(args, "stdoutCursor", 0, 0, Number.MAX_SAFE_INTEGER), intArg(args, "stderrCursor", 0, 0, Number.MAX_SAFE_INTEGER)));
   if (name === "write_process") return processRead(() => processes.write(textArg(args, "processId"), textArg(args, "input")));
   if (name === "stop_process") return processRead(() => processes.stop(textArg(args, "processId")));
+
+  // Network access is not a workspace operation: no path routing, no workspace locks.
+  if (name === "web_fetch") {
+    const headers = args.headers ?? {};
+    if (!headers || typeof headers !== "object" || Array.isArray(headers)) throw new Error("headers must be an object.");
+    const method = optionalTextArg(args, "method");
+    const body = optionalTextArg(args, "body");
+    return webFetch({
+      url: textArg(args, "url"),
+      ...(method ? { method: method as "GET" | "HEAD" | "POST" } : {}),
+      headers: headers as Record<string, string>,
+      ...(body !== undefined ? { body } : {}),
+      maxBytes: intArg(args, "maxBytes", 262144, 1, 1048576),
+      timeoutMs: intArg(args, "timeoutMs", 30000, 100, 120000),
+    }, { signal });
+  }
 
   // For all other tools, resolve the workspace based on the input path/cwd
   const { workspace, relativeInput } = resolveWorkspace(
