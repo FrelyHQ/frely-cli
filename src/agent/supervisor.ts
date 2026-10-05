@@ -47,6 +47,9 @@ export class AgentHostConnection {
   ) {
     const lines = createInterface({ input: duplex, crlfDelay: Infinity });
     lines.on("line", (line) => this.handleLine(line));
+    // readline re-emits input stream errors (e.g. ECONNRESET during host teardown) as its own
+    // "error" event; without a listener that becomes an uncaughtException.
+    lines.on("error", (error) => this.close(error));
     this.duplex.on("error", (error) => this.close(error));
     this.duplex.on("close", () => this.close());
     this.process.once("exit", (code, signal) => this.close(new Error(`Agent host exited (code=${code} signal=${signal}).`)));
