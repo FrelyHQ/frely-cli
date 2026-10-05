@@ -22,6 +22,7 @@ function variants(path: string): string[] {
 }
 
 function under(path: string, base: string): boolean {
+  if (process.platform === "win32") { path = path.toLowerCase(); base = base.toLowerCase(); }
   return path === base || path.startsWith(base.endsWith(sep) ? base : base + sep);
 }
 

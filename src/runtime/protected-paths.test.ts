@@ -8,6 +8,7 @@ import { Workspace } from "./workspace.js";
 async function homeWorkspace(grants: string[] = []) {
   const home = await realpath(await mkdtemp(join(tmpdir(), "frely-cli-home-")));
   process.env.HOME = home;
+  process.env.USERPROFILE = home;
   await mkdir(join(home, ".ssh"), { recursive: true });
   await mkdir(join(home, ".config/frely"), { recursive: true });
   await mkdir(join(home, "project"), { recursive: true });
