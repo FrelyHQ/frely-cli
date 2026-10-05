@@ -27,7 +27,7 @@ export class CloudItemError extends Error {
 }
 
 interface ItemFile { readonly path: string; readonly contentBase64: string; readonly isScript: boolean }
-interface ItemManifest { readonly id: string; readonly kind: "prompt" | "skill"; readonly slug: string; readonly displayName: string; readonly version: number; readonly hasScripts: boolean; readonly premiumFileCount: number }
+interface ItemManifest { readonly id: string; readonly kind: "prompt" | "skill"; readonly slug: string; readonly displayName: string; readonly version: number; readonly hasScripts: boolean; readonly premiumFileCount: number; readonly scanned: boolean }
 
 const GUARD_ID = "frely-item-guard";
 const GUARD_SKILL = `---
@@ -54,8 +54,10 @@ export interface CloudItemInstallResult {
   readonly files: number;
   readonly premium: "installed" | "pass_required" | "none";
   readonly hasScripts: boolean;
-  /** True for a Skill: it is reviewed by the user's agent through the guard Skill before first use. */
+  /** True for a Skill without a passing Frely scan: the user's agent reviews it through the guard Skill before first use. */
   readonly guarded: boolean;
+  /** True when Frely's automated scan passed for exactly this version, so the item is already marked reviewed. */
+  readonly scanned: boolean;
 }
 
 /**
@@ -95,9 +97,12 @@ export async function installCloudItem(input: {
     : join(resolve(cwd, input.dir ?? "."), folder);
   await writeItemFolder(target, manifest.id, files);
   if (manifest.kind === "skill") await installGuard(dirname(target));
+  // A passing scan is bound to this version's files on the server, so the local review is already done.
+  const scanned = manifest.kind === "skill" && manifest.scanned;
+  if (scanned) await trustCloudItem(target);
   return Object.freeze({
     id: manifest.id, kind: manifest.kind, name: manifest.displayName, version: manifest.version,
-    path: target, files: files.length, premium, hasScripts: manifest.hasScripts, guarded: manifest.kind === "skill",
+    path: target, files: files.length, premium, hasScripts: manifest.hasScripts, guarded: manifest.kind === "skill" && !scanned, scanned,
   });
 }
 
@@ -140,6 +145,8 @@ function parseContent(value: Record<string, unknown>, skillId: string): { manife
     || typeof manifest.displayName !== "string" || !Number.isSafeInteger(manifest.version) || !Array.isArray(value.files) || value.files.length > MAX_FILES) {
     throw new CloudItemError("item_invalid", "Frely returned an invalid item.");
   }
+  const scan = record(manifest.scan);
+  const scanned = scan?.verdict === "pass" && typeof manifest.manifestDigest === "string" && scan.manifestDigest === manifest.manifestDigest;
   let total = 0;
   const files = value.files.map((raw) => {
     const file = record(raw);
@@ -151,7 +158,7 @@ function parseContent(value: Record<string, unknown>, skillId: string): { manife
   return {
     manifest: {
       id: skillId, kind: manifest.kind, slug: manifest.slug, displayName: manifest.displayName, version: manifest.version as number,
-      hasScripts: manifest.hasScripts === true, premiumFileCount: typeof premium?.fileCount === "number" ? premium.fileCount : 0,
+      hasScripts: manifest.hasScripts === true, premiumFileCount: typeof premium?.fileCount === "number" ? premium.fileCount : 0, scanned,
     },
     files,
   };

@@ -8,12 +8,13 @@ import { CloudItemError, CloudToolError, installCloudItem, trustCloudItem, type 
 const skillId = "cloud_skill_0123456789abcdef01234567";
 const b64 = (text: string) => Buffer.from(text).toString("base64");
 
-function caller(options: { kind?: "prompt" | "skill"; premium?: "ok" | "pass" | "none"; paths?: string[] } = {}): CloudToolCaller {
+function caller(options: { kind?: "prompt" | "skill"; premium?: "ok" | "pass" | "none"; paths?: string[]; scan?: "pass" | "stale" } = {}): CloudToolCaller {
   const kind = options.kind ?? "skill";
   const premium = options.premium ?? "none";
   return async (name, input) => {
     assert.equal(name, "skills.install");
-    const manifest = { id: skillId, kind, slug: "review", displayName: "Review", version: 2, hasScripts: true, premium: { fileCount: premium === "none" ? 0 : 1, totalBytes: 4 } };
+    const manifest = { id: skillId, kind, slug: "review", displayName: "Review", version: 2, hasScripts: true, manifestDigest: "a".repeat(64), premium: { fileCount: premium === "none" ? 0 : 1, totalBytes: 4 },
+      scan: options.scan ? { verdict: "pass", manifestDigest: options.scan === "pass" ? "a".repeat(64) : "b".repeat(64) } : null };
     if (input.part === "premium") {
       if (premium === "pass") throw new CloudToolError("creator_pass_required");
       return { manifest, files: [{ path: kind === "prompt" ? "PREMIUM.md" : "premium/extra.md", contentBase64: b64("paid"), isScript: false }] };
@@ -85,5 +86,20 @@ test("does not install the guard Skill for a Prompt", async () => {
     const result = await installCloudItem({ skillId, call: caller({ kind: "prompt" }), home, cwd: home });
     assert.equal(result.guarded, false);
     await assert.rejects(readFile(join(home, ".claude", "skills", "frely-item-guard", "SKILL.md"), "utf8"));
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test("a passing Frely scan for this version marks the Skill reviewed and drops the review hint", async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), "frely-item-")));
+  try {
+    const result = await installCloudItem({ skillId, call: caller({ scan: "pass" }), host: "claude-code", scope: "global", home });
+    assert.equal(result.scanned, true);
+    assert.equal(result.guarded, false);
+    assert.deepEqual(await trustCloudItem(result.path, { check: true }), { trusted: true });
+    // A scan for another digest, or no scan, keeps the local review.
+    const stale = await installCloudItem({ skillId: "cloud_skill_" + "1".repeat(24), call: async (name, input) => ({ ...(await caller({ scan: "stale" })(name, input)), manifest: { ...(await caller({ scan: "stale" })(name, input) as { manifest: object }).manifest, id: "cloud_skill_" + "1".repeat(24) } }), host: "claude-code", scope: "global", home });
+    assert.equal(stale.scanned, false);
+    assert.equal(stale.guarded, true);
+    assert.deepEqual(await trustCloudItem(stale.path, { check: true }), { trusted: false });
   } finally { await rm(home, { recursive: true, force: true }); }
 });
