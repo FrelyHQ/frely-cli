@@ -41,7 +41,7 @@ import { runComputerCommand } from "./computer/command.js";
 import { runComputerMcpServer } from "./computer/server.js";
 import { agentManifestUrl, installSkillAdapter, invokeInstalledAgent, publicSkillAccessError, removeSkillAdapter, skillAdapterStatus } from "./skill/access.js";
 import type { SkillHost, SkillScope } from "./skill/managed.js";
-import { installCloudItem } from "./skill/cloud-item.js";
+import { installCloudItem, trustCloudItem } from "./skill/cloud-item.js";
 import { callCloudTool } from "./cloud.js";
 
 
@@ -140,6 +140,15 @@ async function main(): Promise<void> {
   }
 
   if (command === "item") {
+    if (args[1] === "trust") {
+      const folder = args[2];
+      if (!folder || folder.startsWith("-")) throw new Error("Usage: frely item trust <folder> [--check]");
+      const check = args.includes("--check");
+      const result = await trustCloudItem(folder, { check });
+      stdout.write(`${result.trusted ? "trusted" : "not reviewed"}\n`);
+      if (check && !result.trusted) process.exitCode = 1;
+      return;
+    }
     if (args[1] !== "install") { stdout.write(subcommandUsage("item")); return; }
     const skillId = args[2];
     if (!skillId || skillId.startsWith("-")) throw new Error("Usage: frely item install <item-id> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--json]");
@@ -152,6 +161,7 @@ async function main(): Promise<void> {
     if (value.premium === "installed") stdout.write("Paid part: installed\n");
     if (value.premium === "pass_required") stdout.write(`Paid part: not installed. Buy a pass in the marketplace or with frely cloud call passes.buy --json '{"productKind":"cloud_skill","productId":"${value.id}","duration":"30d"}', then run this command again.\n`);
     if (value.hasScripts) stdout.write("This item contains scripts. Read them before you let an agent run them; they were saved without execute permission.\n");
+    if (value.guarded) stdout.write("Frely has not scanned this Skill. Your agent reviews it with the frely-item-guard Skill before first use.\n");
     if (value.kind === "skill") stdout.write("Restart or reload the agent session so it rescans Skills.\n");
     return;
   }

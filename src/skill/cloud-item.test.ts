@@ -3,7 +3,7 @@ import { mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { CloudItemError, CloudToolError, installCloudItem, type CloudToolCaller } from "./cloud-item.js";
+import { CloudItemError, CloudToolError, installCloudItem, trustCloudItem, type CloudToolCaller } from "./cloud-item.js";
 
 const skillId = "cloud_skill_0123456789abcdef01234567";
 const b64 = (text: string) => Buffer.from(text).toString("base64");
@@ -57,5 +57,33 @@ test("refuses unsafe paths, unmanaged folders and edited files", async () => {
     await assert.rejects(installCloudItem({ skillId, call: caller(), home }), (error: unknown) => error instanceof CloudItemError && error.code === "managed_item_modified");
     await rm(join(result.path, ".frely-managed.json"));
     await assert.rejects(installCloudItem({ skillId, call: caller(), home }), (error: unknown) => error instanceof CloudItemError && error.code === "unmanaged_item_exists");
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test("installs the guard Skill next to a Skill and tracks review per version", async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), "frely-item-")));
+  try {
+    const result = await installCloudItem({ skillId, call: caller(), host: "claude-code", scope: "global", home });
+    assert.equal(result.guarded, true);
+    assert.match(await readFile(join(home, ".claude", "skills", "frely-item-guard", "SKILL.md"), "utf8"), /frely item trust/);
+    assert.deepEqual(await trustCloudItem(result.path, { check: true }), { trusted: false });
+    await trustCloudItem(result.path);
+    assert.deepEqual(await trustCloudItem(result.path, { check: true }), { trusted: true });
+    const updated: CloudToolCaller = async (name, input) => {
+      const value = await caller()(name, input) as { files: Array<{ path: string; contentBase64: string }> };
+      return { ...value, files: value.files.map((file) => (file.path === "SKILL.md" ? { ...file, contentBase64: b64("new version") } : file)) };
+    };
+    await installCloudItem({ skillId, call: updated, host: "claude-code", scope: "global", home });
+    assert.deepEqual(await trustCloudItem(result.path, { check: true }), { trusted: false });
+    await assert.rejects(trustCloudItem(home, { check: true }), CloudItemError);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test("does not install the guard Skill for a Prompt", async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), "frely-item-")));
+  try {
+    const result = await installCloudItem({ skillId, call: caller({ kind: "prompt" }), home, cwd: home });
+    assert.equal(result.guarded, false);
+    await assert.rejects(readFile(join(home, ".claude", "skills", "frely-item-guard", "SKILL.md"), "utf8"));
   } finally { await rm(home, { recursive: true, force: true }); }
 });
