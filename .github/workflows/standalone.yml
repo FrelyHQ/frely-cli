@@ -27,6 +27,10 @@ jobs:
           bun-version: 1.4.0
       - name: Install without dependency lifecycle scripts
         run: npm ci --ignore-scripts
+      - name: Apply patched dependencies on macOS (npm ignores Bun patchedDependencies)
+        if: runner.os == 'macOS'
+        run: patch -p1 -d node_modules/@anthropic-ai/sandbox-runtime < patches/sandbox-runtime-0.0.77.patch
+
       - name: Type-check and test
         run: npm test
       - name: Build standalone executable
