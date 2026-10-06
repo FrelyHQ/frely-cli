@@ -1,5 +1,5 @@
 import { homedir, tmpdir } from "node:os";
-import { isAbsolute, join, normalize, sep } from "node:path";
+import { isAbsolute, join, normalize, parse, sep } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 
 /**
@@ -69,30 +69,48 @@ export const UNSANDBOXED_GROUP = "unsandboxed";
 /** Owner-chosen writable directory, sent as `path:<absolute or ~/ path>`. */
 const CUSTOM_PATH_PREFIX = "path:";
 
-/** A custom writable path may never be, contain or sit inside these. Shell start-up files and launch agents would let a command outlive the call. */
-const CUSTOM_PATH_DENIED = [
-  "~/.ssh", "~/.gnupg", "~/.aws", "~/.kube", "~/.docker", "~/.config/frely", "~/.config/gcloud", "~/.config/gh",
+/**
+ * Protected paths: credential stores, shell start-up files and launch agents (the latter would let a command outlive the call).
+ * They are always denied for writing, even inside a granted parent such as `path:~/`. Only a grant naming one of them exactly
+ * (`path:~/.ssh`) lifts the denial for that path; a parent or a sub-path does not.
+ */
+export const PROTECTED_PATHS: readonly string[] = [
+  "~/.ssh", "~/.gnupg", "~/.aws", "~/.kube", "~/.docker", "~/.config/gcloud", "~/.config/gh",
   "~/.zshrc", "~/.zshenv", "~/.zprofile", "~/.zlogin", "~/.bashrc", "~/.bash_profile", "~/.bash_login", "~/.profile", "~/.config/fish",
   "~/Library/LaunchAgents", "/Library/LaunchAgents", "/Library/LaunchDaemons", "~/.git-credentials", "~/.netrc", "~/.npmrc", "~/.pypirc",
+  "~/.cargo/credentials.toml", "~/Library/Application Support/gcloud",
 ];
-/** Where a custom path may live: below the home directory or in the usual tool install roots. */
-const CUSTOM_PATH_ROOTS = ["~", "/opt", "/usr/local", "/Volumes"];
+/** Frely's own device credentials: never writable by a grant, not even an exact one. */
+const NEVER_WRITABLE_PATHS: readonly string[] = ["~/.config/frely"];
+/** Longest path after `path:`. Keep equal to the relay's `PATH_GRANT_CUSTOM_PATH_MAX` (device-relay path-grants.ts) so both ends accept the same paths. */
+const CUSTOM_PATH_MAX = 150;
 
 const expandHome = (path: string): string => path === "~" ? homedir() : path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
+const expanded = (path: string): string => normalize(expandHome(path));
 const within = (path: string, base: string): boolean => path === base || path.startsWith(base.endsWith(sep) ? base : base + sep);
 
 /** The expanded path of a `path:` grant name, or undefined when it is not allowed. */
 export function customWritePath(name: string): string | undefined {
-  if (!name.startsWith(CUSTOM_PATH_PREFIX) || name.length > 400 || name.includes("\0")) return undefined;
+  if (!name.startsWith(CUSTOM_PATH_PREFIX) || name.includes("\0")) return undefined;
   const raw = name.slice(CUSTOM_PATH_PREFIX.length);
-  if (!(raw.startsWith("~/") || isAbsolute(raw)) || raw.split("/").includes("..")) return undefined;
-  const path = normalize(expandHome(raw)).replace(/\/+$/u, "");
-  const roots = CUSTOM_PATH_ROOTS.map(expandHome);
-  // Deeper than the root itself, so neither the home directory nor /opt can be opened wholesale.
-  if (!roots.some((root) => path !== root && within(path, root))) return undefined;
-  if (path === homedir() || path.split(sep).filter(Boolean).length < 2) return undefined;
-  if (CUSTOM_PATH_DENIED.map(expandHome).some((denied) => within(path, denied) || within(denied, path))) return undefined;
+  if (raw.length > CUSTOM_PATH_MAX || !(raw.startsWith("~/") || isAbsolute(raw)) || raw.split("/").includes("..")) return undefined;
+  const normalized = expanded(raw);
+  const { root } = parse(normalized);
+  const isRoot = normalized === root;
+  const path = isRoot ? root : normalized.replace(/[\\/]+$/u, "");
+  // Any absolute directory, but never the filesystem root or the system drive root. The root of another Windows drive (`D:\`) is allowed.
+  if (path === "") return undefined;
+  if (isRoot && (!/^[A-Za-z]:[\\/]$/u.test(root) || root.toLowerCase() === `${process.env.SystemDrive ?? "C:"}\\`.toLowerCase())) return undefined;
+  if (NEVER_WRITABLE_PATHS.some((never) => within(path, expanded(never)))) return undefined;
+  // Inside a protected path only that path itself can be named; the grant must spell it out in full.
+  if (PROTECTED_PATHS.some((protectedPath) => path !== expanded(protectedPath) && within(path, expanded(protectedPath)))) return undefined;
   return path;
+}
+
+/** Paths a sandboxed command may never write: every protected path except those named exactly by an approved grant, plus Frely's own credentials. */
+export function protectedWriteDenials(allowedGroups: readonly string[]): string[] {
+  const granted = new Set(allowedGroups.flatMap((name) => customWritePath(name) ?? []));
+  return [...PROTECTED_PATHS.filter((protectedPath) => !granted.has(expanded(protectedPath))), ...NEVER_WRITABLE_PATHS];
 }
 
 /** Whether `name` is a grant name this CLI understands. */
@@ -175,7 +193,7 @@ export function buildSandboxConfig(workspaceRoot: string, allowedGroups: readonl
     filesystem: {
       denyRead: sensitiveReadPaths(allowedGroups),
       allowWrite: [workspaceRoot, tmpdir(), ...writablePaths(allowedGroups)],
-      denyWrite: [],
+      denyWrite: protectedWriteDenials(allowedGroups),
     },
   };
 }

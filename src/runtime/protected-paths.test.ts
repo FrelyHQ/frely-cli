@@ -55,3 +55,17 @@ test("an approved group opens reads only; Frely's own credentials stay closed", 
   await assert.rejects(() => workspace.readFile(".config/frely/device.json"), /protected/);
   assert.ok(home);
 });
+
+test("launch agents are protected for file tools, and a `path:` grant, exact or parent, does not open them", async () => {
+  const { home, workspace } = await homeWorkspace();
+  await mkdir(join(home, "Library/LaunchAgents"), { recursive: true });
+  await assert.rejects(() => workspace.writeFile("Library/LaunchAgents/evil.plist", "x", false), /protected/);
+
+  // `path:` grants add writable directories for commands; file tools keep every protected path closed.
+  for (const grant of ["path:~/.ssh", "path:~/"]) {
+    const granted = (await homeWorkspace([grant])).workspace;
+    await assert.rejects(() => granted.writeFile(".ssh/authorized_keys", "key", false), /protected/, grant);
+    await assert.rejects(() => granted.writeFile(".zshrc", "evil", true), /protected/, grant);
+    await assert.rejects(() => granted.readFile(".ssh/id_ed25519"), /protected/, grant);
+  }
+});

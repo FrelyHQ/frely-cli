@@ -89,7 +89,7 @@ On the computer to control, enable file, shell and process access:
 frely mcp url --workspace /path/to/project
 ```
 
-`frely login` requests a restricted account session through browser device authorization. The first `frely mcp url` initializes a separate secure MCP key, requests browser approval for this device and workspace (the current directory when `--workspace` is omitted), installs the user-level Device Relay service (macOS LaunchAgent, Linux systemd user unit, or Windows Task Scheduler), and prints the MCP URL. The default authorization is 90 days; `--days 1..365` selects a duration.
+`frely login` requests a restricted account session through browser device authorization. The first `frely mcp url` initializes a separate secure MCP key, requests browser approval for this device and workspace (the home directory when `--workspace` is omitted), installs the user-level Device Relay service (macOS LaunchAgent, Linux systemd user unit, or Windows Task Scheduler), and prints the MCP URL. The default authorization is 90 days; `--days 1..365` selects a duration.
 
 `frely mcp url` is idempotent: once enabled it only prints the same URL, so run it again whenever you need the address. Prompts go to stderr, so stdout remains a single URL or, with `--json`, a JSON object. No URL is printed if approval or service installation fails. To expose more directories, use `frely mcp workspace add <path>`; `frely mcp workspace list` lists them. A command group run without a subcommand (for example `frely mcp workspace` or `frely agent`) prints the subcommands under it.
 
