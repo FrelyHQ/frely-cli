@@ -2,6 +2,7 @@
 import { update } from "./update/update.js";
 import { requireMcpAuthorization, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, generateMcpKey, parseMcpDays, MCP_DEFAULT_DAYS } from "./mcp-authorization.js";
 import { realpath } from "node:fs/promises";
+import { homedir } from "node:os";
 import { runLocalMcpCommand } from "./local-mcp-command.js";
 import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
@@ -215,7 +216,7 @@ async function main(): Promise<void> {
       try {
         let mcp: EmailDeviceChallenge["mcp"];
         if (args.includes("--mcp")) {
-          const workspace = await realpath(resolve(option(args, "--workspace") || process.cwd()));
+          const workspace = await realpath(resolve(option(args, "--workspace") || homedir()));
           const days = parseMcpDays(option(args, "--days") ?? DEFAULT_EMAIL_LOGIN_MCP_DAYS);
           mcp = { ...generateMcpKey(), workspace, days };
         }

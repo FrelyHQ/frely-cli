@@ -1,4 +1,5 @@
 import { realpath } from "node:fs/promises";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { inspectMcpMetadataOrQuarantine, requireMcpAuthorization, setupMcpAuthorization, type McpAuthorization, type McpMetadata, type McpPreset } from "./mcp-authorization.js";
 import { installMcpService, serviceStatus, startMcpService } from "./service.js";
@@ -99,7 +100,7 @@ export async function setupMcp(
   input: McpSetupInput,
   installService: typeof installMcpService = installMcpService,
 ): Promise<McpAuthorization> {
-  const workspace = metadata?.grant.workspace ?? input.workspace ?? process.cwd();
+  const workspace = metadata?.grant.workspace ?? input.workspace ?? homedir();
   input.notify(metadata ? `Renewing device MCP authorization for ${workspace}\n` : `Enabling device MCP for ${workspace}\n`);
   const authorization = await setupMcpAuthorization(workspace, input.days, Boolean(metadata), ({ verificationUri, keyThumbprint, days }) => {
     input.notify(`Device MCP execution authorization: ${days} days\nMCP key: ${keyThumbprint}\nApprove: ${verificationUri}\n`);

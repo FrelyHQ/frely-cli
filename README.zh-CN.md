@@ -75,7 +75,7 @@ frely login
 frely mcp url --workspace /path/to/project
 ```
 
-`frely login` 通过浏览器设备授权获取受限账号会话。首次运行 `frely mcp url` 会初始化独立的 MCP 安全密钥、请求浏览器批准该设备与工作区（省略 `--workspace` 时为当前目录）、安装用户级 Device Relay 服务（macOS LaunchAgent、Linux systemd 用户单元或 Windows 任务计划程序），并打印 MCP URL。默认授权 90 天，`--days 1..365` 可选时长。
+`frely login` 通过浏览器设备授权获取受限账号会话。首次运行 `frely mcp url` 会初始化独立的 MCP 安全密钥、请求浏览器批准该设备与工作区（省略 `--workspace` 时为主目录）、安装用户级 Device Relay 服务（macOS LaunchAgent、Linux systemd 用户单元或 Windows 任务计划程序），并打印 MCP URL。默认授权 90 天，`--days 1..365` 可选时长。
 
 `frely mcp url` 是幂等的：启用后再次运行只打印同一个 URL，需要地址时直接再运行即可。提示走 stderr，stdout 保持单一 URL（或 `--json` 时一个 JSON 对象）；批准或安装失败则不打印 URL。要开放更多目录，用 `frely mcp workspace add <path>`；`frely mcp workspace list` 列出所有目录。只输入命令组而不带子命令（如 `frely mcp workspace`、`frely agent`）时，会显示该组下可用的子命令。
 
