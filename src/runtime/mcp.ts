@@ -131,7 +131,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
     tool("move_path", "Move or rename a workspace path.", { from: stringSchema("Source path"), to: stringSchema("Destination path"), overwrite: boolSchema(false) }, { readOnly: false, destructive: true, idempotent: false }),
     tool(
       "run_command",
-      "Run a shell command as the current OS user. Workspace only constrains cwd; this is not a sandbox. Parallel mode allows bounded command concurrency; use exclusive for commands that mutate shared repository, dependency, build, migration, or release state.",
+      "Run a shell command as the current OS user, in a sandbox when the device supports one: it blocks credential folders (call request_permission to ask the owner for one), limits writes to the workspace and temp directory, and only lets HTTP(S) and ssh/scp/sftp reach the network. For commands longer than timeoutMs use the `process` tool. Parallel mode allows bounded command concurrency; use exclusive for commands that mutate shared repository, dependency, build, migration, or release state.",
       {
         command: stringSchema("Shell command"),
         cwd: stringSchema("Relative working directory", "."),
