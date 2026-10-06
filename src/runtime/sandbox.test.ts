@@ -34,20 +34,22 @@ test("path grants are read from the relay's _meta key and unknown names are drop
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { customWritePath, isKnownGrantName, SSH_PROXY_PREFIX, UNSANDBOXED_GROUP, writablePaths } from "./sandbox.js";
 
 test("cache groups and custom paths open only the directories they name", () => {
   assert.ok(buildSandboxConfig("/work", ["pub-cache"]).filesystem?.allowWrite?.includes("~/.pub-cache"));
   assert.ok(!buildSandboxConfig("/work", []).filesystem?.allowWrite?.includes("~/.pub-cache"));
   assert.deepEqual(writablePaths(["gradle", "ssh", UNSANDBOXED_GROUP]), ["~/.gradle"]);
-  assert.deepEqual(writablePaths(["path:~/development/flutter/bin/cache"]), [`${homedir()}/development/flutter/bin/cache`]);
+  assert.deepEqual(writablePaths(["path:~/development/flutter/bin/cache"]), [join(homedir(), "development", "flutter", "bin", "cache")]);
 });
 
 test("custom writable paths refuse the home directory, credential stores and start-up files", () => {
   for (const name of ["path:~", "path:~/", "path:/", "path:/etc", "path:/usr/bin", "path:~/.ssh", "path:~/.ssh/keys", "path:~/.zshrc", "path:~/Library", "path:~/Library/LaunchAgents/x", "path:~/.config/frely", "path:~/a/../.ssh", "path:relative/dir", "path:/opt", "path:/opt/../etc"]) {
     assert.equal(customWritePath(name), undefined, name);
   }
-  assert.equal(customWritePath("path:/opt/homebrew/Caskroom/flutter"), "/opt/homebrew/Caskroom/flutter");
+  // /opt is a POSIX install root; on Windows it is not under any allowed root.
+  assert.equal(customWritePath("path:/opt/homebrew/Caskroom/flutter"), process.platform === "win32" ? undefined : "/opt/homebrew/Caskroom/flutter");
   assert.equal(isKnownGrantName("path:~/.ssh"), false);
   assert.equal(isKnownGrantName("unsandboxed"), true);
   assert.deepEqual(pathGrantsFromMeta({ [PATH_GRANTS_META_KEY]: ["ssh", "gradle", "unsandboxed", "path:~/dev/sdk", "path:~/.ssh", "nope"] }), ["ssh", "gradle", "unsandboxed", "path:~/dev/sdk"]);
