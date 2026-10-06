@@ -50,8 +50,5 @@
     "@types/node": "^22.18.1",
     "@types/ws": "^8.18.1",
     "typescript": "^5.9.2"
-  },
-  "patchedDependencies": {
-    "@anthropic-ai/sandbox-runtime@0.0.77": "patches/sandbox-runtime-0.0.77.patch"
   }
 }

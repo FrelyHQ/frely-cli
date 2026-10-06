@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildSandboxConfig, detectSandboxBackend, isSandboxDisabled, PATH_GRANTS_META_KEY, pathGrantsFromMeta, sandboxDenialHint, sensitiveReadPaths } from "./sandbox.js";
-import { generateProxyEnvVars } from "@anthropic-ai/sandbox-runtime/dist/sandbox/sandbox-utils.js";
 
 test("sandbox backend detection reports off when disabled and never throws", () => {
   const previous = process.env.FRELY_SANDBOX;
@@ -114,25 +113,4 @@ test("sandboxDenialHint recognises denials and points at request_permission", ()
   assert.match(sandboxDenialHint("mkdir: /opt/homebrew/x: Operation not permitted") ?? "", /request_permission/);
   assert.match(sandboxDenialHint("Permission denied") ?? "", /sandbox/);
   assert.equal(sandboxDenialHint("fatal: not a git repository"), undefined);
-});
-
-test("patched srt uses authenticated HTTP CONNECT for macOS git-over-ssh", { skip: process.platform !== "darwin" }, () => {
-  const env = generateProxyEnvVars(65229, 65230, undefined, "deadbeef", true, "echo hi");
-  const gitSsh = env.find((value) => value.startsWith("GIT_SSH_COMMAND="));
-  assert.ok(gitSsh);
-  assert.match(gitSsh, /ProxyCommand=/);
-  assert.match(gitSsh, /CONNECT %h:%p HTTP\/1\.1/);
-  assert.match(gitSsh, /Proxy-Authorization: Basic/);
-  assert.match(gitSsh, /c3J0LmVjaG8gaGk6ZGVhZGJlZWY=/);
-  assert.match(gitSsh, /\/bin\/sh -c/);
-  assert.match(gitSsh, /\/usr\/bin\/nc 127\.0\.0\.1 65229/);
-  assert.doesNotMatch(gitSsh, /nc -X 5 -x localhost:65230/);
-});
-
-test("patched srt keeps the macOS SOCKS5 git-over-ssh path without proxy auth", { skip: process.platform !== "darwin" }, () => {
-  const env = generateProxyEnvVars(65229, 65230, undefined, undefined, true, "echo hi");
-  const gitSsh = env.find((value) => value.startsWith("GIT_SSH_COMMAND="));
-  assert.ok(gitSsh);
-  assert.match(gitSsh, /nc -X 5 -x localhost:65230/);
-  assert.doesNotMatch(gitSsh, /Proxy-Authorization: Basic/);
 });
