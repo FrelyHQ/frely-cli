@@ -15,7 +15,7 @@ import { ensureDevice } from "./device/control.js";
 import { createLocalProviderToken, loadOrCreateDeviceIdentity } from "./device/identity.js";
 import { serveDeviceRelay } from "./device/relay-client.js";
 import { startStdioMcp } from "./runtime/mcp.js";
-import { installDeviceRelayService, serviceStatus, stopMcpService, uninstallMcpService } from "./service.js";
+import { installDeviceRelayService, serviceStatus, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
 import { discoverLocalModels } from "./provider/local.js";
 import { finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider, waitForLocalProviderRelay } from "./provider/control.js";
 import { isSupportedLocalModelName, listLocalProviders, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider, type LocalProviderBinding } from "./provider/state.js";
@@ -360,7 +360,7 @@ async function main(): Promise<void> {
     const config = await loadAgentConfig();
     if (action === "enable") {
       await saveAgentConfig({ ...config, remoteControlEnabled: true });
-      stdout.write("Agent remote control enabled. Start or restart the device relay service (frely mcp service start).\n");
+      stdout.write("Agent remote control enabled. Start or restart the device relay service (frely mcp start).\n");
     } else if (action === "disable") {
       await saveAgentConfig({ ...config, remoteControlEnabled: false });
       stdout.write("Agent remote control disabled.\n");
@@ -468,7 +468,9 @@ async function main(): Promise<void> {
   }
 
   if (command === "mcp" && args[1] === "start") {
-    if (process.argv[3] === "url") process.stderr.write("`frely mcp start` is deprecated; use `frely mcp start`.\n");
+    if (process.argv[3] === "url") process.stderr.write("`frely mcp url` is deprecated; use `frely mcp start`.\n");
+    // Internal: update scripts only resume the installed service, never prompt for approval.
+    if (args.includes("--resume")) { const service = await startMcpService(); stdout.write(`Frely MCP service ${service.active ? "started" : "not active"}.\n`); return; }
     const workspace = option(args, "--workspace");
     const days = option(args, "--days");
     const authorization = await startMcp({ ...(workspace ? { workspace } : {}), ...(days ? { days } : {}), notify: (message) => { process.stderr.write(message); } });
