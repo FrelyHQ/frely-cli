@@ -6,7 +6,7 @@
   "loginEmail": "frely login --email <EMAIL> --mcp",
   "loginCode": "frely login --code <CODE>",
   "doctor": "frely doctor",
-  "mcpSetup": "frely mcp url",
+  "mcpSetup": "frely mcp start",
   "claudeConnect": "claude mcp add --transport http frely \"https://mcp.frely.cloud/mcp\"",
   "codexConnect": "codex mcp add frely --url \"https://mcp.frely.cloud/mcp\"",
   "codexAuthorize": "codex mcp login frely"

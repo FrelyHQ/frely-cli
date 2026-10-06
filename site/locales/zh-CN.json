@@ -87,7 +87,7 @@
   "tools.chatgpt": "添加远程 MCP 连接，填写设备 URL，选择 OAuth，并使用你的 Frely 账号授权。其他兼容客户端也使用这个地址。",
   "tools.claudePrepare": "在调用端电脑执行以下命令。同一账户的所有设备共用这一个地址，只需添加一次。",
   "tools.claudeAuthorize": "在 Claude Code 中打开 /mcp，完成 OAuth 授权。处理目标电脑上的任务时，让 Agent 使用 Frely 工具。在目标电脑安装 Frely CLI；调用端使用 MCP 客户端。",
-  "install.approval": "在浏览器中确认设备、工作区和授权期限。批准后，Frely CLI 启动后台服务。MCP 地址是固定值（https://mcp.frely.cloud/mcp），frely mcp url 会输出该地址。",
+  "install.approval": "在浏览器中确认设备、工作区和授权期限。批准后，Frely CLI 启动后台服务。MCP 地址是固定值（https://mcp.frely.cloud/mcp），frely mcp start 会输出该地址。",
   "copy.mcp": "复制设备 MCP 启用命令",
   "device.eyebrow": "AGENT 从哪里访问",
   "device.line1": "网页中的 Agent。",

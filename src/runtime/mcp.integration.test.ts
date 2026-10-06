@@ -185,7 +185,7 @@ test("a failing run_command returns its stderr and stdout, not only the exit sta
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   try {
-    const result = await client.callTool({ name: "run_command", arguments: { command: "echo out-text; echo err-text 1>&2; exit 3", timeoutMs: 5000 } });
+    const result = await client.callTool({ name: "run_command", arguments: { command: `node -e "console.log('out-text'); console.error('err-text'); process.exit(3)"`, timeoutMs: 5000 } });
     assert.equal(result.isError, true);
     const text = (result.content as Array<{ text: string }>)[0]!.text;
     assert.match(text, /^MCP command exited with status 3\./);

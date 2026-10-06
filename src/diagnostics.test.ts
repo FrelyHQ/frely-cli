@@ -116,8 +116,8 @@ test("invalid MCP metadata is a failure, not silently treated as optional", asyn
   assert.match(report.summary.mcp, /Configuration unreadable/);
 });
 
-test("doctor names invalid MCP configuration and points to frely mcp url", async () => {
-  for (const [reason, expected] of [["legacy_url", /older CLI\. Run frely mcp url to repair/], ["malformed", /invalid\. Run frely mcp url to repair/]] as const) {
+test("doctor names invalid MCP configuration and points to frely mcp start", async () => {
+  for (const [reason, expected] of [["legacy_url", /older CLI\. Run frely mcp start to repair/], ["malformed", /invalid\. Run frely mcp start to repair/]] as const) {
     const f = fixture();
     f.dependencies.inspectMcpMetadata = async () => { throw new McpConfigInvalidError(reason); };
     const report = await doctor({}, f.dependencies);

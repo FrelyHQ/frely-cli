@@ -13,7 +13,7 @@ else {
 $frely = Join-Path $directory 'frely.exe'
 if (!(Test-Path -LiteralPath $frely)) { throw "Frely was not installed at $frely." }
 if (-not [Environment]::UserInteractive) {
-  Write-Output "No interactive session is available here. Run these commands in a terminal:`n  $frely login`n  $frely mcp url"
+  Write-Output "No interactive session is available here. Run these commands in a terminal:`n  $frely login`n  $frely mcp start"
   return
 }
 $doctor = (& $frely doctor --json 2>$null) -join ''
@@ -24,4 +24,4 @@ if ($doctor -match '"account":\s*"[^"]*[Nn]ot logged in') {
 } else { [Console]::Error.WriteLine('Frely: already signed in.') }
 $workspace = if ($env:FRELY_WORKSPACE) { $env:FRELY_WORKSPACE } else { (Get-Location).Path }
 [Console]::Error.WriteLine("Frely: enabling device MCP for $workspace (add more later with: frely mcp workspace add <path>).")
-& $frely mcp url --workspace $workspace
+& $frely mcp start --workspace $workspace

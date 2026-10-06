@@ -87,7 +87,7 @@
   "tools.chatgpt": "Add a remote MCP connection with your device URL, select OAuth, and authorize with your Frely account. The same URL works for other compatible clients.",
   "tools.claudePrepare": "Run this command on the calling computer. All devices on your account share this one address, so add it once.",
   "tools.claudeAuthorize": "Open /mcp in Claude Code to finish OAuth authorization. Ask the agent to use Frely tools for work on the target computer. Install Frely CLI on the target computer; the calling computer uses its MCP client.",
-  "install.approval": "Approve the device, workspace and duration in your browser. Frely CLI starts a background service. The MCP address is fixed (https://mcp.frely.cloud/mcp); frely mcp url prints it.",
+  "install.approval": "Approve the device, workspace and duration in your browser. Frely CLI starts a background service. The MCP address is fixed (https://mcp.frely.cloud/mcp); frely mcp start prints it.",
   "copy.mcp": "Copy device MCP setup command",
   "device.eyebrow": "WHERE AGENTS CONNECT FROM",
   "device.line1": "Agents in your browser.",

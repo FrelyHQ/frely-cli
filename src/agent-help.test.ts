@@ -16,7 +16,7 @@ test("Agent help runs offline without authentication or credential-store access"
   const help = JSON.parse(result.stdout) as { schemaVersion: string; cliVersion: string; commands: { id: string; usage: string; effect: string; purpose: string }[] };
   assert.equal(help.schemaVersion, "frely.cli.agent-help.v1");
   assert.equal(help.cliVersion, VERSION);
-  const mcp = help.commands.find(command => command.id === "mcp.url");
+  const mcp = help.commands.find(command => command.id === "mcp.start");
   assert.equal(mcp?.effect, "authorization-if-needed");
   assert.match(mcp!.purpose, /browser approval/);
   assert.ok(help.commands.some(command => command.id === "agent.run"));
@@ -24,7 +24,7 @@ test("Agent help runs offline without authentication or credential-store access"
     assert.ok(!help.commands.some(command => command.id === removed), removed);
   }
   assert.equal(help.commands.find(command => command.id === "doctor")?.usage, "frely doctor [-v] [--json]");
-  assert.ok(!help.commands.some(command => ["status", "mcp.status"].includes(command.id)));
+  assert.ok(!help.commands.some(command => ["status"].includes(command.id)));
   const ordinary = await execute(process.execPath, [fileURLToPath(new URL("./index.js", import.meta.url)), "--help"]);
   assert.ok(ordinary.stdout.includes("frely help --agent --json"));
   assert.ok(ordinary.stdout.includes("frely agent status"));
@@ -52,7 +52,7 @@ test("agent help lists the mcp workspace subcommands", () => {
 
 test("command groups without a direct action print their subcommands offline", async () => {
   const cases: Array<[string[], RegExp]> = [
-    [["mcp"], /frely mcp url/],
+    [["mcp"], /frely mcp start/],
     [["mcp", "workspace"], /frely mcp workspace list/],
     [["mcp", "local"], /frely mcp local list/],
     [["agent"], /frely agent install/],

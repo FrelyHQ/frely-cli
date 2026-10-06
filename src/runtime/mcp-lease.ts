@@ -14,7 +14,7 @@ export class McpLease {
   assert(): void {
     if (this.controller.signal.aborted || this.wall() >= this.expiresAt || this.elapsed() >= this.elapsedDeadline) {
       this.close();
-      throw new Error("MCP_AUTHORIZATION_EXPIRED: remote execution is disabled; run frely mcp url to renew.");
+      throw new Error("MCP_AUTHORIZATION_EXPIRED: remote execution is disabled; run frely mcp start to renew.");
     }
   }
   close(): void { clearTimeout(this.timer); this.controller.abort(); }
