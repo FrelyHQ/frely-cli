@@ -28,6 +28,11 @@ export interface McpRuntimeOptions {
   getToolsets?: () => string[];
   /** Bridge for agent_* tools (frely-app toolset). Without it agent tools stay hidden. */
   callAgent?: (op: string, args: Record<string, unknown>) => Promise<unknown>;
+  /** Bridge for cloud_list / cloud_call (frely-app toolset): the Frely Cloud tools, called with this device's own Cloud authorization. Without it the tools stay hidden. */
+  cloud?: {
+    list: (group?: string) => Promise<unknown>;
+    call: (name: string, input: Record<string, unknown>) => Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }>;
+  };
   /** Device-local MCP servers (plan mcp/本机MCP转发-方案.md). Without a hub the local_mcp_* tools stay hidden. */
   localMcp?: LocalMcpHub;
   /** Names the owner enabled on the current MCP authorization; absent or empty hides the local_mcp_* tools. */
@@ -54,6 +59,12 @@ function enabledLocalMcps(options: McpRuntimeOptions): string[] {
 function enabledToolsets(options: McpRuntimeOptions): string[] {
   try { return options.getToolsets?.() ?? ["workspace"]; } catch { return ["workspace"]; }
 }
+
+/** Frely Cloud tools (account, keys, Creator, Owner). Permissions and per-call approval are enforced by the server for this device. */
+export const CLOUD_TOOLS = [
+  tool("cloud_list", "List the Frely Cloud tools this device may use, with their input schemas (for example owner.* tools when the account is a Platform Owner). With `group`, only that tool group.", { group: stringSchema("Tool group prefix such as owner, keys or skills; omit for all") }, { readOnly: true }),
+  tool("cloud_call", "Call one Frely Cloud tool by name with its arguments. Writes that need approval return confirmation_required with a link: the user approves on the web console, then call again with the same arguments plus confirmationId.", { tool: stringSchema("Cloud tool name from cloud_list"), arguments: { type: "object", description: "Arguments for the tool", additionalProperties: true } }, { readOnly: false, destructive: true, idempotent: false }),
+];
 
 /** Gateway tools for device-local MCP servers (plan F1): one pair, whatever number of servers or transports sit behind them. */
 export const LOCAL_MCP_TOOLS = [
@@ -120,6 +131,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
     ...((enabledToolsets(options).includes("frely-app") && options.callAgent)
       ? AGENT_TOOLS.map((entry) => tool(entry.op, entry.description, entry.properties, { readOnly: entry.op === "agent_get_task" || entry.op === "agent_get_events" || entry.op === "agent_list_tasks" }))
       : []),
+    ...((enabledToolsets(options).includes("frely-app") && options.cloud) ? CLOUD_TOOLS : []),
     ...(enabledLocalMcps(options).length > 0 ? LOCAL_MCP_TOOLS : []),
     tool("workspace_info", "Return the active workspace root.", {}, { readOnly: true }),
     tool("list_directory", "List a workspace directory, or inspect a file or directory (type, size, mode, modified time) when `path` is a file.", { path: stringSchema("Relative path", "."), stat: boolSchema(false) }, { readOnly: true }),
@@ -158,6 +170,15 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
         }
         const result = await options.callAgent(name, args);
         return { content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result) }] };
+      }
+      if (name === "cloud_list" || name === "cloud_call") {
+        if (!enabledToolsets(options).includes("frely-app") || !options.cloud) {
+          throw new Error("Cloud tools are not enabled for this MCP permission. Enable Frely app tools on the Frely connections page.");
+        }
+        if (name === "cloud_list") return { content: [{ type: "text" as const, text: JSON.stringify(await options.cloud.list(optionalTextArg(args, "group"))) }] };
+        const callArgs = args.arguments ?? {};
+        if (!callArgs || typeof callArgs !== "object" || Array.isArray(callArgs)) throw new Error("arguments must be an object.");
+        return await options.cloud.call(textArg(args, "tool"), callArgs as Record<string, unknown>);
       }
       if (name === "local_mcp_list" || name === "local_mcp_call") {
         const enabled = enabledLocalMcps(options);

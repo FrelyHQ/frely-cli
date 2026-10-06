@@ -89,7 +89,7 @@ export async function logoutCloud(): Promise<void> {
   await credentialStore.deletePassword(SERVICE, identity.key);
 }
 
-async function connectCloud() {
+async function connectCloud(interactive = true) {
   const identity = await cloudIdentity();
   const raw = await credentialStore.getPassword(SERVICE, identity.key);
   let stored: StoredCloud = raw ? JSON.parse(raw) as StoredCloud : { version: 1, resource: identity.resource, redirectUrl: "" };
@@ -158,6 +158,7 @@ async function connectCloud() {
     codeVerifier: () => { if (!verifier) throw new Error("Cloud PKCE verifier is missing."); return verifier; },
     redirectToAuthorization: async url => {
       if (url.origin !== identity.origin) throw new Error("Unexpected Cloud authorization server.");
+      if (!interactive) throw new CloudNotAuthorizedError();
       if (!listener) await listen(Number(callback.port));
       pendingCode = new Promise<string>((resolve, reject) => { resolveCode = resolve; rejectCode = reject; });
       // Attach immediately so a callback rejection never becomes an unhandled promise.
@@ -279,4 +280,48 @@ export async function callCloudTool(name: string, input: Record<string, unknown>
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new CloudToolError("invalid_operation_output");
     return value as Record<string, unknown>;
   } finally { await session.close(); }
+}
+
+/** Raised instead of opening a browser when a background runtime has no Cloud authorization. */
+export class CloudNotAuthorizedError extends Error {
+  constructor() { super("Frely Cloud is not authorized on this device. Ask the user to run `frely cloud list` in a terminal once, then retry."); }
+}
+
+/** Cloud tools for the device MCP runtime (frely-app toolset). Never opens a browser; permission and approval hints are returned to the caller. */
+export const cloudMcpBridge = {
+  async list(group?: string): Promise<unknown> {
+    const session = await connectCloudNonInteractive();
+    try {
+      const all = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < 20; page++) {
+        const result = await session.client.listTools(cursor === undefined ? {} : { cursor });
+        all.push(...result.tools);
+        cursor = result.nextCursor;
+        if (!cursor) break;
+      }
+      return { tools: all.filter(tool => !group || tool.name.startsWith(group + ".")) };
+    } finally { await session.close(); }
+  },
+  async call(name: string, input: Record<string, unknown>): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
+    const session = await connectCloudNonInteractive();
+    try {
+      const result = await session.client.callTool({ name, arguments: input }, undefined, { timeout: 180000 });
+      const content = (Array.isArray(result.content) ? result.content : []).filter((part): part is { type: "text"; text: string } =>
+        (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string");
+      const hint = permissionHint(result);
+      if (hint) content.push({ type: "text", text: hint });
+      return { content, ...(result.isError === true ? { isError: true } : {}) };
+    } finally { await session.close(); }
+  },
+};
+
+async function connectCloudNonInteractive() {
+  try { return await connectCloud(false); }
+  catch (error) {
+    // The generic connection failure hides the cause; a missing authorization is the one case the caller can act on.
+    const raw = await credentialStore.getPassword(SERVICE, (await cloudIdentity()).key).catch(() => null);
+    if (!raw || !(JSON.parse(raw) as StoredCloud).tokens) throw new CloudNotAuthorizedError();
+    throw error;
+  }
 }
