@@ -23,7 +23,7 @@ frely="$install_dir/frely"
 
 # The next steps need a browser approval and a person at the terminal; `curl | sh` has no stdin, so read the terminal.
 if ! (: </dev/tty) 2>/dev/null; then
-  printf '%s\n' "No terminal is available here. Run these commands in a terminal:" "  $frely login" "  $frely mcp url" >&2
+  printf '%s\n' "No terminal is available here. Run these commands in a terminal:" "  $frely login" "  $frely mcp start" >&2
   exit 0
 fi
 
@@ -38,4 +38,4 @@ fi
 workspace="${FRELY_WORKSPACE:-$(pwd)}"
 [ "$workspace" != / ] || workspace="$HOME"
 printf '%s\n' "Frely: enabling device MCP for $workspace (add more later with: frely mcp workspace add <path>)." >&2
-"$frely" mcp url --workspace "$workspace" </dev/tty
+"$frely" mcp start --workspace "$workspace" </dev/tty

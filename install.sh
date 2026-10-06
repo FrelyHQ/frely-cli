@@ -100,5 +100,5 @@ if [ "$install_dir" = "$HOME/.local/bin" ] && [ "${FRELY_INSTALL_NO_PROFILE:-0}"
   ;; esac
 fi
 printf 'Installed Frely %s at %s\n' "$("$install_dir/frely" --version)" "$install_dir/frely"
-printf '%s\n' 'Basic commands require no keyring setup. MCP authorization begins with frely mcp url.'
+printf '%s\n' 'Basic commands require no keyring setup. MCP authorization begins with frely mcp start.'
 case ":${PATH:-}:" in *":$install_dir:"*) ;; *) printf 'This terminal can use %s; new shells use frely.\n' "$install_dir/frely" ;; esac

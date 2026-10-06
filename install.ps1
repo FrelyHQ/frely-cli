@@ -71,5 +71,5 @@ try {
   if (($env:PATH -split ';') -notcontains $directory) { $env:PATH = "$directory;$env:PATH" }
   $installedVersion = & $target --version
   Write-Output "Installed Frely $installedVersion at $target"
-  Write-Output 'Basic commands require no keyring setup. MCP authorization begins with frely mcp url.'
+  Write-Output 'Basic commands require no keyring setup. MCP authorization begins with frely mcp start.'
 } finally { Remove-Item -LiteralPath $stage -Recurse -Force }

@@ -9,7 +9,7 @@ import test, { type TestContext } from "node:test";
 import { basicCredentialStore } from "./credential-basic.js";
 import { credentialStore } from "./credential-store.js";
 import { generateMcpKey, inspectMcpMetadata, McpConfigInvalidError, mcpMetadataPath, setupMcpAuthorization, type McpAuthorizationView } from "./mcp-authorization.js";
-import { ensureMcpAuthorization } from "./mcp-command.js";
+import { ensureMcpAuthorization, startMcp } from "./mcp-command.js";
 import { useMemoryCredentialStore } from "./test-support.js";
 
 async function fixture(t: TestContext, denied = false) {
@@ -101,6 +101,38 @@ test("frely mcp sets up an unconfigured device once, then returns the same autho
   assert.deepEqual(f.state.installations, [workspace]);
   assert.deepEqual(f.state.messages, []);
   assert.equal(await readFile(mcpMetadataPath(), "utf8"), metadata);
+});
+
+test("frely mcp start configures once, then only starts the service", async (t) => {
+  const f = await fixture(t);
+  const project = join(f.directory, "project");
+  await mkdir(project);
+  const workspace = await realpath(project);
+  let status = { installed: false, active: false, platform: process.platform };
+  const started: string[] = [];
+  const deps = {
+    installService: f.install,
+    serviceStatus: async () => status,
+    startService: async () => { started.push("start"); status = { installed: true, active: true, platform: process.platform }; return status; },
+  };
+  const first = await startMcp({ workspace: project, notify: f.notify }, deps);
+  assert.equal(first.mcpUrl, f.mcpResource);
+  assert.deepEqual(f.state.installations, [workspace]);
+  assert.equal(f.state.requests, 1);
+  // Stopped but installed: start without a new approval.
+  status = { installed: true, active: false, platform: process.platform };
+  const second = await startMcp({ notify: f.notify }, deps);
+  assert.equal(second.grant.id, first.grant.id);
+  assert.deepEqual(started, ["start"]);
+  assert.equal(f.state.requests, 1);
+  // Already running: nothing to do.
+  await startMcp({ notify: f.notify }, deps);
+  assert.deepEqual(started, ["start"]);
+  // Authorized but service removed: reinstall without a new approval.
+  status = { installed: false, active: false, platform: process.platform };
+  await startMcp({ notify: f.notify }, deps);
+  assert.deepEqual(f.state.installations, [workspace, workspace]);
+  assert.equal(f.state.requests, 1);
 });
 
 test("frely mcp refuses to switch the primary workspace and points to workspace add", async (t) => {

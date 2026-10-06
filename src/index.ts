@@ -15,7 +15,7 @@ import { ensureDevice } from "./device/control.js";
 import { createLocalProviderToken, loadOrCreateDeviceIdentity } from "./device/identity.js";
 import { serveDeviceRelay } from "./device/relay-client.js";
 import { startStdioMcp } from "./runtime/mcp.js";
-import { installDeviceRelayService, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
+import { installDeviceRelayService, serviceStatus, stopMcpService, uninstallMcpService } from "./service.js";
 import { discoverLocalModels } from "./provider/local.js";
 import { finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider, waitForLocalProviderRelay } from "./provider/control.js";
 import { isSupportedLocalModelName, listLocalProviders, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider, type LocalProviderBinding } from "./provider/state.js";
@@ -34,7 +34,7 @@ import { agentStateDir } from "./agent/task-store.js";
 import { TaskStore } from "./agent/task-store.js";
 import { VERSION } from "./version.js";
 import { agentHelp, cliUsage, mcpUsage, subcommandUsage } from "./agent-help.js";
-import { ensureMcpAuthorization, normalizeMcpArgs } from "./mcp-command.js";
+import { ensureMcpAuthorization, grantInactive, normalizeMcpArgs, startMcp } from "./mcp-command.js";
 import { getKeyBudget, KeyBudgetError, publicKeyBudgetError } from "./key-budget.js";
 import { runNetwork, publicNetworkError } from "./network.js";
 import { runComputerCommand } from "./computer/command.js";
@@ -203,7 +203,7 @@ async function main(): Promise<void> {
             stdout.write(`Device MCP enabled for ${authorization.grant.workspace} until ${authorization.grant.expiresAt}. Remove it any time with \`frely mcp remove\`.\n`);
             stdout.write(`MCP address: ${authorization.mcpUrl}\n`);
           } else {
-            stdout.write("Run `frely mcp url` on the computer you want to control, then connect your MCP client with OAuth.\n");
+            stdout.write("Run `frely mcp start` on the computer you want to control, then connect your MCP client with OAuth.\n");
           }
         } catch (error) {
           stdout.write(`Verification failed: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -259,7 +259,7 @@ async function main(): Promise<void> {
     if (!("sessionBound" in result) || !result.sessionBound) {
       stdout.write("Your server version is older and does not support logging out per device yet.\n");
     }
-    stdout.write("Run `frely mcp url --workspace <path>` on the computer you want to control, then connect your MCP client with OAuth.\n");
+    stdout.write("Run `frely mcp start --workspace <path>` on the computer you want to control, then connect your MCP client with OAuth.\n");
     return;
   }
 
@@ -321,16 +321,6 @@ async function main(): Promise<void> {
     if (args.includes("--json")) stdout.write(`${JSON.stringify({ providers }, null, 2)}\n`);
     else if (providers.length === 0) stdout.write("No local Providers are configured on this device.\n");
     else for (const provider of providers) stdout.write(`${provider.providerId}  ${provider.driver}  ${provider.name}  ${provider.models.join(", ")}${provider.pending ? "  (pending: run frely provider share)" : ""}\n`);
-    return;
-  }
-
-  if (command === "mcp" && args[1] === "url") {
-    const workspace = option(args, "--workspace");
-    const days = option(args, "--days");
-    const authorization = await ensureMcpAuthorization({ ...(workspace ? { workspace } : {}), ...(days ? { days } : {}), notify: (message) => { process.stderr.write(message); } });
-    const value = { deviceId: authorization.grant.deviceId, mcpUrl: authorization.mcpUrl, transport: "http", authentication: "oauth", workspace: authorization.grant.workspace, expiresAt: authorization.grant.expiresAt };
-    if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
-    else stdout.write(`${authorization.mcpUrl}\n`);
     return;
   }
 
@@ -477,7 +467,26 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === "mcp" && args[1] === "start") { const service = await startMcpService(); stdout.write(`Frely MCP service ${service.active ? "started" : "not active"}.\n`); return; }
+  if (command === "mcp" && args[1] === "start") {
+    if (process.argv[3] === "url") process.stderr.write("`frely mcp start` is deprecated; use `frely mcp start`.\n");
+    const workspace = option(args, "--workspace");
+    const days = option(args, "--days");
+    const authorization = await startMcp({ ...(workspace ? { workspace } : {}), ...(days ? { days } : {}), notify: (message) => { process.stderr.write(message); } });
+    const value = { deviceId: authorization.grant.deviceId, mcpUrl: authorization.mcpUrl, transport: "http", authentication: "oauth", workspace: authorization.grant.workspace, expiresAt: authorization.grant.expiresAt };
+    if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
+    else stdout.write(`${authorization.mcpUrl}\n`);
+    return;
+  }
+  if (command === "mcp" && args[1] === "status") {
+    const metadata = await inspectMcpMetadataOrQuarantine((message) => { process.stderr.write(message); });
+    const service = await serviceStatus();
+    const expired = metadata ? grantInactive(metadata) : false;
+    const value = { configured: Boolean(metadata), service: { installed: service.installed, running: service.active }, ...(metadata ? { mcpUrl: metadata.mcpResource, workspace: metadata.grant.workspace, expiresAt: metadata.grant.expiresAt, expired } : {}) };
+    if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
+    else if (!metadata) stdout.write(`Device MCP is not configured. Run frely mcp start.\nService: ${service.active ? "running" : service.installed ? "stopped" : "not installed"}\n`);
+    else stdout.write(`MCP URL: ${metadata.mcpResource}\nWorkspace: ${metadata.grant.workspace}\nAuthorization: ${expired ? "expired or inactive (run frely mcp start to renew)" : `active until ${metadata.grant.expiresAt}`}\nService: ${service.active ? "running" : service.installed ? "stopped (run frely mcp start)" : "not installed (run frely mcp start)"}\n`);
+    return;
+  }
   if (command === "mcp" && args[1] === "stop") { const service = await stopMcpService(); stdout.write(`Frely MCP service ${service.active ? "still active" : "stopped"}.\n`); return; }
 
   if (command === "mcp" && args[1] === "remove") {
