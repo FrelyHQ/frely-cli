@@ -75,22 +75,20 @@ const CUSTOM_PATH_DENIED = [
   "~/.zshrc", "~/.zshenv", "~/.zprofile", "~/.zlogin", "~/.bashrc", "~/.bash_profile", "~/.bash_login", "~/.profile", "~/.config/fish",
   "~/Library/LaunchAgents", "/Library/LaunchAgents", "/Library/LaunchDaemons", "~/.git-credentials", "~/.netrc", "~/.npmrc", "~/.pypirc",
 ];
-/** Where a custom path may live: below the home directory or in the usual tool install roots. */
-const CUSTOM_PATH_ROOTS = ["~", "/opt", "/usr/local", "/Volumes"];
+/** Longest path after `path:`. Keep equal to the relay's `PATH_GRANT_CUSTOM_PATH_MAX` (device-relay path-grants.ts) so both ends accept the same paths. */
+const CUSTOM_PATH_MAX = 150;
 
 const expandHome = (path: string): string => path === "~" ? homedir() : path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
 const within = (path: string, base: string): boolean => path === base || path.startsWith(base.endsWith(sep) ? base : base + sep);
 
 /** The expanded path of a `path:` grant name, or undefined when it is not allowed. */
 export function customWritePath(name: string): string | undefined {
-  if (!name.startsWith(CUSTOM_PATH_PREFIX) || name.length > 400 || name.includes("\0")) return undefined;
+  if (!name.startsWith(CUSTOM_PATH_PREFIX) || name.includes("\0")) return undefined;
   const raw = name.slice(CUSTOM_PATH_PREFIX.length);
-  if (!(raw.startsWith("~/") || isAbsolute(raw)) || raw.split("/").includes("..")) return undefined;
+  if (raw.length > CUSTOM_PATH_MAX || !(raw.startsWith("~/") || isAbsolute(raw)) || raw.split("/").includes("..")) return undefined;
   const path = normalize(expandHome(raw)).replace(/\/+$/u, "");
-  const roots = CUSTOM_PATH_ROOTS.map(expandHome);
-  // Deeper than the root itself, so neither the home directory nor /opt can be opened wholesale.
-  if (!roots.some((root) => path !== root && within(path, root))) return undefined;
-  if (path === homedir() || path.split(sep).filter(Boolean).length < 2) return undefined;
+  // Any absolute directory, but never the filesystem root or the home directory wholesale.
+  if (path === "" || path === homedir()) return undefined;
   if (CUSTOM_PATH_DENIED.map(expandHome).some((denied) => within(path, denied) || within(denied, path))) return undefined;
   return path;
 }

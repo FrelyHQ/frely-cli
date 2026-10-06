@@ -46,11 +46,21 @@ test("cache groups and custom paths open only the directories they name", () => 
 });
 
 test("custom writable paths refuse the home directory, credential stores and start-up files", () => {
-  for (const name of ["path:~", "path:~/", "path:/", "path:/etc", "path:/usr/bin", "path:~/.ssh", "path:~/.ssh/keys", "path:~/.zshrc", "path:~/Library", "path:~/Library/LaunchAgents/x", "path:~/.config/frely", "path:~/a/../.ssh", "path:relative/dir", "path:/opt", "path:/opt/../etc"]) {
-    assert.equal(customWritePath(name), undefined, name);
+  const home = homedir();
+  const refused = [
+    "path:~", "path:~/", "path:/", "path:", "path:relative/dir", "path:/opt/../etc", "path:~/a/../.ssh", "path:/tmp\0/x", `path:/${"a".repeat(150)}`,
+    "path:~/.ssh", "path:~/.ssh/keys", "path:~/.aws", "path:~/.zshrc", "path:~/.bashrc", "path:~/.config/frely", "path:~/.config/frely/devices",
+    "path:~/Library", "path:~/Library/LaunchAgents/x", "path:/Library/LaunchDaemons",
+    `path:${join(home, ".ssh")}`, `path:${join(home, ".aws", "config")}`, `path:${home}`, `path:${join(home, "..")}`,
+  ];
+  for (const name of refused) assert.equal(customWritePath(name), undefined, name);
+  // Any other absolute directory is allowed (POSIX paths; Windows normalises the separators).
+  if (process.platform !== "win32") {
+    for (const path of ["/tmp", "/tmp/", "/tmp/frely-work", "/var/folders/ab/cd1234/T/frely", "/private/tmp/x", "/opt/homebrew/Caskroom/flutter", "/Volumes/Data/work", `/${"a".repeat(149)}`]) {
+      assert.equal(customWritePath(`path:${path}`), path.replace(/\/+$/u, ""), path);
+    }
+    assert.equal(customWritePath(`path:${join(home, "development", "sdk")}`), join(home, "development", "sdk"));
   }
-  // /opt is a POSIX install root; on Windows it is not under any allowed root.
-  assert.equal(customWritePath("path:/opt/homebrew/Caskroom/flutter"), process.platform === "win32" ? undefined : "/opt/homebrew/Caskroom/flutter");
   assert.equal(isKnownGrantName("path:~/.ssh"), false);
   assert.equal(isKnownGrantName("unsandboxed"), true);
   assert.deepEqual(pathGrantsFromMeta({ [PATH_GRANTS_META_KEY]: ["ssh", "gradle", "unsandboxed", "path:~/dev/sdk", "path:~/.ssh", "nope"] }), ["ssh", "gradle", "unsandboxed", "path:~/dev/sdk"]);
