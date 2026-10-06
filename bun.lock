@@ -1,6 +1,9 @@
 {
   "lockfileVersion": 2,
   "configVersion": 0,
+  "patchedDependencies": {
+    "@anthropic-ai/sandbox-runtime@0.0.77": "patches/sandbox-runtime-0.0.77.patch",
+  },
   "workspaces": {
     "": {
       "name": "frely-cli",
