@@ -1,6 +1,8 @@
+import { realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, normalize, parse, sep } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
+import { cliLaunchArguments } from "../cli-launch.js";
 
 /**
  * OS-level sandboxing for `run_command` / `start_process`.
@@ -179,6 +181,25 @@ export const SSH_PROXY_PREFIX = [
   "fi\n",
 ].join(" ");
 
+/** Single-quotes a word for sh unless it is made of characters that never need quoting. */
+const shellQuote = (value: string): string => /^[\w./:@%+=,-]+$/u.test(value) ? value : `'${value.replace(/'/gu, `'\\''`)}'`;
+
+/**
+ * On macOS srt points GIT_SSH_COMMAND at `nc -X 5` (SOCKS5), which cannot send the sandbox proxy's credentials, so git over ssh fails
+ * whenever the proxy requires authentication. When HTTP_PROXY carries credentials, this swaps in `frely ssh-proxy`, an HTTP CONNECT
+ * relay that reads them from the environment. Other platforms keep srt's own setting (Linux uses socat with proxyauth).
+ */
+export function sshProxyPrefix(platform: string = process.platform, helper: readonly string[] = cliLaunchArguments(helperEntry(), ["ssh-proxy"])): string {
+  if (platform !== "darwin") return SSH_PROXY_PREFIX;
+  const proxyCommand = `${helper.map(shellQuote).join(" ")} %h %p`;
+  const gitSshCommand = `ssh -o ControlMaster=no -o ControlPath=none -o ${shellQuote(`ProxyCommand=${proxyCommand}`)}`;
+  return `case "$HTTP_PROXY" in *@*) if [ -n "$GIT_SSH_COMMAND" ]; then GIT_SSH_COMMAND=${shellQuote(gitSshCommand)}; export GIT_SSH_COMMAND; fi;; esac\n${SSH_PROXY_PREFIX}`;
+}
+
+function helperEntry(): string {
+  try { return realpathSync(process.argv[1] ?? ""); } catch { return process.argv[1] ?? ""; }
+}
+
 export function buildSandboxConfig(workspaceRoot: string, allowedGroups: readonly string[] = []): SandboxRuntimeConfig {
   return {
     network: {
@@ -245,7 +266,7 @@ export async function sandboxCommand(command: string, workspaceRoot: string, all
   }
   try {
     // initialize() fixed allowWrite to the first workspace that ran a command; give every call its own workspace.
-    return await SandboxManager.wrapWithSandbox(SSH_PROXY_PREFIX + command, undefined, { filesystem: buildSandboxConfig(workspaceRoot, allowedGroups).filesystem });
+    return await SandboxManager.wrapWithSandbox(sshProxyPrefix() + command, undefined, { filesystem: buildSandboxConfig(workspaceRoot, allowedGroups).filesystem });
   } catch (error) {
     if (isSandboxStrict()) throw error instanceof Error ? error : new Error(String(error));
     warnOnce(`failed to sandbox a command (${error instanceof Error ? error.message : String(error)}); it ran unsandboxed this time. Set FRELY_SANDBOX_STRICT=1 to refuse instead.`);

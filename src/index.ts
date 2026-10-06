@@ -3,6 +3,7 @@ import { update } from "./update/update.js";
 import { requireMcpAuthorization, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, generateMcpKey, parseMcpDays, MCP_DEFAULT_DAYS } from "./mcp-authorization.js";
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
+import { sshProxyConnect } from "./runtime/ssh-proxy.js";
 import { runLocalMcpCommand } from "./local-mcp-command.js";
 import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
@@ -58,6 +59,14 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "mcp" && args[1] === "help") { stdout.write(mcpUsage()); return; }
+  // Internal: ssh's ProxyCommand inside the macOS command sandbox (see sshProxyPrefix in runtime/sandbox.ts). Not listed in help.
+  if (command === "ssh-proxy") {
+    const port = Number(args[2]);
+    const proxyUrl = process.env.HTTP_PROXY ?? process.env.http_proxy;
+    if (args.length !== 3 || !args[1] || !Number.isInteger(port) || port < 1 || port > 65535 || !proxyUrl) throw new Error("Usage: frely ssh-proxy <host> <port> (HTTP_PROXY must name the proxy).");
+    await sshProxyConnect({ proxyUrl, host: args[1], port, input: process.stdin, output: process.stdout });
+    process.exit(0);
+  }
   if (command === "--version" || command === "-v" || command === "version") {
     stdout.write(`${VERSION}\n`);
     return;
