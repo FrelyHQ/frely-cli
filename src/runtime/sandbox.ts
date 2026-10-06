@@ -1,5 +1,5 @@
 import { homedir, tmpdir } from "node:os";
-import { isAbsolute, join, normalize, sep } from "node:path";
+import { dirname, isAbsolute, join, normalize, sep } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 
 /**
@@ -86,9 +86,9 @@ export function customWritePath(name: string): string | undefined {
   if (!name.startsWith(CUSTOM_PATH_PREFIX) || name.includes("\0")) return undefined;
   const raw = name.slice(CUSTOM_PATH_PREFIX.length);
   if (raw.length > CUSTOM_PATH_MAX || !(raw.startsWith("~/") || isAbsolute(raw)) || raw.split("/").includes("..")) return undefined;
-  const path = normalize(expandHome(raw)).replace(/\/+$/u, "");
-  // Any absolute directory, but never the filesystem root or the home directory wholesale.
-  if (path === "" || path === homedir()) return undefined;
+  const path = normalize(expandHome(raw)).replace(/[\\/]+$/u, "");
+  // Any absolute directory, but never a filesystem or drive root or the home directory wholesale.
+  if (path === "" || dirname(path) === path || path === homedir()) return undefined;
   if (CUSTOM_PATH_DENIED.map(expandHome).some((denied) => within(path, denied) || within(denied, path))) return undefined;
   return path;
 }
