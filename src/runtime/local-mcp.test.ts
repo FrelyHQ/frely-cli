@@ -202,3 +202,32 @@ test("the MCP runtime exposes local_mcp_* only while a name is enabled and forwa
     await mcp.close();
   }
 });
+
+test("the MCP runtime exposes cloud_* only with the frely-app toolset and forwards to the Cloud bridge", async () => {
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const workspace = await mkdtemp(join(tmpdir(), "frely-cloud-ws-"));
+  const session = await RelayMcpSession.create(workspace, { cloud: {
+    list: async (group) => ({ tools: [{ name: `${group ?? "all"}.x` }] }),
+    call: async (name, input) => { calls.push([name, input]); return { content: [{ type: "text", text: "ok" }] }; },
+  } });
+  type Reply = { result?: { tools?: Array<{ name: string }>; content?: Array<{ text: string }>; isError?: boolean } };
+  const rpc = (id: number, method: string, params: unknown, toolsets: string[]) => session.execute({ jsonrpc: "2.0", id, method, params }, `relay_request_${id}_xxxxxxxx`, toolsets) as Promise<Reply>;
+  try {
+    await session.execute({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } }, "relay_request_init_xxxxxxxx");
+    const names = (reply: Reply) => (reply.result?.tools ?? []).map((tool) => tool.name);
+    assert.ok(!names(await rpc(2, "tools/list", {}, ["workspace"])).includes("cloud_call"));
+    const denied = await rpc(3, "tools/call", { name: "cloud_call", arguments: { tool: "owner.plan_get", arguments: {} } }, ["workspace"]);
+    assert.equal(denied.result?.isError, true);
+    assert.deepEqual(calls, []);
+
+    const toolsets = ["workspace", "frely-app"];
+    assert.ok(names(await rpc(4, "tools/list", {}, toolsets)).includes("cloud_call"));
+    const listed = await rpc(5, "tools/call", { name: "cloud_list", arguments: { group: "owner" } }, toolsets);
+    assert.deepEqual(JSON.parse(listed.result!.content![0]!.text), { tools: [{ name: "owner.x" }] });
+    const called = await rpc(6, "tools/call", { name: "cloud_call", arguments: { tool: "owner.plan_get", arguments: { planId: "p1" } } }, toolsets);
+    assert.equal(called.result?.content?.[0]?.text, "ok");
+    assert.deepEqual(calls, [["owner.plan_get", { planId: "p1" }]]);
+  } finally {
+    await session.close();
+  }
+});

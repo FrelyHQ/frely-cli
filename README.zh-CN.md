@@ -83,6 +83,8 @@ frely mcp url --workspace /path/to/project
 
 远程 MCP 客户端也能访问只在这台电脑上运行的 MCP 服务，例如只监听 `127.0.0.1` 的浏览器插件 MCP。只监听本机回环地址的服务会被自动发现（`frely mcp local list`）；其他服务用 `frely mcp local add <name> --url http://127.0.0.1:<port>/mcp`，或 `frely mcp local add <name> [--env KEY=VALUE] -- <命令> [参数...]`（stdio）手动添加。每个服务默认对远程客户端关闭，需要在 Frely 连接页面逐个开启。开启后通过两个设备工具 `local_mcp_list` 和 `local_mcp_call` 访问，运行在命令沙箱之外，使用你的用户账号。只会连接回环地址；请求头和环境变量的值只保存在本机。
 
+在连接页面开启 Frely 应用工具后，远程 MCP 客户端还会得到 `cloud_list` 和 `cloud_call`：用这台设备自己的 Cloud 授权调用你的 Frely Cloud 工具（等同 `frely cloud call`），服务端的设备权限和逐次确认依然生效。设备需要先在终端运行一次 `frely cloud list` 完成 Cloud 授权；后台运行时不会为此打开浏览器。
+
 把打印的完整 URL 添加到支持 OAuth 的远程 MCP 客户端，选择 OAuth 并完成授权。保持电脑在线。验证首次连接：让客户端只列出所选工作区的顶层名称，不写文件、不跑 shell 命令——返回与目录一致的结果即连通。
 
 调用端的 Claude Code：

@@ -21,6 +21,7 @@ import { diagnostic, mcpDiagnosticContext, type DiagnosticLog } from "../runtime
 import { RelayMcpSession } from "../runtime/relay-mcp.js";
 import { executeAgentRequest, createAgentCallBridge } from "../runtime/relay-agent.js";
 import type { LocalMcpHub } from "../runtime/local-mcp.js";
+import { cloudMcpBridge } from "../cloud.js";
 import type { AgentService } from "../agent/agent-service.js";
 import type { RelaySession } from "../runtime/relay-session.js";
 import { openLocalProviderRequest, readLocalProviderBody } from "../provider/local.js";
@@ -100,6 +101,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
               assertAuthorized: () => guard.assert(), signal: guard.controller.signal, log, ...(maintenance ? { maintenance } : {}),
               ...(options.agent ? { callAgent: createAgentCallBridge(options.agent, { workspace: options.workspace }) } : {}),
               ...(options.localMcp ? { localMcp: options.localMcp } : {}),
+              cloud: cloudMcpBridge,
             });
             const activeSession = session;
             guard.controller.signal.addEventListener("abort", () => { void activeSession.close(); }, { once: true });
