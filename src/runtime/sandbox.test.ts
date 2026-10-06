@@ -45,37 +45,59 @@ test("cache groups and custom paths open only the directories they name", () => 
   assert.deepEqual(writablePaths(["path:~/development/flutter/bin/cache"]), [join(homedir(), "development", "flutter", "bin", "cache")]);
 });
 
-test("custom writable paths refuse the home directory, credential stores and start-up files", () => {
+test("custom writable paths: any absolute directory, protected paths only when named exactly", () => {
   const home = homedir();
   const refused = [
-    "path:~", "path:~/", "path:/", "path:", "path:relative/dir", "path:/opt/../etc", "path:~/a/../.ssh", "path:/tmp\0/x", `path:/${"a".repeat(150)}`,
-    "path:~/.ssh", "path:~/.ssh/keys", "path:~/.aws", "path:~/.zshrc", "path:~/.bashrc", "path:~/.config/frely", "path:~/.config/frely/devices",
-    "path:~/Library", "path:~/Library/LaunchAgents/x", "path:/Library/LaunchDaemons",
-    `path:${join(home, ".ssh")}`, `path:${join(home, ".aws", "config")}`, `path:${home}`, `path:${join(home, "..")}`,
+    "path:/", "path:", "path:~", "path:relative/dir", "path:/opt/../etc", "path:~/a/../.ssh", "path:/tmp\0/x", `path:/${"a".repeat(150)}`,
+    // Frely's own credentials can never be granted; sub-paths of a protected path need the protected path itself.
+    "path:~/.config/frely", "path:~/.config/frely/devices", "path:~/.ssh/keys", `path:${join(home, ".aws", "config")}`, "path:~/Library/LaunchAgents/x",
   ];
   for (const name of refused) assert.equal(customWritePath(name), undefined, name);
+  // A parent of a protected path is a normal grant (the protection is applied by protectedWriteDenials); so is the home directory.
+  assert.equal(customWritePath("path:~/"), home);
+  assert.equal(customWritePath(`path:${home}`), home);
+  assert.equal(customWritePath("path:~/.config"), join(home, ".config"));
+  assert.equal(customWritePath("path:~/Library"), join(home, "Library"));
+  // Naming a protected path in full is the explicit second step.
+  assert.equal(customWritePath("path:~/.ssh"), join(home, ".ssh"));
+  assert.equal(customWritePath("path:~/.zshrc"), join(home, ".zshrc"));
+  assert.equal(isKnownGrantName("path:~/.ssh"), true);
+  assert.equal(isKnownGrantName("path:~/.ssh/keys"), false);
+  assert.equal(isKnownGrantName("unsandboxed"), true);
+  assert.deepEqual(pathGrantsFromMeta({ [PATH_GRANTS_META_KEY]: ["ssh", "gradle", "unsandboxed", "path:~/dev/sdk", "path:~/.ssh/keys", "nope"] }), ["ssh", "gradle", "unsandboxed", "path:~/dev/sdk"]);
   // Any other absolute directory is allowed (POSIX paths; Windows normalises the separators).
   if (process.platform !== "win32") {
-    for (const path of ["/tmp", "/tmp/", "/tmp/frely-work", "/var/folders/ab/cd1234/T/frely", "/private/tmp/x", "/opt/homebrew/Caskroom/flutter", "/Volumes/Data/work", `/${"a".repeat(149)}`]) {
+    for (const path of ["/tmp", "/tmp/", "/tmp/frely-work", "/var/folders/ab/cd1234/T/frely", "/private/tmp/x", "/etc", "/opt/homebrew/Caskroom/flutter", "/Volumes/Data/work", `/${"a".repeat(149)}`]) {
       assert.equal(customWritePath(`path:${path}`), path.replace(/\/+$/u, ""), path);
     }
     assert.equal(customWritePath(`path:${join(home, "development", "sdk")}`), join(home, "development", "sdk"));
   }
-  // On Windows the system drive root is refused, the root of another drive is allowed (unless it holds the home directory).
+  // On Windows the system drive root is refused, the root of another drive is allowed.
   if (process.platform === "win32") {
     const system = `${process.env.SystemDrive ?? "C:"}\\`;
     const other = system.toLowerCase().startsWith("d:") ? "E:\\" : "D:\\";
     assert.equal(customWritePath(`path:${system}`), undefined);
     assert.equal(customWritePath(`path:${system.replace("\\", "/")}`), undefined);
-    if (!home.toLowerCase().startsWith(other.toLowerCase())) {
-      assert.equal(customWritePath(`path:${other}`), other);
-      assert.equal(customWritePath(`path:${other.replace("\\", "/")}`), other);
-      assert.equal(customWritePath(`path:${other}work`), `${other}work`);
-    }
+    assert.equal(customWritePath(`path:${other}`), other);
+    assert.equal(customWritePath(`path:${other.replace("\\", "/")}`), other);
+    assert.equal(customWritePath(`path:${other}work`), `${other}work`);
   }
-  assert.equal(isKnownGrantName("path:~/.ssh"), false);
-  assert.equal(isKnownGrantName("unsandboxed"), true);
-  assert.deepEqual(pathGrantsFromMeta({ [PATH_GRANTS_META_KEY]: ["ssh", "gradle", "unsandboxed", "path:~/dev/sdk", "path:~/.ssh", "nope"] }), ["ssh", "gradle", "unsandboxed", "path:~/dev/sdk"]);
+});
+
+test("protected paths stay write-denied inside a granted parent until named exactly", () => {
+  const denied = (groups: string[]) => buildSandboxConfig("/work", groups).filesystem?.denyWrite ?? [];
+  // Always denied by default, and Frely's credentials in every case.
+  for (const path of ["~/.ssh", "~/.aws", "~/.zshrc", "~/Library/LaunchAgents", "~/.config/frely"]) assert.ok(denied([]).includes(path), path);
+  // The home directory granted as a whole does not open the protected paths inside it.
+  const withHome = buildSandboxConfig("/work", ["path:~/"]).filesystem;
+  assert.ok(withHome?.allowWrite?.includes(homedir()));
+  for (const path of ["~/.ssh", "~/.aws", "~/.zshrc", "~/.config/frely"]) assert.ok(withHome?.denyWrite?.includes(path), path);
+  // Naming ~/.ssh in full lifts that one denial and no other; Frely's credentials stay denied.
+  const exact = denied(["path:~/", "path:~/.ssh"]);
+  assert.ok(!exact.includes("~/.ssh"));
+  for (const path of ["~/.aws", "~/.zshrc", "~/.config/frely"]) assert.ok(exact.includes(path), path);
+  // A refused name changes nothing.
+  assert.ok(denied(["path:~/.config/frely", "path:~/.ssh/keys"]).includes("~/.ssh"));
 });
 
 test("the ssh prefix runs plain ssh through the proxy options srt exports for git", { skip: process.platform === "win32" }, () => {
