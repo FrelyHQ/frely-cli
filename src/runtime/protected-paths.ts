@@ -1,10 +1,7 @@
 import { homedir } from "node:os";
 import { join, sep } from "node:path";
 import { realpathSync } from "node:fs";
-import { SENSITIVE_PATH_GROUPS, sensitiveReadPaths } from "./sandbox.js";
-
-/** Shell start-up files: a remote file tool must not plant commands that run at the owner's next login. */
-const SHELL_STARTUP_FILES = [".zshrc", ".zshenv", ".zprofile", ".zlogin", ".bashrc", ".bash_profile", ".bash_login", ".profile", ".config/fish/config.fish"].map((name) => `~/${name}`);
+import { protectedWriteDenials, SENSITIVE_PATH_GROUPS, sensitiveReadPaths } from "./sandbox.js";
 
 function expand(path: string): string {
   return path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
@@ -29,7 +26,7 @@ function under(path: string, base: string): boolean {
 export interface PathProtection {
   /** Credential stores that were not approved for this call (and the never-openable ones). */
   readBlocked(path: string): boolean;
-  /** Everything readBlocked covers, approved credential stores included, plus shell start-up files. */
+  /** Everything readBlocked covers, approved credential stores included, plus every protected path (start-up files, launch agents). */
   writeBlocked(path: string): boolean;
 }
 
@@ -40,7 +37,10 @@ export interface PathProtection {
  */
 export function pathProtection(grants: readonly string[] = []): PathProtection {
   const readRoots = sensitiveReadPaths(grants).flatMap(variants);
-  const writeRoots = [...Object.values(SENSITIVE_PATH_GROUPS).flat(), ...sensitiveReadPaths(), ...SHELL_STARTUP_FILES].flatMap(variants);
+  // Same protected list as the command sandbox. A `path:` grant (extra writable directory for commands) does not lift it for file
+  // tools: they check readability before writing, and `path:` must not open reads. Reading a credential store (the `ssh` group)
+  // never allows writing it. sensitiveReadPaths(all groups) leaves just the never-openable paths.
+  const writeRoots = [...protectedWriteDenials([]), ...sensitiveReadPaths(Object.keys(SENSITIVE_PATH_GROUPS))].flatMap(variants);
   return {
     readBlocked: (path) => readRoots.some((root) => under(path, root)),
     writeBlocked: (path) => writeRoots.some((root) => under(path, root)),

@@ -78,6 +78,7 @@ export const PROTECTED_PATHS: readonly string[] = [
   "~/.ssh", "~/.gnupg", "~/.aws", "~/.kube", "~/.docker", "~/.config/gcloud", "~/.config/gh",
   "~/.zshrc", "~/.zshenv", "~/.zprofile", "~/.zlogin", "~/.bashrc", "~/.bash_profile", "~/.bash_login", "~/.profile", "~/.config/fish",
   "~/Library/LaunchAgents", "/Library/LaunchAgents", "/Library/LaunchDaemons", "~/.git-credentials", "~/.netrc", "~/.npmrc", "~/.pypirc",
+  "~/.cargo/credentials.toml", "~/Library/Application Support/gcloud",
 ];
 /** Frely's own device credentials: never writable by a grant, not even an exact one. */
 const NEVER_WRITABLE_PATHS: readonly string[] = ["~/.config/frely"];
