@@ -61,6 +61,18 @@ test("custom writable paths refuse the home directory, credential stores and sta
     }
     assert.equal(customWritePath(`path:${join(home, "development", "sdk")}`), join(home, "development", "sdk"));
   }
+  // On Windows the system drive root is refused, the root of another drive is allowed (unless it holds the home directory).
+  if (process.platform === "win32") {
+    const system = `${process.env.SystemDrive ?? "C:"}\\`;
+    const other = system.toLowerCase().startsWith("d:") ? "E:\\" : "D:\\";
+    assert.equal(customWritePath(`path:${system}`), undefined);
+    assert.equal(customWritePath(`path:${system.replace("\\", "/")}`), undefined);
+    if (!home.toLowerCase().startsWith(other.toLowerCase())) {
+      assert.equal(customWritePath(`path:${other}`), other);
+      assert.equal(customWritePath(`path:${other.replace("\\", "/")}`), other);
+      assert.equal(customWritePath(`path:${other}work`), `${other}work`);
+    }
+  }
   assert.equal(isKnownGrantName("path:~/.ssh"), false);
   assert.equal(isKnownGrantName("unsandboxed"), true);
   assert.deepEqual(pathGrantsFromMeta({ [PATH_GRANTS_META_KEY]: ["ssh", "gradle", "unsandboxed", "path:~/dev/sdk", "path:~/.ssh", "nope"] }), ["ssh", "gradle", "unsandboxed", "path:~/dev/sdk"]);
