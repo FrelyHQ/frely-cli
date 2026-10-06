@@ -1,5 +1,5 @@
-import { runShellCommand } from "./process-tree.js";
-import { sandboxCommand } from "./sandbox.js";
+import { CommandFailedError, runShellCommand } from "./process-tree.js";
+import { sandboxCommand, sandboxDenialHint } from "./sandbox.js";
 import { pathProtection, type PathProtection } from "./protected-paths.js";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
@@ -219,8 +219,13 @@ export class Workspace {
     if (!command.trim()) throw new Error("command is required.");
     const cwd = await this.existingPath(cwdInput || ".", "directory");
     const sandboxed = await sandboxCommand(command, this.root, pathGrants);
-    const { stdout, stderr } = await runShellCommand(sandboxed, cwd, safeEnv(), timeoutMs, MAX_OUTPUT_BYTES, signal);
-    return { stdout: truncate(stdout), stderr: truncate(stderr) };
+    try {
+      const { stdout, stderr } = await runShellCommand(sandboxed, cwd, safeEnv(), timeoutMs, MAX_OUTPUT_BYTES, signal);
+      return { stdout: truncate(stdout), stderr: truncate(stderr) };
+    } catch (error) {
+      const hint = error instanceof CommandFailedError && sandboxed !== command ? sandboxDenialHint(error.stderr) : undefined;
+      throw hint && error instanceof CommandFailedError ? new CommandFailedError(error.exitCode, error.stdout, error.stderr, hint) : error;
+    }
   }
 
   async processCwd(cwdInput: string): Promise<string> {

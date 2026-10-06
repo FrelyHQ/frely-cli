@@ -235,6 +235,16 @@ export async function sandboxCommand(command: string, workspaceRoot: string, all
   }
 }
 
+/**
+ * Hint for a failed sandboxed command whose stderr looks like a sandbox denial, so the caller asks the owner for approval
+ * (request_permission) instead of giving up on a bare "Operation not permitted".
+ */
+export function sandboxDenialHint(stderr: string): string | undefined {
+  if (!/operation not permitted|permission denied|read-only file system|sandbox/iu.test(stderr)) return undefined;
+  return "This command may have been blocked by the Frely command sandbox (writes only to the workspace and temp directory; credential folders unreadable; only HTTP(S) and ssh reach the network). "
+    + "Call request_permission with the reason and the exact command (a credential group, cache directories, a specific path, or unsandboxed); the owner approves it on the web with a passkey or authenticator code. Then run the same command again.";
+}
+
 /** Exposed for tests: resets the module-level init state and the underlying manager. */
 export async function resetSandboxForTests(): Promise<void> {
   initialized = undefined;

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSandboxConfig, detectSandboxBackend, isSandboxDisabled, PATH_GRANTS_META_KEY, pathGrantsFromMeta, sensitiveReadPaths } from "./sandbox.js";
+import { buildSandboxConfig, detectSandboxBackend, isSandboxDisabled, PATH_GRANTS_META_KEY, pathGrantsFromMeta, sandboxDenialHint, sensitiveReadPaths } from "./sandbox.js";
 
 test("sandbox backend detection reports off when disabled and never throws", () => {
   const previous = process.env.FRELY_SANDBOX;
@@ -63,4 +63,10 @@ test("the ssh prefix runs plain ssh through the proxy options srt exports for gi
   const out = run('ssh host "echo hi there"', { PATH: `${dir}:/usr/bin:/bin`, GIT_SSH_COMMAND: "ssh -o ControlMaster=no -o ProxyCommand='nc -X 5 -x localhost:9 %h %p'" });
   assert.equal(out.trim(), "[-o][ControlMaster=no][-o][ProxyCommand=nc -X 5 -x localhost:9 %h %p][host][echo hi there]");
   assert.equal(run('ssh host', { PATH: `${dir}:/usr/bin:/bin` }).trim(), "[host]");
+});
+
+test("sandboxDenialHint recognises denials and points at request_permission", () => {
+  assert.match(sandboxDenialHint("mkdir: /opt/homebrew/x: Operation not permitted") ?? "", /request_permission/);
+  assert.match(sandboxDenialHint("Permission denied") ?? "", /sandbox/);
+  assert.equal(sandboxDenialHint("fatal: not a git repository"), undefined);
 });

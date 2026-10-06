@@ -48,7 +48,8 @@ export function diagnosticError(error: unknown): { name: string; message: string
   const name = ["Error", "TypeError", "RangeError", "SyntaxError", "AbortError", "DeviceRelayProtocolError"].includes(error.name) ? error.name : "Error";
   const code = "code" in error && typeof error.code === "string" && codes.has(error.code) ? error.code : undefined;
   let message = messages.has(error.message) ? error.message : "Error details withheld; inspect code and stack locations.";
-  if (/^MCP command exited with status (?:\d+|unknown)\.$/u.test(error.message)) message = error.message;
+  const exited = /^(MCP command exited with status (?:\d+|unknown)\.)(?:\n|$)/u.exec(error.message);
+  if (exited) message = exited[1]!;
   const http = /^(?:Frely request failed with HTTP|Unexpected server response:) (\d{3})\.?$/u.exec(error.message);
   if (http) message = `HTTP ${http[1]}.`;
   const websocket = /^WebSocket closed \((\d{4})(?:: ([a-z_]+))?\)$/u.exec(error.message);

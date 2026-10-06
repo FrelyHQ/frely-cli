@@ -25,6 +25,17 @@ export async function terminateProcessTree(child: ChildProcess): Promise<void> {
   await Promise.all([terminate, closed]);
 }
 
+/** Output kept per stream when a command fails, so the caller can see why (for example a sandbox denial). */
+const FAILURE_OUTPUT_BYTES = 4096;
+
+/** A non-zero exit. The first message line is stable; stderr/stdout tails and an optional hint follow it. */
+export class CommandFailedError extends Error {
+  constructor(readonly exitCode: number | null, readonly stdout: string, readonly stderr: string, hint?: string) {
+    const tail = (name: string, text: string) => text.trim() ? `\n${name}:\n${text.length > FAILURE_OUTPUT_BYTES ? "…" + text.slice(-FAILURE_OUTPUT_BYTES) : text}` : "";
+    super(`MCP command exited with status ${exitCode ?? "unknown"}.${tail("stderr", stderr)}${tail("stdout", stdout)}${hint ? `\n${hint}` : ""}`);
+  }
+}
+
 export function runShellCommand(command: string, cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number, maxBytes: number, signal?: AbortSignal): Promise<{ stdout: string; stderr: string }> {
   signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
@@ -44,7 +55,7 @@ export function runShellCommand(command: string, cwd: string, env: NodeJS.Proces
     child.once("close", (code) => {
       clearTimeout(timer); signal?.removeEventListener("abort", abort);
       if (failure) reject(failure);
-      else if (code !== 0) reject(new Error(`MCP command exited with status ${code ?? "unknown"}.`));
+      else if (code !== 0) reject(new CommandFailedError(code, Buffer.concat(output).toString("utf8"), Buffer.concat(errors).toString("utf8")));
       else resolve({ stdout: Buffer.concat(output).toString("utf8"), stderr: Buffer.concat(errors).toString("utf8") });
     });
     if (signal?.aborted) abort();
