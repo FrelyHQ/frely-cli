@@ -38,6 +38,23 @@ if (osButtons.length > 0) {
   for (const button of osButtons) button.addEventListener('click', () => selectOs(button.dataset.osSelect));
   selectOs(/\bwin/i.test(platform) ? 'windows' : /mac|iphone|ipad/i.test(platform) ? 'mac' : 'linux');
 }
+// The agent prompt shows one line until clicked. Copy always copies the full text.
+const agentPrompt = document.getElementById('agent-prompt');
+if (agentPrompt) {
+  const togglePrompt = () => {
+    const collapsed = agentPrompt.parentElement.classList.toggle('collapsed');
+    agentPrompt.setAttribute('aria-expanded', String(!collapsed));
+  };
+  agentPrompt.tabIndex = 0;
+  agentPrompt.setAttribute('role', 'button');
+  togglePrompt();
+  agentPrompt.addEventListener('click', () => { if (!window.getSelection().toString()) togglePrompt(); });
+  agentPrompt.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    togglePrompt();
+  });
+}
 for (const button of document.querySelectorAll('[data-copy]')) {
   button.addEventListener('click', async () => {
     const command = document.getElementById(button.dataset.copy);
