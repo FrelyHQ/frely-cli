@@ -62,7 +62,7 @@ function enabledToolsets(options: McpRuntimeOptions): string[] {
 
 /** Frely Cloud tools (account, keys, Creator, Owner). Permissions and per-call approval are enforced by the server for this device. */
 export const CLOUD_TOOLS = [
-  tool("cloud_list", "List the Frely Cloud tools this device may use, with their input schemas (for example owner.* tools when the account is a Platform Owner). With `group`, only that tool group.", { group: stringSchema("Tool group prefix such as owner, keys or skills; omit for all") }, { readOnly: true }),
+  tool("cloud_list", "List the Frely Cloud tools this device may use, with their input schemas. With `group`, only that tool group.", { group: stringSchema("Tool group prefix such as keys or skills; omit for all") }, { readOnly: true }),
   tool("cloud_call", "Call one Frely Cloud tool by name with its arguments. Writes that need approval return confirmation_required with a link: the user approves on the web console, then call again with the same arguments plus confirmationId.", { tool: stringSchema("Cloud tool name from cloud_list"), arguments: { type: "object", description: "Arguments for the tool", additionalProperties: true } }, { readOnly: false, destructive: true, idempotent: false }),
 ];
 
