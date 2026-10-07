@@ -73,7 +73,6 @@
   "install.next": "在客户端添加这个地址，选择 OAuth，完成授权。被控电脑需要保持运行和联网。",
   "install.tools": "选择客户端接入方式",
   "nav.install": "安装与使用",
-  "install.configure": "启用设备 MCP",
   "setup.eyebrow": "配置设备访问",
   "tools.chatgpt": "添加远程 MCP 连接，填写设备 URL，选择 OAuth，并使用你的 Frely 账号授权。其他兼容客户端也使用这个地址。",
   "tools.claudePrepare": "在调用端电脑执行以下命令。同一账户的所有设备共用这一个地址，只需添加一次。",
@@ -102,14 +101,13 @@
   "tools.codexAuthorize": "添加地址后，按提示完成 OAuth 授权。需要发起授权时，执行以下命令。",
   "tools.codexPrepare": "在运行 Codex 的电脑上执行以下命令。同一账户的所有设备共用这一个地址，只需添加一次。",
   "tools.webTab": "网页 Agent",
-  "install.curlNote": "优先从 GitHub Releases 下载，连不上时（例如中国大陆）改用 npmmirror CDN，随后运行 frely mcp start。",
   "install.agentTitle": "或者让 Agent 帮你安装",
-  "install.agentHint": "把下面这段话粘贴给目标电脑上能用终端的 Agent，例如 Claude Code、Codex。",
   "install.agentPrompt": "请在这台电脑上安装 Frely CLI，并把它连接为设备 MCP。macOS 或 Linux 运行：curl -fsSL https://frely.cloud/install.sh | sh；Windows PowerShell 运行：curl.exe -fsSLo \"$env:TEMP\\frely-install.ps1\" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:TEMP\\frely-install.ps1\"。然后用安装器输出的路径运行 frely mcp start。它输出登录或授权链接时，把链接发给我，并保持命令运行，等我在浏览器里批准。最后把它输出的 MCP 地址发给我。",
   "install.packagesTitle": "包管理器",
   "copy.installMac": "复制 macOS 安装命令",
   "copy.installLinux": "复制 Linux 安装命令",
   "copy.agentPrompt": "复制给 Agent 的安装指令",
   "copy.installBun": "复制 bun 安装命令",
-  "copy.installPnpm": "复制 pnpm 安装命令"
+  "copy.installPnpm": "复制 pnpm 安装命令",
+  "install.autoRun": "自动运行"
 }
