@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import test from "node:test";
-import { addWorkspace, listWorkspaces, removeWorkspace, ensureWorkspaceRegistered, workspaceRegistryPath } from "./workspace-registry.js";
+import { addWorkspace, listWorkspaces, reportedWorkspaces, removeWorkspace, ensureWorkspaceRegistered, workspaceRegistryPath } from "./workspace-registry.js";
 import { writePrivateFile } from "../credential-file.js";
 
 test("workspace registry: listWorkspaces returns empty array for fresh registry", async () => {
@@ -113,4 +113,15 @@ test("workspace registry: rejects paths with control characters", async () => {
       await addWorkspace(validPath);
     },
   ).catch(() => {}); // Might fail for other reasons, just ensure code path works
+});
+
+test("workspace registry: reportedWorkspaces lists the primary workspace first, once", async () => {
+  const primary = await mkdtemp(join(tmpdir(), "frely-registry-primary-"));
+  const other = await mkdtemp(join(tmpdir(), "frely-registry-other-"));
+  await ensureWorkspaceRegistered(other);
+  await ensureWorkspaceRegistered(primary);
+  const reported = await reportedWorkspaces(primary);
+  assert.equal(reported[0], await realpath(primary));
+  assert(reported.includes(await realpath(other)));
+  assert.equal(reported.filter((root) => root === reported[0]).length, 1);
 });
