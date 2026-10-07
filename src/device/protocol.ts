@@ -6,7 +6,7 @@ export type DeviceRelayRequest = {
   protocol: typeof DEVICE_RELAY_PROTOCOL;
   type: "request";
   id: string;
-  method: "mcp" | "provider" | "node" | "agent";
+  method: "mcp" | "provider" | "node";
   authorizationId?: string;
   /** Enabled MCP toolsets on the authorization (relay server -> device). Absent means ["workspace"] (older relays). */
   toolsets?: string[];
@@ -99,7 +99,7 @@ export function validateDeviceRelayEnvelope(value: unknown): asserts value is De
     if (record.authorizationId !== undefined && (record.method !== "mcp" || typeof record.authorizationId !== "string" || !/^mca_[a-f0-9]{32}$/u.test(record.authorizationId))) throw new DeviceRelayProtocolError("frame_invalid");
     if (record.toolsets !== undefined && (record.method !== "mcp" || !isToolsetList(record.toolsets))) throw new DeviceRelayProtocolError("frame_invalid");
     if (record.localMcps !== undefined && (record.method !== "mcp" || !isLocalMcpList(record.localMcps))) throw new DeviceRelayProtocolError("frame_invalid");
-    if (record.method !== "mcp" && record.method !== "provider" && record.method !== "node" && record.method !== "agent") throw new DeviceRelayProtocolError("frame_invalid");
+    if (record.method !== "mcp" && record.method !== "provider" && record.method !== "node") throw new DeviceRelayProtocolError("frame_invalid");
     return;
   }
   if (record.type === "device_capabilities") {

@@ -4,7 +4,6 @@ import { mkdtemp, writeFile, readFile, access, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RelayMcpSession } from "./relay-mcp.js";
-import { AGENT_TOOLS } from "./mcp.js";
 
 test("relay MCP session handles initialize and concurrent requests", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "frely-relay-mcp-"));
@@ -112,11 +111,11 @@ test("relay MCP session reports malformed initialize as Invalid Request", async 
   }
 });
 
-test("agent tools appear only when the frely-app toolset is enabled on the frame", async () => {
+test("cloud tools appear only when the frely-app toolset is enabled on the frame", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "frely-relay-toolsets-"));
   const calls: Array<{ op: string; args: Record<string, unknown> }> = [];
   const session = await RelayMcpSession.create(workspace, {
-    callAgent: async (op, args) => { calls.push({ op, args }); return { ok: true }; },
+    cloud: { list: async (group) => { calls.push({ op: "cloud_list", args: group ? { group } : {} }); return { ok: true }; }, call: async () => ({ content: [{ type: "text", text: "unused" }] }) },
   });
   try {
     await session.execute({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } } });
@@ -124,24 +123,24 @@ test("agent tools appear only when the frely-app toolset is enabled on the frame
 
     // Default (no toolsets on frames, older relay): workspace only.
     const base = await session.execute({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }) as { result: { tools: Array<{ name: string }> } };
-    assert.ok(!base.result.tools.some((entry) => entry.name.startsWith("agent_")));
-    const denied = await session.execute({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "agent_list_tasks", arguments: {} } }) as { result: { isError?: boolean; content: Array<{ text: string }> } };
+    assert.ok(!base.result.tools.some((entry) => entry.name.startsWith("cloud_")));
+    const denied = await session.execute({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "cloud_list", arguments: {} } }) as { result: { isError?: boolean; content: Array<{ text: string }> } };
     assert.equal(denied.result.isError, true);
     assert.match(denied.result.content[0]!.text, /not enabled/);
     assert.equal(calls.length, 0);
 
-    // Relay frame carrying frely-app exposes agent tools and bridges calls.
+    // Relay frame carrying frely-app exposes cloud tools and bridges calls.
     await session.execute({ jsonrpc: "2.0", id: 4, method: "tools/list", params: {} }, "relay-request-tools", ["workspace", "frely-app"]);
     const enabled = await session.execute({ jsonrpc: "2.0", id: 5, method: "tools/list", params: {} }, "relay-request-list", ["workspace", "frely-app"]) as { result: { tools: Array<{ name: string }> } };
-    assert.deepEqual(enabled.result.tools.filter((entry) => entry.name.startsWith("agent_")).map((entry) => entry.name), AGENT_TOOLS.map((entry) => entry.op));
-    const bridged = await session.execute({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "agent_list_tasks", arguments: {} } }, "relay-request-call", ["workspace", "frely-app"]) as { result: { content: Array<{ text: string }> } };
+    assert.deepEqual(enabled.result.tools.filter((entry) => entry.name.startsWith("cloud_")).map((entry) => entry.name), ["cloud_list", "cloud_call"]);
+    const bridged = await session.execute({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "cloud_list", arguments: {} } }, "relay-request-call", ["workspace", "frely-app"]) as { result: { content: Array<{ text: string }> } };
     assert.deepEqual(JSON.parse(bridged.result.content[0]!.text), { ok: true });
-    assert.deepEqual(calls, [{ op: "agent_list_tasks", args: {} }]);
+    assert.deepEqual(calls, [{ op: "cloud_list", args: {} }]);
 
     // A later frame without frely-app hides the tools again (owner disabled the toolset).
     await session.execute({ jsonrpc: "2.0", id: 7, method: "tools/list", params: {} }, "relay-request-off", ["workspace"]);
     const reverted = await session.execute({ jsonrpc: "2.0", id: 8, method: "tools/list", params: {} }, "relay-request-off2", ["workspace"]) as { result: { tools: Array<{ name: string }> } };
-    assert.ok(!reverted.result.tools.some((entry) => entry.name.startsWith("agent_")));
+    assert.ok(!reverted.result.tools.some((entry) => entry.name.startsWith("cloud_")));
   } finally {
     await session.close();
   }
