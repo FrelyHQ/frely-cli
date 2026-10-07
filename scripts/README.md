@@ -20,7 +20,7 @@
 
 npm 包安装与独立二进制安装器测试覆盖不同分发方式，均保留。
 `release-package` 是 CLI 发布实现，并非兼容脚本。
-根目录 `install.sh` / `install.ps1` 是对外分发的仅安装脚本，`start.sh` / `start.ps1` 在安装后继续登录并进入 MCP 流程；`release-mirror.mjs` 把发布产物上传到静态镜像；`site/build.mjs` 是站点构建实现，保留原位置。
+根目录 `install.sh` / `install.ps1` 是对外分发的仅安装脚本，`start.sh` / `start.ps1` 在安装后继续登录并进入 MCP 流程；`release-platform-packages.mjs` 把各平台程序打包成 `@frelyhq/cli-<平台>` npm 包（安装器的国内回退源）；`site/build.mjs` 是站点构建实现，保留原位置。
 
 本仓库已移除旧目录软链接、废弃发布转发入口和不可执行的本地 tag 发布入口。使用 `--validate-tag` 校验发布身份，实际发布交给 Actions。
 

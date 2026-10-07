@@ -13,36 +13,26 @@ This repository contains the open-source Frely client and local MCP runtime. The
 
 ```text
 Remote Agent Skill: install -> frely login -> frely agent install -> frely agent run
-Device MCP:  install on target computer -> frely login -> frely mcp url -> add MCP URL to client -> OAuth authorize
+Device MCP:  install on target computer -> frely mcp start (signs in first) -> add MCP URL to client -> OAuth authorize
 ```
 
 ## Install
 
-The standalone installers select the platform executable, verify a SHA-256 checksum and install into the user directory. They do not require Node.js, npm or a keyring.
+Install and continue straight into Device MCP setup: `frely mcp start` signs in through the browser when needed (new accounts can register on the same page), asks for device approval and prints the MCP URL. The workspace defaults to the home directory (credential and start-up files stay protected); `FRELY_WORKSPACE` picks another.
 
 ```sh
 # macOS / Linux
-curl -fsSL https://cli.frely.cloud/install.sh | sh
+curl -fsSL https://frely.cloud/start.sh | sh
 ```
 
 ```powershell
-# Windows
-irm https://cli.frely.cloud/install.ps1 | iex
+# Windows (PowerShell)
+curl.exe -fsSLo "$env:TEMP\frely-start.ps1" https://frely.cloud/start.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-start.ps1"
 ```
 
-To install and continue straight into Device MCP setup (sign in in the browser, new accounts can register there, then the MCP URL is printed), use `start.sh` / `start.ps1` instead. The workspace is the directory the command ran in (override with `FRELY_WORKSPACE`); without a terminal it only installs and prints the next commands. `install.sh` / `install.ps1` stay install-only, for scripts and Skills that need the CLI.
+`install.sh` / `install.ps1` (same URLs) only install, for agents, scripts and Skills that need the CLI. The installers select the platform executable, verify its SHA-256 checksum and install into the user directory without Node.js, npm or a keyring.
 
-```sh
-# macOS / Linux
-curl -fsSL https://cli.frely.cloud/start.sh | sh
-```
-
-```powershell
-# Windows
-irm https://cli.frely.cloud/start.ps1 | iex
-```
-
-The installers and `frely update` download from a static mirror (`https://dl.frely.cloud/cli`, reachable from mainland China) and fall back to GitHub Releases as a whole when the mirror cannot supply the version or its checksum does not match. `FRELY_RELEASE_MIRROR=<https URL>` replaces the mirror and `FRELY_RELEASE_MIRROR=off` uses GitHub only.
+Downloads try GitHub Releases first. When GitHub is unreachable, stalls (under 50 KB/s for 20 s) or fails verification, they fall back to the same build published as the npm package `@frelyhq/cli-<platform>`, downloaded from npmmirror (reachable from mainland China) and then npmjs. Each source is verified against its own `.sha256`. `FRELY_INSTALL_SOURCES` narrows or reorders the list (`github npmmirror npmjs`). `frely update` uses the same chain.
 
 Or with npm (Node.js 22 or newer required):
 

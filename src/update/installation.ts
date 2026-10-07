@@ -124,7 +124,8 @@ export function manualUpdateCommand(installation: Installation, version: string,
     command = `${windows ? "& " : ""}${quote(installation.manager!)} ${packageArguments(installation, version).map(quote).join(" ")}`;
     if (windows) command += "; if ($LASTEXITCODE -ne 0) { throw 'Frely installation failed' }";
   } else if (installation.method === "standalone") {
-    const base = `https://github.com/FrelyHQ/frely-cli/releases/download/v${version}`;
+    // Served from frely.cloud so the command also works where GitHub is unreachable; the version stays pinned.
+    const base = "https://frely.cloud";
     command = windows
       ? `$env:FRELY_CLI_VERSION = ${quote(version)}; $env:FRELY_INSTALL_DIR = ${quote(dirname(installation.entry))}; $env:FRELY_INSTALL_NO_PROFILE = '1'; & ([scriptblock]::Create((Invoke-WebRequest ${quote(base + "/install.ps1")} -UseBasicParsing).Content))`
       : `curl -fsSL ${quote(base + "/install.sh")} | FRELY_CLI_VERSION=${quote(version)} FRELY_INSTALL_DIR=${quote(dirname(installation.entry))} FRELY_INSTALL_NO_PROFILE=1 sh`;

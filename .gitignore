@@ -12,3 +12,6 @@ artifacts/
 
 # Generated landing page
 _site/
+
+# Generated npm platform packages
+platform-packages/

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { VERSION } from "../version.js";
 import { inspectInstallation, manualUpdateCommand } from "./installation.js";
-import { compareVersions, latestRelease } from "./release.js";
+import { compareVersions, latestRelease, standaloneAsset } from "./release.js";
 import { acquireMaintenance, MaintenanceGate, serveMaintenance } from "./maintenance.js";
 import { prepareStandalone, update, validateStandalone, type UpdateDependencies } from "./update.js";
 
@@ -60,9 +60,9 @@ test("release lookup pins stable official versions and never follows a metadata 
     assert.equal(init?.redirect, "error"); assert.ok(init?.signal);
     return Response.json({ draft: false, prerelease: false, tag_name: "v1.2.3" });
   };
-  assert.equal((await latestRelease(install, request, null)).baseUrl, "https://github.com/FrelyHQ/frely-cli/releases/download/v1.2.3");
+  assert.deepEqual((await latestRelease(install, request)).sources?.[0], { kind: "github", baseUrl: "https://github.com/FrelyHQ/frely-cli/releases/download/v1.2.3" });
   for (const tag of ["v1.2.3-rc.1", "v1.2.3/evil", "v01.2.3", "../bad"]) {
-    await assert.rejects(latestRelease(install, async () => Response.json({ draft: false, prerelease: false, tag_name: tag }), null));
+    await assert.rejects(latestRelease(install, async () => Response.json({ draft: false, prerelease: false, tag_name: tag })));
   }
   const npm = { method: "npm" as const, entry: "/frely", platform: "linux" as const, manager: "npm", prefix: "/p" };
   const packument = (latest: string, versions: string[]) => async (url: string | URL | Request, init?: RequestInit) => {
@@ -83,7 +83,7 @@ test("standalone preparation leaves original intact; replacement and recovery us
   t.after(() => rm(root, { recursive: true, force: true }));
   const entry = join(root, "frely"); await writeFile(entry, "old");
   const hash = createHash("sha256").update("new").digest("hex");
-  const prepared = await prepareStandalone({ method: "standalone", entry, platform: "linux" }, { version: "1.2.3", baseUrl: "https://example.invalid" },
+  const prepared = await prepareStandalone({ method: "standalone", entry, platform: "linux" }, { version: "1.2.3", sources: [{ kind: "github", baseUrl: "https://example.invalid" }] },
     async (url, path) => { await writeFile(path, url.endsWith(".sha256") ? `${hash}  frely\n` : "new"); }, async () => "1.2.3");
   assert.equal(await readFile(entry, "utf8"), "old");
   await prepared.apply(); assert.equal(await readFile(entry, "utf8"), "new");
@@ -208,33 +208,38 @@ test("service identity changes during preparation cancel before stop or install"
   assert.equal(calls.at(-1), "unlock");
 });
 
-test("standalone lookup prefers the mirror, falls back to GitHub, and download falls back as a whole", async (t) => {
+test("standalone lookup falls back to npmmirror when GitHub is unreachable, and download falls back source by source", async (t) => {
   const install = { method: "standalone" as const, entry: "/frely", platform: "linux" as const };
-  const mirror = "https://mirror.example/cli";
-  const viaMirror = await latestRelease(install, async (url) => {
-    assert.equal(String(url), `${mirror}/latest`);
-    return new Response("1.2.3\n");
-  }, mirror);
-  assert.deepEqual(viaMirror, { version: "1.2.3", baseUrl: `${mirror}/v1.2.3`, fallbackBaseUrl: "https://github.com/FrelyHQ/frely-cli/releases/download/v1.2.3" });
-  const viaGithub = await latestRelease(install, async (url) => String(url).startsWith(mirror)
-    ? new Response("down", { status: 503 })
-    : Response.json({ draft: false, prerelease: false, tag_name: "v1.2.4" }), mirror);
-  assert.equal(viaGithub.version, "1.2.4");
-  assert.match(viaGithub.baseUrl!, /^https:\/\/github\.com\//u);
+  const asked: string[] = [];
+  const viaNpm = await latestRelease(install, async (url) => {
+    asked.push(String(url));
+    if (String(url).startsWith("https://api.github.com/")) throw new TypeError("fetch failed");
+    return Response.json({ name: "@frelyhq/cli-x", version: "1.2.4" });
+  });
+  assert.equal(viaNpm.version, "1.2.4");
+  assert.match(asked[1]!, /^https:\/\/registry\.npmmirror\.com\/@frelyhq\/cli-[a-z0-9-]+\/latest$/u);
+  assert.deepEqual(viaNpm.sources?.map((source) => source.kind), ["github", "npm", "npm"]);
+  assert.match((viaNpm.sources![1] as { tarballUrl: string }).tarballUrl, /^https:\/\/registry\.npmmirror\.com\/@frelyhq\/cli-[a-z0-9-]+\/-\/cli-[a-z0-9-]+-1\.2\.4\.tgz$/u);
+  await assert.rejects(latestRelease(install, async () => { throw new TypeError("offline"); }), /GitHub, npmmirror and npmjs/u);
 
-  const root = await mkdtemp(join(tmpdir(), "frely-mirror-"));
+  const root = await mkdtemp(join(tmpdir(), "frely-sources-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const entry = join(root, "frely"); await writeFile(entry, "old");
   const hash = createHash("sha256").update("new").digest("hex");
   const seen: string[] = [];
   const prepared = await prepareStandalone({ method: "standalone", entry, platform: "linux" },
-    { version: "1.2.3", baseUrl: `${mirror}/v1.2.3`, fallbackBaseUrl: "https://github.com/x/v1.2.3" },
+    { version: "1.2.3", sources: [{ kind: "github", baseUrl: "https://github.com/x/v1.2.3" }, { kind: "npm", registry: "https://registry.npmmirror.com", tarballUrl: "https://registry.npmmirror.com/p/-/p-1.2.3.tgz" }] },
     async (url, path) => {
       seen.push(url);
-      if (url.startsWith(mirror) && !url.endsWith(".sha256")) throw new Error("mirror cut off");
-      await writeFile(path, url.endsWith(".sha256") ? `${hash}  frely\n` : "new");
-    }, async () => "1.2.3");
-  assert.ok(seen.some((url) => url.startsWith(mirror)) && seen.some((url) => url.startsWith("https://github.com/")));
+      if (url.startsWith("https://github.com/")) throw new Error("connection reset");
+      await writeFile(path, "tgz");
+    }, async () => "1.2.3",
+    async (_tarball, directory) => {
+      await mkdir(join(directory, "package"));
+      await writeFile(join(directory, "package", "frely"), "new");
+      await writeFile(join(directory, "package", "frely.sha256"), `${hash}  frely\n`);
+    });
+  assert.deepEqual(seen, ["https://github.com/x/v1.2.3/" + standaloneAsset() + ".sha256", "https://registry.npmmirror.com/p/-/p-1.2.3.tgz"]);
   await prepared.apply(); assert.equal(await readFile(entry, "utf8"), "new");
   await prepared.cleanup();
 });

@@ -483,6 +483,16 @@ async function main(): Promise<void> {
     if (args.includes("--resume")) { const service = await startMcpService(); stdout.write(`Frely MCP service ${service.active ? "started" : "not active"}.\n`); return; }
     const workspace = option(args, "--workspace");
     const days = option(args, "--days");
+    // --no-browser applies to both the sign-in and the MCP approval page: only the links are printed.
+    if (args.includes("--no-browser")) process.env.FRELY_NO_BROWSER = "1";
+    // MCP authorization needs an account: sign in first (the browser page also creates new accounts).
+    await requireLogin().catch(async (error: unknown) => {
+      if (!(error instanceof Error && /Run `frely login`/u.test(error.message))) throw error;
+      const { user } = await loginDevice(undefined, ({ verificationUri, userCode }) => {
+        process.stderr.write(`Sign in to Frely (new accounts can register on the same page):\n${verificationUri}\nDevice code: ${userCode}\nWaiting for approval...\n`);
+      });
+      process.stderr.write(`Logged in as ${user.email}.\n`);
+    });
     const authorization = await startMcp({ ...(workspace ? { workspace } : {}), ...(days ? { days } : {}), notify: (message) => { process.stderr.write(message); } });
     const value = { deviceId: authorization.grant.deviceId, mcpUrl: authorization.mcpUrl, transport: "http", authentication: "oauth", workspace: authorization.grant.workspace, expiresAt: authorization.grant.expiresAt };
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);

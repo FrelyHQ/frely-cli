@@ -19,15 +19,22 @@
     <h2 id="install-title">{{install.step1}}</h2>
     <!-- Without JavaScript every command stays visible; app.js reveals this switch and shows the one matching the visitor's system. -->
     <div class="os-switch" id="os-switch" role="group" aria-label="{{install.platformLabel}}" hidden>
-      <button type="button" data-os-select="unix" aria-pressed="true">macOS / Linux</button>
+      <button type="button" data-os-select="mac" aria-pressed="true">macOS</button>
+      <button type="button" data-os-select="linux" aria-pressed="false">Linux</button>
       <button type="button" data-os-select="windows" aria-pressed="false">Windows</button>
-      <button type="button" data-os-select="npm" aria-pressed="false">npm</button>
     </div>
-    <div class="os-option" data-os="unix">
-      <div class="command-label"><span>macOS / Linux</span></div>
+    <div class="os-option" data-os="mac">
+      <div class="command-label"><span>macOS</span></div>
       <div class="command">
-        <code id="install-unix-command">{{command.installUnix}}</code>
-        <button class="copy-button" data-copy="install-unix-command" aria-label="{{copy.installUnix}}">{{copy.idle}}</button>
+        <code id="install-mac-command">{{command.installMac}}</code>
+        <button class="copy-button" data-copy="install-mac-command" aria-label="{{copy.installMac}}">{{copy.idle}}</button>
+      </div>
+    </div>
+    <div class="os-option" data-os="linux">
+      <div class="command-label"><span>Linux</span></div>
+      <div class="command">
+        <code id="install-linux-command">{{command.installLinux}}</code>
+        <button class="copy-button" data-copy="install-linux-command" aria-label="{{copy.installLinux}}">{{copy.idle}}</button>
       </div>
     </div>
     <div class="os-option" data-os="windows">
@@ -37,12 +44,26 @@
         <button class="copy-button" data-copy="install-windows-command" aria-label="{{copy.installWindows}}">{{copy.idle}}</button>
       </div>
     </div>
-    <div class="os-option" data-os="npm">
-      <div class="command-label"><span>npm</span><span class="fineprint">{{install.node}}</span></div>
-      <div class="command">
-        <code id="install-command">{{command.install}}</code>
-        <button class="copy-button" data-copy="install-command" aria-label="{{copy.install}}">{{copy.idle}}</button>
-      </div>
+    <p class="fineprint">{{install.curlNote}}</p>
+    <h3 class="install-subheading">{{install.agentTitle}}</h3>
+    <p class="fineprint">{{install.agentHint}}</p>
+    <div class="command agent-prompt">
+      <code id="agent-prompt">{{install.agentPrompt}}</code>
+      <button class="copy-button" data-copy="agent-prompt" aria-label="{{copy.agentPrompt}}">{{copy.idle}}</button>
+    </div>
+    <h3 class="install-subheading">{{install.packagesTitle}}</h3>
+    <p class="fineprint">{{install.node}}</p>
+    <div class="command">
+      <code id="install-command">{{command.install}}</code>
+      <button class="copy-button" data-copy="install-command" aria-label="{{copy.install}}">{{copy.idle}}</button>
+    </div>
+    <div class="command">
+      <code id="install-bun-command">{{command.installBun}}</code>
+      <button class="copy-button" data-copy="install-bun-command" aria-label="{{copy.installBun}}">{{copy.idle}}</button>
+    </div>
+    <div class="command">
+      <code id="install-pnpm-command">{{command.installPnpm}}</code>
+      <button class="copy-button" data-copy="install-pnpm-command" aria-label="{{copy.installPnpm}}">{{copy.idle}}</button>
     </div>
     <div class="download-option">
       <a class="text-link" href="https://github.com/FrelyHQ/frely-cli/releases/latest">{{install.standalone}} <span aria-hidden="true">↗</span></a>

@@ -13,8 +13,10 @@ asset="frely-$os-$arch$libc"
 version="${FRELY_CLI_VERSION:-latest}"
 case "$version" in *[!0-9A-Za-z._-]*|'') fail "Invalid release version." ;; esac
 github="https://github.com/FrelyHQ/frely-cli/releases"
-mirror="${FRELY_RELEASE_MIRROR:-https://dl.frely.cloud/cli}"
-case "$mirror" in off|https://*) ;; *) fail "FRELY_RELEASE_MIRROR must be an https URL or off." ;; esac
+# GitHub first; mainland China and other networks without GitHub fall back to the same build published as an npm package,
+# downloaded from npmmirror (China CDN) and then npmjs. FRELY_INSTALL_SOURCES narrows or reorders the list.
+package="@frelyhq/cli-$os-$arch$libc"
+sources="${FRELY_INSTALL_SOURCES:-github npmmirror npmjs}"
 install_dir="${FRELY_INSTALL_DIR:-$HOME/.local/bin}"
 case "$install_dir" in /*) ;; *) fail "FRELY_INSTALL_DIR must be an absolute path." ;; esac
 [ ! -L "$install_dir" ] || fail "Install directory must not be a symbolic link."
@@ -23,46 +25,57 @@ mkdir -p "$install_dir"
 # Download into the destination filesystem so replacement uses rename, not a partial copy.
 stage="$(mktemp -d "$install_dir/.frely-install.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT HUP INT TERM
-# fetch URL DESTINATION: a system HTTPS downloader only; FRELY_RELEASE_DIR serves a local release directory for tests.
+# fetch URL DESTINATION: a system HTTPS downloader only. A stalled transfer (under 50 KB/s for 20 s) counts as unreachable.
+# FRELY_RELEASE_DIR serves a local release directory for tests.
 fetch() {
   if [ -n "${FRELY_RELEASE_DIR:-}" ]; then
     cp "$FRELY_RELEASE_DIR/${1##*/}" "$2"
   elif command -v curl >/dev/null 2>&1; then
-    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 10 "$1" -o "$2"
+    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 8 --speed-limit 51200 --speed-time 20 "$1" -o "$2"
   elif command -v wget >/dev/null 2>&1; then
     wget --https-only --quiet --timeout=20 "$1" -O "$2"
   else fail "A system HTTPS downloader (curl or wget) is required."; fi
 }
-# verify_release: the downloaded executable must match the checksum published beside it.
-verify_release() {
-  expected="$(awk 'NR == 1 { print $1 }' "$stage/$asset.sha256")"
+# verify FILE CHECKSUM_FILE: the executable must match the checksum published beside it.
+verify() {
+  expected="$(awk 'NR == 1 { print $1 }' "$2")"
   case "$expected" in *[!0-9a-fA-F]*|'') return 1 ;; esac
   [ "${#expected}" -eq 64 ] || return 1
-  if command -v sha256sum >/dev/null 2>&1; then actual="$(sha256sum "$stage/$asset" | awk '{print $1}')"
-  elif command -v shasum >/dev/null 2>&1; then actual="$(shasum -a 256 "$stage/$asset" | awk '{print $1}')"
+  if command -v sha256sum >/dev/null 2>&1; then actual="$(sha256sum "$1" | awk '{print $1}')"
+  elif command -v shasum >/dev/null 2>&1; then actual="$(shasum -a 256 "$1" | awk '{print $1}')"
   else fail "A system SHA-256 verifier is required."; fi
   [ "$actual" = "$expected" ]
 }
-# The static mirror is reachable from mainland China; any mirror problem (lookup, download, checksum) falls back to GitHub as a whole.
-downloaded=
-if [ "$mirror" != off ] && [ -z "${FRELY_RELEASE_DIR:-}" ]; then
-  mirror="${mirror%/}"
-  mirror_version="${version#v}"
-  if [ "$version" = latest ]; then
-    mirror_version=
-    if fetch "$mirror/latest" "$stage/latest" 2>/dev/null; then mirror_version="$(awk 'NR == 1 { print $1 }' "$stage/latest")"; fi
-    case "$mirror_version" in *[!0-9.]*|'') mirror_version= ;; esac
-  fi
-  if [ -n "$mirror_version" ] && fetch "$mirror/v$mirror_version/$asset" "$stage/$asset" 2>/dev/null && fetch "$mirror/v$mirror_version/$asset.sha256" "$stage/$asset.sha256" 2>/dev/null && verify_release 2>/dev/null; then
-    downloaded=1
-  else rm -f "$stage/$asset" "$stage/$asset.sha256"; fi
-fi
-if [ -z "$downloaded" ]; then
+from_github() {
   if [ "$version" = latest ]; then base="$github/latest/download"; else base="$github/download/v${version#v}"; fi
-  fetch "$base/$asset" "$stage/$asset"
-  fetch "$base/$asset.sha256" "$stage/$asset.sha256"
-  verify_release || fail "Release checksum mismatch or invalid; installation was not changed."
-fi
+  fetch "$base/$asset" "$stage/$asset" && fetch "$base/$asset.sha256" "$stage/$asset.sha256" && verify "$stage/$asset" "$stage/$asset.sha256"
+}
+# from_npm REGISTRY: the package tarball holds package/frely and package/frely.sha256.
+from_npm() {
+  registry="$1" wanted="${version#v}"
+  if [ "$version" = latest ]; then
+    fetch "$registry/$package/latest" "$stage/meta.json" || return 1
+    wanted="$(sed -n 's/.*"version": *"\([0-9][0-9.]*\)".*/\1/p' "$stage/meta.json" | head -n 1)"
+  fi
+  case "$wanted" in *[!0-9.]*|'') return 1 ;; esac
+  fetch "$registry/$package/-/${package##*/}-$wanted.tgz" "$stage/package.tgz" || return 1
+  mkdir -p "$stage/npm" && tar -xzf "$stage/package.tgz" -C "$stage/npm" || return 1
+  verify "$stage/npm/package/frely" "$stage/npm/package/frely.sha256" || return 1
+  mv -f "$stage/npm/package/frely" "$stage/$asset"
+}
+downloaded=
+for source in $sources; do
+  case "$source" in
+    github) from_github 2>/dev/null && downloaded=github ;;
+    npmmirror) from_npm https://registry.npmmirror.com 2>/dev/null && downloaded=npmmirror ;;
+    npmjs) from_npm https://registry.npmjs.org 2>/dev/null && downloaded=npmjs ;;
+    *) fail "Unknown install source: $source (use github, npmmirror, npmjs)." ;;
+  esac
+  [ -z "$downloaded" ] || break
+  rm -rf "$stage/$asset" "$stage/$asset.sha256" "$stage/npm" "$stage/package.tgz" "$stage/meta.json"
+  printf 'Frely: %s unavailable or failed verification; trying the next source.\n' "$source" >&2
+done
+[ -n "$downloaded" ] || fail "No source supplied a verified release (checksum mismatch or no connection); installation was not changed."
 chmod 755 "$stage/$asset"
 "$stage/$asset" --version >/dev/null || fail "The downloaded executable could not run."
 [ ! -L "$install_dir/frely" ] || fail "Existing frely is a symbolic link; choose another FRELY_INSTALL_DIR."

@@ -1,7 +1,10 @@
 {
-  "installUnix": "curl -fsSL https://cli.frely.cloud/install.sh | sh",
-  "installWindows": "irm https://cli.frely.cloud/install.ps1 | iex",
+  "installMac": "curl -fsSL https://frely.cloud/start.sh | sh",
+  "installLinux": "curl -fsSL https://frely.cloud/start.sh | sh",
+  "installWindows": "curl.exe -fsSLo \"$env:TEMP\\frely-start.ps1\" https://frely.cloud/start.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:TEMP\\frely-start.ps1\"",
   "install": "npm install --global --ignore-scripts frely-cli@latest",
+  "installBun": "bun add --global frely-cli@latest",
+  "installPnpm": "pnpm add --global frely-cli@latest",
   "login": "frely login",
   "loginEmail": "frely login --email <EMAIL> --mcp",
   "loginCode": "frely login --code <CODE>",

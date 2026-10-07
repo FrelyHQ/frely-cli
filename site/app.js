@@ -36,7 +36,7 @@ if (osButtons.length > 0) {
   if (osSwitch) osSwitch.hidden = false;
   if (note) note.hidden = true;
   for (const button of osButtons) button.addEventListener('click', () => selectOs(button.dataset.osSelect));
-  selectOs(/\bwin/i.test(platform) ? 'windows' : 'unix');
+  selectOs(/\bwin/i.test(platform) ? 'windows' : /mac|iphone|ipad/i.test(platform) ? 'mac' : 'linux');
 }
 for (const button of document.querySelectorAll('[data-copy]')) {
   button.addEventListener('click', async () => {

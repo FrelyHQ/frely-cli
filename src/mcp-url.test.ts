@@ -257,20 +257,22 @@ test("frely mcp propagates service installation failure instead of returning a s
   assert.doesNotMatch(f.state.messages.join(""), /Background service/);
 });
 
-test("frely mcp keeps setup prompts off stdout, including JSON mode", async (t) => {
+test("frely mcp start without a login signs in first and keeps prompts off stdout, including JSON mode", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "frely-mcp-url-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const entry = fileURLToPath(new URL("./index.js", import.meta.url));
-  for (const args of [["mcp", "url"], ["mcp", "url", "--json"]]) {
+  for (const args of [["mcp", "start"], ["mcp", "start", "--json"]]) {
     await assert.rejects(promisify(execFile)(process.execPath, [entry, ...args], {
       cwd: directory,
-      env: { ...process.env, XDG_CONFIG_HOME: directory, FRELY_NO_BROWSER: "1" },
+      // An unreachable loopback relay: the sign-in request fails at once instead of waiting for a browser approval.
+      env: { ...process.env, XDG_CONFIG_HOME: directory, FRELY_NO_BROWSER: "1", FRELY_RELAY_URL: "http://127.0.0.1:9" },
+      timeout: 20000,
     }), (error: unknown) => {
       const result = error as Error & { code: number; stdout: string; stderr: string };
       assert.equal(result.code, 1);
       assert.equal(result.stdout, "");
-      assert.match(result.stderr, /Enabling device MCP for/);
-      assert.match(result.stderr, /frely login/);
+      assert.doesNotMatch(result.stderr, /Enabling device MCP for/u, "MCP setup must not start before a login exists");
+      assert.notEqual(result.stderr.trim(), "");
       return true;
     });
   }
