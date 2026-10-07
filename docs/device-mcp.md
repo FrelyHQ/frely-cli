@@ -24,7 +24,7 @@ FrelyMCP 的产品定位是：**让 Agent 从任何地方访问你的设备。**
 
 这里的 Agent 是访问设备的外部客户端。CLI 调用 Frely 托管 Agent 是另一条调用方向，其 install/invoke 命令包含在 npm 0.6.2 中。设备访问无需配置托管 Agent 调用或 Provider 模型共享。
 
-- Web：Frely → **Device MCP**，路径保持 `/user/account/connections`。展示设备、工作区、执行权限与到期时间，复制连接 URL 或 Claude Code 命令，撤销设备或 MCP 权限。
+- Web：Frely → **Device MCP**，路径为 `/user/device-mcp`（旧路径 `/user/account/connections` 301 跳转）。展示设备、工作区、执行权限与到期时间，复制连接 URL 或 Claude Code 命令，撤销设备或 MCP 权限。
 - CLI：`frely mcp url` 启用、获取地址与续期，`frely mcp remove` 撤销并卸载服务。状态和诊断统一使用 `frely doctor [-v]`。
 - Landing：以 Agent 从外部访问用户设备为主线，网页 Agent 与命令行 Agent 是接入场景；主标题为“让 Agent 从任何地方访问你的设备”。中英文保持同一能力边界，避免副词。独立功能无步骤编号；页面不展示写死的产品版本或发行状态。
 - `frely mcp url --json` 返回 `deviceId`、`mcpUrl`、`transport=http`、`authentication=oauth`、`workspace` 和 `expiresAt`；新增字段不改变原 URL。

@@ -95,7 +95,7 @@ claude mcp add --transport http frely "<MCP_URL>"
 
 在 Claude Code 中打开 `/mcp` 完成 OAuth 授权。一个 URL 覆盖账户下所有已开启 MCP 的设备：`list_devices` 列出设备及其工作区，其余工具都带 `device` 参数（设备名或 id）。让 Agent 用 Frely 工具做远程工作；它自带的 shell 仍跑在调用端电脑。客户端共享各设备的工作区与托管进程。
 
-授权生命周期：授权过期后，`frely mcp url` 会请求新的批准并轮换 MCP 执行密钥；`frely mcp url --days 365` 可提前续期。MCP URL 对你的所有设备相同，续期也不会改变。登录刷新、OAuth 刷新与重启都不延长授权。`frely mcp stop|start` 暂停或恢复后台服务；`frely mcp remove` 撤销所有客户端的访问并卸载服务（本机有本地 Provider 时服务改为仅 Provider 模式继续运行）。在 Frely → **Device MCP**（`/user/account/connections`）管理你的设备。
+授权生命周期：授权过期后，`frely mcp url` 会请求新的批准并轮换 MCP 执行密钥；`frely mcp url --days 365` 可提前续期。MCP URL 对你的所有设备相同，续期也不会改变。登录刷新、OAuth 刷新与重启都不延长授权。`frely mcp stop|start` 暂停或恢复后台服务；`frely mcp remove` 撤销所有客户端的访问并卸载服务（本机有本地 Provider 时服务改为仅 Provider 模式继续运行）。在 Frely → **Device MCP**（`/user/device-mcp`）管理你的设备。
 
 ### 调用 Frely 托管的 Agent
 
