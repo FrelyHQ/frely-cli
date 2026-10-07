@@ -25,17 +25,16 @@
       <div class="terminal-body">
         <div class="os-option" data-os="mac">
           <p class="terminal-comment"># macOS</p>
-          <div class="terminal-line"><span class="prompt" aria-hidden="true">$</span><code id="install-mac-command">{{command.installMac}}</code><button class="copy-button" data-copy="install-mac-command" aria-label="{{copy.installMac}}">{{copy.idle}}</button></div>
+          <div class="terminal-line"><code data-prompt="$" id="install-mac-command">{{command.installMac}}</code><button class="copy-button" data-copy="install-mac-command" aria-label="{{copy.installMac}}">{{copy.idle}}</button></div>
         </div>
         <div class="os-option" data-os="linux">
           <p class="terminal-comment"># Linux</p>
-          <div class="terminal-line"><span class="prompt" aria-hidden="true">$</span><code id="install-linux-command">{{command.installLinux}}</code><button class="copy-button" data-copy="install-linux-command" aria-label="{{copy.installLinux}}">{{copy.idle}}</button></div>
+          <div class="terminal-line"><code data-prompt="$" id="install-linux-command">{{command.installLinux}}</code><button class="copy-button" data-copy="install-linux-command" aria-label="{{copy.installLinux}}">{{copy.idle}}</button></div>
         </div>
         <div class="os-option" data-os="windows">
           <p class="terminal-comment"># Windows (PowerShell)</p>
-          <div class="terminal-line"><span class="prompt" aria-hidden="true">PS&gt;</span><code id="install-windows-command">{{command.installWindows}}</code><button class="copy-button" data-copy="install-windows-command" aria-label="{{copy.installWindows}}">{{copy.idle}}</button></div>
+          <div class="terminal-line"><code data-prompt="PS&gt;" id="install-windows-command">{{command.installWindows}}</code><button class="copy-button" data-copy="install-windows-command" aria-label="{{copy.installWindows}}">{{copy.idle}}</button></div>
         </div>
-        <div class="terminal-line terminal-auto"><span class="prompt" aria-hidden="true">↳</span><code>{{command.mcpSetup}}</code><span class="terminal-note">{{install.autoRun}}</span></div>
       </div>
     </div>
     <h3 class="install-subheading">{{install.agentTitle}}</h3>

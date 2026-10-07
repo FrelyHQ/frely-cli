@@ -108,6 +108,5 @@
   "copy.installLinux": "Copy Linux install command",
   "copy.agentPrompt": "Copy agent install instruction",
   "copy.installBun": "Copy bun install command",
-  "copy.installPnpm": "Copy pnpm install command",
-  "install.autoRun": "runs automatically"
+  "copy.installPnpm": "Copy pnpm install command"
 }

@@ -108,6 +108,5 @@
   "copy.installLinux": "复制 Linux 安装命令",
   "copy.agentPrompt": "复制给 Agent 的安装指令",
   "copy.installBun": "复制 bun 安装命令",
-  "copy.installPnpm": "复制 pnpm 安装命令",
-  "install.autoRun": "自动运行"
+  "copy.installPnpm": "复制 pnpm 安装命令"
 }

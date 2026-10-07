@@ -174,12 +174,9 @@ h1 em { font-style:normal; color:var(--accent); }
 .terminal-comment { margin:0; color:var(--muted); }
 .os-switch:not([hidden]) + .terminal .terminal-comment { display:none; }
 .terminal-line { display:flex; align-items:center; gap:.6rem; }
-.terminal-line + .terminal-line, .os-option + .terminal-line, .os-option + .os-option { margin-top:.6rem; }
-.terminal-line .prompt { flex-shrink:0; align-self:flex-start; color:var(--accent); user-select:none; }
+.os-option + .os-option { margin-top:.6rem; }
+.terminal-line code::before { content:attr(data-prompt) " "; color:var(--accent); }
 .terminal-line code { flex:1; min-width:0; overflow-wrap:anywhere; }
-.terminal-auto { color:var(--muted); }
-.terminal-auto .prompt { color:var(--muted); }
-.terminal-note { flex-shrink:0; font-size:.75rem; }
 .install-card .fineprint { color:#3f502d; font-size:.8125rem; }
 .install-card .text-link:hover { color:#101411; }
 .install-card :focus-visible { outline-color:#101411; }
@@ -200,9 +197,8 @@ h1 em { font-style:normal; color:var(--accent); }
 .command code { min-width:0; font-size:.8125rem; line-height:1.7; overflow-wrap:anywhere; }
 .copy-button {
   flex-shrink:0;
-  min-height:44px;
-  min-width:64px;
-  padding:.4rem .65rem;
+  min-height:28px;
+  padding:.2rem .55rem;
   border:1px solid #6c7e6d;
   border-radius:4px;
   background:transparent;
