@@ -109,7 +109,7 @@ claude mcp add --transport http frely "<MCP_URL>"
 
 Open `/mcp` in Claude Code to complete OAuth authorization. One URL serves every device on your account with an active MCP permission: `list_devices` shows your devices and their workspaces, and every other tool takes a `device` argument (device name or id). Ask the Agent to use Frely tools for remote work; its built-in shell still runs on the calling computer. Clients share each device's workspaces and managed processes.
 
-Authorization lifecycle: when the authorization has expired, `frely mcp url` asks for a new approval and rotates the MCP execution key; `frely mcp url --days 365` renews early. The MCP URL is the same for all your devices and does not change on renewal. Login refresh, OAuth refresh and restart do not extend authorization. `frely mcp stop|start` pauses or resumes the background service; `frely mcp remove` revokes access for every client and uninstalls the service (it keeps running provider-only when local Providers exist). Manage your devices in Frely → **Device MCP** (`/user/account/connections`).
+Authorization lifecycle: when the authorization has expired, `frely mcp url` asks for a new approval and rotates the MCP execution key; `frely mcp url --days 365` renews early. The MCP URL is the same for all your devices and does not change on renewal. Login refresh, OAuth refresh and restart do not extend authorization. `frely mcp stop|start` pauses or resumes the background service; `frely mcp remove` revokes access for every client and uninstalls the service (it keeps running provider-only when local Providers exist). Manage your devices in Frely → **Device MCP** (`/user/device-mcp`).
 
 ### Invoke a Frely-hosted Agent
 
