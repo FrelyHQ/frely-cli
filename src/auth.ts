@@ -114,6 +114,8 @@ export interface EmailDeviceChallenge {
   deviceCode: string;
   email: string;
   expiresIn: number;
+  /** Short tag shown in the code mail, so the user can pick the right (latest) mail. Not part of the code. */
+  reference?: string;
   /** Device MCP request prepared before the code is entered; `privateKeyPem` never leaves this machine. */
   mcp?: { privateKeyPem: string; keyThumbprint: string; workspace: string; days: number };
 }
@@ -157,6 +159,7 @@ export async function initEmailDeviceLogin(
     deviceCode,
     email: typeof data.email === "string" ? data.email : email,
     expiresIn: expiresIn,
+    ...(typeof data.reference === "string" ? { reference: data.reference } : {}),
     ...(mcp ? { mcp } : {}),
   };
 }
