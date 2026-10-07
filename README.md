@@ -194,9 +194,9 @@ Full behavior: [the self-update contract](docs/self-update.md) and [service main
 
 ## Local execution boundaries
 
-The local MCP server exposes workspace inspection, file search/read/write/patch, directory create/delete/move, shell commands, and persistent process management.
+The local MCP server exposes four tools: `read` (list, read, search and find workspace files), `edit_file` (atomic whole-file writes and line edits), `process` (shell commands, run to completion or started as persistent processes) and `web_fetch`. Deleting, moving and creating directories go through `process`. Older tool names (`read_file`, `write_file`, `run_command` and so on) are no longer listed but still answer.
 
-Filesystem tools are constrained to the selected workspace, reject symlink escapes, cap normal file reads/writes at 1 MiB, use no-follow reads, and use atomic replacement for writes. `run_command` and persistent process tools execute with the current OS user's permissions inside an OS-level sandbox where the platform supports one (credential folders unreadable, writes limited to the workspace and the temp directory, HTTP(S) and ssh/scp/sftp through a proxy). The owner can open more from the Frely connections page: credential folders to read, build-cache or chosen directories to write, or a time-limited run without the sandbox for raw network connections. The workspace itself only constrains the working directory.
+Filesystem tools are constrained to the selected workspace, reject symlink escapes, cap normal file reads/writes at 1 MiB, use no-follow reads, and use atomic replacement for writes. `process` commands execute with the current OS user's permissions inside an OS-level sandbox where the platform supports one (credential folders unreadable, writes limited to the workspace and the temp directory, HTTP(S) and ssh/scp/sftp through a proxy). The owner can open more from the Frely connections page: credential folders to read, build-cache or chosen directories to write, or a time-limited run without the sandbox for raw network connections. The workspace itself only constrains the working directory.
 
 Read-only local operations may overlap; writes and shell operations use the local fair scheduler — this avoids device-wide `busy -> 429` behavior.
 
