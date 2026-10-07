@@ -221,11 +221,8 @@ h1 em { font-style:normal; color:var(--accent); }
 
 /* Setup sequence */
 .setup-section { background:var(--surface); border-block:1px solid var(--line); }
-.setup-steps { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1.5rem; list-style:none; padding:0; margin:0; }
-.setup-step { min-width:0; padding-top:1.2rem; border-top:1px solid #607161; }
-.step-heading { display:flex; align-items:center; gap:.75rem; min-height:2rem; margin-bottom:1rem; }
-.step-heading > span { font:.75rem var(--mono); color:var(--accent); }
-.step-heading h3 { font-size:1rem; }
+.setup-step { max-width:44rem; padding-top:1.2rem; border-top:1px solid #607161; }
+.setup-step > h3 { font-size:1rem; margin-bottom:1rem; }
 .setup-step > .fineprint { margin-top:1rem; margin-bottom:0; }
 .workflow-choices { display:flex; flex-direction:column; align-items:flex-start; gap:.25rem; margin-top:.6rem; }
 
@@ -298,7 +295,6 @@ pre { padding:1rem 1.2rem; margin:1.4rem 0; border:1px solid var(--line); border
   .wrap { width:calc(100% - 3rem); }
   .hero { gap:2rem; }
   .install-card { padding:1.5rem; }
-  .setup-steps { gap:1rem; }
   .footer-note { display:none; }
 }
 @media(max-width:800px) {
@@ -311,7 +307,6 @@ pre { padding:1rem 1.2rem; margin:1.4rem 0; border:1px solid var(--line); border
   :lang(zh-CN) h1 { font-size:clamp(2.2rem,7.8vw,3.8rem); }
   .section { padding-block:3.5rem; }
   .section-heading { grid-template-columns:1fr; gap:1.25rem; margin-bottom:2rem; }
-  .setup-steps { grid-template-columns:1fr; gap:1.75rem; }
   .workflow-layout { grid-template-columns:1fr; }
   .workflow-tabs { gap:.25rem; }
   .workflow-tab { padding:1rem; }
@@ -375,7 +370,8 @@ pre { padding:1rem 1.2rem; margin:1.4rem 0; border:1px solid var(--line); border
   .clarity-consent-actions { justify-content:flex-end; }
 }
 .install-subheading { margin:1.4rem 0 .35rem; font-size:1rem; }
-.agent-prompt code { white-space:normal; max-height:calc(1.7em * 3); overflow-y:auto; }
+.agent-prompt code { white-space:normal; }
+.agent-prompt.collapsed code { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
 .install-more { margin-bottom:1rem; }
 .install-more summary { display:inline-block; cursor:pointer; font-weight:600; }
 .install-more summary::marker, .install-more summary::-webkit-details-marker { display:none; }
