@@ -34,6 +34,18 @@ export async function listWorkspaces(): Promise<string[]> {
   return registry.roots;
 }
 
+/** The relay drops a capability report over 4 KB, so the report carries at most this many workspaces, none longer than the path limit. */
+const REPORTED_WORKSPACES_MAX = 8;
+const REPORTED_PATH_MAX = 150;
+
+/** The workspaces this device serves for the relay's capability report: the primary one first, then the other registered roots. A broken registry reports only the primary. */
+export async function reportedWorkspaces(primary?: string): Promise<string[]> {
+  const roots = await listWorkspaces().then((value) => value, () => [] as string[]);
+  const first = primary ? await realpath(resolve(primary)).then((value) => value, () => resolve(primary)) : undefined;
+  const all = first ? [first, ...roots.filter((root) => root !== first)] : roots;
+  return all.filter((root) => root.length <= REPORTED_PATH_MAX).slice(0, REPORTED_WORKSPACES_MAX);
+}
+
 export async function ensureWorkspaceRegistered(input: string): Promise<void> {
   const path = await realpath(resolve(input));
   if (/[\x00-\x1f\x7f]/u.test(path)) throw new Error("Workspace path contains control characters.");

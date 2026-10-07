@@ -28,6 +28,7 @@ import { readAppInstall } from "./agent/app-install.js";
 import { appInstallStatus, installApp, openApp, uninstallApp, updateApp } from "./app-manager.js";
 import { detectSandboxBackend } from "./runtime/sandbox.js";
 import { LocalMcpHub } from "./runtime/local-mcp.js";
+import { reportedWorkspaces } from "./runtime/workspace-registry.js";
 import { provisionAgentKey } from "./agent/app-key.js";
 import { startAgentOpsServer } from "./agent/ops-server.js";
 import { runAgentOpsStdioBridge } from "./agent/ops-stdio.js";
@@ -450,6 +451,7 @@ async function main(): Promise<void> {
           sandbox: detectSandboxBackend(),
           agentHost: true,
           remoteControl: config.remoteControlEnabled,
+          workspaces: providerOnly ? [] : await reportedWorkspaces(workspace),
           ...(localMcp ? { localMcp: localMcp.capabilities() } : {}),
         };
       };
