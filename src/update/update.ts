@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
-import { chmod, copyFile, lstat, mkdtemp, open, readFile, realpath, rename, rm } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, mkdtemp, open, readFile, realpath, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
@@ -9,7 +9,7 @@ import { readDeviceBinding } from "../device/state.js";
 import { connectionIsLive, readConnectionStatus } from "../device/connection-status.js";
 import { serviceCommand, serviceStatus, startMcpService, stopMcpService } from "../service.js";
 import { inspectInstallation, manualUpdateCommand, packageArguments, type Installation } from "./installation.js";
-import { compareVersions, latestRelease, releaseMirror, standaloneAsset, type Release } from "./release.js";
+import { compareVersions, latestRelease, NPM_REGISTRIES, standaloneAsset, type Release, type ReleaseSource } from "./release.js";
 import { acquireMaintenance } from "./maintenance.js";
 
 const execFile = promisify(execFileCallback);
@@ -38,17 +38,14 @@ export async function installedVersion(installation: Installation): Promise<stri
   return (await execFile(file, args, { cwd: homedir(), timeout: 10000, maxBuffer: 65536 })).stdout.trim();
 }
 
-const DOWNLOAD_HOSTS = ["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"];
-function mirrorHosts(): string[] {
-  try { const mirror = releaseMirror(); return mirror ? [new URL(mirror).hostname] : []; } catch { return []; }
-}
+const DOWNLOAD_HOSTS = ["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com", ...NPM_REGISTRIES.map((url) => new URL(url).hostname), "cdn.npmmirror.com"];
 
 async function download(url: string, destination: string, maxBytes: number): Promise<void> {
   const signal = AbortSignal.timeout(60000);
   let response: Response | undefined;
   for (let redirects = 0; redirects < 5; redirects++) {
     const parsed = new URL(url);
-    if (parsed.protocol !== "https:" || parsed.username || parsed.password || ![...DOWNLOAD_HOSTS, ...mirrorHosts()].includes(parsed.hostname)) throw new Error("Unsupported release download location.");
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password || !DOWNLOAD_HOSTS.includes(parsed.hostname)) throw new Error("Unsupported release download location.");
     response = await fetch(url, { signal, redirect: "manual" });
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.get("location");
@@ -80,23 +77,42 @@ export async function validateStandalone(path: string, checksum: string, version
 }
 
 export interface PreparedUpdate { apply(): Promise<void>; restore(): Promise<void>; cleanup(): Promise<void> }
+/** System tar (macOS and Linux ship one; standalone updates do not run on Windows). */
+async function systemUnpack(tarball: string, directory: string): Promise<void> {
+  await execFile("tar", ["-xzf", tarball, "-C", directory], { timeout: 60000, maxBuffer: 65536 });
+}
+
 export async function prepareStandalone(installation: Installation, release: Release,
-  fetchFile = download, execute = installedVersion): Promise<PreparedUpdate> {
+  fetchFile = download, execute = installedVersion, unpack = systemUnpack): Promise<PreparedUpdate> {
   const target = installation.entry;
   if (!(await lstat(target)).isFile()) throw new Error("The installation is not a regular file.");
   const stage = await mkdtemp(join(dirname(target), ".frely-update-"));
   const next = join(stage, "frely"), backup = join(stage, "previous");
   try {
     const asset = standaloneAsset();
-    // Checksum and executable must come from the same source; a mirror failure of any kind falls back to GitHub as a whole.
-    const fromBase = async (base: string) => {
-      await rm(join(stage, "checksum"), { force: true }); await rm(next, { force: true });
-      await fetchFile(`${base}/${asset}.sha256`, join(stage, "checksum"), 1024);
-      await fetchFile(`${base}/${asset}`, next, 200 * 1024 * 1024);
+    // Each source supplies its own checksum; any failure (connection, size, checksum, startup) moves to the next source as a whole.
+    const fromSource = async (source: ReleaseSource) => {
+      await rm(join(stage, "checksum"), { force: true }); await rm(next, { force: true }); await rm(join(stage, "npm"), { recursive: true, force: true });
+      if (source.kind === "github") {
+        await fetchFile(`${source.baseUrl}/${asset}.sha256`, join(stage, "checksum"), 1024);
+        await fetchFile(`${source.baseUrl}/${asset}`, next, 200 * 1024 * 1024);
+      } else {
+        const tarball = join(stage, "package.tgz"), unpacked = join(stage, "npm");
+        await rm(tarball, { force: true });
+        await fetchFile(source.tarballUrl, tarball, 200 * 1024 * 1024);
+        await mkdir(unpacked);
+        await unpack(tarball, unpacked);
+        await rename(join(unpacked, "package", "frely"), next);
+        await copyFile(join(unpacked, "package", "frely.sha256"), join(stage, "checksum"));
+      }
       await validateStandalone(next, await readFile(join(stage, "checksum"), "utf8"), release.version, execute);
     };
-    try { await fromBase(release.baseUrl!); }
-    catch (error) { if (!release.fallbackBaseUrl) throw error; await fromBase(release.fallbackBaseUrl); }
+    let lastError: unknown = new Error("No release source is available.");
+    let prepared = false;
+    for (const source of release.sources ?? []) {
+      try { await fromSource(source); prepared = true; break; } catch (error) { lastError = error; }
+    }
+    if (!prepared) throw lastError;
     await copyFile(target, backup);
     return {
       apply: () => rename(next, target),

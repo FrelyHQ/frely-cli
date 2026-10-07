@@ -172,40 +172,41 @@ jobs:
             --title "frely-cli $GITHUB_REF_NAME" \
             --generate-notes
 
-  mirror:
-    # Static mirror of the release assets for networks that cannot reach GitHub (mainland China).
-    # Skipped until the MIRROR_* secrets exist; the GitHub release above is the source of truth.
+
+  platform-packages:
+    # The same executables as npm packages (@frelyhq/cli-<target>), so installers can fall back to npmmirror
+    # (China CDN) and npmjs when GitHub is unreachable. One package per platform keeps each download small.
     needs: [github-release]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-    env:
-      MIRROR_HOST: ${{ secrets.MIRROR_HOST }}
+      id-token: write
     steps:
       - name: Check out release tag
-        if: env.MIRROR_HOST != ''
         uses: actions/checkout@v5
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
       - name: Download standalone artifacts
-        if: env.MIRROR_HOST != ''
         uses: actions/download-artifact@v6
         with:
           pattern: release-*
           path: artifacts
           merge-multiple: true
 
-      - name: Upload to the mirror
-        if: env.MIRROR_HOST != ''
+      - name: Build and publish platform packages
         env:
-          MIRROR_USER: ${{ secrets.MIRROR_USER }}
-          MIRROR_PATH: ${{ secrets.MIRROR_PATH }}
-          MIRROR_SSH_KEY: ${{ secrets.MIRROR_SSH_KEY }}
-          MIRROR_KNOWN_HOSTS: ${{ secrets.MIRROR_KNOWN_HOSTS }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node scripts/release-platform-packages.mjs artifacts "${GITHUB_REF_NAME#v}" --publish
+
+      - name: Ask npmmirror to sync now (best effort)
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
-          cp install.sh install.ps1 start.sh start.ps1 artifacts/
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$MIRROR_SSH_KEY" > ~/.ssh/mirror_key && chmod 600 ~/.ssh/mirror_key
-          printf '%s\n' "$MIRROR_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          node scripts/release-mirror.mjs artifacts "${GITHUB_REF_NAME#v}"
+          for target in darwin-arm64 darwin-x64 linux-arm64 linux-x64 linux-arm64-musl linux-x64-musl windows-arm64 windows-x64; do
+            curl -fsS -X PUT "https://registry-direct.npmmirror.com/-/package/@frelyhq/cli-${target}/syncs" || true
+          done

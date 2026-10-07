@@ -57,7 +57,7 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
     stdio: ["--workspace"],
   };
   const flags: Record<string, readonly string[]> = {
-    start: ["--json", "--resume"],
+    start: ["--json", "--resume", "--no-browser"],
     status: ["--json"],
     serve: ["--provider-only"],
   };

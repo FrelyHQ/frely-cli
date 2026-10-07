@@ -374,3 +374,5 @@ pre { padding:1rem 1.2rem; margin:1.4rem 0; border:1px solid var(--line); border
   .clarity-consent { align-items:stretch; flex-direction:column; }
   .clarity-consent-actions { justify-content:flex-end; }
 }
+.install-subheading { margin:1.4rem 0 .35rem; font-size:1rem; }
+.agent-prompt code { white-space:normal; }

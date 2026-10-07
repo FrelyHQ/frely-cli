@@ -13,22 +13,26 @@
 
 ```text
 Remote Agent Skill: 安装 -> frely login -> frely agent install -> frely agent run
-Device MCP:  在被控电脑安装 -> frely login -> frely mcp url -> 客户端添加 MCP URL -> OAuth 授权
+Device MCP:  在被控电脑安装 -> frely mcp start（先登录）-> 客户端添加 MCP URL -> OAuth 授权
 ```
 
 ## 安装
 
-独立安装器（standalone installer）会选择平台可执行文件、校验 SHA-256 并安装到用户目录，不需要 Node.js、npm 或 keyring。
+安装后直接进入设备 MCP 流程：`frely mcp start` 在没有登录时先跳浏览器登录（新账号可在同一页面注册），再请求设备批准并输出 MCP URL。工作区默认是用户主目录（凭据与启动文件仍受保护），`FRELY_WORKSPACE` 可另选。
 
 ```sh
 # macOS / Linux
-curl -fsSL https://cli.frely.cloud/install.sh | sh
+curl -fsSL https://frely.cloud/start.sh | sh
 ```
 
 ```powershell
-# Windows
-irm https://cli.frely.cloud/install.ps1 | iex
+# Windows（PowerShell）
+curl.exe -fsSLo "$env:TEMP\frely-start.ps1" https://frely.cloud/start.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-start.ps1"
 ```
+
+`install.sh` / `install.ps1`（同一域名）只安装，供 Agent、脚本和 Skill 引用。安装器选择平台可执行文件、校验 SHA-256 并安装到用户目录，不需要 Node.js、npm 或 keyring。
+
+下载先走 GitHub Releases；连不上、过慢（20 秒内低于 50 KB/s）或校验失败时，改从同一构建的 npm 包 `@frelyhq/cli-<平台>` 下载，依次尝试 npmmirror（中国大陆可用）和 npmjs。每个来源都用自己的 `.sha256` 校验。`FRELY_INSTALL_SOURCES` 可缩减或调整顺序（`github npmmirror npmjs`）。`frely update` 使用同一条链路。
 
 或使用 npm（需要 Node.js 22 或更新版本）：
 
