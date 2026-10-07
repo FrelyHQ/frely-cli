@@ -4,7 +4,7 @@ import { PiNodeSupervisor, type PiNodeEndpoint, type PiNodeSupervisorDeps } from
 import type { AppInstall, CapsuleFacts } from "./app-install.js";
 
 const install: AppInstall = { schemaVersion: 2, appVersion: "1.0.0", capsulePath: "/app/PiNode", protocolVersion: 0, agentDir: "/agent", projectsFile: "/agent/frely/mcp-projects.json" };
-const facts = { manifest: { sourceCommit: "a".repeat(40) }, executable: "/app/PiNode/pi-node", headlessArguments: ["headless"], agentHostArguments: ["agent-host"] } as unknown as CapsuleFacts;
+const facts = { manifest: { sourceCommit: "a".repeat(40) }, executable: "/app/PiNode/pi-node", headlessArguments: ["headless"] } as unknown as CapsuleFacts;
 
 function harness(overrides: Partial<PiNodeSupervisorDeps> = {}) {
   const state = {

@@ -24,7 +24,7 @@ async function capsule(t: test.TestContext, mutate: (manifest: Record<string, an
     sourceCommit: "a".repeat(40),
     target: { id: `${platform}-x64`, platform, architecture: "x64", architectures: ["x64"] },
     versions: { piNode: "0.2.0", protocol: "0.2.0", piSdk: "0.84.3", bun: "1.4.0" },
-    runtime: { executable, stdioArguments: ["stdio"], headlessArguments: ["headless"], agentHostArguments: ["agent-host"] },
+    runtime: { executable, stdioArguments: ["stdio"], headlessArguments: ["headless"] },
     integrity: {
       algorithm: "sha256",
       manifestExcludedPath: "capsule-manifest.json",
@@ -38,12 +38,11 @@ async function capsule(t: test.TestContext, mutate: (manifest: Record<string, an
   return { schemaVersion: 2, appVersion: "0.2.0", capsulePath: root, protocolVersion: 0, agentDir: join(root, "agent"), projectsFile: join(root, "projects.json") };
 }
 
-test("capsule facts launch the Pi Node executable in its agent-host role", async (t) => {
+test("capsule facts launch the Pi Node executable in its headless role", async (t) => {
   const install = await capsule(t);
   const facts = await verifyCapsule(install);
   assert.equal(facts.executable, join(install.capsulePath, executable));
   assert.deepEqual(facts.headlessArguments, ["headless"]);
-  assert.deepEqual(facts.agentHostArguments, ["agent-host"]);
   await verifyCapsuleIntegrity(install);
 });
 
@@ -55,15 +54,19 @@ test("capsule verification rejects the retired Node runtime capsule", async (t) 
   await assert.rejects(verifyCapsule(install), /capsule_invalid/);
 });
 
+test("capsule verification accepts a manifest that still carries the retired agentHostArguments", async (t) => {
+  const install = await capsule(t, (manifest) => {
+    manifest.runtime.agentHostArguments = ["agent-host"];
+  });
+  const facts = await verifyCapsule(install);
+  assert.deepEqual(facts.headlessArguments, ["headless"]);
+});
+
 test("capsule verification rejects a redirected executable or role", async (t) => {
   const outside = await capsule(t, (manifest) => {
     manifest.runtime.executable = "../node";
   });
   await assert.rejects(verifyCapsule(outside), /capsule_invalid/);
-  const wrongRole = await capsule(t, (manifest) => {
-    manifest.runtime.agentHostArguments = ["stdio"];
-  });
-  await assert.rejects(verifyCapsule(wrongRole), /capsule_invalid/);
   const wrongHeadless = await capsule(t, (manifest) => {
     manifest.runtime.headlessArguments = ["stdio"];
   });

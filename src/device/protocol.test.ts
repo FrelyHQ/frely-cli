@@ -67,7 +67,7 @@ test("device relay capabilities envelope round trips within 4KB", () => {
     protocol: DEVICE_RELAY_PROTOCOL,
     type: "device_capabilities" as const,
     id: "caps_1234567890ab",
-    capabilities: { app: { installed: true, version: "0.4.0" }, sandbox: "none", agentHost: true, remoteControl: false },
+    capabilities: { app: { installed: true, version: "0.4.0" }, sandbox: "none" },
   };
   assert.deepEqual(decodeDeviceRelayEnvelope(encodeDeviceRelayEnvelope(report)), report);
   assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...report, capabilities: ["not", "an", "object"] })));

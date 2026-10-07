@@ -74,7 +74,7 @@ test("relay透传 node 帧：client → relay → serveConnection(RelayNodeSessi
     const deviceController = new AbortController();
 
     let deviceConnected = false;
-    const deviceDone = serveConnection(relay.url, "fake-token", "device-1", session, null, null, process.cwd(), deviceController.signal, () => {}, (event) => {
+    const deviceDone = serveConnection(relay.url, "fake-token", "device-1", session, null, deviceController.signal, () => {}, (event) => {
       if (event.type === "connected") deviceConnected = true;
     });
 

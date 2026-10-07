@@ -19,10 +19,8 @@ import {
 } from "./protocol.js";
 import { diagnostic, mcpDiagnosticContext, type DiagnosticLog } from "../runtime/diagnostics.js";
 import { RelayMcpSession } from "../runtime/relay-mcp.js";
-import { executeAgentRequest, createAgentCallBridge } from "../runtime/relay-agent.js";
 import type { LocalMcpHub } from "../runtime/local-mcp.js";
 import { cloudMcpBridge } from "../cloud.js";
-import type { AgentService } from "../agent/agent-service.js";
 import type { RelaySession } from "../runtime/relay-session.js";
 import { openLocalProviderRequest, readLocalProviderBody } from "../provider/local.js";
 
@@ -40,12 +38,6 @@ export interface RelayServeOptions {
    * When omitted the relay falls back to the existing MCP path.
    */
   session?: () => Promise<RelaySession>;
-  /**
-   * Injected AgentService for `method: "agent"` remote-control requests
-   * (plan frely-app-agent-toolset §5). When omitted agent requests fail with
-   * a clear error instead of breaking the relay connection.
-   */
-  agent?: AgentService;
   /** Device capability report sent once per connection for the web console (plan §6.4). */
   capabilities?: () => Record<string, unknown> | Promise<Record<string, unknown>> | undefined;
   /** Device-local MCP servers; enabled names arrive on each mcp request (plan mcp/本机MCP转发-方案.md). */
@@ -99,7 +91,6 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
             const guard = lease;
             session = await RelayMcpSession.create(options.workspace, {
               assertAuthorized: () => guard.assert(), signal: guard.controller.signal, log, ...(maintenance ? { maintenance } : {}),
-              ...(options.agent ? { callAgent: createAgentCallBridge(options.agent, { workspace: options.workspace }) } : {}),
               ...(options.localMcp ? { localMcp: options.localMcp } : {}),
               cloud: cloudMcpBridge,
             });
@@ -126,8 +117,6 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
           device.deviceId,
           session,
           lease,
-          options.agent ?? null,
-          options.workspace ?? process.cwd(),
           options.signal,
           log,
           (event) => {
@@ -195,8 +184,6 @@ export async function serveConnection(
   deviceId: string,
   session: RelaySession | null,
   lease: McpLease | null,
-  agent: AgentService | null,
-  defaultWorkspace: string,
   signal: AbortSignal,
   log: (message: string) => void,
   report: (event: ConnectionEvent) => void = () => undefined,
@@ -267,7 +254,7 @@ export async function serveConnection(
       // WebSocket peers may deliver the same JSON envelope as either a text
       // or a binary frame. `rawDataBuffer` normalizes both forms before the
       // protocol validator parses the JSON.
-      void handleFrame(rawDataBuffer(data), socket, inflight, cancelled, session, lease, agent, defaultWorkspace, log, maintenance).catch((error) => { diagnostic(log, "relay.frame_failed", {}, error); finish(error); });
+      void handleFrame(rawDataBuffer(data), socket, inflight, cancelled, session, lease, log, maintenance).catch((error) => { diagnostic(log, "relay.frame_failed", {}, error); finish(error); });
     });
   });
 }
@@ -279,8 +266,6 @@ async function handleFrame(
   cancelled: Set<string>,
   session: RelaySession | null,
   lease: McpLease | null,
-  agent: AgentService | null,
-  defaultWorkspace: string,
   log: DiagnosticLog,
   maintenance?: MaintenanceGate,
 ): Promise<void> {
@@ -308,11 +293,7 @@ async function handleFrame(
   inflight.set(envelope.id, { request: envelope, controller });
   const operation = envelope.method === "provider"
     ? executeProviderRequest(envelope, socket, controller.signal, cancelled, log)
-    : envelope.method === "agent"
-      ? executeAgentRequest(envelope, agent ?? unavailableAgent(), { workspace: defaultWorkspace }).then((payload) => {
-        if (!cancelled.has(envelope.id)) send(socket, { protocol: DEVICE_RELAY_PROTOCOL, type: "response", id: envelope.id, ok: true, payload }, log);
-      })
-      : (envelope.method === "node" ? executeNodeRequest(envelope, session) : executeMcpRequest(envelope, session, lease)).then((payload) => {
+    : (envelope.method === "node" ? executeNodeRequest(envelope, session) : executeMcpRequest(envelope, session, lease)).then((payload) => {
         if (!cancelled.has(envelope.id)) send(socket, { protocol: DEVICE_RELAY_PROTOCOL, type: "response", id: envelope.id, ok: true, payload }, log);
       });
   void operation.catch((error) => {
@@ -339,12 +320,7 @@ async function executeNodeRequest(request: DeviceRelayRequest, session: RelaySes
 function relayErrorCode(method: string): string {
   if (method === "mcp") return "mcp_execution_failed";
   if (method === "node") return "node_execution_failed";
-  if (method === "agent") return "agent_execution_failed";
   return "provider_execution_failed";
-}
-
-function unavailableAgent(): AgentService {
-  throw new Error("Agent remote control is not available in this daemon.");
 }
 
 async function executeProviderRequest(request: DeviceRelayRequest, socket: WebSocket, signal: AbortSignal, cancelled: Set<string>, log: DiagnosticLog): Promise<void> {

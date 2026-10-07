@@ -400,12 +400,12 @@ export async function uninstallApp(deps: AppManagerDeps = {}): Promise<void> {
   if (status.managedBy === "homebrew") {
     const result = await d.run("brew", ["uninstall", "--cask", HOMEBREW_CASK]);
     if (result.code !== 0) throw new Error(`brew uninstall failed: ${result.stderr}`);
-    d.log("Uninstalled with Homebrew. User data (tasks, credentials, worktrees) stays with frely-cli.");
+    d.log("Uninstalled with Homebrew. User data (credentials) stays with frely-cli.");
     return;
   }
   if (d.platform === "darwin" && status.path) {
     await rm(status.path, { recursive: true, force: true });
-    d.log(`Removed ${status.path}. User data (tasks, credentials, worktrees) stays with frely-cli.`);
+    d.log(`Removed ${status.path}. User data (credentials) stays with frely-cli.`);
     return;
   }
   if (status.path) {

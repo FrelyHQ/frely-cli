@@ -59,7 +59,6 @@ test("command groups without a direct action print their subcommands offline", a
     [["provider"], /frely provider list/],
     [["cloud"], /frely cloud list/],
     [["app"], /frely app status/],
-    [["app", "remote"], /frely app remote enable/],
   ];
   for (const [args, expected] of cases) {
     const result = await execute(process.execPath, [entry, ...args], {

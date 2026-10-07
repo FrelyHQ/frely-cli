@@ -28,7 +28,7 @@ export type CapsuleManifest = {
   sourceCommit: string;
   target: { id: string; platform: string; architecture: string };
   versions: { piNode: string; protocol: string };
-  runtime: { executable: string; headlessArguments: string[]; agentHostArguments: string[] };
+  runtime: { executable: string; headlessArguments: string[] };
 };
 
 export class AppInstallError extends Error {
@@ -80,13 +80,11 @@ export type CapsuleFacts = {
   manifest: CapsuleManifest;
   executable: string;
   headlessArguments: string[];
-  agentHostArguments: string[];
 };
 
 const CAPSULE_SCHEMA_VERSION = 3;
 const CAPSULE_KIND = "pi-node-executable";
 const HEADLESS_ARGUMENTS = ["headless"];
-const AGENT_HOST_ARGUMENTS = ["agent-host"];
 
 /** Structural capsule verification: manifest shape, platform match, executable. */
 export async function verifyCapsule(appInstall: AppInstall): Promise<CapsuleFacts> {
@@ -110,10 +108,9 @@ export async function verifyCapsule(appInstall: AppInstall): Promise<CapsuleFact
   const runtime = manifest.runtime;
   if (typeof runtime?.executable !== "string" || runtime.executable.includes("/") || runtime.executable.includes("\\")) throw new AppInstallError("capsule_invalid");
   if (!Array.isArray(runtime.headlessArguments) || JSON.stringify(runtime.headlessArguments) !== JSON.stringify(HEADLESS_ARGUMENTS)) throw new AppInstallError("capsule_invalid");
-  if (!Array.isArray(runtime.agentHostArguments) || JSON.stringify(runtime.agentHostArguments) !== JSON.stringify(AGENT_HOST_ARGUMENTS)) throw new AppInstallError("capsule_invalid");
   const executable = join(appInstall.capsulePath, runtime.executable);
   if (!(await isFile(executable))) throw new AppInstallError("capsule_invalid");
-  return { manifest, executable, headlessArguments: [...runtime.headlessArguments], agentHostArguments: [...runtime.agentHostArguments] };
+  return { manifest, executable, headlessArguments: [...runtime.headlessArguments] };
 }
 
 /**

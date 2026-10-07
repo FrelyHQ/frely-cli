@@ -76,7 +76,7 @@ test("real Relay frames isolate reused client IDs and cancel only the addressed 
       });
       resolve(peer);
     }));
-    runtime = serveConnection(`ws://127.0.0.1:${address.port}`, "synthetic-test-token", `drd_${"a".repeat(32)}`, session, lease, null, process.cwd(), controller.signal, log);
+    runtime = serveConnection(`ws://127.0.0.1:${address.port}`, "synthetic-test-token", `drd_${"a".repeat(32)}`, session, lease, controller.signal, log);
     void runtime.catch(() => undefined);
     socket = await connected;
     call("relay-request-aaa", "read_file", { path: "a.txt" });
@@ -134,8 +134,6 @@ test("transport fallback is reserved for transport failures", async () => {
       `drd_${"a".repeat(32)}`,
       null,
       null,
-      null,
-      process.cwd(),
       controller.signal,
       () => undefined,
     );
@@ -162,7 +160,7 @@ test("device reports capabilities once per connection and forwards frame toolset
     log: () => undefined,
     signal: lease.controller.signal,
     assertAuthorized: () => lease.assert(),
-    callAgent: async (op) => ({ bridged: op }),
+    cloud: { list: async () => ({ bridged: "cloud_list" }), call: async () => ({ content: [{ type: "text", text: "unused" }] }) },
   });
   const server = new WebSocketServer({ port: 0, handleProtocols: () => DEVICE_RELAY_PROTOCOL });
   const listening = new Promise<void>((resolve) => server.once("listening", resolve));
@@ -181,7 +179,7 @@ test("device reports capabilities once per connection and forwards frame toolset
       });
       resolve(peer);
     }));
-    const runtime = serveConnection(`ws://127.0.0.1:${address.port}`, "synthetic-test-token", `drd_${"a".repeat(32)}`, session, lease, null, process.cwd(), controller.signal, () => undefined, () => undefined, undefined, () => ({ app: { installed: true, version: "0.4.0" }, sandbox: "none", agentHost: true, remoteControl: false }));
+    const runtime = serveConnection(`ws://127.0.0.1:${address.port}`, "synthetic-test-token", `drd_${"a".repeat(32)}`, session, lease, controller.signal, () => undefined, () => undefined, undefined, () => ({ app: { installed: true, version: "0.4.0" }, sandbox: "none" }));
     void runtime.catch(() => undefined);
     await connected;
 
@@ -194,27 +192,27 @@ test("device reports capabilities once per connection and forwards frame toolset
       poll();
     });
     assert.equal(reported.type, "device_capabilities");
-    assert.deepEqual((reported as { capabilities: Record<string, unknown> }).capabilities, { app: { installed: true, version: "0.4.0" }, sandbox: "none", agentHost: true, remoteControl: false });
+    assert.deepEqual((reported as { capabilities: Record<string, unknown> }).capabilities, { app: { installed: true, version: "0.4.0" }, sandbox: "none" });
 
-    // A relay request frame carrying toolsets must reach the session and bridge agent calls.
+    // A relay request frame carrying toolsets must reach the session and expose the frely-app cloud tools.
     const peer = frames; // responses echo back over the same socket captured above
     void peer;
     const wire = await connected;
     wire.send(encodeDeviceRelayEnvelope({
-      protocol: DEVICE_RELAY_PROTOCOL, type: "request", id: "relay-request-agent", method: "mcp", authorizationId: lease.authorizationId,
+      protocol: DEVICE_RELAY_PROTOCOL, type: "request", id: "relay-request-cloud", method: "mcp", authorizationId: lease.authorizationId,
       toolsets: ["workspace", "frely-app"],
-      payload: { jsonrpc: "2.0", id: 0, method: "tools/call", params: { name: "agent_list_tasks", arguments: {} } },
+      payload: { jsonrpc: "2.0", id: 0, method: "tools/call", params: { name: "cloud_list", arguments: {} } },
     }));
     const bridged = await new Promise<DeviceRelayEnvelope>((resolve) => {
       const poll = () => {
-        const found = frames.find((frame) => frame.type === "response" && frame.id === "relay-request-agent");
+        const found = frames.find((frame) => frame.type === "response" && frame.id === "relay-request-cloud");
         if (found) resolve(found); else setTimeout(poll, 10);
       };
       poll();
     });
     assert.equal(bridged.type, "response");
     const payload = (bridged as { payload?: { result?: { content?: Array<{ text: string }> } } }).payload;
-    assert.deepEqual(JSON.parse(payload?.result?.content?.[0]?.text ?? "{}"), { bridged: "agent_list_tasks" });
+    assert.deepEqual(JSON.parse(payload?.result?.content?.[0]?.text ?? "{}"), { bridged: "cloud_list" });
   } finally {
     controller.abort();
     lease.close();
