@@ -23,11 +23,12 @@ import { finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider,
 import { isSupportedLocalModelName, listLocalProviders, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider, type LocalProviderBinding } from "./provider/state.js";
 import { CLOUD_USAGE, logoutCloud, runCloud } from "./cloud.js";
 import { createAgentService } from "./agent/compose.js";
+import { PiNodeSupervisor } from "./agent/pi-node-supervisor.js";
 import { loadAgentConfig, saveAgentConfig } from "./agent/agent-service.js";
 import { readAppInstall } from "./agent/app-install.js";
 import { appInstallStatus, installApp, openApp, uninstallApp, updateApp } from "./app-manager.js";
 import { detectSandboxBackend } from "./runtime/sandbox.js";
-import { LocalMcpHub } from "./runtime/local-mcp.js";
+import { LocalMcpHub, loadManualEntries } from "./runtime/local-mcp.js";
 import { reportedWorkspaces } from "./runtime/workspace-registry.js";
 import { provisionAgentKey } from "./agent/app-key.js";
 import { startAgentOpsServer } from "./agent/ops-server.js";
@@ -439,8 +440,21 @@ async function main(): Promise<void> {
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     // Device-local MCP servers are only served with device MCP, never for a provider-only relay.
-    const localMcp = providerOnly ? undefined : new LocalMcpHub({ log: agentLog });
+    // The App's headless Pi Node is supervised here; its thread tools are served as the local MCP "frely-app".
+    let localMcp: LocalMcpHub | undefined;
+    const piNode = providerOnly ? undefined : new PiNodeSupervisor({ log: agentLog, onChange: () => { void localMcp?.refresh().catch(() => undefined); } });
+    if (!providerOnly) {
+      localMcp = new LocalMcpHub({
+        log: agentLog,
+        loadManual: async () => {
+          const manual = await loadManualEntries();
+          const entry = piNode?.localMcpEntry();
+          return entry ? [...manual.filter((item) => item.name !== entry.name), entry] : manual;
+        },
+      });
+    }
     localMcp?.start();
+    piNode?.start();
     try {
       const capabilities = async () => {
         const install = await readAppInstall().then((value) => value, () => null);
@@ -465,6 +479,7 @@ async function main(): Promise<void> {
     } finally {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
+      await piNode?.stop(); // the node keeps running; a restarted service adopts it
       await localMcp?.close();
     }
     return;

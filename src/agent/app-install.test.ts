@@ -24,7 +24,7 @@ async function capsule(t: test.TestContext, mutate: (manifest: Record<string, an
     sourceCommit: "a".repeat(40),
     target: { id: `${platform}-x64`, platform, architecture: "x64", architectures: ["x64"] },
     versions: { piNode: "0.2.0", protocol: "0.2.0", piSdk: "0.84.3", bun: "1.4.0" },
-    runtime: { executable, stdioArguments: ["stdio"], agentHostArguments: ["agent-host"] },
+    runtime: { executable, stdioArguments: ["stdio"], headlessArguments: ["headless"], agentHostArguments: ["agent-host"] },
     integrity: {
       algorithm: "sha256",
       manifestExcludedPath: "capsule-manifest.json",
@@ -35,13 +35,14 @@ async function capsule(t: test.TestContext, mutate: (manifest: Record<string, an
   };
   mutate(manifest);
   await writeFile(join(root, "capsule-manifest.json"), JSON.stringify(manifest), "utf8");
-  return { schemaVersion: 1, appVersion: "0.2.0", capsulePath: root, protocolVersion: 1 };
+  return { schemaVersion: 2, appVersion: "0.2.0", capsulePath: root, protocolVersion: 0, agentDir: join(root, "agent"), projectsFile: join(root, "projects.json") };
 }
 
 test("capsule facts launch the Pi Node executable in its agent-host role", async (t) => {
   const install = await capsule(t);
   const facts = await verifyCapsule(install);
   assert.equal(facts.executable, join(install.capsulePath, executable));
+  assert.deepEqual(facts.headlessArguments, ["headless"]);
   assert.deepEqual(facts.agentHostArguments, ["agent-host"]);
   await verifyCapsuleIntegrity(install);
 });
@@ -63,6 +64,10 @@ test("capsule verification rejects a redirected executable or role", async (t) =
     manifest.runtime.agentHostArguments = ["stdio"];
   });
   await assert.rejects(verifyCapsule(wrongRole), /capsule_invalid/);
+  const wrongHeadless = await capsule(t, (manifest) => {
+    manifest.runtime.headlessArguments = ["stdio"];
+  });
+  await assert.rejects(verifyCapsule(wrongHeadless), /capsule_invalid/);
 });
 
 test("capsule integrity rejects tampered payload bytes", async (t) => {
