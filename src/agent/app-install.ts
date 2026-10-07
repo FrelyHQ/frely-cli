@@ -8,7 +8,8 @@ import { createReadStream } from "node:fs";
 import { lstat, readFile, stat } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 
-export const APP_INSTALL_SCHEMA_VERSION = 1;
+/** Schema 2 (App >= the headless Pi Node): adds the agent directory and the local MCP project allow-list. */
+export const APP_INSTALL_SCHEMA_VERSION = 2;
 export const CAPSULE_MANIFEST_NAME = "capsule-manifest.json";
 
 export type AppInstall = {
@@ -16,6 +17,8 @@ export type AppInstall = {
   appVersion: string;
   capsulePath: string;
   protocolVersion: number;
+  agentDir: string;
+  projectsFile: string;
 };
 
 /** Frely App Pi Node capsule (schema 3): one Bun-compiled executable plus data files. */
@@ -25,7 +28,7 @@ export type CapsuleManifest = {
   sourceCommit: string;
   target: { id: string; platform: string; architecture: string };
   versions: { piNode: string; protocol: string };
-  runtime: { executable: string; agentHostArguments: string[] };
+  runtime: { executable: string; headlessArguments: string[]; agentHostArguments: string[] };
 };
 
 export class AppInstallError extends Error {
@@ -54,20 +57,35 @@ export async function readAppInstall(path?: string, env: NodeJS.ProcessEnv = pro
   }
   const record = value as Record<string, unknown>;
   if (record.schemaVersion !== APP_INSTALL_SCHEMA_VERSION) throw new AppInstallError("app_manifest_invalid");
-  if (typeof record.appVersion !== "string" || typeof record.capsulePath !== "string" || !Number.isSafeInteger(record.protocolVersion)) {
+  if (
+    typeof record.appVersion !== "string" ||
+    typeof record.capsulePath !== "string" ||
+    typeof record.agentDir !== "string" ||
+    typeof record.projectsFile !== "string" ||
+    !Number.isSafeInteger(record.protocolVersion)
+  ) {
     throw new AppInstallError("app_manifest_invalid");
   }
-  return { schemaVersion: APP_INSTALL_SCHEMA_VERSION, appVersion: record.appVersion, capsulePath: record.capsulePath, protocolVersion: record.protocolVersion as number };
+  return {
+    schemaVersion: APP_INSTALL_SCHEMA_VERSION,
+    appVersion: record.appVersion,
+    capsulePath: record.capsulePath,
+    protocolVersion: record.protocolVersion as number,
+    agentDir: record.agentDir,
+    projectsFile: record.projectsFile,
+  };
 }
 
 export type CapsuleFacts = {
   manifest: CapsuleManifest;
   executable: string;
+  headlessArguments: string[];
   agentHostArguments: string[];
 };
 
 const CAPSULE_SCHEMA_VERSION = 3;
 const CAPSULE_KIND = "pi-node-executable";
+const HEADLESS_ARGUMENTS = ["headless"];
 const AGENT_HOST_ARGUMENTS = ["agent-host"];
 
 /** Structural capsule verification: manifest shape, platform match, executable. */
@@ -91,10 +109,11 @@ export async function verifyCapsule(appInstall: AppInstall): Promise<CapsuleFact
 
   const runtime = manifest.runtime;
   if (typeof runtime?.executable !== "string" || runtime.executable.includes("/") || runtime.executable.includes("\\")) throw new AppInstallError("capsule_invalid");
+  if (!Array.isArray(runtime.headlessArguments) || JSON.stringify(runtime.headlessArguments) !== JSON.stringify(HEADLESS_ARGUMENTS)) throw new AppInstallError("capsule_invalid");
   if (!Array.isArray(runtime.agentHostArguments) || JSON.stringify(runtime.agentHostArguments) !== JSON.stringify(AGENT_HOST_ARGUMENTS)) throw new AppInstallError("capsule_invalid");
   const executable = join(appInstall.capsulePath, runtime.executable);
   if (!(await isFile(executable))) throw new AppInstallError("capsule_invalid");
-  return { manifest, executable, agentHostArguments: [...runtime.agentHostArguments] };
+  return { manifest, executable, headlessArguments: [...runtime.headlessArguments], agentHostArguments: [...runtime.agentHostArguments] };
 }
 
 /**
