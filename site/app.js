@@ -32,9 +32,7 @@ function selectOs(os) {
 if (osButtons.length > 0) {
   const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || '';
   const osSwitch = document.getElementById('os-switch');
-  const note = document.getElementById('platform-note');
   if (osSwitch) osSwitch.hidden = false;
-  if (note) note.hidden = true;
   for (const button of osButtons) button.addEventListener('click', () => selectOs(button.dataset.osSelect));
   selectOs(/\bwin/i.test(platform) ? 'windows' : /mac|iphone|ipad/i.test(platform) ? 'mac' : 'linux');
 }
