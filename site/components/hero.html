@@ -51,24 +51,26 @@
       <code id="agent-prompt">{{install.agentPrompt}}</code>
       <button class="copy-button" data-copy="agent-prompt" aria-label="{{copy.agentPrompt}}">{{copy.idle}}</button>
     </div>
-    <h3 class="install-subheading">{{install.packagesTitle}}</h3>
-    <p class="fineprint">{{install.node}}</p>
-    <div class="command">
-      <code id="install-command">{{command.install}}</code>
-      <button class="copy-button" data-copy="install-command" aria-label="{{copy.install}}">{{copy.idle}}</button>
-    </div>
-    <div class="command">
-      <code id="install-bun-command">{{command.installBun}}</code>
-      <button class="copy-button" data-copy="install-bun-command" aria-label="{{copy.installBun}}">{{copy.idle}}</button>
-    </div>
-    <div class="command">
-      <code id="install-pnpm-command">{{command.installPnpm}}</code>
-      <button class="copy-button" data-copy="install-pnpm-command" aria-label="{{copy.installPnpm}}">{{copy.idle}}</button>
-    </div>
-    <div class="download-option">
-      <a class="text-link" href="https://github.com/FrelyHQ/frely-cli/releases/latest">{{install.standalone}} <span aria-hidden="true">↗</span></a>
-      <p class="fineprint">{{install.runtime}}</p>
-    </div>
+    <details class="install-more">
+      <summary class="install-subheading">{{install.packagesTitle}}</summary>
+      <p class="fineprint">{{install.node}}</p>
+      <div class="command">
+        <code id="install-command">{{command.install}}</code>
+        <button class="copy-button" data-copy="install-command" aria-label="{{copy.install}}">{{copy.idle}}</button>
+      </div>
+      <div class="command">
+        <code id="install-bun-command">{{command.installBun}}</code>
+        <button class="copy-button" data-copy="install-bun-command" aria-label="{{copy.installBun}}">{{copy.idle}}</button>
+      </div>
+      <div class="command">
+        <code id="install-pnpm-command">{{command.installPnpm}}</code>
+        <button class="copy-button" data-copy="install-pnpm-command" aria-label="{{copy.installPnpm}}">{{copy.idle}}</button>
+      </div>
+      <div class="download-option">
+        <a class="text-link" href="https://github.com/FrelyHQ/frely-cli/releases/latest">{{install.standalone}} <span aria-hidden="true">↗</span></a>
+        <p class="fineprint">{{install.runtime}}</p>
+      </div>
+    </details>
     <a class="button card-action" href="#get-started">{{install.configure}} <span aria-hidden="true">↓</span></a>
   </section>
 </section>

@@ -375,4 +375,9 @@ pre { padding:1rem 1.2rem; margin:1.4rem 0; border:1px solid var(--line); border
   .clarity-consent-actions { justify-content:flex-end; }
 }
 .install-subheading { margin:1.4rem 0 .35rem; font-size:1rem; }
-.agent-prompt code { white-space:normal; }
+.agent-prompt code { white-space:normal; max-height:calc(1.7em * 3); overflow-y:auto; }
+.install-more { margin-bottom:1rem; }
+.install-more summary { display:inline-block; cursor:pointer; font-weight:600; }
+.install-more summary::marker, .install-more summary::-webkit-details-marker { display:none; }
+.install-more summary::after { content:" +"; font:1rem var(--mono); }
+.install-more[open] summary::after { content:" −"; }
