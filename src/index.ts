@@ -26,7 +26,7 @@ import { createAgentService } from "./agent/compose.js";
 import { loadAgentConfig, saveAgentConfig } from "./agent/agent-service.js";
 import { readAppInstall } from "./agent/app-install.js";
 import { appInstallStatus, installApp, openApp, uninstallApp, updateApp } from "./app-manager.js";
-import { detectSandboxBackend } from "./runtime/sandbox.js";
+import { detectSandboxBackend, sandboxDisabledReason, writeSandboxSetting } from "./runtime/sandbox.js";
 import { LocalMcpHub } from "./runtime/local-mcp.js";
 import { provisionAgentKey } from "./agent/app-key.js";
 import { startAgentOpsServer } from "./agent/ops-server.js";
@@ -468,6 +468,16 @@ async function main(): Promise<void> {
   if (command === "mcp" && args[1] === "local") {
     if (args[2] === undefined) { stdout.write(subcommandUsage("mcp.local")); return; }
     await runLocalMcpCommand({ args, write: (text) => { stdout.write(text); } });
+    return;
+  }
+  if (command === "mcp" && args[1] === "sandbox") {
+    if (args[2] === undefined) { stdout.write(subcommandUsage("mcp.sandbox")); return; }
+    if (args[2] === "on" || args[2] === "off") writeSandboxSetting(args[2] === "on");
+    const reason = sandboxDisabledReason();
+    stdout.write(reason === "env" ? "Command sandbox: off (FRELY_SANDBOX in the environment).\n"
+      : reason === "setting" ? "Command sandbox: off (frely mcp sandbox off). run_command and start_process run with your full user permissions; turn it back on with frely mcp sandbox on.\n"
+      : "Command sandbox: on.\n");
+    if (args[2] !== "status") stdout.write("Applies to the next command; a running service reports the new state to the owner after it reconnects (frely mcp stop, then frely mcp start).\n");
     return;
   }
   if (command === "mcp" && args[1] === "workspace") {

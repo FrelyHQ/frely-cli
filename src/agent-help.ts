@@ -13,6 +13,9 @@ export const COMMANDS = [
   { id: "mcp.local.list", usage: "frely mcp local list [--json]", auth: "none", effect: "read", purpose: "List MCP servers on this device that remote clients could use: loopback HTTP servers found automatically plus ones added by hand. Every server is off for remote clients until the owner turns it on in the web console." },
   { id: "mcp.local.add", usage: "frely mcp local add <name> --url <http://127.0.0.1:port/path> [--header K=V] | frely mcp local add <name> [--env K=V] -- <command> [args...]", auth: "none", effect: "local-write", purpose: "Add a local MCP server by loopback URL or by the command that starts it (stdio). It is connected once to check it works; it stays off for remote clients until the owner turns it on in the web console." },
   { id: "mcp.local.remove", usage: "frely mcp local remove <name>", auth: "none", effect: "local-write", purpose: "Remove a manually added local MCP server." },
+  { id: "mcp.sandbox.status", usage: "frely mcp sandbox status", auth: "none", effect: "read", purpose: "Show whether the command sandbox for run_command and start_process is on or off on this device." },
+  { id: "mcp.sandbox.on", usage: "frely mcp sandbox on", auth: "none", effect: "local-write", purpose: "Turn the command sandbox back on (the default)." },
+  { id: "mcp.sandbox.off", usage: "frely mcp sandbox off", auth: "none", effect: "local-write", purpose: "Turn the command sandbox off for this device: run_command and start_process then run with your full user permissions, no per-call owner approval is needed, and the setting also applies to the background service. FRELY_SANDBOX=off in the environment does the same for one process." },
   { id: "mcp.status", usage: "frely mcp status [--json]", auth: "none", effect: "read", purpose: "Show whether device MCP is configured, its URL, workspace, authorization expiry and background service state. Makes no network request." },
   { id: "mcp.stop", usage: "frely mcp stop", auth: "none", effect: "local-service", purpose: "Stop the local MCP background service without revoking authorization; frely mcp start resumes it. Supported updates restore running services without this command." },
   { id: "mcp.remove", usage: "frely mcp remove", auth: "account", effect: "remote-write", purpose: "Revoke device MCP for every connected client and uninstall the background service (kept running provider-only when local Providers exist)." },
@@ -72,7 +75,7 @@ export function agentHelp() {
 
 const GROUPS: readonly { title: string; ids: readonly string[] }[] = [
   { title: "Account", ids: ["login", "logout", "doctor", "update"] },
-  { title: "Device MCP", ids: ["mcp.start", "mcp.workspace", "mcp.local", "mcp.lifecycle"] },
+  { title: "Device MCP", ids: ["mcp.start", "mcp.workspace", "mcp.local", "mcp.sandbox", "mcp.lifecycle"] },
   { title: "Agents", ids: ["agent.install", "agent.run", "agent.status", "agent.remove"] },
   { title: "Marketplace items", ids: ["item.install", "item.trust"] },
   { title: "Providers", ids: ["provider.share", "provider.list"] },
@@ -91,6 +94,7 @@ const SHORT_USAGE: Readonly<Record<string, string>> = {
   "mcp.start": "frely mcp start [--workspace <path>] [--days 1..365] [--json]",
   "mcp.workspace": "frely mcp workspace list|add <path>|remove <path>",
   "mcp.local": "frely mcp local list|add <name> (--url <address>|-- <command>)|remove <name>",
+  "mcp.sandbox": "frely mcp sandbox on|off|status",
   "mcp.lifecycle": "frely mcp status|stop|remove",
   "item.install": "frely item install <item-id> [--host <host>]",
   "item.trust": "frely item trust <folder> [--check]",
@@ -126,7 +130,7 @@ export function subcommandUsage(group: string): string {
 
 export function mcpUsage(): string {
   return "Device MCP — use this computer from a remote MCP client.\n\nUsage:\n"
-    + ["mcp.start", "mcp.workspace", "mcp.local", "mcp.lifecycle"].map((id) => "  " + SHORT_USAGE[id] + "\n").join("")
+    + ["mcp.start", "mcp.workspace", "mcp.local", "mcp.sandbox", "mcp.lifecycle"].map((id) => "  " + SHORT_USAGE[id] + "\n").join("")
     + "\nStatus: frely mcp status [--json]; diagnostics: frely doctor [-v] [--json]\n\n"
     + "Run frely mcp start on the computer to control. It asks for browser approval the first time (the home directory, or --workspace) and when authorization has expired, installs and starts the background service, and prints the MCP URL. Add that URL to ChatGPT, Claude Code on another computer, or another HTTP MCP client, then authorize with OAuth.\n"
     + "Prompts go to stderr; stdout contains only the URL or JSON. --days 1..365 renews now; the URL stays the same.\n"

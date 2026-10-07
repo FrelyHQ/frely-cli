@@ -1,6 +1,6 @@
-import { realpathSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { isAbsolute, join, normalize, parse, sep } from "node:path";
+import { dirname, isAbsolute, join, normalize, parse, sep } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { cliLaunchArguments } from "../cli-launch.js";
 
@@ -28,8 +28,9 @@ import { cliLaunchArguments } from "../cli-launch.js";
  * than break existing installs. Set `FRELY_SANDBOX_STRICT=1` to instead
  * refuse to run a command that cannot be sandboxed.
  *
- * Set `FRELY_SANDBOX=off` to disable this layer entirely (no attempt, no
- * warning) -- for environments that already provide their own containment,
+ * Run `frely mcp sandbox off` (saved on this device, also reaches the background
+ * service) or set `FRELY_SANDBOX=off` to disable this layer entirely (no attempt,
+ * no warning) -- for environments that already provide their own containment,
  * or while diagnosing whether the sandbox itself is the cause of a failure.
  */
 
@@ -144,9 +145,37 @@ export function sensitiveReadPaths(allowedGroups: readonly string[] = []): strin
 let initialized: Promise<boolean> | undefined;
 let warned = false;
 
+/** Persistent switch behind `frely mcp sandbox on|off`; the background service does not inherit a shell's FRELY_SANDBOX, so it reads this file instead. */
+export function sandboxSettingPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "frely", "sandbox.json");
+}
+
+/** Whether the owner turned the command sandbox off on this device. Read on every call so a change applies without a restart. */
+export function readSandboxSettingOff(env: NodeJS.ProcessEnv = process.env): boolean {
+  try {
+    return (JSON.parse(readFileSync(sandboxSettingPath(env), "utf8")) as { enabled?: unknown }).enabled === false;
+  } catch {
+    return false;
+  }
+}
+
+export function writeSandboxSetting(enabled: boolean, env: NodeJS.ProcessEnv = process.env): void {
+  const path = sandboxSettingPath(env);
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify({ schemaVersion: 1, enabled })}\n`, { encoding: "utf8", mode: 0o600 });
+  renameSync(tmp, path);
+}
+
+/** Why the sandbox is off, if it is: the FRELY_SANDBOX environment variable wins over the saved setting. */
+export function sandboxDisabledReason(env: NodeJS.ProcessEnv = process.env): "env" | "setting" | undefined {
+  const value = (env.FRELY_SANDBOX ?? "").trim().toLowerCase();
+  if (value === "off" || value === "0" || value === "false") return "env";
+  return readSandboxSettingOff(env) ? "setting" : undefined;
+}
+
 export function isSandboxDisabled(): boolean {
-  const value = (process.env.FRELY_SANDBOX ?? "").trim().toLowerCase();
-  return value === "off" || value === "0" || value === "false";
+  return sandboxDisabledReason() !== undefined;
 }
 
 export function isSandboxStrict(): boolean {

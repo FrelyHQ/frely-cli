@@ -18,7 +18,7 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
   if (!args[1]) return ["mcp", "help"];
   // Deprecated alias: `mcp url` is `mcp start`.
   if (args[1] === "url") args[1] = "start";
-  if (!["workspace", "local", "stop", "start", "status", "remove", "serve", "stdio"].includes(args[1])) throw new Error("Unknown device MCP command. Run frely mcp --help.");
+  if (!["workspace", "local", "sandbox", "stop", "start", "status", "remove", "serve", "stdio"].includes(args[1])) throw new Error("Unknown device MCP command. Run frely mcp --help.");
   const action = args[1]!;
   if (action === "stop" || action === "remove") {
     if (args.length > 2) throw new Error("Unsupported MCP option. Run frely mcp --help.");
@@ -37,6 +37,12 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
     if (subaction === "add" && args.length === 3) return [...args, "."];
     if (!args[3]) throw new Error(`frely mcp workspace ${subaction} requires a path argument.`);
     if (args.length > 4) throw new Error(`Unsupported workspace ${subaction} option. Run frely mcp workspace.`);
+    return args;
+  }
+  if (action === "sandbox") {
+    const subaction = args[2];
+    if (subaction === undefined) return args;
+    if (!["on", "off", "status"].includes(subaction) || args.length > 3) throw new Error("Unknown sandbox command. Run frely mcp sandbox.");
     return args;
   }
   if (action === "local") {

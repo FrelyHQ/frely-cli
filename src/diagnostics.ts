@@ -108,7 +108,7 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
     appInstall ? `Frely App ${appInstall.appVersion} installed (capsule verified); agent remote control ${agentConfig?.remoteControlEnabled ? "enabled" : "disabled"}.`
       : "Frely App not installed. Install the desktop app to enable agent tasks.");
   add("agent_sandbox", isSandboxDisabled() ? "info" : "pass",
-    isSandboxDisabled() ? "Command sandbox disabled by environment (FRELY_SANDBOX=off)." : "Command sandbox active (workspace + temp writes only).");
+    isSandboxDisabled() ? "Command sandbox disabled (frely mcp sandbox off, or FRELY_SANDBOX=off)." : "Command sandbox active (workspace + temp writes only).");
   const refreshGuidance = connection?.autoRefresh && connection.pid === service?.pid
     ? "The service will switch after active work finishes and the installation passes its startup check."
     : "Finish running tasks and restart the service from a local terminal.";

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSandboxConfig, detectSandboxBackend, isSandboxDisabled, PATH_GRANTS_META_KEY, pathGrantsFromMeta, sandboxDenialHint, sensitiveReadPaths } from "./sandbox.js";
+import { readSandboxSettingOff, sandboxDisabledReason, writeSandboxSetting, buildSandboxConfig, detectSandboxBackend, isSandboxDisabled, PATH_GRANTS_META_KEY, pathGrantsFromMeta, sandboxDenialHint, sensitiveReadPaths } from "./sandbox.js";
 
 test("sandbox backend detection reports off when disabled and never throws", () => {
   const previous = process.env.FRELY_SANDBOX;
@@ -32,8 +32,8 @@ test("path grants are read from the relay's _meta key and unknown names are drop
 });
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { customWritePath, isKnownGrantName, SSH_PROXY_PREFIX, UNSANDBOXED_GROUP, writablePaths } from "./sandbox.js";
 
@@ -113,4 +113,20 @@ test("sandboxDenialHint recognises denials and points at request_permission", ()
   assert.match(sandboxDenialHint("mkdir: /opt/homebrew/x: Operation not permitted") ?? "", /request_permission/);
   assert.match(sandboxDenialHint("Permission denied") ?? "", /sandbox/);
   assert.equal(sandboxDenialHint("fatal: not a git repository"), undefined);
+});
+
+test("saved sandbox setting turns the sandbox off and back on, and the environment wins", () => {
+  const dir = mkdtempSync(join(tmpdir(), "frely-sandbox-"));
+  const env = { XDG_CONFIG_HOME: dir } as NodeJS.ProcessEnv;
+  try {
+    assert.equal(sandboxDisabledReason(env), undefined);
+    writeSandboxSetting(false, env);
+    assert.equal(readSandboxSettingOff(env), true);
+    assert.equal(sandboxDisabledReason(env), "setting");
+    assert.equal(sandboxDisabledReason({ ...env, FRELY_SANDBOX: "off" }), "env");
+    writeSandboxSetting(true, env);
+    assert.equal(sandboxDisabledReason(env), undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -55,6 +55,7 @@ test("command groups without a direct action print their subcommands offline", a
     [["mcp"], /frely mcp start/],
     [["mcp", "workspace"], /frely mcp workspace list/],
     [["mcp", "local"], /frely mcp local list/],
+    [["mcp", "sandbox"], /frely mcp sandbox off/],
     [["agent"], /frely agent install/],
     [["provider"], /frely provider list/],
     [["cloud"], /frely cloud list/],
