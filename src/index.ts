@@ -238,10 +238,12 @@ async function main(): Promise<void> {
             email: challenge.email,
             expiresIn: challenge.expiresIn,
             challengeId: challenge.challengeId,
+            ...(challenge.reference ? { reference: challenge.reference } : {}),
             ...(mcp ? { deviceMcp: { workspace: mcp.workspace, days: mcp.days } } : {}),
           }, null, 2) + "\n");
         } else {
           stdout.write(`Verification code sent to ${challenge.email}\n`);
+          if (challenge.reference) stdout.write(`Mail reference: ${challenge.reference} (use the newest mail with this reference; enter only the 6 digits)\n`);
           stdout.write(`Expires in: ${challenge.expiresIn} seconds\n`);
           if (mcp) {
             stdout.write(`Entering the code also lets remote agents read and write files and run commands in ${mcp.workspace} for ${mcp.days} days. Remove it later with \`frely mcp remove\`.\n`);
