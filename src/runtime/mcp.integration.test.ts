@@ -16,9 +16,10 @@ test("MCP client can list and call frely-cli tools", async () => {
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   try {
     const tools = await client.listTools();
-    assert.ok(tools.tools.some((tool) => tool.name === "read_file"));
-    assert.ok(tools.tools.some((tool) => tool.name === "process"));
-    for (const merged of ["read_file_lines", "stat_path", "find_files", "create_directory", "start_process", "list_processes", "read_process", "write_process", "stop_process"]) {
+    assert.deepEqual(tools.tools.map((tool) => tool.name), ["read", "edit_file", "web_fetch", "process"]);
+    assert.equal(tools.tools.find((tool) => tool.name === "read")?.annotations?.readOnlyHint, true);
+    assert.equal(tools.tools.find((tool) => tool.name === "edit_file")?.annotations?.destructiveHint, false);
+    for (const merged of ["workspace_info", "list_directory", "search_files", "read_file", "write_file", "apply_patch", "delete_path", "move_path", "run_command", "read_file_lines", "stat_path", "find_files", "create_directory", "start_process", "list_processes", "read_process", "write_process", "stop_process"]) {
       assert.ok(!tools.tools.some((tool) => tool.name === merged), `${merged} is merged into another tool`);
     }
     const result = await client.callTool({ name: "read_file", arguments: { path: "hello.txt" } });
@@ -59,6 +60,19 @@ test("merged tools cover the former separate tools and old names still answer", 
     await text("process", { action: "stop", processId: id });
     const bad = await client.callTool({ name: "process", arguments: { action: "nope" } });
     assert.equal(bad.isError, true);
+
+    assert.equal(await text("read", { action: "read", path: "a.txt", startLine: 2, endLine: 2 }), await text("read_file_lines", { path: "a.txt", startLine: 2, endLine: 2 }));
+    assert.equal(await text("read", { action: "read", path: "a.txt" }), "one\ntwo\nthree\n");
+    assert.equal(JSON.parse(await text("read", { action: "list", path: "a.txt" })).type, "file");
+    assert.deepEqual(JSON.parse(await text("read", { action: "find", query: "*.txt" })), ["a.txt"]);
+    assert.ok(JSON.parse(await text("read", { action: "search", query: "two" })).length > 0);
+    assert.ok(Array.isArray(JSON.parse(await text("read", { action: "roots" })).workspaces));
+    assert.equal((await client.callTool({ name: "read", arguments: { action: "toString" } })).isError, true);
+    await text("edit_file", { path: "new/b.txt", content: "x\ny\n" });
+    await text("edit_file", { path: "new/b.txt", edits: [{ startLine: 2, endLine: 2, replacement: "z" }] });
+    assert.equal(await readFile(join(root, "new/b.txt"), "utf8"), "x\nz\n");
+    assert.equal((await client.callTool({ name: "edit_file", arguments: { path: "new/b.txt" } })).isError, true);
+    assert.match(JSON.stringify(JSON.parse(await text("process", { action: "run", command: "echo merged-run" }))), /merged-run/);
   } finally {
     await client.close();
     await server.close();

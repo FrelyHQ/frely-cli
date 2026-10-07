@@ -133,27 +133,10 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
       : []),
     ...((enabledToolsets(options).includes("frely-app") && options.cloud) ? CLOUD_TOOLS : []),
     ...(enabledLocalMcps(options).length > 0 ? LOCAL_MCP_TOOLS : []),
-    tool("workspace_info", "Return the active workspace root.", {}, { readOnly: true }),
-    tool("list_directory", "List a workspace directory, or inspect a file or directory (type, size, mode, modified time) when `path` is a file.", { path: stringSchema("Relative path", "."), stat: boolSchema(false) }, { readOnly: true }),
-    tool("search_files", "Search UTF-8 workspace file contents (mode=content), or find files by name with *, ** and ? wildcards (mode=name).", { path: stringSchema("Relative directory path", "."), query: stringSchema("Search text or regex; a wildcard pattern in name mode"), mode: { type: "string", enum: ["content", "name"], default: "content" }, regex: boolSchema(false), caseSensitive: boolSchema(false), maxResults: intSchema(100, 1, 1000), contextLines: intSchema(0, 0, 10) }, { readOnly: true }),
-    tool("read_file", "Read a UTF-8 workspace file up to 1 MiB; with startLine/endLine, read only that line range.", { path: stringSchema("Relative file path"), startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 } }, { readOnly: true }),
-    tool("write_file", "Atomically write a UTF-8 workspace file, creating parent directories; or, with directory=true, create an empty directory.", { path: stringSchema("Relative path"), content: stringSchema("Complete file content"), overwrite: boolSchema(false), directory: boolSchema(false) }, { readOnly: false, idempotent: false }),
-    tool("apply_patch", "Apply non-overlapping line replacements to a UTF-8 workspace file.", { path: stringSchema("Relative file path"), expectedSha256: { type: "string", pattern: "^[a-f0-9]{64}$" }, edits: { type: "array", minItems: 1, maxItems: 100, items: { type: "object", additionalProperties: false, required: ["startLine", "endLine", "replacement"], properties: { startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, replacement: { type: "string" } } } } }, { readOnly: false, idempotent: false }),
-    tool("delete_path", "Delete a workspace path. Recursive directory deletion requires recursive=true.", { path: stringSchema("Relative path"), recursive: boolSchema(false) }, { readOnly: false, destructive: true, idempotent: false }),
-    tool("move_path", "Move or rename a workspace path.", { from: stringSchema("Source path"), to: stringSchema("Destination path"), overwrite: boolSchema(false) }, { readOnly: false, destructive: true, idempotent: false }),
-    tool(
-      "run_command",
-      "Run a shell command as the current OS user, in a sandbox when the device supports one: it blocks credential folders (call request_permission to ask the owner for one), limits writes to the workspace and temp directory, and only lets HTTP(S) and ssh/scp/sftp reach the network. For commands longer than timeoutMs use the `process` tool. Parallel mode allows bounded command concurrency; use exclusive for commands that mutate shared repository, dependency, build, migration, or release state.",
-      {
-        command: stringSchema("Shell command"),
-        cwd: stringSchema("Relative working directory", "."),
-        timeoutMs: intSchema(30000, 100, 120000),
-        concurrency: { type: "string", enum: ["parallel", "exclusive"], default: "parallel" },
-      },
-      { readOnly: false, destructive: true, idempotent: false },
-    ),
-    tool("web_fetch", "Fetch a public web page or API from this device's own network connection (GET, HEAD or POST over http/https, ports 80 and 443). Addresses on private or local networks are refused. Returns status, content type and the body as text, up to maxBytes.", { url: stringSchema("http or https URL"), method: { type: "string", enum: ["GET", "HEAD", "POST"], default: "GET" }, headers: { type: "object", description: "Extra request headers", additionalProperties: { type: "string" } }, body: stringSchema("Request body for POST"), maxBytes: intSchema(262144, 1, 1048576), timeoutMs: intSchema(30000, 100, 120000) }, { readOnly: false, idempotent: false }),
-    tool("process", "Manage persistent shell processes as the current OS user. action=start runs `command` in `cwd` and returns a process id; list shows processes started by this runtime; read returns output after the absolute stdoutCursor/stderrCursor; write sends `input` to stdin; stop ends the process.", { action: { type: "string", enum: ["start", "list", "read", "write", "stop"] }, command: stringSchema("Shell command (start)"), cwd: stringSchema("Relative working directory (start)", "."), processId: stringSchema("Process id (read, write, stop)"), stdoutCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), stderrCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), input: stringSchema("Input text (write)") }, { readOnly: false, destructive: true, idempotent: false }),
+    tool("read", "Read the workspace. action=list lists a directory, or returns type/size/mtime for a file; read returns a UTF-8 file (max 1 MiB), or lines startLine..endLine; search finds `query` in file contents; find matches file names (*, **, ?); roots lists workspace roots.", { action: { type: "string", enum: ["list", "read", "search", "find", "roots"] }, path: stringSchema("Relative path", "."), startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, query: { type: "string" }, regex: boolSchema(false), caseSensitive: boolSchema(false), maxResults: intSchema(100, 1, 1000), contextLines: intSchema(0, 0, 10) }, { readOnly: true }),
+    tool("edit_file", "Change a UTF-8 workspace file: `content` atomically writes the whole file, creating parent directories (overwrite=true to replace one); `edits` replaces line ranges. Delete, move and mkdir with process.", { path: stringSchema("Relative path"), content: { type: "string" }, overwrite: boolSchema(false), edits: { type: "array", minItems: 1, maxItems: 100, items: { type: "object", additionalProperties: false, required: ["startLine", "endLine", "replacement"], properties: { startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, replacement: { type: "string" } } } } }, { readOnly: false, idempotent: false }),
+    tool("web_fetch", "Fetch a public http(s) URL (ports 80, 443) from this device's network; private addresses are refused. Returns status, content type and body text up to maxBytes.", { url: { type: "string" }, method: { type: "string", enum: ["GET", "HEAD", "POST"], default: "GET" }, headers: { type: "object", additionalProperties: { type: "string" } }, body: { type: "string" }, maxBytes: intSchema(262144, 1, 1048576), timeoutMs: intSchema(30000, 100, 120000) }, { readOnly: false, idempotent: false }),
+    tool("process", "Run shell commands as the current OS user, sandboxed where supported: credential folders blocked (ask with request_permission), writes limited to workspace and temp, network to HTTP(S) and ssh. action=run waits up to timeoutMs and returns output; start returns an id for longer tasks; read returns output after stdoutCursor/stderrCursor; write sends `input` to stdin; list; stop. concurrency=exclusive for commands that change shared repo, dependency or build state.", { action: { type: "string", enum: ["run", "start", "read", "write", "list", "stop"] }, command: { type: "string" }, cwd: stringSchema("Relative path", "."), timeoutMs: intSchema(30000, 100, 120000), concurrency: { type: "string", enum: ["parallel", "exclusive"], default: "parallel" }, processId: { type: "string" }, stdoutCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), stderrCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), input: { type: "string" } }, { readOnly: false, destructive: true, idempotent: false }),
   ] }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
@@ -253,11 +236,21 @@ async function dispatch(
     }));
   }
 
-  if (name === "process") {
+  // Merged tools route to the former per-action tools, which still answer under their old names.
+  const merged = ({
+    read: { list: "list_directory", read: "read_file", search: "search_files", find: "find_files", roots: "workspace_info" },
+    process: { run: "run_command", start: "start_process", list: "list_processes", read: "read_process", write: "write_process", stop: "stop_process" },
+  } as Record<string, Record<string, string>>)[name];
+  if (merged) {
     const action = textArg(args, "action");
-    const mapped = ({ start: "start_process", list: "list_processes", read: "read_process", write: "write_process", stop: "stop_process" } as Record<string, string>)[action];
-    if (!mapped) throw new Error("action must be start, list, read, write or stop.");
-    return dispatch(mapped, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow);
+    const mapped = Object.hasOwn(merged, action) ? merged[action] : undefined;
+    if (!mapped) throw new Error(`action must be one of ${Object.keys(merged).join(", ")}.`);
+    const routed = mapped === "find_files" ? { ...args, pattern: args.query } : args;
+    return dispatch(mapped, routed, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow);
+  }
+  if (name === "edit_file") {
+    if ((args.content === undefined) === (args.edits === undefined)) throw new Error("Pass exactly one of content or edits.");
+    return dispatch(args.edits === undefined ? "write_file" : "apply_patch", args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow);
   }
 
   // Process-management tools address a process id, not a path: no workspace routing.
