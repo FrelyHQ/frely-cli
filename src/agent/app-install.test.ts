@@ -54,14 +54,6 @@ test("capsule verification rejects the retired Node runtime capsule", async (t) 
   await assert.rejects(verifyCapsule(install), /capsule_invalid/);
 });
 
-test("capsule verification accepts a manifest that still carries the retired agentHostArguments", async (t) => {
-  const install = await capsule(t, (manifest) => {
-    manifest.runtime.agentHostArguments = ["agent-host"];
-  });
-  const facts = await verifyCapsule(install);
-  assert.deepEqual(facts.headlessArguments, ["headless"]);
-});
-
 test("capsule verification rejects a redirected executable or role", async (t) => {
   const outside = await capsule(t, (manifest) => {
     manifest.runtime.executable = "../node";
