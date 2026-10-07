@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSandboxConfig, detectSandboxBackend, isSandboxDisabled, PATH_GRANTS_META_KEY, pathGrantsFromMeta, sandboxDenialHint, sensitiveReadPaths } from "./sandbox.js";
+import { buildSandboxConfig, detectSandboxBackend, isSandboxDisabled, PATH_GRANTS_META_KEY, pathGrantsFromMeta, protectedWriteDenials, sandboxDenialHint, sensitiveReadPaths } from "./sandbox.js";
 
 test("sandbox backend detection reports off when disabled and never throws", () => {
   const previous = process.env.FRELY_SANDBOX;
@@ -23,6 +23,16 @@ test("a path grant reopens only its own group and never the Frely credential dir
   assert.ok(withSsh.includes("~/.aws"));
   assert.ok(sensitiveReadPaths(["ssh", "aws", "gcloud", "kube", "gh", "gnupg", "git-credentials", "npm-tokens", "frely"]).includes("~/.config/frely"));
   assert.equal(buildSandboxConfig("/work", ["ssh"]).filesystem?.denyRead?.includes("~/.ssh"), false);
+});
+
+test("the Admin session directory is closed to commands until friday-admin is approved, then readable and writable", () => {
+  assert.ok(sensitiveReadPaths().includes("~/.config/friday-relay"));
+  assert.ok(protectedWriteDenials([]).includes("~/.config/friday-relay"));
+  assert.ok(!sensitiveReadPaths(["friday-admin"]).includes("~/.config/friday-relay"));
+  assert.ok(!protectedWriteDenials(["friday-admin"]).includes("~/.config/friday-relay"));
+  assert.ok(writablePaths(["friday-admin"]).includes("~/.config/friday-relay"));
+  assert.ok(sensitiveReadPaths(["friday-admin"]).includes("~/.config/frely"));
+  assert.deepEqual(pathGrantsFromMeta({ [PATH_GRANTS_META_KEY]: ["friday-admin"] }), ["friday-admin"]);
 });
 
 test("path grants are read from the relay's _meta key and unknown names are dropped", () => {

@@ -49,6 +49,12 @@ export const SENSITIVE_PATH_GROUPS: Readonly<Record<string, readonly string[]>> 
 };
 
 /**
+ * Saved Admin API sessions and the Owner email profile (friday-relay scripts). Unlike the cache groups this is also unreadable until
+ * the owner approves `friday-admin`, which opens it for reading and writing: the saved session works as a login for its lifetime.
+ */
+const ADMIN_SESSION_PATHS: readonly string[] = ["~/.config/friday-relay"];
+
+/**
  * Build-tool cache directories a remote client may be allowed to write after the owner approves them on the web.
  * Caches only: nothing here holds credentials or start-up scripts.
  */
@@ -60,6 +66,7 @@ export const WRITABLE_PATH_GROUPS: Readonly<Record<string, readonly string[]>> =
   "cargo-cache": ["~/.cargo/registry", "~/.cargo/git"],
   cocoapods: ["~/.cocoapods", "~/Library/Caches/CocoaPods"],
   "user-cache": ["~/.cache", "~/Library/Caches"],
+  "friday-admin": [...ADMIN_SESSION_PATHS],
 };
 
 /**
@@ -112,7 +119,8 @@ export function customWritePath(name: string): string | undefined {
 /** Paths a sandboxed command may never write: every protected path except those named exactly by an approved grant, plus Frely's own credentials. */
 export function protectedWriteDenials(allowedGroups: readonly string[]): string[] {
   const granted = new Set(allowedGroups.flatMap((name) => customWritePath(name) ?? []));
-  return [...PROTECTED_PATHS.filter((protectedPath) => !granted.has(expanded(protectedPath))), ...NEVER_WRITABLE_PATHS];
+  const adminOpen = allowedGroups.includes("friday-admin");
+  return [...PROTECTED_PATHS.filter((protectedPath) => !granted.has(expanded(protectedPath))), ...(adminOpen ? [] : ADMIN_SESSION_PATHS), ...NEVER_WRITABLE_PATHS];
 }
 
 /** Whether `name` is a grant name this CLI understands. */
@@ -137,6 +145,7 @@ export function sensitiveReadPaths(allowedGroups: readonly string[] = []): strin
   const allowed = new Set(allowedGroups);
   return [
     ...Object.entries(SENSITIVE_PATH_GROUPS).filter(([name]) => !allowed.has(name)).flatMap(([, paths]) => paths),
+    ...(allowed.has("friday-admin") ? [] : ADMIN_SESSION_PATHS),
     ...ALWAYS_DENIED_READ_PATHS,
   ];
 }
