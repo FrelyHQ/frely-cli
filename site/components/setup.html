@@ -2,21 +2,60 @@
   <div class="wrap">
     <div class="section-heading">
       <div>
-        <p class="eyebrow">{{setup.eyebrow}}</p>
-        <h2 id="setup-title">{{install.line1}}<br>{{install.line2}}</h2>
+        <p class="eyebrow">{{relation.eyebrow}}</p>
+        <h2 id="setup-title">{{relation.line1}}<br>{{relation.line2}}</h2>
       </div>
-      <p>{{install.description}}</p>
+      <p>{{relation.description}}</p>
     </div>
-    <div class="setup-step">
-      <h3>{{install.step3}}</h3>
-      <div class="command">
-        <code id="mcp-command">{{command.mcpSetup}}</code>
-        <button class="copy-button" data-copy="mcp-command" aria-label="{{copy.mcp}}">{{copy.idle}}</button>
+    <!-- Diagram: the device box contains its resources and Frely CLI; the chat app sits outside and reaches the CLI through Frely over MCP. -->
+    <figure class="relation" aria-labelledby="relation-caption">
+      <div class="relation-device">
+        <p class="relation-device-label">
+          <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="4" width="18" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M1.5 19.5h21" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          {{relation.deviceTitle}}
+        </p>
+        <div class="relation-device-body">
+          <div class="relation-node relation-resources">
+            <h3>{{relation.resourcesTitle}}</h3>
+            <ul>
+              <li><svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><path d="M4 3.5h10l6 6v11H4z M14 3.5v6h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>{{relation.files}}</li>
+              <li><svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><path d="m5 7 5 5-5 5M12 17h7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>{{relation.shell}}</li>
+              <li><svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><path d="M3 12h4l2.5-6 5 12 2.5-6h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>{{relation.processes}}</li>
+            </ul>
+          </div>
+          <div class="relation-link relation-link-local">
+            <svg aria-hidden="true" viewBox="0 0 80 24" preserveAspectRatio="none"><path d="M6 12h68" stroke="currentColor" stroke-width="1.6"/><path d="m12 6-6 6 6 6M68 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>{{relation.localLink}}</span>
+          </div>
+          <div class="relation-node relation-cli">
+            <span class="relation-cli-mark" aria-hidden="true">›_</span>
+            <h3>Frely CLI</h3>
+            <p>{{relation.cliDescription}}</p>
+          </div>
+        </div>
       </div>
-      <p class="fineprint">{{install.approval}}</p>
-      <p class="fineprint">{{install.next}}</p>
-      <a class="text-link" href="#panel-tools">{{install.tools}} <span aria-hidden="true">↗</span></a>
-    </div>
+      <div class="relation-link relation-link-remote">
+        <span>{{relation.request}}</span>
+        <svg aria-hidden="true" viewBox="0 0 120 40" preserveAspectRatio="none"><path d="M8 12h106" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 4"/><path d="m14 6-6 6 6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 28h106" stroke="currentColor" stroke-width="1.6"/><path d="m106 22 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>{{relation.result}}</span>
+        <small>{{relation.relay}}</small>
+      </div>
+      <div class="relation-node relation-chat">
+        <p class="relation-device-label">
+          <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path d="M4 5h16v11H9l-5 4z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+          {{relation.chatTitle}}
+        </p>
+        <p class="relation-chat-apps">{{relation.chatApps}}</p>
+        <p class="relation-bubble">{{relation.chatExample}}</p>
+      </div>
+      <figcaption id="relation-caption">
+        <ol class="relation-steps">
+          <li>{{relation.step1}}</li>
+          <li>{{relation.step2}}</li>
+          <li>{{relation.step3}}</li>
+        </ol>
+      </figcaption>
+    </figure>
     <div class="setup-diagnostics">
       <p class="fineprint">{{install.diagnostics}}</p>
       <div class="command">
