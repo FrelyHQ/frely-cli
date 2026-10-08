@@ -22,6 +22,7 @@ const messages = new Set([
   "MCP command authorization was cancelled; mutation outcome may be unknown.",
   "MCP command timed out; mutation outcome may be unknown.", "MCP command output limit exceeded.",
   "MCP command could not be started.", "No Frely login is stored. Run `frely login`.",
+  "Frely login expired. Run `frely login`.", "Frely login refresh is temporarily unavailable; retrying later.", "Frely request timed out.",
   "MCP_AUTHORIZATION_EXPIRED", "The operation was aborted", "fetch failed",
 ]);
 
