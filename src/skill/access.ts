@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { requireLogin } from "../auth.js";
+import { LOGIN_REFRESH_UNAVAILABLE, requireLogin } from "../auth.js";
 import { credentialStore as secureCredentialStore, type CredentialStore } from "../credential-store.js";
 import { remoteAgentMcpInvoker, SkillInvocationError, type RemoteAgentMcpInvoker } from "./router.js";
 import {
@@ -177,7 +177,11 @@ export async function invokeInstalledAgent(input: {
     token = await store.getPassword(SKILL_API_KEY_SERVICE, record.distributionId).catch(() => null) ?? "";
     if (!token) throw new SkillAccessError("auth_required", "The model-scoped API key is unavailable. Reinstall with frely agent install <distribution-id> --api-key-stdin.");
   } else {
-    const login = await requireLogin().catch(() => { throw new SkillAccessError("auth_required", "Frely login is required. Run `frely login`."); });
+    const login = await requireLogin().catch((error: unknown) => {
+      // A refresh outage is not a missing login: tell the caller to retry instead of asking for `frely login`.
+      if (error instanceof Error && error.message === LOGIN_REFRESH_UNAVAILABLE) throw new SkillAccessError("remote_call_failed", LOGIN_REFRESH_UNAVAILABLE);
+      throw new SkillAccessError("auth_required", "Frely login is required. Run `frely login`.");
+    });
     token = login.credential.value;
     credential = login.credential;
   }

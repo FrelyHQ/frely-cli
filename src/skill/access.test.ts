@@ -5,6 +5,9 @@ import { join } from "node:path";
 import test from "node:test";
 import type { CredentialStore } from "../credential-store.js";
 import { installSkillAdapter, invokeInstalledAgent, removeSkillAdapter, skillAdapterStatus } from "./access.js";
+import { LOGIN_REFRESH_UNAVAILABLE, loginDevice } from "../auth.js";
+import { basicCredentialStore } from "../credential-basic.js";
+import { useMemoryCredentialStore } from "../test-support.js";
 
 const distributionId = "creator_distribution_0123456789abcdef01234567";
 const manifestUrl = `https://app.frely.cloud/api/public/virtual-models/${distributionId}`;
@@ -221,4 +224,38 @@ test("invalid client triggers fail before installing a Skill", async () => {
     }
     assert.equal((await skillAdapterStatus(distributionId, home)).installed, false);
   } finally { await rm(home, { recursive: true, force: true }); }
+});
+test("account-mode invocation tells a refresh outage apart from a missing login", async (t) => {
+  const root = await tempRoot();
+  const configDir = await tempRoot();
+  const oldFetch = globalThis.fetch;
+  const previous = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, FRELY_NO_BROWSER: process.env.FRELY_NO_BROWSER };
+  const restore = useMemoryCredentialStore();
+  process.env.XDG_CONFIG_HOME = configDir;
+  process.env.FRELY_NO_BROWSER = "1";
+  t.after(async () => {
+    restore(); globalThis.fetch = oldFetch;
+    for (const [name, value] of Object.entries(previous)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+    await rm(root, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+  });
+  await installSkillAdapter({ manifestUrl, host: "chatgpt", scope: "global", home: root, fetchFn: fetchManifest() });
+  const invoke = () => invokeInstalledAgent({ distributionId, task: "Plan my Tokyo trip.", home: root, remoteInvoker: { async invoke() { throw new Error("must not be called"); } } });
+  await assert.rejects(invoke(), /Frely login is required/u);
+
+  globalThis.fetch = (async (url: string | URL | Request, options?: RequestInit) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/api/auth/device/code") return Response.json({ device_code: "synthetic-code", user_code: "SYNTH", verification_uri: "https://test.invalid/device", verification_uri_complete: "https://test.invalid/device?user_code=SYNTH", expires_in: 300, interval: 1 });
+    if (path === "/api/auth/oauth2/token" && new URLSearchParams(String(options?.body)).get("grant_type") !== "refresh_token") return Response.json({ access_token: "synthetic-basic", refresh_token: "synthetic-refresh", token_type: "bearer", expires_in: 3600 });
+    if (path === "/api/auth/me") return Response.json({ user: { id: "user_test", email: "user@example.com" } });
+    throw new TypeError("fetch failed");
+  }) as typeof fetch;
+  await loginDevice("https://test.invalid");
+  const stored = JSON.parse((await basicCredentialStore.getPassword("frely-cli-basic-v1", "https://test.invalid"))!);
+  await basicCredentialStore.setPassword("frely-cli-basic-v1", "https://test.invalid", JSON.stringify({ ...stored, expiresAt: Date.now() - 1_000 }));
+  await assert.rejects(invoke(), (error: Error) => {
+    assert.equal(error.message, LOGIN_REFRESH_UNAVAILABLE);
+    assert.equal((error as { code?: string }).code, "remote_call_failed");
+    return true;
+  });
 });

@@ -15,6 +15,8 @@ const DEFAULT_RELAY = "https://frely.cloud";
 // app.frely.cloud now belongs to the Frely App; logins saved against it must be redone on frely.cloud.
 const RETIRED_RELAY_HOSTNAME = "app.frely.cloud";
 const REQUEST_TIMEOUT_MS = 15_000;
+const REFRESH_ATTEMPTS = 3;
+const REFRESH_RETRY_BASE_MS = 500;
 
 function debugAuth(message: string): void {
   if (process.env.FRELY_DEBUG === "1") process.stderr.write(`[debug] auth ${message}\n`);
@@ -491,31 +493,61 @@ async function loadCredential(config: CliConfig, refresh: boolean, input?: strin
   const raw = input === undefined ? await credentialStore.getPassword(SERVICE, accountKey(config.relayUrl)) : input;
   if (!raw) return null;
   if (raw.startsWith(`${SESSION_COOKIE_NAME}=`)) throw new Error("Legacy credentials require a new basic login.");
+  let stored: Partial<StoredOAuthCredential>;
   try {
-    const stored = JSON.parse(raw) as Partial<StoredOAuthCredential>;
-    if (stored.version !== 1 || stored.type !== "basic-oauth" || !isString(stored.accessToken) || typeof stored.expiresAt !== "number") return null;
-    if (refresh && stored.refreshToken && stored.expiresAt <= Date.now() + 30_000) {
-      const next = await refreshOAuthCredential(config.relayUrl, stored.refreshToken, config.deviceId);
-      if (next.expiresAt === undefined) return null;
-      const refreshed: StoredOAuthCredential = { version: 1, type: "basic-oauth", accessToken: next.value, ...(next.refreshToken ? { refreshToken: next.refreshToken } : {}), expiresAt: next.expiresAt };
-      const sessionBindingId = next.sessionBindingId ?? stored.sessionBindingId;
-      if (sessionBindingId) refreshed.sessionBindingId = sessionBindingId;
-      await credentialStore.setPassword(SERVICE, accountKey(config.relayUrl), JSON.stringify(refreshed satisfies StoredOAuthCredential));
-      return next;
-    }
-    return { scheme: "bearer", value: stored.accessToken, ...(stored.refreshToken ? { refreshToken: stored.refreshToken } : {}), expiresAt: stored.expiresAt, ...(stored.sessionBindingId ? { sessionBindingId: stored.sessionBindingId } : {}) };
+    stored = JSON.parse(raw) as Partial<StoredOAuthCredential>;
   } catch {
     return null;
   }
+  if (stored.version !== 1 || stored.type !== "basic-oauth" || !isString(stored.accessToken) || typeof stored.expiresAt !== "number") return null;
+  if (refresh && stored.refreshToken && stored.expiresAt <= Date.now() + 30_000) {
+    // Refresh failures propagate: a network outage must not read as "No Frely login is stored".
+    const next = await refreshOAuthCredential(config.relayUrl, stored.refreshToken, config.deviceId);
+    if (next.expiresAt === undefined) return null;
+    const refreshed: StoredOAuthCredential = { version: 1, type: "basic-oauth", accessToken: next.value, ...(next.refreshToken ? { refreshToken: next.refreshToken } : {}), expiresAt: next.expiresAt };
+    const sessionBindingId = next.sessionBindingId ?? stored.sessionBindingId;
+    if (sessionBindingId) refreshed.sessionBindingId = sessionBindingId;
+    await credentialStore.setPassword(SERVICE, accountKey(config.relayUrl), JSON.stringify(refreshed satisfies StoredOAuthCredential));
+    return next;
+  }
+  return { scheme: "bearer", value: stored.accessToken, ...(stored.refreshToken ? { refreshToken: stored.refreshToken } : {}), expiresAt: stored.expiresAt, ...(stored.sessionBindingId ? { sessionBindingId: stored.sessionBindingId } : {}) };
 }
 
+export const LOGIN_REFRESH_UNAVAILABLE = "Frely login refresh is temporarily unavailable; retrying later.";
+
+class TransientRefreshError extends Error {
+  constructor() {
+    super(LOGIN_REFRESH_UNAVAILABLE);
+    this.name = "Error";
+  }
+}
+
+// Short retry for network errors, timeouts, 408/429 and 5xx; a rejected refresh token fails at once.
 async function refreshOAuthCredential(relayUrl: string, refreshToken: string, deviceId?: string | null): Promise<AuthCredential> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await refreshOAuthCredentialOnce(relayUrl, refreshToken, deviceId);
+    } catch (error) {
+      if (!(error instanceof TransientRefreshError) || attempt >= REFRESH_ATTEMPTS) throw error;
+      debugAuth(`stage=refresh attempt=${attempt} transient=1`);
+      await delay(REFRESH_RETRY_BASE_MS * 2 ** (attempt - 1));
+    }
+  }
+}
+
+async function refreshOAuthCredentialOnce(relayUrl: string, refreshToken: string, deviceId?: string | null): Promise<AuthCredential> {
   const body = new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken, client_id: OAUTH_CLIENT_ID, resource: `${relayUrl}/api` });
   appendSessionBinding(body, deviceId);
-  const response = await fetchWithTimeout(`${relayUrl}/api/auth/oauth2/token`, {
-    method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: relayUrl, accept: "application/json" },
-    body: body.toString(), redirect: "error",
-  });
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(`${relayUrl}/api/auth/oauth2/token`, {
+      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: relayUrl, accept: "application/json" },
+      body: body.toString(), redirect: "error",
+    });
+  } catch {
+    throw new TransientRefreshError();
+  }
+  if (response.status === 408 || response.status === 429 || response.status >= 500) throw new TransientRefreshError();
   const payload = await safeJson(response);
   const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
   if (!response.ok || !isString(record.access_token)) throw new Error("Frely login expired. Run `frely login`.");
