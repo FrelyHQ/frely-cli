@@ -1,5 +1,5 @@
 import { CommandFailedError, runShellCommand } from "./process-tree.js";
-import { sandboxCommand, sandboxDenialHint } from "./sandbox.js";
+import { sandboxCommand, sandboxDenialHint, sshConfigReadable } from "./sandbox.js";
 import { pathProtection, type PathProtection } from "./protected-paths.js";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
@@ -223,7 +223,7 @@ export class Workspace {
       const { stdout, stderr } = await runShellCommand(sandboxed, cwd, safeEnv(), timeoutMs, MAX_OUTPUT_BYTES, signal);
       return { stdout: truncate(stdout), stderr: truncate(stderr) };
     } catch (error) {
-      const hint = error instanceof CommandFailedError && sandboxed !== command ? sandboxDenialHint(error.stderr) : undefined;
+      const hint = error instanceof CommandFailedError && sandboxed !== command ? sandboxDenialHint(error.stderr, command, error.exitCode, sshConfigReadable()) : undefined;
       throw hint && error instanceof CommandFailedError ? new CommandFailedError(error.exitCode, error.stdout, error.stderr, hint) : error;
     }
   }
