@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, normalize, parse, sep } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
@@ -287,10 +287,35 @@ export async function sandboxCommand(command: string, workspaceRoot: string, all
  * Hint for a failed sandboxed command whose stderr looks like a sandbox denial, so the caller asks the owner for approval
  * (request_permission) instead of giving up on a bare "Operation not permitted".
  */
-export function sandboxDenialHint(stderr: string): string | undefined {
+export function sandboxDenialHint(stderr: string, command?: string, exitCode?: number | null, sshConfigReadable?: boolean): string | undefined {
+  const ssh = command !== undefined ? sshHint(stderr, command, exitCode, sshConfigReadable) : undefined;
+  if (ssh) return ssh;
   if (!/operation not permitted|permission denied|read-only file system|sandbox/iu.test(stderr)) return undefined;
   return "This command may have been blocked by the Frely command sandbox (writes only to the workspace and temp directory; credential folders unreadable; only HTTP(S) and ssh reach the network). "
     + "Call request_permission with the reason and the exact command (a credential group, cache directories, a specific path, or unsandboxed); the owner approves it on the web with a passkey or authenticator code. Then run the same command again.";
+}
+
+const SSH_COMMAND = /(?:^|[\s;&|(])(?:ssh|scp|sftp|git)\s/u;
+const SSH_FAILURE = /proxy refused the tunnel|could not resolve hostname|kex_exchange_identification/iu;
+
+/** ssh-family failures that never say "permission": the sandbox hides ~/.ssh, so aliases and keys are silently missing. */
+function sshHint(stderr: string, command: string, exitCode: number | null | undefined, sshConfigReadable: boolean | undefined): string | undefined {
+  if (!SSH_COMMAND.test(command) || !(SSH_FAILURE.test(stderr) || exitCode === 255)) return undefined;
+  const alias = /(?:ssh|scp|sftp)\s+(?:-\S+\s+)*(?:[\w.-]+@)?([\w-]+)(?::|\s|$)/u.exec(command)?.[1];
+  const aliasNote = alias && !alias.includes(".") ? ` The target "${alias}" has no dot, so it may be an alias from ~/.ssh/config, which the sandbox cannot read.` : "";
+  const readNote = sshConfigReadable === false ? " Reading ~/.ssh/config from the CLI process failed too, so the file is missing or unreadable even outside the sandbox; check it exists." : "";
+  return `This ssh/scp/sftp/git command probably failed because the Frely command sandbox hides ~/.ssh (config and keys), not because of the network; ssh skips an unreadable config silently.${aliasNote}${readNote} `
+    + "Call request_permission with resource=ssh, the reason and the exact command; the owner approves it on the web. Then run the same command again.";
+}
+
+/** Whether ~/.ssh/config can be read by the CLI process itself (outside the sandbox). */
+export function sshConfigReadable(): boolean {
+  try {
+    readFileSync(join(homedir(), ".ssh", "config"));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Exposed for tests: resets the module-level init state and the underlying manager. */

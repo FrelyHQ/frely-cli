@@ -124,3 +124,15 @@ test("sandboxDenialHint recognises denials and points at request_permission", ()
   assert.match(sandboxDenialHint("Permission denied") ?? "", /sandbox/);
   assert.equal(sandboxDenialHint("fatal: not a git repository"), undefined);
 });
+
+test("sandboxDenialHint points ssh proxy failures at request_permission resource=ssh", () => {
+  const proxy = sandboxDenialHint("ssh: Could not resolve hostname ctb-eu\nThe proxy refused the tunnel (HTTP 502)", "ssh ctb-eu uptime", 255, false);
+  assert.match(proxy ?? "", /resource=ssh/);
+  assert.match(proxy ?? "", /"ctb-eu" has no dot/);
+  assert.match(proxy ?? "", /Reading ~\/\.ssh\/config from the CLI process failed/);
+  assert.match(sandboxDenialHint("kex_exchange_identification: read: Connection reset", "git pull", 128) ?? "", /resource=ssh/);
+  assert.match(sandboxDenialHint("", "scp a b.example.com:/x", 255) ?? "", /resource=ssh/);
+  assert.doesNotMatch(sandboxDenialHint("", "ssh ctb.example.com true", 255, true) ?? "", /no dot|failed too/);
+  assert.equal(sandboxDenialHint("The proxy refused the tunnel", "curl https://x", 1), undefined);
+  assert.equal(sandboxDenialHint("boom", "ssh host true", 1), undefined);
+});
