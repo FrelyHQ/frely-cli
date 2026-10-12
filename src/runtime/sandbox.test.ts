@@ -43,7 +43,7 @@ test("path grants are read from the relay's _meta key and unknown names are drop
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { customWritePath, isKnownGrantName, SSH_PROXY_PREFIX, UNSANDBOXED_GROUP, writablePaths } from "./sandbox.js";
 
@@ -135,4 +135,38 @@ test("sandboxDenialHint points ssh proxy failures at request_permission resource
   assert.doesNotMatch(sandboxDenialHint("", "ssh ctb.example.com true", 255, true) ?? "", /no dot|failed too/);
   assert.equal(sandboxDenialHint("The proxy refused the tunnel", "curl https://x", 1), undefined);
   assert.equal(sandboxDenialHint("boom", "ssh host true", 1), undefined);
+});
+
+test("the sandbox fails closed: the refusal explains the reason and the ways forward, and manual opt-outs still run the command", async () => {
+  const { sandboxCommand, sandboxUnavailableMessage, resetSandboxForTests, isSandboxStrict } = await import("./sandbox.js");
+  const message = sandboxUnavailableMessage("missing dependencies: bubblewrap not installed");
+  assert.match(message, /was not run/u);
+  assert.match(message, /bubblewrap not installed/u);
+  assert.match(message, /install the missing sandbox dependencies/u);
+  assert.match(message, /request_permission with resource "unsandboxed"/u);
+  assert.match(message, /FRELY_SANDBOX=off/u);
+  assert.equal(isSandboxStrict(), true);
+
+  const previous = { sandbox: process.env.FRELY_SANDBOX, strict: process.env.FRELY_SANDBOX_STRICT };
+  try {
+    delete process.env.FRELY_SANDBOX_STRICT;
+    process.env.FRELY_SANDBOX = "";
+    await resetSandboxForTests();
+    const backend = detectSandboxBackend();
+    if (backend === "srt") {
+      // Sandbox works here: the command is wrapped, never returned bare.
+      assert.notEqual(await sandboxCommand("echo hi", tmpdir()), "echo hi");
+    } else {
+      // Unsupported platform or missing dependency: refused without any strict flag.
+      await assert.rejects(sandboxCommand("echo hi", tmpdir()), /sandbox cannot run on this device/u);
+    }
+    // The owner's approved grant and FRELY_SANDBOX=off are the only ways to run it as is.
+    assert.equal(await sandboxCommand("echo hi", tmpdir(), [UNSANDBOXED_GROUP]), "echo hi");
+    process.env.FRELY_SANDBOX = "off";
+    assert.equal(await sandboxCommand("echo hi", tmpdir()), "echo hi");
+  } finally {
+    if (previous.sandbox === undefined) delete process.env.FRELY_SANDBOX; else process.env.FRELY_SANDBOX = previous.sandbox;
+    if (previous.strict === undefined) delete process.env.FRELY_SANDBOX_STRICT; else process.env.FRELY_SANDBOX_STRICT = previous.strict;
+    await resetSandboxForTests();
+  }
 });

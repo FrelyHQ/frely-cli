@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createMcpServer } from "./mcp.js";
+import { CLOUD_TOOLS, createMcpServer, LOCAL_MCP_TOOLS } from "./mcp.js";
 
 test("MCP client can list and call frely-cli tools", async () => {
   const root = await mkdtemp(join(tmpdir(), "frely-cli-mcp-"));
@@ -18,7 +18,17 @@ test("MCP client can list and call frely-cli tools", async () => {
     const tools = await client.listTools();
     assert.deepEqual(tools.tools.map((tool) => tool.name), ["read", "edit_file", "web_fetch", "process"]);
     assert.equal(tools.tools.find((tool) => tool.name === "read")?.annotations?.readOnlyHint, true);
-    assert.equal(tools.tools.find((tool) => tool.name === "edit_file")?.annotations?.destructiveHint, false);
+    assert.equal(tools.tools.find((tool) => tool.name === "edit_file")?.annotations?.destructiveHint, true);
+    const hints = new Map<string, [boolean, boolean, boolean]>([
+      ["read", [true, false, false]], ["edit_file", [false, true, false]], ["web_fetch", [false, false, true]], ["process", [false, true, true]],
+      ["cloud_list", [true, false, false]], ["cloud_call", [false, true, true]], ["local_mcp_list", [true, false, false]], ["local_mcp_call", [false, true, true]],
+    ]);
+    for (const listed of [...tools.tools, ...CLOUD_TOOLS, ...LOCAL_MCP_TOOLS]) {
+      const { readOnlyHint, destructiveHint, openWorldHint } = listed.annotations ?? {};
+      for (const hint of [readOnlyHint, destructiveHint, openWorldHint]) assert.equal(typeof hint, "boolean", `${listed.name} sets all three hints`);
+      assert.deepEqual([readOnlyHint, destructiveHint, openWorldHint], hints.get(listed.name), listed.name);
+    }
+    assert.match(tools.tools.find((tool) => tool.name === "process")?.description ?? "", /refused when this device cannot sandbox/u);
     for (const merged of ["workspace_info", "list_directory", "search_files", "read_file", "write_file", "apply_patch", "delete_path", "move_path", "run_command", "read_file_lines", "stat_path", "find_files", "create_directory", "start_process", "list_processes", "read_process", "write_process", "stop_process"]) {
       assert.ok(!tools.tools.some((tool) => tool.name === merged), `${merged} is merged into another tool`);
     }
