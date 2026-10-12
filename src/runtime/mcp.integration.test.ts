@@ -20,7 +20,7 @@ test("MCP client can list and call frely-cli tools", async () => {
     assert.equal(tools.tools.find((tool) => tool.name === "read")?.annotations?.readOnlyHint, true);
     assert.equal(tools.tools.find((tool) => tool.name === "edit_file")?.annotations?.destructiveHint, true);
     const hints = new Map<string, [boolean, boolean, boolean]>([
-      ["read", [true, false, false]], ["edit_file", [false, true, false]], ["web_fetch", [false, false, true]], ["process", [false, true, true]],
+      ["read", [true, false, false]], ["edit_file", [false, true, false]], ["web_fetch", [true, false, true]], ["process", [false, true, true]],
       ["cloud_list", [true, false, false]], ["cloud_call", [false, true, true]], ["local_mcp_list", [true, false, false]], ["local_mcp_call", [false, true, true]],
     ]);
     for (const listed of [...tools.tools, ...CLOUD_TOOLS, ...LOCAL_MCP_TOOLS]) {

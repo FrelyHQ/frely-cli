@@ -4,7 +4,7 @@ import { request as httpsRequest } from "node:https";
 import { BlockList, isIP } from "node:net";
 
 /**
- * `web_fetch`: an HTTP request made from this device, so a hosted Agent's web access leaves from the owner's own network
+ * `web_fetch`: a read-only (GET/HEAD) HTTP request made from this device, so a hosted Agent's web access leaves from the owner's own network
  * instead of Frely's servers (plan mcp/云Agent借用户本机磁盘与网络).
  *
  * By default the request reaches only the public internet. Every address the host name resolves to is checked, the connection is pinned to
@@ -19,10 +19,9 @@ import { BlockList, isIP } from "node:net";
 
 export const WEB_FETCH_DEFAULT_BYTES = 256 * 1024;
 export const WEB_FETCH_MAX_BYTES = 1024 * 1024;
-export const WEB_FETCH_MAX_REQUEST_BODY = 256 * 1024;
 const MAX_REDIRECTS = 5;
 const ALLOWED_PORTS = new Set([80, 443]);
-const METHODS = ["GET", "HEAD", "POST"] as const;
+const METHODS = ["GET", "HEAD"] as const;
 type WebFetchMethod = (typeof METHODS)[number];
 const FORBIDDEN_REQUEST_HEADERS = new Set(["host", "connection", "content-length", "transfer-encoding", "upgrade", "proxy-authorization", "te", "expect"]);
 
@@ -86,7 +85,6 @@ export interface WebFetchArgs {
   url: string;
   method?: WebFetchMethod;
   headers?: Record<string, string>;
-  body?: string;
   maxBytes?: number;
   timeoutMs?: number;
 }
@@ -139,7 +137,7 @@ function readText(contentType: string | null, bytes: Buffer): string {
   return text ? bytes.toString("utf8") : `[${contentType} response, ${bytes.length} bytes, not shown as text]`;
 }
 
-function once(url: URL, method: WebFetchMethod, headers: Record<string, string>, body: string | undefined, address: string, maxBytes: number, timeoutMs: number, signal: AbortSignal | undefined): Promise<{ status: number; location: string | null; contentType: string | null; bytes: Buffer; truncated: boolean }> {
+function once(url: URL, method: WebFetchMethod, headers: Record<string, string>, address: string, maxBytes: number, timeoutMs: number, signal: AbortSignal | undefined): Promise<{ status: number; location: string | null; contentType: string | null; bytes: Buffer; truncated: boolean }> {
   return new Promise((resolve, reject) => {
     const secure = url.protocol === "https:";
     const family = isIP(address) === 6 ? 6 : 4;
@@ -168,15 +166,13 @@ function once(url: URL, method: WebFetchMethod, headers: Record<string, string>,
     });
     request.once("timeout", () => request.destroy(new Error("The request timed out.")));
     request.once("error", reject);
-    if (body !== undefined && method === "POST") request.write(body);
     request.end();
   });
 }
 
 export async function webFetch(args: WebFetchArgs, options: WebFetchOptions = {}): Promise<WebFetchResult> {
   const method = args.method ?? "GET";
-  if (!METHODS.includes(method)) throw new Error("method must be GET, HEAD or POST.");
-  if (args.body !== undefined && Buffer.byteLength(args.body) > WEB_FETCH_MAX_REQUEST_BODY) throw new Error("The request body is too large.");
+  if (!METHODS.includes(method)) throw new Error("method must be GET or HEAD.");
   const maxBytes = Math.min(Math.max(1, args.maxBytes ?? WEB_FETCH_DEFAULT_BYTES), WEB_FETCH_MAX_BYTES);
   const timeoutMs = Math.min(Math.max(100, args.timeoutMs ?? 30_000), 120_000);
   const headers: Record<string, string> = { "user-agent": "Mozilla/5.0 (compatible; FrelyAgent/1.0)", accept: "*/*", "accept-encoding": "identity" };
@@ -184,23 +180,19 @@ export async function webFetch(args: WebFetchArgs, options: WebFetchOptions = {}
     if (typeof value !== "string" || FORBIDDEN_REQUEST_HEADERS.has(name.toLowerCase()) || /[\r\n]/u.test(name + value)) throw new Error(`Header ${JSON.stringify(name.slice(0, 40))} is not allowed.`);
     headers[name.toLowerCase()] = value;
   }
-  if (args.body !== undefined && method === "POST") headers["content-length"] = String(Buffer.byteLength(args.body));
 
   let url: URL;
   try { url = new URL(args.url); } catch { throw new Error("url is not a valid URL."); }
-  let currentMethod: WebFetchMethod = method;
-  let currentBody = args.body;
   for (let redirects = 0; ; redirects += 1) {
     options.signal?.throwIfAborted();
     const target = await checkedTarget(url, options);
     const sameOriginHeaders = { ...headers, host: url.host };
-    const response = await once(url, currentMethod, sameOriginHeaders, currentBody, target.address, maxBytes, timeoutMs, options.signal);
+    const response = await once(url, method, sameOriginHeaders, target.address, maxBytes, timeoutMs, options.signal);
     if (response.status >= 300 && response.status < 400 && response.location) {
       if (redirects >= MAX_REDIRECTS) throw new Error("Too many redirects.");
       const next = new URL(response.location, url);
       // Credentials the Agent attached belong to the first origin only.
       if (next.origin !== url.origin) for (const name of ["authorization", "cookie"]) delete headers[name];
-      if (response.status === 303 || ((response.status === 301 || response.status === 302) && currentMethod === "POST")) { currentMethod = "GET"; currentBody = undefined; delete headers["content-length"]; }
       url = next;
       continue;
     }
