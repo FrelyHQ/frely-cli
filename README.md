@@ -192,6 +192,17 @@ frely update     # updates the running installation in place
 
 Full behavior: [the self-update contract](docs/self-update.md) and [service maintenance and legacy updates](docs/service-maintenance.md). If more than one `frely` is installed, check the path shown by `doctor` before updating.
 
+## Uninstall
+
+```sh
+frely uninstall          # lists everything first, removes it only after you type yes
+frely uninstall --yes    # non-interactive confirmation for scripts
+```
+
+`frely uninstall` revokes this device's Device MCP authorization, removes the device from your account and revokes the Cloud and account login on the Frely side, then stops and uninstalls the background service, deletes the saved login, device identity, MCP and Provider settings, state and caches (including the OS credential vault entry), removes installed Agent Skills that Frely manages, and finally removes the `frely` program (standalone file, or the npm/Bun global package). Without a terminal and without `--yes` it only prints the list. If an account-side step fails, it asks (or, with `--yes`, continues) and reports what is left; the exit code is 1 whenever anything remains.
+
+It does not remove the Frely App (use `frely app uninstall`; the App's `app.json` is kept), Providers or Agents in your Frely account, the PATH lines `install.sh` added to shell profiles, edited Agent Skills, or marketplace items. Source checkouts, local links and unrecognised installations are reported and left alone. It refuses to run inside device MCP because it stops the service that runs the command; run it in a local terminal.
+
 ## Local execution boundaries
 
 The local MCP server exposes four tools: `read` (list, read, search and find workspace files), `edit_file` (atomic whole-file writes and line edits), `process` (shell commands, run to completion or started as persistent processes) and `web_fetch`. Deleting, moving and creating directories go through `process`. Older tool names (`read_file`, `write_file`, `run_command` and so on) are no longer listed but still answer.

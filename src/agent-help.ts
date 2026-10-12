@@ -3,6 +3,7 @@ import { VERSION } from "./version.js";
 export const COMMANDS = [
   { id: "login", usage: "frely login [--relay <url>] [--no-browser] | frely login --email <address> [--invite <link>] [--mcp] [--workspace <path>] [--days <n>] then frely login --code <6-digit code>", auth: "browser-or-email", effect: "authorization", purpose: "Authorize the CLI for the user's Frely account. With --email, Frely emails a code; the user pastes it into `frely login --code` (enter only the 6 digits; the mail also shows a short reference such as K7, which is only for matching the mail). Add --mcp to also enable device MCP for the workspace (default 90 days) once the code is verified; do this when the user is registering for the first time, and tell them before asking for the code." },
   { id: "logout", usage: "frely logout", auth: "none", effect: "local-write", purpose: "Remove login, revoke Cloud authorization and stop the MCP background service." },
+  { id: "uninstall", usage: "frely uninstall [--yes] [--json]", auth: "optional-account", effect: "remote-write", purpose: "Remove Frely from this computer: revoke this device's Device MCP authorization, Cloud and account login on the Frely side, stop and uninstall the background service, delete saved login, device and MCP data, installed Agent Skills and the frely program itself. It lists everything first and removes nothing until the user types yes; without a terminal it only lists, and --yes confirms. Frely App and server-side Providers/Agents are not removed. Refuses to run inside device MCP. Destructive: run only when the user asks for it." },
   { id: "doctor", usage: "frely doctor [-v] [--json]", auth: "optional-account", effect: "diagnostic", purpose: "Show the signed-in account, installation, available updates, MCP and connection status; -v verifies the account online and runs detailed diagnostics." },
   { id: "update", usage: "frely update", auth: "none", effect: "local-write", purpose: "Update the current installation to the latest stable release. Windows prints a manual command; doctor checks versions." },
   { id: "help", usage: "frely help --agent --json", auth: "none", effect: "read", purpose: "Read this installed CLI's current Agent instructions." },
@@ -64,7 +65,7 @@ export function agentHelp() {
 }
 
 const GROUPS: readonly { title: string; ids: readonly string[] }[] = [
-  { title: "Account", ids: ["login", "logout", "doctor", "update"] },
+  { title: "Account", ids: ["login", "logout", "uninstall", "doctor", "update"] },
   { title: "Device MCP", ids: ["mcp.start", "mcp.workspace", "mcp.local", "mcp.lifecycle"] },
   { title: "Agents", ids: ["agent.install", "agent.run", "agent.status", "agent.remove"] },
   { title: "Marketplace items", ids: ["item.install", "item.trust"] },
@@ -79,6 +80,7 @@ const GROUPS: readonly { title: string; ids: readonly string[] }[] = [
 const SHORT_USAGE: Readonly<Record<string, string>> = {
   login: "frely login [--no-browser]",
   logout: "frely logout",
+  uninstall: "frely uninstall [--yes]",
   doctor: "frely doctor [-v] [--json]",
   update: "frely update",
   "mcp.start": "frely mcp start [--workspace <path>] [--days 1..365] [--no-browser] [--json]",
