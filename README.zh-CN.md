@@ -182,6 +182,17 @@ frely update     # 原地升级当前正在运行的安装
 
 完整行为：[self-update 契约](docs/self-update.md) 与[服务维护与旧版本迁移](docs/service-maintenance.md)。若安装了多个 `frely`，升级前先查看 `doctor` 显示的路径。
 
+## 卸载
+
+```sh
+frely uninstall          # 先列出将要移除的全部内容，输入 yes 后才执行
+frely uninstall --yes    # 脚本用的非交互确认
+```
+
+`frely uninstall` 先在 Frely 侧撤销本设备的 Device MCP 授权、从账号中移除本设备并撤销 Cloud 与账号登录，再停止并卸载后台服务，删除已保存的登录、设备身份、MCP 与 Provider 设置、状态和缓存（含系统凭据库条目），移除 Frely 管理的 Agent Skill，最后移除 `frely` 程序本身（standalone 文件，或 npm/Bun 全局包）。无终端且未加 `--yes` 时只打印清单。账号侧步骤失败时会询问（`--yes` 则继续）并报告残留项；只要有残留，退出码为 1。
+
+不会移除：Frely App（请用 `frely app uninstall`，其 `app.json` 会保留）、账号里的 Provider 和 Agent、`install.sh` 写入 shell 配置的 PATH 行、被修改过的 Agent Skill、市场条目。源码检出、本地 link 和无法识别的安装只报告、不删除。它会拒绝在 device MCP 内运行（会停掉执行该命令的服务），请在本机终端运行。
+
 ## 本地执行边界
 
 本地 MCP 服务暴露 4 个工具：`read`（列目录、读文件、搜索内容、按名查找）、`edit_file`（原子整体写入与按行修改）、`process`（shell 命令，可等待完成或作为常驻进程启动）和 `web_fetch`。删除、移动、建目录经 `process` 完成。旧工具名（`read_file`、`write_file`、`run_command` 等）不再列出但仍可调用。

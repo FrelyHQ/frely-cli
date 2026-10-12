@@ -39,6 +39,8 @@ import { agentManifestUrl, installSkillAdapter, invokeInstalledAgent, publicSkil
 import type { SkillHost, SkillScope } from "./skill/managed.js";
 import { installCloudItem, trustCloudItem } from "./skill/cloud-item.js";
 import { callCloudTool } from "./cloud.js";
+import { createInterface } from "node:readline/promises";
+import { runUninstall } from "./uninstall.js";
 
 
 const DEFAULT_EMAIL_LOGIN_MCP_DAYS = MCP_DEFAULT_DAYS;
@@ -276,6 +278,16 @@ async function main(): Promise<void> {
     await logout();
     stdout.write("Frely login removed and MCP background service stopped.\n");
     if (!cloudRevoked) process.stderr.write("Cloud authorization revocation was not confirmed; revoke it in Frely account settings if needed.\n");
+    return;
+  }
+
+  if (command === "uninstall") {
+    const interactive = Boolean(stdin.isTTY && stdout.isTTY);
+    const prompt = interactive ? async (question: string) => {
+      const rl = createInterface({ input: stdin, output: stdout });
+      try { return await rl.question(question); } finally { rl.close(); }
+    } : undefined;
+    process.exitCode = await runUninstall(args.slice(1), { write: (text) => { stdout.write(text); }, interactive, ...(prompt ? { prompt } : {}) });
     return;
   }
 
