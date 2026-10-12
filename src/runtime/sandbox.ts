@@ -164,14 +164,17 @@ export function isSandboxStrict(): boolean {
   return true;
 }
 
-/** Best-effort report of the sandbox backend for device capability frames (plan §4.3). */
-export function detectSandboxBackend(): "srt" | "off" | "none" {
+/**
+ * Best-effort report of the sandbox backend for device capability frames (plan §4.3).
+ * "unavailable" means commands are refused here (fail closed); older CLIs reported "none" and ran them unprotected.
+ */
+export function detectSandboxBackend(): "srt" | "off" | "unavailable" {
   if (isSandboxDisabled()) return "off";
   try {
-    if (!SandboxManager.isSupportedPlatform()) return "none";
-    return SandboxManager.checkDependencies().errors.length > 0 ? "none" : "srt";
+    if (!SandboxManager.isSupportedPlatform()) return "unavailable";
+    return SandboxManager.checkDependencies().errors.length > 0 ? "unavailable" : "srt";
   } catch {
-    return "none";
+    return "unavailable";
   }
 }
 

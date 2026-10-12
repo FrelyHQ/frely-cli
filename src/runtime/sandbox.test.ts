@@ -10,7 +10,7 @@ test("sandbox backend detection reports off when disabled and never throws", () 
     assert.equal(detectSandboxBackend(), "off");
     process.env.FRELY_SANDBOX = "";
     const backend = detectSandboxBackend();
-    assert.ok(backend === "srt" || backend === "none", `unexpected backend ${backend}`);
+    assert.ok(backend === "srt" || backend === "unavailable", `unexpected backend ${backend}`);
   } finally {
     if (previous === undefined) delete process.env.FRELY_SANDBOX; else process.env.FRELY_SANDBOX = previous;
   }
