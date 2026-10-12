@@ -8,11 +8,11 @@ import { fileURLToPath } from "node:url";
 import test, { type TestContext } from "node:test";
 import { basicCredentialStore } from "./credential-basic.js";
 import { credentialStore } from "./credential-store.js";
-import { generateMcpKey, inspectMcpMetadata, McpConfigInvalidError, mcpMetadataPath, setupMcpAuthorization, type McpAuthorizationView } from "./mcp-authorization.js";
+import { generateMcpKey, inspectMcpMetadata, McpConfigInvalidError, mcpMetadataPath, mcpVerificationUri, setupMcpAuthorization, type McpAuthorizationView } from "./mcp-authorization.js";
 import { ensureMcpAuthorization, startMcp } from "./mcp-command.js";
 import { useMemoryCredentialStore } from "./test-support.js";
 
-async function fixture(t: TestContext, denied = false) {
+async function fixture(t: TestContext, denied = false, offeredLink?: (id: string) => unknown) {
   const directory = await mkdtemp(join(tmpdir(), "frely-mcp-url-"));
   const restore = useMemoryCredentialStore();
   const previous = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, FRELY_NO_BROWSER: process.env.FRELY_NO_BROWSER };
@@ -52,7 +52,7 @@ async function fixture(t: TestContext, denied = false) {
         keyThumbprint: body.keyThumbprint, days: body.days,
         approvalDeadline: new Date(Date.now() + 900000).toISOString(), approvedAt: null, expiresAt: null, status: "pending",
       };
-      return Response.json({ ...current, mcpResource }, { status: 201 });
+      return Response.json({ ...current, mcpResource, ...(offeredLink ? { verificationUri: offeredLink(current.id) } : {}) }, { status: 201 });
     }
     assert.ok(current);
     if (current.status === "pending") {
@@ -306,4 +306,20 @@ test("frely mcp enables a preapproved device with its pregenerated key and no br
   assert.equal(bodies[0]!.preapproval, "signed-token");
   assert.doesNotMatch(f.state.messages.join(""), /Approve:/);
   assert.deepEqual(f.state.installations, [await realpath(project)]);
+});
+
+test("frely mcp prints the short approval link the relay offers and falls back to the long link otherwise", async (t) => {
+  const short = await fixture(t, false, () => "https://test.invalid/device?m=ABCDEF");
+  const project = join(short.directory, "project");
+  await mkdir(project);
+  await ensureMcpAuthorization({ workspace: project, notify: short.notify }, short.install);
+  assert.match(short.state.messages.join(""), /Approve: https:\/\/test\.invalid\/device\?m=ABCDEF\n/);
+  // Other origins, other pages, another request's id and extra parameters are not trusted.
+  const id = `mca_${"1".repeat(32)}`;
+  const long = `https://test.invalid/device?mcp_request=${id}`;
+  for (const offered of ["https://attacker.invalid/device?m=ABCDEF", "https://test.invalid/login?m=ABCDEF", "https://test.invalid/device?m=ABC", "https://test.invalid/device?m=ABCDEF&next=x",
+    `https://test.invalid/device?mcp_request=mca_${"2".repeat(32)}`, "javascript:alert(1)", 42, undefined]) {
+    assert.equal(mcpVerificationUri("https://test.invalid", id, offered), long);
+  }
+  assert.equal(mcpVerificationUri("https://test.invalid", id, long), long);
 });
