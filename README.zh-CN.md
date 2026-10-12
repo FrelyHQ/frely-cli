@@ -195,7 +195,7 @@ frely uninstall --yes    # 脚本用的非交互确认
 
 ## 本地执行边界
 
-本地 MCP 服务暴露 4 个工具：`read`（列目录、读文件、搜索内容、按名查找）、`edit_file`（原子整体写入与按行修改）、`process`（shell 命令，可等待完成或作为常驻进程启动）和 `web_fetch`。删除、移动、建目录经 `process` 完成。旧工具名（`read_file`、`write_file`、`run_command` 等）不再列出但仍可调用。
+本地 MCP 服务暴露 4 个工具：`read`（列目录、读文件、搜索内容、按名查找）、`edit_file`（原子整体写入与按行修改）、`process`（shell 命令，可等待完成或作为常驻进程启动）和 `web_fetch`（只读 GET/HEAD 公网 URL）。删除、移动、建目录经 `process` 完成。旧工具名（`read_file`、`write_file`、`run_command` 等）不再列出但仍可调用。
 
 文件系统工具约束在所选工作区内：拒绝 symlink 逃逸、普通文件读写上限 1 MiB、no-follow 读、原子替换写。`process` 命令以当前 OS 用户权限执行；工作区只约束它们的工作目录，**不是** shell 沙箱。`process` 命令默认在系统级沙箱内运行；若本机无法运行沙箱（Windows，或缺少 `bubblewrap`、`socat`、`ripgrep` 的 Linux），命令会被拒绝并说明原因，不会无沙箱运行。设备所有者可在网页端批准 `unsandboxed`，或在设备上设置 `FRELY_SANDBOX=off` 关闭沙箱（`FRELY_SANDBOX_STRICT` 仍被接受，但已不再起作用）。
 
