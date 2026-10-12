@@ -14,7 +14,9 @@ import { networkAllowFromMeta, webFetch } from "./web-fetch.js";
 
 interface ToolFlags {
   readOnly: boolean;
-  destructive?: boolean;
+  destructive: boolean;
+  /** True when the tool reaches beyond this device and workspace (network, cloud, other servers). */
+  openWorld: boolean;
   idempotent?: boolean;
 }
 
@@ -47,14 +49,14 @@ function enabledToolsets(options: McpRuntimeOptions): string[] {
 
 /** Frely Cloud tools (account, keys, Creator, Owner). Permissions and per-call approval are enforced by the server for this device. */
 export const CLOUD_TOOLS = [
-  tool("cloud_list", "List the Frely Cloud tools this device may use, with their input schemas. With `group`, only that tool group.", { group: stringSchema("Tool group prefix such as keys or skills; omit for all") }, { readOnly: true }),
-  tool("cloud_call", "Call one Frely Cloud tool by name with its arguments. Writes that need approval return confirmation_required with a link: the user approves on the web console, then call again with the same arguments plus confirmationId.", { tool: stringSchema("Cloud tool name from cloud_list"), arguments: { type: "object", description: "Arguments for the tool", additionalProperties: true } }, { readOnly: false, destructive: true, idempotent: false }),
+  tool("cloud_list", "List the Frely Cloud tools this device may use, with their input schemas. With `group`, only that tool group.", { group: stringSchema("Tool group prefix such as keys or skills; omit for all") }, { readOnly: true, destructive: false, openWorld: false }),
+  tool("cloud_call", "Call one Frely Cloud tool by name with its arguments. Writes that need approval return confirmation_required with a link: the user approves on the web console, then call again with the same arguments plus confirmationId.", { tool: stringSchema("Cloud tool name from cloud_list"), arguments: { type: "object", description: "Arguments for the tool", additionalProperties: true } }, { readOnly: false, destructive: true, openWorld: true, idempotent: false }),
 ];
 
 /** Gateway tools for device-local MCP servers (plan F1): one pair, whatever number of servers or transports sit behind them. */
 export const LOCAL_MCP_TOOLS = [
-  tool("local_mcp_list", "List the MCP servers running on this device that the owner enabled. With `server`, list that server's tools and their input schemas.", { server: stringSchema("Server name from the list; omit to list servers") }, { readOnly: true }),
-  tool("local_mcp_call", "Call one tool of an enabled MCP server running on this device (for example a browser extension that only listens on 127.0.0.1). Use local_mcp_list with `server` first to see the tools and arguments.", { server: stringSchema("Server name"), tool: stringSchema("Tool name on that server"), arguments: { type: "object", description: "Arguments for the tool", additionalProperties: true }, timeoutMs: intSchema(60000, 100, 120000) }, { readOnly: false, destructive: true, idempotent: false }),
+  tool("local_mcp_list", "List the MCP servers running on this device that the owner enabled. With `server`, list that server's tools and their input schemas.", { server: stringSchema("Server name from the list; omit to list servers") }, { readOnly: true, destructive: false, openWorld: false }),
+  tool("local_mcp_call", "Call one tool of an enabled MCP server running on this device (for example a browser extension that only listens on 127.0.0.1). Use local_mcp_list with `server` first to see the tools and arguments.", { server: stringSchema("Server name"), tool: stringSchema("Tool name on that server"), arguments: { type: "object", description: "Arguments for the tool", additionalProperties: true }, timeoutMs: intSchema(60000, 100, 120000) }, { readOnly: false, destructive: true, openWorld: true, idempotent: false }),
 ];
 
 export async function createMcpServer(workspaceInput: string, options: McpRuntimeOptions = {}): Promise<Server> {
@@ -115,10 +117,10 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
     ...((enabledToolsets(options).includes("frely-app") && options.cloud) ? CLOUD_TOOLS : []),
     ...(enabledLocalMcps(options).length > 0 ? LOCAL_MCP_TOOLS : []),
-    tool("read", "Read the workspace. action=list lists a directory, or returns type/size/mtime for a file; read returns a UTF-8 file (max 1 MiB), or lines startLine..endLine; search finds `query` in file contents; find matches file names (*, **, ?); roots lists workspace roots.", { action: { type: "string", enum: ["list", "read", "search", "find", "roots"] }, path: stringSchema("Relative path", "."), startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, query: { type: "string" }, regex: boolSchema(false), caseSensitive: boolSchema(false), maxResults: intSchema(100, 1, 1000), contextLines: intSchema(0, 0, 10) }, { readOnly: true }),
-    tool("edit_file", "Change a UTF-8 workspace file: `content` atomically writes the whole file, creating parent directories (overwrite=true to replace one); `edits` replaces line ranges. Delete, move and mkdir with process.", { path: stringSchema("Relative path"), content: { type: "string" }, overwrite: boolSchema(false), edits: { type: "array", minItems: 1, maxItems: 100, items: { type: "object", additionalProperties: false, required: ["startLine", "endLine", "replacement"], properties: { startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, replacement: { type: "string" } } } } }, { readOnly: false, idempotent: false }),
-    tool("web_fetch", "Fetch a public http(s) URL (ports 80, 443) from this device's network; private addresses are refused. Returns status, content type and body text up to maxBytes.", { url: { type: "string" }, method: { type: "string", enum: ["GET", "HEAD", "POST"], default: "GET" }, headers: { type: "object", additionalProperties: { type: "string" } }, body: { type: "string" }, maxBytes: intSchema(262144, 1, 1048576), timeoutMs: intSchema(30000, 100, 120000) }, { readOnly: false, idempotent: false }),
-    tool("process", "Run shell commands as the current OS user, sandboxed where supported: credential folders blocked (ask with request_permission), writes limited to workspace and temp, network to HTTP(S) and ssh (the connection needs no approval, but reading ~/.ssh config and keys does: request_permission resource=ssh). action=run waits up to timeoutMs and returns output; start returns an id for longer tasks; read returns output after stdoutCursor/stderrCursor; write sends `input` to stdin; list; stop. concurrency=exclusive for commands that change shared repo, dependency or build state.", { action: { type: "string", enum: ["run", "start", "read", "write", "list", "stop"] }, command: { type: "string" }, cwd: stringSchema("Relative path", "."), timeoutMs: intSchema(30000, 100, 120000), concurrency: { type: "string", enum: ["parallel", "exclusive"], default: "parallel" }, processId: { type: "string" }, stdoutCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), stderrCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), input: { type: "string" } }, { readOnly: false, destructive: true, idempotent: false }),
+    tool("read", "Read the workspace. action=list lists a directory, or returns type/size/mtime for a file; read returns a UTF-8 file (max 1 MiB), or lines startLine..endLine; search finds `query` in file contents; find matches file names (*, **, ?); roots lists workspace roots.", { action: { type: "string", enum: ["list", "read", "search", "find", "roots"] }, path: stringSchema("Relative path", "."), startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, query: { type: "string" }, regex: boolSchema(false), caseSensitive: boolSchema(false), maxResults: intSchema(100, 1, 1000), contextLines: intSchema(0, 0, 10) }, { readOnly: true, destructive: false, openWorld: false }),
+    tool("edit_file", "Change a UTF-8 workspace file: `content` atomically writes the whole file, creating parent directories (overwrite=true to replace one); `edits` replaces line ranges. Delete, move and mkdir with process.", { path: stringSchema("Relative path"), content: { type: "string" }, overwrite: boolSchema(false), edits: { type: "array", minItems: 1, maxItems: 100, items: { type: "object", additionalProperties: false, required: ["startLine", "endLine", "replacement"], properties: { startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, replacement: { type: "string" } } } } }, { readOnly: false, destructive: true, openWorld: false, idempotent: false }),
+    tool("web_fetch", "Fetch a public http(s) URL (ports 80, 443) from this device's network; private addresses are refused. Returns status, content type and body text up to maxBytes.", { url: { type: "string" }, method: { type: "string", enum: ["GET", "HEAD", "POST"], default: "GET" }, headers: { type: "object", additionalProperties: { type: "string" } }, body: { type: "string" }, maxBytes: intSchema(262144, 1, 1048576), timeoutMs: intSchema(30000, 100, 120000) }, { readOnly: false, destructive: false, openWorld: true, idempotent: false }),
+    tool("process", "Run shell commands as the current OS user, inside the OS sandbox, and refused when this device cannot sandbox them unless the owner turned the sandbox off: credential folders blocked (ask with request_permission), writes limited to workspace and temp, network to HTTP(S) and ssh (the connection needs no approval, but reading ~/.ssh config and keys does: request_permission resource=ssh). action=run waits up to timeoutMs and returns output; start returns an id for longer tasks; read returns output after stdoutCursor/stderrCursor; write sends `input` to stdin; list; stop. concurrency=exclusive for commands that change shared repo, dependency or build state.", { action: { type: "string", enum: ["run", "start", "read", "write", "list", "stop"] }, command: { type: "string" }, cwd: stringSchema("Relative path", "."), timeoutMs: intSchema(30000, 100, 120000), concurrency: { type: "string", enum: ["parallel", "exclusive"], default: "parallel" }, processId: { type: "string" }, stdoutCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), stderrCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), input: { type: "string" } }, { readOnly: false, destructive: true, openWorld: true, idempotent: false }),
   ] }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
@@ -302,7 +304,8 @@ function tool(name: string, description: string, properties: Record<string, unkn
     inputSchema: { type: "object", additionalProperties: false, properties },
     annotations: {
       readOnlyHint: flags.readOnly,
-      destructiveHint: flags.destructive ?? false,
+      destructiveHint: flags.destructive,
+      openWorldHint: flags.openWorld,
       idempotentHint: flags.idempotent ?? flags.readOnly,
     },
   };

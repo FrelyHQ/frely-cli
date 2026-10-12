@@ -123,7 +123,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           npm_tag="$(node -p "require('./package.json').version.includes('-') ? 'next' : 'latest'")"
-          npm publish --access public --tag "$npm_tag"
+          npm publish --access public --provenance --tag "$npm_tag"
 
   github-release:
     needs: [publish, release-assets]

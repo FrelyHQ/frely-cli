@@ -19,5 +19,6 @@ test('one package per release target with the executable and its checksum', () =
   assert.deepEqual([musl.name, musl.version, musl.os, musl.cpu, musl.libc], ['@frelyhq/cli-linux-x64-musl', '1.2.3', ['linux'], ['x64'], ['musl']]);
   const windows = directories.find((d) => d.endsWith('windows-x64'));
   assert.match(readFileSync(join(windows, 'frely.exe.sha256'), 'utf8'), /^[0-9a-f]{64} {2}frely\.exe\n$/u);
+  assert.deepEqual(JSON.parse(readFileSync(join(windows, 'package.json'), 'utf8')).repository, { type: 'git', url: 'git+https://github.com/FrelyHQ/frely-cli.git' });
   assert.throws(() => buildPlatformPackages(artifacts, 'v1', mkdtempSync(join(tmpdir(), 'x-'))), /Invalid version/u);
 });

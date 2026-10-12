@@ -6,6 +6,10 @@ import { afterEach, beforeEach } from "node:test";
 // Preloaded by scripts/test.mjs (node --test --import). Gives every test a private
 // XDG_CONFIG_HOME so state kept under ~/.config/frely (MCP authorization, the workspace
 // registry, ...) can neither leak between tests nor touch the real user profile.
+// Command-execution tests exercise process handling, not the OS sandbox, which fails closed on hosts that cannot run it
+// (Windows, Linux without bubblewrap). sandbox.test.ts sets FRELY_SANDBOX itself where it matters.
+process.env.FRELY_SANDBOX = "off";
+
 let previous: string | undefined;
 let directory: string | undefined;
 

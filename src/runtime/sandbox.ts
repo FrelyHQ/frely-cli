@@ -20,15 +20,17 @@ import { cliLaunchArguments } from "../cli-launch.js";
  *     cloud-metadata addresses, closing a common SSRF-style exfiltration path,
  *     even though outbound domains are otherwise left open by default
  *
- * This is a best-effort layer, not a hard security boundary on every
- * platform: srt requires `bubblewrap` + `socat` on Linux and `ripgrep` on
- * macOS/Linux, and its own README describes it as a beta research preview.
- * By default, when the platform is unsupported or a dependency is missing,
- * we log a one-time warning to stderr and run the command unsandboxed rather
- * than break existing installs. Set `FRELY_SANDBOX_STRICT=1` to instead
- * refuse to run a command that cannot be sandboxed.
+ * srt requires `bubblewrap` + `socat` on Linux and `ripgrep` on macOS/Linux,
+ * and its own README describes it as a beta research preview. The sandbox
+ * fails closed: when the platform is unsupported (for example Windows), a
+ * dependency is missing, initialization fails, or wrapping a command fails,
+ * the command is refused with an error that says why and how to proceed. It
+ * is never silently run unsandboxed. The only ways to run without the sandbox
+ * are the two deliberate opt-outs: the device owner sets `FRELY_SANDBOX=off`,
+ * or the owner approves the `unsandboxed` grant on the web (request_permission).
+ * `FRELY_SANDBOX_STRICT` is still accepted but has no effect: strict is always on.
  *
- * Set `FRELY_SANDBOX=off` to disable this layer entirely (no attempt, no
+ * `FRELY_SANDBOX=off` disables this layer entirely (no attempt, no
  * warning) -- for environments that already provide their own containment,
  * or while diagnosing whether the sandbox itself is the cause of a failure.
  */
@@ -150,7 +152,6 @@ export function sensitiveReadPaths(allowedGroups: readonly string[] = []): strin
   ];
 }
 
-let initialized: Promise<boolean> | undefined;
 let warned = false;
 
 export function isSandboxDisabled(): boolean {
@@ -158,19 +159,22 @@ export function isSandboxDisabled(): boolean {
   return value === "off" || value === "0" || value === "false";
 }
 
+/** Kept for compatibility: the sandbox now always fails closed, so FRELY_SANDBOX_STRICT no longer changes anything. */
 export function isSandboxStrict(): boolean {
-  const value = (process.env.FRELY_SANDBOX_STRICT ?? "").trim().toLowerCase();
-  return value === "1" || value === "true" || value === "on";
+  return true;
 }
 
-/** Best-effort report of the sandbox backend for device capability frames (plan §4.3). */
-export function detectSandboxBackend(): "srt" | "off" | "none" {
+/**
+ * Best-effort report of the sandbox backend for device capability frames (plan §4.3).
+ * "unavailable" means commands are refused here (fail closed); older CLIs reported "none" and ran them unprotected.
+ */
+export function detectSandboxBackend(): "srt" | "off" | "unavailable" {
   if (isSandboxDisabled()) return "off";
   try {
-    if (!SandboxManager.isSupportedPlatform()) return "none";
-    return SandboxManager.checkDependencies().errors.length > 0 ? "none" : "srt";
+    if (!SandboxManager.isSupportedPlatform()) return "unavailable";
+    return SandboxManager.checkDependencies().errors.length > 0 ? "unavailable" : "srt";
   } catch {
-    return "none";
+    return "unavailable";
   }
 }
 
@@ -234,24 +238,40 @@ function warnOnce(message: string): void {
   process.stderr.write(`frely-cli: ${message}\n`);
 }
 
-async function ensureInitialized(workspaceRoot: string): Promise<boolean> {
-  initialized ??= (async () => {
+const errorText = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+/** Plain-words refusal shown to the caller when the sandbox cannot run on this device. */
+export function sandboxUnavailableMessage(reason: string): string {
+  return `The command was not run: the command sandbox cannot run on this device (${reason}), and commands are only run inside the sandbox. `
+    + "To proceed, install the missing sandbox dependencies (on Linux: bubblewrap, socat and ripgrep; Windows is not supported), "
+    + 'or the device owner can turn the sandbox off for this connection (call request_permission with resource "unsandboxed", approved on the web) '
+    + "or set FRELY_SANDBOX=off on the device.";
+}
+
+type Init = { ready: true } | { ready: false; reason: string };
+let initialized: Promise<Init> | undefined;
+
+async function ensureInitialized(workspaceRoot: string): Promise<Init> {
+  initialized ??= (async (): Promise<Init> => {
     if (!SandboxManager.isSupportedPlatform()) {
-      warnOnce("sandboxing is not supported on this platform; run_command and start_process are running unsandboxed. Set FRELY_SANDBOX_STRICT=1 to refuse instead.");
-      return false;
+      const reason = `unsupported platform ${process.platform}`;
+      warnOnce(`sandboxing is not supported on this platform; run_command and start_process are refused. ${reason}.`);
+      return { ready: false, reason };
     }
     const dependencies = SandboxManager.checkDependencies();
     if (dependencies.errors.length > 0) {
-      warnOnce(`sandboxing dependencies are missing (${dependencies.errors.join("; ")}); run_command and start_process are running unsandboxed. Set FRELY_SANDBOX_STRICT=1 to refuse instead.`);
-      return false;
+      const reason = `missing dependencies: ${dependencies.errors.join("; ")}`;
+      warnOnce(`sandboxing dependencies are missing (${dependencies.errors.join("; ")}); run_command and start_process are refused.`);
+      return { ready: false, reason };
     }
     for (const warning of dependencies.warnings) warnOnce(warning);
     try {
       await SandboxManager.initialize(buildSandboxConfig(workspaceRoot));
-      return true;
+      return { ready: true };
     } catch (error) {
-      warnOnce(`sandbox initialization failed (${error instanceof Error ? error.message : String(error)}); run_command and start_process are running unsandboxed. Set FRELY_SANDBOX_STRICT=1 to refuse instead.`);
-      return false;
+      const reason = `sandbox initialization failed: ${errorText(error)}`;
+      warnOnce(`${reason}; run_command and start_process are refused.`);
+      return { ready: false, reason };
     }
   })();
   return initialized;
@@ -259,27 +279,23 @@ async function ensureInitialized(workspaceRoot: string): Promise<boolean> {
 
 /**
  * Wrap a shell command with sandbox restrictions before it is spawned with
- * `shell: true`. Returns the original command unchanged when sandboxing is
- * disabled, unsupported, or a per-call wrap fails and strict mode is off.
- * In strict mode (`FRELY_SANDBOX_STRICT=1`), any of those failures throws
- * instead of silently running the command unsandboxed.
+ * `shell: true`. Fails closed: when the sandbox cannot run (unsupported
+ * platform, missing dependencies, failed initialization or a failed per-call
+ * wrap) this throws instead of running the command unsandboxed. The command
+ * is returned unchanged only when the owner turned the sandbox off
+ * (`FRELY_SANDBOX=off`) or approved the `unsandboxed` grant for this call.
  */
 export async function sandboxCommand(command: string, workspaceRoot: string, allowedGroups: readonly string[] = []): Promise<string> {
   if (isSandboxDisabled()) return command;
   // The owner opened raw outbound connections for this call, which the sandbox cannot offer without losing its other limits.
   if (allowedGroups.includes(UNSANDBOXED_GROUP)) return command;
-  const ready = await ensureInitialized(workspaceRoot);
-  if (!ready) {
-    if (isSandboxStrict()) throw new Error("Sandboxing is unavailable on this host and FRELY_SANDBOX_STRICT is set; refusing to run an unsandboxed command.");
-    return command;
-  }
+  const init = await ensureInitialized(workspaceRoot);
+  if (!init.ready) throw new Error(sandboxUnavailableMessage(init.reason));
   try {
     // initialize() fixed allowWrite to the first workspace that ran a command; give every call its own workspace.
     return await SandboxManager.wrapWithSandbox(sshProxyPrefix() + command, undefined, { filesystem: buildSandboxConfig(workspaceRoot, allowedGroups).filesystem });
   } catch (error) {
-    if (isSandboxStrict()) throw error instanceof Error ? error : new Error(String(error));
-    warnOnce(`failed to sandbox a command (${error instanceof Error ? error.message : String(error)}); it ran unsandboxed this time. Set FRELY_SANDBOX_STRICT=1 to refuse instead.`);
-    return command;
+    throw new Error(sandboxUnavailableMessage(`wrapping the command failed: ${errorText(error)}`));
   }
 }
 

@@ -20,7 +20,7 @@ export function platformPackageName(target) { return `@frelyhq/cli-${target}`; }
 export function buildPlatformPackages(artifacts, version, output) {
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$/u.test(version)) throw new Error(`Invalid version: ${version}`);
   const root = resolve(process.cwd(), 'package.json');
-  const { license, repository, homepage } = JSON.parse(readFileSync(root, 'utf8'));
+  const { license, homepage } = JSON.parse(readFileSync(root, 'utf8'));
   const directories = [];
   for (const [target, platform] of Object.entries(TARGETS)) {
     const windows = target.startsWith('windows');
@@ -36,7 +36,7 @@ export function buildPlatformPackages(artifacts, version, output) {
     writeFileSync(join(directory, 'package.json'), `${JSON.stringify({
       name: platformPackageName(target), version,
       description: `Frely CLI executable for ${target}. Installed by https://frely.cloud/install.sh; not meant to be required.`,
-      license, repository, homepage,
+      license, repository: { type: 'git', url: 'git+https://github.com/FrelyHQ/frely-cli.git' }, homepage,
       os: [platform.os], cpu: [platform.cpu], ...(platform.libc ? { libc: [platform.libc] } : {}),
       files: [binary, `${binary}.sha256`],
       preferUnplugged: true,
@@ -52,6 +52,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const directories = buildPlatformPackages(resolve(artifacts), version, resolve('platform-packages'));
   if (flags.includes('--publish')) {
     const tag = version.includes('-') ? 'next' : 'latest';
-    for (const directory of directories) execFileSync('npm', ['publish', '--access', 'public', '--tag', tag], { cwd: directory, stdio: 'inherit' });
+    for (const directory of directories) execFileSync('npm', ['publish', '--access', 'public', '--provenance', '--tag', tag], { cwd: directory, stdio: 'inherit' });
   } else process.stdout.write(`${directories.join('\n')}\n`);
 }
