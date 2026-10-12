@@ -289,6 +289,8 @@ export async function sandboxCommand(command: string, workspaceRoot: string, all
   if (isSandboxDisabled()) return command;
   // The owner opened raw outbound connections for this call, which the sandbox cannot offer without losing its other limits.
   if (allowedGroups.includes(UNSANDBOXED_GROUP)) return command;
+  const denied = deniedReadReference(command, allowedGroups);
+  if (denied) throw new Error(deniedReadMessage(denied));
   const init = await ensureInitialized(workspaceRoot);
   if (!init.ready) throw new Error(sandboxUnavailableMessage(init.reason));
   try {
@@ -297,6 +299,39 @@ export async function sandboxCommand(command: string, workspaceRoot: string, all
   } catch (error) {
     throw new Error(sandboxUnavailableMessage(`wrapping the command failed: ${errorText(error)}`));
   }
+}
+
+/** The group whose unapproved credential path a command names, or `null` for a path no grant can open. */
+type DeniedRead = { path: string; group: string | null };
+
+/**
+ * A credential path the command names in its text without an approved grant. The sandbox would only show such a folder as empty
+ * (Linux) or fail with a bare "Operation not permitted" (macOS), and a remote client would read that as "the file does not exist".
+ * Text matching only: a script that reads the path itself is still confined by the sandbox, just without this explanation.
+ */
+export function deniedReadReference(command: string, allowedGroups: readonly string[] = []): DeniedRead | undefined {
+  const allowed = new Set(allowedGroups);
+  const candidates: DeniedRead[] = [
+    ...Object.entries(SENSITIVE_PATH_GROUPS).filter(([name]) => !allowed.has(name)).flatMap(([group, paths]) => paths.map((path) => ({ path, group }))),
+    ...(allowed.has("friday-admin") ? [] : ADMIN_SESSION_PATHS.map((path) => ({ path, group: "friday-admin" }))),
+    ...ALWAYS_DENIED_READ_PATHS.map((path) => ({ path, group: null })),
+  ];
+  return candidates.find(({ path }) => commandNamesPath(command, path));
+}
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+
+/** Whether `command` spells out `path` (a `~/` path) as `~/`, `$HOME/`, `${HOME}/` or the absolute home path, followed by a path boundary. */
+function commandNamesPath(command: string, path: string): boolean {
+  const rest = escapeRegExp(path.slice(2));
+  const home = ["~", "\\$HOME", "\\$\\{HOME\\}", escapeRegExp(homedir())].join("|");
+  return new RegExp(`(?:${home})/${rest}(?=$|[/\\s"'\`;&|)<>])`, "u").test(command);
+}
+
+function deniedReadMessage({ path, group }: DeniedRead): string {
+  if (group === null) return `The command was not run: Frely's command sandbox never lets commands read ${path}, and no approval can open it.`;
+  return `The command was not run: no permission to read ${path}. Frely's command sandbox hides credential folders until the device owner approves access. `
+    + `Call request_permission with resource "${group}", the reason and this exact command; it returns a link where the owner approves it with a passkey or authenticator code. Then run the same command again.`;
 }
 
 /**
