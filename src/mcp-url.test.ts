@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import test, { type TestContext } from "node:test";
 import { basicCredentialStore } from "./credential-basic.js";
 import { credentialStore } from "./credential-store.js";
-import { generateMcpKey, inspectMcpMetadata, McpConfigInvalidError, mcpMetadataPath, mcpVerificationUri, setupMcpAuthorization, type McpAuthorizationView } from "./mcp-authorization.js";
+import { generateMcpKey, inspectMcpMetadata, McpConfigInvalidError, mcpMetadataPath, mcpVerificationUri, revokeMcpAuthorization, setupMcpAuthorization, type McpAuthorizationView } from "./mcp-authorization.js";
 import { ensureMcpAuthorization, startMcp } from "./mcp-command.js";
 import { useMemoryCredentialStore } from "./test-support.js";
 
@@ -101,6 +101,34 @@ test("frely mcp sets up an unconfigured device once, then returns the same autho
   assert.deepEqual(f.state.installations, [workspace]);
   assert.deepEqual(f.state.messages, []);
   assert.equal(await readFile(mcpMetadataPath(), "utf8"), metadata);
+});
+
+test("frely mcp start clears an authorization saved for another account and sets up again", async (t) => {
+  const f = await fixture(t);
+  const project = join(f.directory, "project");
+  await mkdir(project);
+  const first = await ensureMcpAuthorization({ workspace: project, notify: f.notify }, f.install);
+  const stored = JSON.parse(await readFile(mcpMetadataPath(), "utf8"));
+  await writeFile(mcpMetadataPath(), JSON.stringify({ ...stored, userId: "user_before_reset" }) + "\n", { mode: 0o600 });
+  f.state.messages.length = 0;
+  const again = await ensureMcpAuthorization({ workspace: project, notify: f.notify }, f.install);
+  assert.equal(f.state.requests, 2);
+  assert.notEqual(again.grant.id, first.grant.id);
+  assert.equal(again.userId, f.userId);
+  assert.match(f.state.messages.join(""), /belongs to a different account\. Cleared it/);
+});
+
+test("frely mcp remove clears an authorization saved for another account without calling the relay", async (t) => {
+  const f = await fixture(t);
+  const project = join(f.directory, "project");
+  await mkdir(project);
+  await ensureMcpAuthorization({ workspace: project, notify: f.notify }, f.install);
+  const stored = JSON.parse(await readFile(mcpMetadataPath(), "utf8"));
+  await writeFile(mcpMetadataPath(), JSON.stringify({ ...stored, userId: "user_before_reset" }) + "\n", { mode: 0o600 });
+  f.state.messages.length = 0;
+  await revokeMcpAuthorization(f.notify);
+  assert.equal(await inspectMcpMetadata(), null);
+  assert.match(f.state.messages.join(""), /belongs to a different account\. Cleared it/);
 });
 
 test("frely mcp start configures once, then only starts the service", async (t) => {

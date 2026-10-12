@@ -1,7 +1,7 @@
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { inspectMcpMetadataOrQuarantine, requireMcpAuthorization, setupMcpAuthorization, type McpAuthorization, type McpMetadata, type McpPreset } from "./mcp-authorization.js";
+import { discardForeignMcpAuthorization, inspectMcpMetadataOrQuarantine, requireMcpAuthorization, setupMcpAuthorization, type McpAuthorization, type McpMetadata, type McpPreset } from "./mcp-authorization.js";
 import { installMcpService, serviceStatus, startMcpService } from "./service.js";
 
 /**
@@ -118,7 +118,7 @@ export async function ensureMcpAuthorization(
   input: McpSetupInput,
   installService: typeof installMcpService = installMcpService,
 ): Promise<McpAuthorization> {
-  const metadata = await inspectMcpMetadataOrQuarantine(input.notify);
+  const metadata = await discardForeignMcpAuthorization(await inspectMcpMetadataOrQuarantine(input.notify), input.notify);
   await checkWorkspace(metadata, input.workspace);
   if (metadata && !grantInactive(metadata) && input.days === undefined) return requireMcpAuthorization();
   return setupMcp(metadata, input, installService);
@@ -138,7 +138,7 @@ export async function startMcp(
   input: McpSetupInput,
   deps: McpStartDeps = { installService: installMcpService, startService: startMcpService, serviceStatus },
 ): Promise<McpAuthorization> {
-  const metadata = await inspectMcpMetadataOrQuarantine(input.notify);
+  const metadata = await discardForeignMcpAuthorization(await inspectMcpMetadataOrQuarantine(input.notify), input.notify);
   await checkWorkspace(metadata, input.workspace);
   if (!metadata || grantInactive(metadata) || input.days !== undefined) return setupMcp(metadata, input, deps.installService);
   const authorization = await requireMcpAuthorization();

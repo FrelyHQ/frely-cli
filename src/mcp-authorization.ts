@@ -84,6 +84,21 @@ export async function clearMcpAuthorization(metadata: McpMetadata): Promise<void
   await unlink(mcpMetadataPath()).catch(() => undefined);
 }
 
+/**
+ * An authorization saved for another account or relay (e.g. before the server was reset and the user signed up again)
+ * can never be used by the signed-in account. Clears it, and the device registration it came with, and returns null
+ * so the caller sets up again instead of failing with "belongs to a different account" forever.
+ */
+export async function discardForeignMcpAuthorization(metadata: McpMetadata | null, notify: (message: string) => void): Promise<McpMetadata | null> {
+  if (!metadata) return null;
+  const auth = await requireLogin();
+  if (metadata.relayUrl === auth.config.relayUrl && metadata.userId === auth.user.id) return metadata;
+  await clearMcpAuthorization(metadata);
+  await resetDeviceRegistration();
+  notify("The saved MCP authorization belongs to a different account. Cleared it.\n");
+  return null;
+}
+
 export async function loadMcpAuthorization(): Promise<McpAuthorization | null> {
   const metadata = await inspectMcpMetadata();
   if (!metadata) return null;
@@ -192,10 +207,10 @@ export async function setupMcpAuthorization(workspaceInput: string, daysInput?: 
 }
 
 export async function revokeMcpAuthorization(notify: (message: string) => void = () => undefined): Promise<void> {
-  const metadata = await inspectMcpMetadataOrQuarantine(notify);
+  // An authorization of another account cannot be revoked from this login; it is cleared locally instead.
+  const metadata = await discardForeignMcpAuthorization(await inspectMcpMetadataOrQuarantine(notify), notify);
   if (!metadata) return;
   const auth = await requireLogin();
-  if (metadata.relayUrl !== auth.config.relayUrl || metadata.userId !== auth.user.id) throw new Error("MCP authorization belongs to another account.");
   const response = await relayFetch(auth.config.relayUrl, auth.credential, ENDPOINT, { method: "POST", body: JSON.stringify({ action: "revoke", requestId: metadata.grant.id }) });
   if (!response.ok) throw new Error("Remote MCP revocation was not confirmed.");
   // Retain metadata on cleanup failure so status/cleanup remain possible.
