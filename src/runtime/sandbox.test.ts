@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSandboxConfig, detectSandboxBackend, isSandboxDisabled, PATH_GRANTS_META_KEY, pathGrantsFromMeta, protectedWriteDenials, sandboxDenialHint, sensitiveReadPaths } from "./sandbox.js";
+import { buildSandboxConfig, deniedReadReference, detectSandboxBackend, isSandboxDisabled, PATH_GRANTS_META_KEY, pathGrantsFromMeta, protectedWriteDenials, sandboxDenialHint, sensitiveReadPaths } from "./sandbox.js";
 
 test("sandbox backend detection reports off when disabled and never throws", () => {
   const previous = process.env.FRELY_SANDBOX;
@@ -169,4 +169,15 @@ test("the sandbox fails closed: the refusal explains the reason and the ways for
     if (previous.strict === undefined) delete process.env.FRELY_SANDBOX_STRICT; else process.env.FRELY_SANDBOX_STRICT = previous.strict;
     await resetSandboxForTests();
   }
+});
+
+test("deniedReadReference names an unapproved credential path spelled in the command", () => {
+  const home = homedir();
+  assert.deepEqual(deniedReadReference("ls -la ~/.ssh"), { path: "~/.ssh", group: "ssh" });
+  assert.deepEqual(deniedReadReference("cat $HOME/.ssh/id_rsa | head -2"), { path: "~/.ssh", group: "ssh" });
+  assert.deepEqual(deniedReadReference(`cat "${home}/.aws/credentials"`), { path: "~/.aws", group: "aws" });
+  assert.deepEqual(deniedReadReference("cat ${HOME}/.config/frely/config.json"), { path: "~/.config/frely", group: null });
+  assert.equal(deniedReadReference("ls -la ~/.ssh", ["ssh"]), undefined);
+  assert.equal(deniedReadReference("ls ~/.sshx ~/projects"), undefined);
+  assert.equal(deniedReadReference("ssh ctb.example.com uptime"), undefined);
 });
