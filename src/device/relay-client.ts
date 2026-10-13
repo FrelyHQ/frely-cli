@@ -1,9 +1,9 @@
 import { watchServiceInstallation } from "../update/service-refresh.js";
 import { MaintenanceGate, serveMaintenance } from "../update/maintenance.js";
-import { requireMcpAuthorization } from "../mcp-authorization.js";
+import { isDefinitiveAuthorizationFailure, requireLocalMcpAuthorization, requireMcpAuthorization } from "../mcp-authorization.js";
 import { McpLease } from "../runtime/mcp-lease.js";
 import WebSocket, { type RawData } from "ws";
-import { connectionGrant, ensureDevice } from "./control.js";
+import { connectionGrant, directConnectionGrant, ensureDevice, storedDevice, type ConnectionGrant } from "./control.js";
 import { nextDeviceTransportKind, selectDeviceTransport, type DeviceTransportGrant, type DeviceTransportKind } from "./transport.js";
 import { connectionReporter, type ConnectionEvent } from "./connection-status.js";
 import { randomBytes } from "node:crypto";
@@ -52,7 +52,8 @@ interface InflightRequest {
 export async function serveDeviceRelay(options: RelayServeOptions): Promise<void> {
   const log = options.log ?? (() => undefined);
   diagnostic(log, "relay.started");
-  const device = await ensureDevice();
+  // A machine that is already enrolled starts without the web app; the checks run in the background.
+  const device = await storedDevice() ?? await ensureDevice();
   const reporter = connectionReporter(device, options.workspace);
   const maintenance = options.managedService && process.platform !== "win32" ? new MaintenanceGate() : undefined;
   const closeMaintenance = maintenance ? await serveMaintenance(maintenance) : undefined;
@@ -85,7 +86,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
           }
         } else if (options.workspace) {
           try {
-            authorization = await requireMcpAuthorization(options.workspace);
+            authorization = await requireLocalMcpAuthorization(options.workspace);
             if (authorization.grant.deviceId !== device.deviceId) throw new Error("MCP device differs from the connected device.");
             lease = new McpLease(authorization.grant.id, Date.parse(authorization.grant.expiresAt!));
             const guard = lease;
@@ -105,7 +106,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
             session = null; lease = null;
           }
         }
-        const grant = await connectionGrant(device, authorization ? { authorizationId: authorization.grant.id, sign: authorization.sign } : undefined);
+        const grant = await obtainGrant(device, authorization, lease, options.workspace, log);
         transports = grant.transports;
         selectedTransport = selectDeviceTransport(transports, preferredTransport);
         const isFallback = preferredTransport !== undefined && selectedTransport.kind === preferredTransport;
@@ -407,4 +408,30 @@ async function wait(ms: number, signal: AbortSignal): Promise<void> {
     function done() { clearTimeout(timer); signal.removeEventListener("abort", onAbort); resolve(); }
     signal.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+/**
+ * Direct to Device Relay first, so a web app outage does not stop reconnecting. A relay that predates the
+ * direct endpoint (404/405) gets the previous flow: login and authorization checked up front, grant via the web app.
+ * With the direct grant the same checks run in the background and stop the session only on a definitive answer.
+ */
+async function obtainGrant(
+  device: Awaited<ReturnType<typeof ensureDevice>>,
+  authorization: Awaited<ReturnType<typeof requireLocalMcpAuthorization>> | null,
+  lease: McpLease | null,
+  workspace: string | undefined,
+  log: (message: string) => void,
+): Promise<ConnectionGrant> {
+  if (authorization) {
+    const direct = await directConnectionGrant(device, { authorizationId: authorization.grant.id, mcpResource: authorization.mcpResource, sign: authorization.sign });
+    if (direct) {
+      void requireMcpAuthorization(workspace).then(() => undefined, (error: unknown) => {
+        diagnostic(log, "relay.background_check_failed", {}, error);
+        if (isDefinitiveAuthorizationFailure(error)) lease?.close();
+      });
+      return direct;
+    }
+    await requireMcpAuthorization(workspace);
+  }
+  return await connectionGrant(device, authorization ? { authorizationId: authorization.grant.id, sign: authorization.sign } : undefined);
 }
