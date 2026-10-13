@@ -26,6 +26,25 @@ double. This keeps tests reproducible on machines without an interactive
 Keychain or Secret Service. Use `frely doctor` separately when validating the
 native OS credential store.
 
+### Install from a local checkout
+
+To try the current source as the `frely` command with Bun:
+
+```sh
+bun install
+bun run build
+bun install --global "$PWD"
+```
+
+Use the absolute `$PWD` path. If `frely` is not found, add the Bun global bin
+to your `PATH`: `export PATH="$(bun pm bin -g):$PATH"`.
+
+npm is the canonical package manager for CI and releases and
+`package-lock.json` is committed; Bun is for local development. Dependency
+installation supports `npm ci --ignore-scripts` and
+`bun install --ignore-scripts`. Keep both lockfiles in sync when changing
+dependencies.
+
 ## Pull requests
 
 - Keep changes focused and explain user-visible or protocol changes.
