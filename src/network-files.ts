@@ -45,7 +45,7 @@ async function atomicWrite(path: string, value: string): Promise<void> {
 }
 export class NetworkFiles {
   readonly directory: string;
-  constructor(private readonly home: string) { this.directory = join(home, ".config", "frely", "network"); }
+  constructor(private readonly home: string, configRoot?: string) { this.directory = join(configRoot ?? join(home, ".config"), "frely", "network"); }
   async readConfig(): Promise<NetworkConfig | null> {
     const text = await readOwnedFile(join(this.directory, "config.json"), 4096);
     if (text === null) return null;

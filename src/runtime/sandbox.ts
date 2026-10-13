@@ -92,7 +92,7 @@ export const PROTECTED_PATHS: readonly string[] = [
   "~/.cargo/credentials.toml", "~/Library/Application Support/gcloud",
 ];
 /** Frely's own device credentials: never writable by a grant, not even an exact one. */
-const NEVER_WRITABLE_PATHS: readonly string[] = ["~/.config/frely"];
+const neverWritablePaths = (): string[] => ["~/.config/frely", ...(process.env.FRELY_DATA_DIR ? [process.env.FRELY_DATA_DIR] : [])];
 /** Longest path after `path:`. Keep equal to the relay's `PATH_GRANT_CUSTOM_PATH_MAX` (device-relay path-grants.ts) so both ends accept the same paths. */
 const CUSTOM_PATH_MAX = 150;
 
@@ -112,7 +112,7 @@ export function customWritePath(name: string): string | undefined {
   // Any absolute directory, but never the filesystem root or the system drive root. The root of another Windows drive (`D:\`) is allowed.
   if (path === "") return undefined;
   if (isRoot && (!/^[A-Za-z]:[\\/]$/u.test(root) || root.toLowerCase() === `${process.env.SystemDrive ?? "C:"}\\`.toLowerCase())) return undefined;
-  if (NEVER_WRITABLE_PATHS.some((never) => within(path, expanded(never)))) return undefined;
+  if (neverWritablePaths().some((never) => within(path, expanded(never)))) return undefined;
   // Inside a protected path only that path itself can be named; the grant must spell it out in full.
   if (PROTECTED_PATHS.some((protectedPath) => path !== expanded(protectedPath) && within(path, expanded(protectedPath)))) return undefined;
   return path;
@@ -122,7 +122,7 @@ export function customWritePath(name: string): string | undefined {
 export function protectedWriteDenials(allowedGroups: readonly string[]): string[] {
   const granted = new Set(allowedGroups.flatMap((name) => customWritePath(name) ?? []));
   const adminOpen = allowedGroups.includes("friday-admin");
-  return [...PROTECTED_PATHS.filter((protectedPath) => !granted.has(expanded(protectedPath))), ...(adminOpen ? [] : ADMIN_SESSION_PATHS), ...NEVER_WRITABLE_PATHS];
+  return [...PROTECTED_PATHS.filter((protectedPath) => !granted.has(expanded(protectedPath))), ...(adminOpen ? [] : ADMIN_SESSION_PATHS), ...neverWritablePaths()];
 }
 
 /** Whether `name` is a grant name this CLI understands. */
@@ -131,7 +131,7 @@ export function isKnownGrantName(name: string): boolean {
 }
 
 /** Never openable by a grant. Frely's own device credentials and local MCP list (which can hold headers and env values): a remote client running commands must not read them back. */
-const ALWAYS_DENIED_READ_PATHS = ["~/.docker/config.json", "~/.config/frely"];
+const alwaysDeniedReadPaths = (): string[] => ["~/.docker/config.json", "~/.config/frely", ...(process.env.FRELY_DATA_DIR ? [process.env.FRELY_DATA_DIR] : [])];
 
 /** Request `_meta` key the relay sets on a tools/call with the approved group names; the relay overwrites anything a client sent. */
 export const PATH_GRANTS_META_KEY = "frely/pathGrants";
@@ -148,7 +148,7 @@ export function sensitiveReadPaths(allowedGroups: readonly string[] = []): strin
   return [
     ...Object.entries(SENSITIVE_PATH_GROUPS).filter(([name]) => !allowed.has(name)).flatMap(([, paths]) => paths),
     ...(allowed.has("friday-admin") ? [] : ADMIN_SESSION_PATHS),
-    ...ALWAYS_DENIED_READ_PATHS,
+    ...alwaysDeniedReadPaths(),
   ];
 }
 
@@ -314,7 +314,7 @@ export function deniedReadReference(command: string, allowedGroups: readonly str
   const candidates: DeniedRead[] = [
     ...Object.entries(SENSITIVE_PATH_GROUPS).filter(([name]) => !allowed.has(name)).flatMap(([group, paths]) => paths.map((path) => ({ path, group }))),
     ...(allowed.has("friday-admin") ? [] : ADMIN_SESSION_PATHS.map((path) => ({ path, group: "friday-admin" }))),
-    ...ALWAYS_DENIED_READ_PATHS.map((path) => ({ path, group: null })),
+    ...alwaysDeniedReadPaths().map((path) => ({ path, group: null })),
   ];
   return candidates.find(({ path }) => commandNamesPath(command, path));
 }
