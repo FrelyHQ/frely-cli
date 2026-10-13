@@ -10,10 +10,15 @@ const execFile = promisify(execFileCallback);
 const LABEL = "cloud.frely.cli-mcp";
 export interface McpServiceInfo { installed: boolean; active: boolean; platform: string; workspace?: string; definitionPath?: string; pid?: number }
 
+/** Development data directories (`--data-dir`) never register OS services: the launchd/systemd names are shared by the whole machine. */
+const noService = (): McpServiceInfo | null => process.env.FRELY_DATA_DIR ? { installed: false, active: false, platform: process.platform } : null;
+
 export async function installMcpService(workspaceInput: string): Promise<McpServiceInfo> {
   return installDeviceRelayService(workspaceInput);
 }
 export async function installDeviceRelayService(workspaceInput?: string): Promise<McpServiceInfo> {
+  const skipped = noService();
+  if (skipped) return skipped;
   const existing = await readServiceConfig();
   const workspace = workspaceInput ? await realpath(resolve(workspaceInput)) : existing?.workspace;
   const entry = IS_STANDALONE ? process.execPath : await realpath(process.argv[1] ?? "");
@@ -40,6 +45,8 @@ export async function installDeviceRelayService(workspaceInput?: string): Promis
   return serviceStatus();
 }
 export async function startMcpService(): Promise<McpServiceInfo> {
+  const skipped = noService();
+  if (skipped) return skipped;
   if (process.platform === "darwin") {
     const domain = `gui/${process.getuid?.() ?? 0}`;
     await execFile("launchctl", ["bootstrap", domain, launchAgentPath()]).catch(async () => {
@@ -51,6 +58,8 @@ export async function startMcpService(): Promise<McpServiceInfo> {
   return serviceStatus();
 }
 export async function stopMcpService(): Promise<McpServiceInfo> {
+  const skipped = noService();
+  if (skipped) return skipped;
   if (process.platform === "darwin") await execFile("launchctl", ["bootout", `gui/${process.getuid?.() ?? 0}`, launchAgentPath()]).catch(() => undefined);
   else if (process.platform === "linux") await execFile("systemctl", ["--user", "stop", "frely-mcp.service"]);
   else if (process.platform === "win32") await windowsService("stop");
@@ -58,6 +67,7 @@ export async function stopMcpService(): Promise<McpServiceInfo> {
   return serviceStatus();
 }
 export async function uninstallMcpService(): Promise<void> {
+  if (noService()) return;
   if (process.platform === "win32") await windowsService("uninstall");
   else {
     await stopMcpService();
@@ -71,6 +81,8 @@ export async function uninstallMcpService(): Promise<void> {
   await rm(serviceConfigPath(), { force: true });
 }
 export async function serviceStatus(): Promise<McpServiceInfo> {
+  const skipped = noService();
+  if (skipped) return skipped;
   const config = await readServiceConfig();
   const common = { platform: process.platform, ...(config?.workspace ? { workspace: config.workspace } : {}) };
   if (process.platform === "win32") return { ...common, ...await windowsService("status") };

@@ -50,7 +50,8 @@ export function createSystemCredentialStore(root: string, native: CredentialStor
       }
       // Preserve old keytar credentials, including enrolled device keys. An OS error
       // propagates instead of being interpreted as a missing device identity.
-      return native.getPassword(service, account);
+      // A custom data directory never inherits entries from the shared OS vault.
+      return process.env.FRELY_DATA_DIR ? null : native.getPassword(service, account);
     },
     async setPassword(service, account, password) {
       const key = await masterKey(true);
@@ -60,11 +61,11 @@ export function createSystemCredentialStore(root: string, native: CredentialStor
       if (await files.getPassword(service, account) !== password) throw new Error("Credential vault readback failed.");
       // Persist the replacement before removing a legacy entry. Deletion failures
       // remain errors, and logout retries both stores so old tokens cannot reappear.
-      await native.deletePassword(service, account);
+      if (!process.env.FRELY_DATA_DIR) await native.deletePassword(service, account);
     },
     async deletePassword(service, account) {
       const key = await masterKey(false);
-      const legacyDeleted = await native.deletePassword(service, account);
+      const legacyDeleted = process.env.FRELY_DATA_DIR ? false : await native.deletePassword(service, account);
       const fileDeleted = key === null ? false : await createEncryptedCredentialStore(root, key).deletePassword(service, account);
       return legacyDeleted || fileDeleted;
     },

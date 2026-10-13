@@ -32,7 +32,7 @@ export async function runNetwork(args: string[], deps: NetworkDeps = {}): Promis
   const task = flags["--task"] ?? (cap ? `Assess ${cap} using the supplied target and source evidence.` : "");
   if (command === "use" && (!task.trim() || task.length > 4000)) throw new NetworkError("TASK_INVALID");
   if (Number(process.versions.node.split(".")[0]) < 22) throw new NetworkError("NODE_VERSION_UNSUPPORTED");
-  const files = new NetworkFiles(deps.home ?? homedir());
+  const files = new NetworkFiles(deps.home ?? homedir(), deps.home ? undefined : process.env.FRELY_DATA_DIR ? process.env.XDG_CONFIG_HOME : undefined);
   let unlock: (() => Promise<void>) | undefined;
   try {
     unlock = await files.lock();

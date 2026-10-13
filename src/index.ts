@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { applyDataDir, activeDataDir } from "./data-dir.js";
 import { update } from "./update/update.js";
 import { requireMcpAuthorization, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, generateMcpKey, parseMcpDays, MCP_DEFAULT_DAYS } from "./mcp-authorization.js";
 import { realpath } from "node:fs/promises";
@@ -46,7 +47,7 @@ import { runUninstall } from "./uninstall.js";
 const DEFAULT_EMAIL_LOGIN_MCP_DAYS = MCP_DEFAULT_DAYS;
 
 async function main(): Promise<void> {
-  const args = normalizeMcpArgs(process.argv.slice(2));
+  const args = normalizeMcpArgs(applyDataDir(process.argv.slice(2)));
   const command = args[0];
   if (command === "update") {
     if (args.length !== 1) throw new Error("Usage: frely update. Version checks are available in frely doctor.");
@@ -461,6 +462,7 @@ async function main(): Promise<void> {
       process.stderr.write(`Logged in as ${user.email}.\n`);
     });
     const authorization = await startMcp({ ...(workspace ? { workspace } : {}), ...(days ? { days } : {}), notify: (message) => { process.stderr.write(message); } });
+    if (activeDataDir()) process.stderr.write(`No background service with --data-dir. Keep the device online with: frely --data-dir ${activeDataDir()} mcp serve\n`);
     const value = { deviceId: authorization.grant.deviceId, mcpUrl: authorization.mcpUrl, transport: "http", authentication: "oauth", workspace: authorization.grant.workspace, expiresAt: authorization.grant.expiresAt };
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
     else stdout.write(`${authorization.mcpUrl}\n`);
