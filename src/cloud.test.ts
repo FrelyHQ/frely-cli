@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cloudClientMetadata, cloudClientName, permissionHint } from "./cloud.js";
+import { cloudClientMetadata, cloudClientName, failureCause, formatApiList, permissionHint } from "./cloud.js";
 
 test("the Cloud client name carries a sanitized host so devices are told apart", () => {
   assert.equal(cloudClientName("mac-mini.local"), "Frely CLI Cloud (mac-mini.local)");
@@ -40,4 +40,31 @@ test("the Cloud client registers as a native app so its http loopback callback i
   assert.deepEqual(metadata.redirect_uris, ["http://127.0.0.1:43125/callback"]);
   assert.equal(metadata.client_name, "Frely CLI Cloud (mac-mini.local)");
   assert.equal(metadata.token_endpoint_auth_method, "none");
+});
+
+test("the tool list is grouped by name prefix with the server's group summary and a one-line entry per tool", () => {
+  const text = formatApiList([
+    { name: "keys.revoke", description: "Revoke an API key. It stops working at once.", annotations: { destructiveHint: true }, _meta: { "frely/groupSummary": "Your API keys." } },
+    { name: "keys.list", description: "List your API keys.\nPaged.", annotations: { readOnlyHint: true }, _meta: { "frely/groupSummary": "Your API keys." } },
+    { name: "usage.summary", description: "Usage totals", annotations: { readOnlyHint: true } },
+    { name: "keys.create", description: "Create an API key." },
+  ]);
+  assert.equal(text, [
+    "keys — Your API keys.",
+    "  keys.revoke [destructive] Revoke an API key.",
+    "  keys.list [read] List your API keys.",
+    "  keys.create [write] Create an API key.",
+    "",
+    "usage",
+    "  usage.summary [read] Usage totals",
+    "",
+    "Details: frely api describe <tool>   Full JSON: frely api list --json",
+    "",
+  ].join("\n"));
+});
+
+test("a connection failure keeps its real cause on one line of at most 200 characters", () => {
+  assert.equal(failureCause(new Error("web clients require\nhttps   redirect URIs")), ": web clients require https redirect URIs");
+  assert.equal(failureCause(new Error("x".repeat(500))).length, 2 + 200);
+  assert.equal(failureCause(undefined), "");
 });
