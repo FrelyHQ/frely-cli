@@ -30,6 +30,8 @@ curl -fsSL https://frely.cloud/start.sh | sh
 curl.exe -fsSLo "$env:TEMP\frely-start.ps1" https://frely.cloud/start.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-start.ps1"
 ```
 
+没有浏览器的服务器：向 Claude（FrelyMCP `list_devices`）或 Frely 控制台要一行安装命令。命令带有 `FRELY_INSTALL_TOKEN`（一次性，15 分钟内有效），会把这台电脑登录到你的账号、启用设备 MCP 并启动后台服务，不需要浏览器，也不会提问。令牌不会保存；如果这台电脑已经登录，令牌不会被使用。Linux 上后台服务需要 systemd 用户实例，并需开启 lingering（`sudo loginctl enable-linger $USER`），退出登录后才能保持在线。
+
 `install.sh` / `install.ps1`（同一域名）只安装，供 Agent、脚本和 Skill 引用。安装器选择平台可执行文件、校验 SHA-256 并安装到用户目录，不需要 Node.js、npm 或 keyring。
 
 下载先走 GitHub Releases；连不上、过慢（20 秒内低于 50 KB/s）或校验失败时，改从同一构建的 npm 包 `@frelyhq/cli-<平台>` 下载，依次尝试 npmmirror（中国大陆可用）和 npmjs。每个来源都用自己的 `.sha256` 校验。`FRELY_INSTALL_SOURCES` 可缩减或调整顺序（`github npmmirror npmjs`）。`frely update` 使用同一条链路。

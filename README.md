@@ -30,6 +30,8 @@ curl -fsSL https://frely.cloud/start.sh | sh
 curl.exe -fsSLo "$env:TEMP\frely-start.ps1" https://frely.cloud/start.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-start.ps1"
 ```
 
+For a server without a browser, ask Claude (FrelyMCP `list_devices`) or the Frely console for a one-line install command. It carries `FRELY_INSTALL_TOKEN`, a one-time token valid for 15 minutes, and signs this computer in to your account, enables Device MCP and starts the background service with no browser and no prompts. The token is not stored; if the computer is already signed in, the token is left unused. On Linux the service needs a systemd user manager and lingering (`sudo loginctl enable-linger $USER`) to stay online after you log out.
+
 `install.sh` / `install.ps1` (same URLs) only install, for agents, scripts and Skills that need the CLI. The installers select the platform executable, verify its SHA-256 checksum and install into the user directory without Node.js, npm or a keyring.
 
 Downloads try GitHub Releases first. When GitHub is unreachable, stalls (under 50 KB/s for 20 s) or fails verification, they fall back to the same build published as the npm package `@frelyhq/cli-<platform>`, downloaded from npmmirror (reachable from mainland China) and then npmjs. Each source is verified against its own `.sha256`. `FRELY_INSTALL_SOURCES` narrows or reorders the list (`github npmmirror npmjs`). `frely update` uses the same chain.

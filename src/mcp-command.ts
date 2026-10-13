@@ -1,7 +1,8 @@
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { discardForeignMcpAuthorization, inspectMcpMetadataOrQuarantine, requireMcpAuthorization, setupMcpAuthorization, type McpAuthorization, type McpMetadata, type McpPreset } from "./mcp-authorization.js";
+import { finishDeviceLogin, localDeviceId, loginDevice, readConfig, redeemInstallToken, requireLogin } from "./auth.js";
+import { discardForeignMcpAuthorization, generateMcpKey, inspectMcpMetadata, inspectMcpMetadataOrQuarantine, MCP_DEFAULT_DAYS, parseMcpDays, requireMcpAuthorization, setupMcpAuthorization, type McpAuthorization, type McpMetadata, type McpPreset } from "./mcp-authorization.js";
 import { installMcpService, serviceStatus, startMcpService } from "./service.js";
 
 /**
@@ -149,4 +150,67 @@ export async function startMcp(
     input.notify(`Background service: ${service.active ? "running" : "not active"}\n`);
   }
   return authorization;
+}
+
+/**
+ * Read the pre-login install token and remove it from the environment at once, so the
+ * background service and every other child process never inherit it.
+ */
+export function takeInstallToken(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const value = env.FRELY_INSTALL_TOKEN?.trim();
+  delete env.FRELY_INSTALL_TOKEN;
+  return value || undefined;
+}
+
+export interface McpStartLoginDeps {
+  requireLogin: typeof requireLogin;
+  loginDevice: typeof loginDevice;
+  redeemInstallToken: typeof redeemInstallToken;
+  finishDeviceLogin: typeof finishDeviceLogin;
+  readConfig: typeof readConfig;
+}
+
+type McpStartLoginInput = { installToken?: string; workspace?: string; days?: string; notify: (message: string) => void };
+
+/**
+ * Sign in for `frely mcp start` when needed. With an install token the server approves this CLI's own
+ * device code and preapproves device MCP: no browser and no prompt. An existing valid login always wins;
+ * the token is then left unused, so an account is never switched silently.
+ * Returns the MCP setup overrides that go with a preapproval.
+ */
+export async function mcpStartLogin(
+  input: McpStartLoginInput,
+  deps: McpStartLoginDeps = { requireLogin, loginDevice, redeemInstallToken, finishDeviceLogin, readConfig },
+): Promise<{ workspace?: string; days?: string; preset?: McpPreset }> {
+  const signedIn = await deps.requireLogin().then((auth) => auth.user, (error: unknown) => {
+    if (!(error instanceof Error && /Run `frely login`/u.test(error.message))) throw error;
+    return null;
+  });
+  if (signedIn) {
+    if (input.installToken) input.notify(`The install token was not used: this computer is already signed in to Frely as ${signedIn.email}. If that is not the account you meant, run \`frely logout\` and run the install command again.\n`);
+    return {};
+  }
+  if (!input.installToken) {
+    // MCP authorization needs an account: sign in first (the browser page also creates new accounts).
+    const { user } = await deps.loginDevice(undefined, ({ verificationUri, userCode }) => {
+      input.notify(`Sign in to Frely (new accounts can register on the same page):\n${verificationUri}\nDevice code: ${userCode}\nWaiting for approval...\n`);
+    });
+    input.notify(`Logged in as ${user.email}.\n`);
+    return {};
+  }
+  // The preapproval is bound to the workspace: keep the one an earlier setup on this computer used.
+  const earlier = input.workspace ? null : await inspectMcpMetadata().catch(() => null);
+  const workspace = await realpath(resolve(input.workspace || earlier?.grant.workspace || homedir()));
+  const days = parseMcpDays(input.days ?? process.env.FRELY_MCP_DAYS ?? MCP_DEFAULT_DAYS);
+  const mcp = { ...generateMcpKey(), workspace, days };
+  const previous = await deps.readConfig().catch(() => null);
+  const redeemed = await deps.redeemInstallToken(undefined, input.installToken, mcp);
+  const { user } = await deps.finishDeviceLogin(redeemed.relayUrl, redeemed.device, localDeviceId(previous?.deviceId));
+  input.notify(`Signed in to Frely as ${user.email} with the install command.\n`);
+  if (previous && previous.user.email !== user.email) input.notify(`This replaces the earlier sign-in of ${previous.user.email} on this computer, which was no longer valid.\n`);
+  if (!redeemed.mcpPreapproval) {
+    input.notify("Frely did not preapprove device MCP for this install command; open the approval link below in a browser signed in to Frely.\n");
+    return { workspace, days: String(days) };
+  }
+  return { workspace, days: String(days), preset: { privateKeyPem: mcp.privateKeyPem, preapproval: redeemed.mcpPreapproval } };
 }

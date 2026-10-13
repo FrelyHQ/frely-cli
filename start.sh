@@ -4,6 +4,11 @@
 # Safe to re-run: it updates to the latest version and restarts the MCP background service on the new binary.
 set -eu
 
+# A pre-login install command passes FRELY_INSTALL_TOKEN (one-time). Only `frely mcp start` gets it;
+# it is unset for the old binary and the installer.
+install_token="${FRELY_INSTALL_TOKEN:-}"
+unset FRELY_INSTALL_TOKEN
+
 install_dir="${FRELY_INSTALL_DIR:-$HOME/.local/bin}"
 
 # Stop a running background service before replacing the binary, so the restart below runs the new version.
@@ -33,6 +38,7 @@ fi
 frely="$install_dir/frely"
 [ -x "$frely" ] || fail "Frely was not installed at $frely."
 
+if [ -n "$install_token" ]; then FRELY_INSTALL_TOKEN="$install_token"; export FRELY_INSTALL_TOKEN; fi
 # Default workspace: the home directory (credential and start-up files stay protected); FRELY_WORKSPACE picks another.
 if [ -n "${FRELY_WORKSPACE:-}" ]; then exec "$frely" mcp start --workspace "$FRELY_WORKSPACE" </dev/null
 else exec "$frely" mcp start </dev/null; fi
