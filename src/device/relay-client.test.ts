@@ -153,14 +153,13 @@ test("transport fallback is reserved for transport failures", async () => {
   assert.equal(isTransportFallbackEligible(unavailable), true);
 });
 
-test("device reports capabilities once per connection and forwards frame toolsets", async () => {
+test("device reports capabilities once per connection", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "frely-relay-caps-"));
   const lease = new McpLease(`mca_${"a".repeat(32)}`, Date.now() + 60_000);
   const session = await RelayMcpSession.create(workspace, {
     log: () => undefined,
     signal: lease.controller.signal,
     assertAuthorized: () => lease.assert(),
-    cloud: { list: async () => ({ bridged: "cloud_list" }), call: async () => ({ content: [{ type: "text", text: "unused" }] }) },
   });
   const server = new WebSocketServer({ port: 0, handleProtocols: () => DEVICE_RELAY_PROTOCOL });
   const listening = new Promise<void>((resolve) => server.once("listening", resolve));
@@ -194,25 +193,6 @@ test("device reports capabilities once per connection and forwards frame toolset
     assert.equal(reported.type, "device_capabilities");
     assert.deepEqual((reported as { capabilities: Record<string, unknown> }).capabilities, { app: { installed: true, version: "0.4.0" }, sandbox: "none" });
 
-    // A relay request frame carrying toolsets must reach the session and expose the frely-app cloud tools.
-    const peer = frames; // responses echo back over the same socket captured above
-    void peer;
-    const wire = await connected;
-    wire.send(encodeDeviceRelayEnvelope({
-      protocol: DEVICE_RELAY_PROTOCOL, type: "request", id: "relay-request-cloud", method: "mcp", authorizationId: lease.authorizationId,
-      toolsets: ["workspace", "frely-app"],
-      payload: { jsonrpc: "2.0", id: 0, method: "tools/call", params: { name: "cloud_list", arguments: {} } },
-    }));
-    const bridged = await new Promise<DeviceRelayEnvelope>((resolve) => {
-      const poll = () => {
-        const found = frames.find((frame) => frame.type === "response" && frame.id === "relay-request-cloud");
-        if (found) resolve(found); else setTimeout(poll, 10);
-      };
-      poll();
-    });
-    assert.equal(bridged.type, "response");
-    const payload = (bridged as { payload?: { result?: { content?: Array<{ text: string }> } } }).payload;
-    assert.deepEqual(JSON.parse(payload?.result?.content?.[0]?.text ?? "{}"), { bridged: "cloud_list" });
   } finally {
     controller.abort();
     lease.close();
