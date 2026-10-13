@@ -71,9 +71,24 @@ test("an install token signs in without a browser and preapproves device MCP", a
   assert.match(messages.join(""), /Signed in to Frely as user@example\.com/);
 });
 
-test("an existing login is kept and the install token is never redeemed", async () => {
+test("an install token replaces an existing login", async (t) => {
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "frely-install-token-")));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  const calls = useSyntheticRelay(t, () => Response.json({ state: "signed_in", user: { id: "user_test", email: "user@example.com" }, mcpPreapproval: "synthetic-preapproval" }));
   const messages: string[] = [];
-  const result = await mcpStartLogin({ installToken: TOKEN, notify: (message) => { messages.push(message); } }, {
+  const result = await mcpStartLogin({ installToken: TOKEN, workspace, notify: (message) => { messages.push(message); } }, {
+    requireLogin: async () => ({ config: { relayUrl: "https://test.invalid" }, user: { id: "user_a", email: "a@example.com" }, credential: { scheme: "bearer", value: "synthetic" } }),
+    loginDevice: noBrowser, redeemInstallToken, finishDeviceLogin,
+    readConfig: async () => ({ relayUrl: "https://test.invalid", user: { id: "user_a", email: "a@example.com" } }) as Awaited<ReturnType<typeof readConfig>>,
+  });
+  assert.ok(calls.includes("/api/auth/device/install/redeem"));
+  assert.equal(result.preset?.preapproval, "synthetic-preapproval");
+  assert.equal((await readConfig()).user.email, "user@example.com");
+  assert.match(messages.join(""), /replaces the earlier sign-in of a@example\.com/);
+});
+
+test("without an install token an existing login is kept", async () => {
+  const result = await mcpStartLogin({ notify: () => {} }, {
     requireLogin: async () => ({ config: { relayUrl: "https://test.invalid" }, user: { id: "user_a", email: "a@example.com" }, credential: { scheme: "bearer", value: "synthetic" } }),
     loginDevice: noBrowser,
     redeemInstallToken: async () => { throw new Error("must not redeem"); },
@@ -81,7 +96,6 @@ test("an existing login is kept and the install token is never redeemed", async 
     readConfig,
   });
   assert.deepEqual(result, {});
-  assert.match(messages.join(""), /install token was not used.*already signed in to Frely as a@example\.com.*frely logout/s);
 });
 
 test("an invalid install token names the next step", async (t) => {
