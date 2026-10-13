@@ -273,10 +273,13 @@ async function main(): Promise<void> {
 
   if (command === "logout") {
     await stopMcpService().catch(() => undefined);
+    // Reconnecting no longer needs the login, so the server-side MCP authorization must go with it.
+    const mcpRevoked = await revokeMcpAuthorization().then(() => true, () => false);
     // Cloud credentials are keyed by the signed-in account, so revoke them before removing the login.
     const cloudRevoked = await logoutCloud().then(() => true, () => false);
     await logout();
     stdout.write("Frely login removed and MCP background service stopped.\n");
+    if (!mcpRevoked) process.stderr.write("MCP authorization revocation was not confirmed; revoke it in Frely account settings if needed.\n");
     if (!cloudRevoked) process.stderr.write("Cloud authorization revocation was not confirmed; revoke it in Frely account settings if needed.\n");
     return;
   }

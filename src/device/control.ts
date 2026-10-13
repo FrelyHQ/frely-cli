@@ -45,6 +45,53 @@ export async function ensureDevice(): Promise<DeviceBinding> {
   return binding;
 }
 
+/** The enrolled device from local state, without contacting the web app; null when this machine is not enrolled. */
+export async function storedDevice(): Promise<DeviceBinding | null> {
+  return await readDeviceBinding();
+}
+
+export interface DirectMcpSigner { authorizationId: string; mcpResource: string; sign(message: string): string }
+
+/**
+ * Asks Device Relay for a connection grant with the device (and MCP) signatures alone, so reconnecting
+ * does not depend on the web app being up. Returns null when the relay predates this endpoint (404/405);
+ * callers then use {@link connectionGrant}. Any other failure is thrown.
+ */
+export async function directConnectionGrant(binding: DeviceBinding, mcp: DirectMcpSigner): Promise<ConnectionGrant | null> {
+  const identity = await loadOrCreateDeviceIdentity(binding.relayUrl, binding.userId);
+  if (identity.keyThumbprint !== binding.keyThumbprint) throw new Error("Device key does not match the enrolled device.");
+  const proof = createConnectionProof(identity, binding.deviceId);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  timer.unref?.();
+  let response: Response;
+  try {
+    response = await fetch(`${new URL(mcp.mcpResource).origin}/device-relay/connect`, {
+      method: "POST",
+      redirect: "error",
+      signal: controller.signal,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({ ...proof, cliVersion: CLIENT_VERSION, ...mcpSignature(binding.deviceId, proof, mcp) }),
+    });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error("Frely Device Relay request timed out.");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (response.status === 404 || response.status === 405) return null;
+  const payload = await responseJson(response);
+  if (!response.ok) throw new Error(publicError(payload, response.status));
+  return { transports: parseConnectionTransports(object(payload)) };
+}
+
+function mcpSignature(deviceId: string, proof: { issuedAt: string; nonce: string }, mcp: { authorizationId: string; sign(message: string): string }) {
+  return {
+    mcpAuthorizationId: mcp.authorizationId,
+    mcpSignature: mcp.sign(["frely.mcp.connect.v1", deviceId, mcp.authorizationId, proof.issuedAt, proof.nonce].join("\n")),
+  };
+}
+
 export async function currentDevice(): Promise<DeviceBinding | null> {
   const auth = await requireLogin();
   const binding = await readDeviceBinding();
@@ -61,10 +108,7 @@ export async function connectionGrant(binding?: DeviceBinding, mcp?: { authoriza
   const proof = createConnectionProof(identity, device.deviceId);
   const response = await relayFetch(auth.config.relayUrl, auth.credential, "/api/user/device-relay/connect", {
     method: "POST",
-    body: JSON.stringify({ ...proof, cliVersion: CLIENT_VERSION, ...(mcp ? {
-      mcpAuthorizationId: mcp.authorizationId,
-      mcpSignature: mcp.sign(["frely.mcp.connect.v1", device.deviceId, mcp.authorizationId, proof.issuedAt, proof.nonce].join("\n")),
-    } : {}) }),
+    body: JSON.stringify({ ...proof, cliVersion: CLIENT_VERSION, ...(mcp ? mcpSignature(device.deviceId, proof, mcp) : {}) }),
   });
   if (response.status === 404 || response.status === 405) throw new Error("This Frely Relay does not provide Device Relay connections yet.");
   const payload = await responseJson(response);

@@ -111,6 +111,26 @@ export async function loadMcpAuthorization(): Promise<McpAuthorization | null> {
   return { ...metadata, mcpUrl: metadata.mcpResource, sign: (message) => identity.signMessage(message) };
 }
 
+/** Local checks only (no web app): the stored authorization exists, is unexpired and matches the workspace. */
+export async function requireLocalMcpAuthorization(workspace?: string): Promise<McpAuthorization> {
+  const authorization = await loadMcpAuthorization();
+  if (!authorization) throw new Error("MCP is not enabled. Run frely mcp start.");
+  assertMcpActive(authorization.grant);
+  if (workspace !== undefined && await realpath(resolve(workspace)) !== authorization.grant.workspace) throw new Error("Workspace differs from the approved MCP workspace. Run frely mcp start for the new workspace.");
+  return authorization;
+}
+
+const DEFINITIVE_AUTHORIZATION_FAILURES = [
+  "MCP_AUTHORIZATION_EXPIRED", "MCP authorization changed", "MCP authorization belongs to a different account",
+  "Frely login expired", "No Frely login is stored", "Workspace differs from the approved MCP workspace", "MCP is not enabled",
+];
+
+/** True only when the web app answered that this login or authorization is no longer valid; outages and network errors are not. */
+export function isDefinitiveAuthorizationFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return DEFINITIVE_AUTHORIZATION_FAILURES.some((prefix) => message.startsWith(prefix));
+}
+
 export async function requireMcpAuthorization(workspace?: string): Promise<McpAuthorization> {
   const authorization = await loadMcpAuthorization();
   if (!authorization) throw new Error("MCP is not enabled. Run frely mcp start.");
