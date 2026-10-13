@@ -52,11 +52,12 @@ export function cloudClientMetadata(redirectUrl: string, host = hostname()): OAu
     grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], token_endpoint_auth_method: "none", scope: SCOPE };
 }
 export const API_USAGE = `Frely API — call your Frely account's business operations (keys, credits, orders, Creator items…).
-  frely api list [--group <name>]
+  frely api list [--group <name>] [--json]
   frely api describe <tool>
   frely api call <tool> [--json '<object>' | --input <file>]
 
-Results are JSON. The first command opens a browser for authorization;
+"list" prints the operations grouped by area with a one-line description each; add --json for the full tool list.
+Other results are JSON. The first command opens a browser for authorization;
 frely logout also revokes it. This authorization is separate from device MCP.
 Calls may create resources or incur usage. Failed writes are never replayed automatically.
 A new device may only read non-sensitive data; for anything else the error links to the web
@@ -170,7 +171,7 @@ async function connectCloud() {
       // Attach immediately so a callback rejection never becomes an unhandled promise.
       pendingCode.catch(() => undefined);
       timer = setTimeout(() => rejectCode?.(new Error("Cloud authorization timed out.")), 300000);
-      process.stderr.write("Authorize Frely Cloud in your browser:\n" + url.toString() + "\n");
+      process.stderr.write("Authorize Frely Cloud in your browser (waiting up to 5 minutes):\n" + url.toString() + "\n");
       openVerificationUrl(url.toString());
     },
     validateResourceURL: async (_serverUrl, resource) => {
@@ -204,11 +205,51 @@ async function connectCloud() {
     }
     await closeListener();
     return { client, close: () => client.close() };
-  } catch {
+  } catch (error) {
     await closeListener();
     await client.close().catch(() => undefined);
-    throw new Error("Cloud connection or authorization failed. Confirm app availability and account selection, then run the command again. No business call was replayed.");
+    throw new Error(`Cloud connection or authorization failed${failureCause(error)}. Confirm app availability and account selection, then run the command again. No business call was replayed.`);
   }
+}
+
+/** The underlying failure as ": <one line, at most 200 characters>", or "" when there is none. */
+export function failureCause(error: unknown): string {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const line = message.replace(/\s+/g, " ").trim();
+  return line ? ": " + (line.length > 200 ? line.slice(0, 199) + "…" : line) : "";
+}
+
+interface ListedTool { name: string; description?: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean }; _meta?: Record<string, unknown> }
+
+function firstSentence(text: string | undefined): string {
+  const flat = (text ?? "").replace(/\s+/g, " ").trim();
+  const end = flat.search(/[.。!?](\s|$)/);
+  return end === -1 ? flat : flat.slice(0, end + 1);
+}
+
+/** Tools grouped by the part of the name before the first dot; the server's `frely/groupSummary` describes each group. */
+export function formatApiList(tools: readonly ListedTool[]): string {
+  const groups = new Map<string, { summary: string; tools: ListedTool[] }>();
+  for (const tool of tools) {
+    const dot = tool.name.indexOf(".");
+    const group = dot === -1 ? tool.name : tool.name.slice(0, dot);
+    const entry = groups.get(group) ?? { summary: "", tools: [] };
+    const summary = tool._meta?.["frely/groupSummary"];
+    if (typeof summary === "string" && !entry.summary) entry.summary = summary;
+    entry.tools.push(tool);
+    groups.set(group, entry);
+  }
+  const lines: string[] = [];
+  for (const [group, entry] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
+    lines.push(entry.summary ? `${group} — ${entry.summary}` : group);
+    for (const tool of entry.tools) {
+      const kind = tool.annotations?.destructiveHint === true ? "destructive" : tool.annotations?.readOnlyHint === true ? "read" : "write";
+      lines.push(`  ${tool.name} [${kind}] ${firstSentence(tool.description)}`.trimEnd());
+    }
+    lines.push("");
+  }
+  lines.push("Details: frely api describe <tool>   Full JSON: frely api list --json");
+  return lines.join("\n") + "\n";
 }
 
 export async function runApi(args: readonly string[]): Promise<{ value?: unknown; text?: string; failed?: boolean }> {
@@ -219,7 +260,9 @@ export async function runApi(args: readonly string[]): Promise<{ value?: unknown
   const name = named ? args[2] : undefined;
   if (named && (!name || !/^[a-zA-Z0-9_.-]{1,128}$/.test(name))) throw new Error("A valid Cloud tool name is required.");
   const options = new Map<string, string>();
+  let fullJson = false;
   for (let i = named ? 3 : 2; i < args.length; i++) {
+    if (action === "list" && args[i] === "--json") { fullJson = true; continue; }
     const option = args[i]!, value = args[++i];
     const allowed = action === "list" ? ["--group"] : action === "call" ? ["--json", "--input"] : [];
     if (!allowed.includes(option) || options.has(option) || value === undefined) throw new Error(API_USAGE);
@@ -253,7 +296,8 @@ export async function runApi(args: readonly string[]): Promise<{ value?: unknown
     } while (cursor);
     if (action === "list") {
       const group = options.get("--group");
-      return { value: { tools: all.filter(tool => !group || tool.name.startsWith(group + ".")) } };
+      const tools = all.filter(tool => !group || tool.name.startsWith(group + "."));
+      return fullJson ? { value: { tools } } : { text: formatApiList(tools as ListedTool[]) };
     }
     const tool = all.find(tool => tool.name === name);
     if (!tool) throw new Error("Cloud tool is unavailable or not authorized: " + name);
