@@ -6,7 +6,7 @@ import { readFile, stat } from "node:fs/promises";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { UnauthorizedError, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
-import type { OAuthClientInformationMixed, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
+import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { credentialStore } from "./credential-store.js";
 import { inspectAuth, normalizeRelayUrl, openVerificationUrl } from "./auth.js";
 import { VERSION } from "./version.js";
@@ -43,6 +43,14 @@ export function permissionHint(result: object): string | null {
 }
 
 const SCOPE = "openid profile offline_access cloud:read cloud:write cloud:execute cloud:publish";
+/**
+ * Registration metadata for the Cloud OAuth client. The callback is an http loopback URL, so the client must declare
+ * itself `native`: the server treats an unspecified type as `web` and rejects every http redirect URI of a web client.
+ */
+export function cloudClientMetadata(redirectUrl: string, host = hostname()): OAuthClientMetadata & { application_type: "native" } {
+  return { client_name: cloudClientName(host), application_type: "native", redirect_uris: [redirectUrl],
+    grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], token_endpoint_auth_method: "none", scope: SCOPE };
+}
 export const API_USAGE = `Frely API — call your Frely account's business operations (keys, credits, orders, Creator items…).
   frely api list [--group <name>]
   frely api describe <tool>
@@ -137,8 +145,7 @@ async function connectCloud() {
   const save = () => credentialStore.setPassword(SERVICE, identity.key, JSON.stringify(stored));
   const provider: OAuthClientProvider = {
     redirectUrl: stored.redirectUrl,
-    clientMetadata: { client_name: cloudClientName(), redirect_uris: [stored.redirectUrl],
-      grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], token_endpoint_auth_method: "none", scope: SCOPE },
+    clientMetadata: cloudClientMetadata(stored.redirectUrl),
     state: () => state,
     clientInformation: () => stored.client,
     saveClientInformation: async client => { stored.client = client; await save(); },
