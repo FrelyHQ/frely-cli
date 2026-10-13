@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cloudClientName, permissionHint } from "./cloud.js";
+import { cloudClientMetadata, cloudClientName, permissionHint } from "./cloud.js";
 
 test("the Cloud client name carries a sanitized host so devices are told apart", () => {
   assert.equal(cloudClientName("mac-mini.local"), "Frely CLI Cloud (mac-mini.local)");
@@ -32,4 +32,12 @@ test("a confirmation_required failure shows the summary, the approval link and h
   assert.match(hint ?? "", /"confirmationId":"cloud_confirm_0123456789abcdef01234567"/);
   assert.equal(permissionHint(failure({ code: "confirmation_required", confirmationId: "bad id\n", url: "https://frely.cloud/x" })), null);
   assert.equal(permissionHint(failure({ code: "confirmation_required", confirmationId: "ok_1", url: "http://evil.example/x" })), null);
+});
+
+test("the Cloud client registers as a native app so its http loopback callback is accepted", () => {
+  const metadata = cloudClientMetadata("http://127.0.0.1:43125/callback", "mac-mini.local");
+  assert.equal(metadata.application_type, "native");
+  assert.deepEqual(metadata.redirect_uris, ["http://127.0.0.1:43125/callback"]);
+  assert.equal(metadata.client_name, "Frely CLI Cloud (mac-mini.local)");
+  assert.equal(metadata.token_endpoint_auth_method, "none");
 });
