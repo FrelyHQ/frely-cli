@@ -28,11 +28,6 @@ export interface McpRuntimeOptions {
   onToolError?: (requestId: string | number, tool: string, error: unknown) => void;
   /** Enabled toolsets on the current MCP authorization; absent or empty means workspace only (plan §6.4). */
   getToolsets?: () => string[];
-  /** Bridge for cloud_list / cloud_call (frely-app toolset): the Frely Cloud tools, called with this device's own Cloud authorization. Without it the tools stay hidden. */
-  cloud?: {
-    list: (group?: string) => Promise<unknown>;
-    call: (name: string, input: Record<string, unknown>) => Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }>;
-  };
   /** Device-local MCP servers (plan mcp/本机MCP转发-方案.md). Without a hub the local_mcp_* tools stay hidden. */
   localMcp?: LocalMcpHub;
   /** Names the owner enabled on the current MCP authorization; absent or empty hides the local_mcp_* tools. */
@@ -42,16 +37,6 @@ export interface McpRuntimeOptions {
 function enabledLocalMcps(options: McpRuntimeOptions): string[] {
   try { return options.localMcp ? options.getLocalMcps?.() ?? [] : []; } catch { return []; }
 }
-
-function enabledToolsets(options: McpRuntimeOptions): string[] {
-  try { return options.getToolsets?.() ?? ["workspace"]; } catch { return ["workspace"]; }
-}
-
-/** Frely Cloud tools (account, keys, Creator, Owner). Permissions and per-call approval are enforced by the server for this device. */
-export const CLOUD_TOOLS = [
-  tool("cloud_list", "List the Frely Cloud tools this device may use, with their input schemas. With `group`, only that tool group.", { group: stringSchema("Tool group prefix such as keys or skills; omit for all") }, { readOnly: true, destructive: false, openWorld: false }),
-  tool("cloud_call", "Call one Frely Cloud tool by name with its arguments. Writes that need approval return confirmation_required with a link: the user approves on the web console, then call again with the same arguments plus confirmationId.", { tool: stringSchema("Cloud tool name from cloud_list"), arguments: { type: "object", description: "Arguments for the tool", additionalProperties: true } }, { readOnly: false, destructive: true, openWorld: true, idempotent: false }),
-];
 
 /** Gateway tools for device-local MCP servers (plan F1): one pair, whatever number of servers or transports sit behind them. */
 export const LOCAL_MCP_TOOLS = [
@@ -115,7 +100,6 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
   server.onclose = () => { options.signal?.removeEventListener("abort", stop); stop(); };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
-    ...((enabledToolsets(options).includes("frely-app") && options.cloud) ? CLOUD_TOOLS : []),
     ...(enabledLocalMcps(options).length > 0 ? LOCAL_MCP_TOOLS : []),
     tool("read", "Read the workspace. action=list lists a directory, or returns type/size/mtime for a file; read returns a UTF-8 file (max 1 MiB), or lines startLine..endLine; search finds `query` in file contents; find matches file names (*, **, ?); roots lists workspace roots. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { action: { type: "string", enum: ["list", "read", "search", "find", "roots"] }, path: stringSchema("Relative path", "."), startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, query: { type: "string" }, regex: boolSchema(false), caseSensitive: boolSchema(false), maxResults: intSchema(100, 1, 1000), contextLines: intSchema(0, 0, 10) }, { readOnly: true, destructive: false, openWorld: false }),
     tool("edit_file", "Change a UTF-8 workspace file: `content` atomically writes the whole file, creating parent directories (overwrite=true to replace one); `edits` replaces line ranges. Delete, move and mkdir with process. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { path: stringSchema("Relative path"), content: { type: "string" }, overwrite: boolSchema(false), edits: { type: "array", minItems: 1, maxItems: 100, items: { type: "object", additionalProperties: false, required: ["startLine", "endLine", "replacement"], properties: { startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, replacement: { type: "string" } } } } }, { readOnly: false, destructive: true, openWorld: false, idempotent: false }),
@@ -131,15 +115,6 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
     const name = request.params.name;
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
     try {
-      if (name === "cloud_list" || name === "cloud_call") {
-        if (!enabledToolsets(options).includes("frely-app") || !options.cloud) {
-          throw new Error("Cloud tools are not enabled for this MCP permission. Enable Frely app tools on the Frely connections page.");
-        }
-        if (name === "cloud_list") return { content: [{ type: "text" as const, text: JSON.stringify(await options.cloud.list(optionalTextArg(args, "group"))) }] };
-        const callArgs = args.arguments ?? {};
-        if (!callArgs || typeof callArgs !== "object" || Array.isArray(callArgs)) throw new Error("arguments must be an object.");
-        return await options.cloud.call(textArg(args, "tool"), callArgs as Record<string, unknown>);
-      }
       if (name === "local_mcp_list" || name === "local_mcp_call") {
         const enabled = enabledLocalMcps(options);
         if (enabled.length === 0 || !options.localMcp) throw new Error("Local MCP access is not enabled for this device. Enable a local MCP on the Frely connections page.");

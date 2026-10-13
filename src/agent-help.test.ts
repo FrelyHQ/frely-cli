@@ -57,7 +57,7 @@ test("command groups without a direct action print their subcommands offline", a
     [["mcp", "local"], /frely mcp local list/],
     [["agent"], /frely agent install/],
     [["provider"], /frely provider list/],
-    [["cloud"], /frely cloud list/],
+    [["api"], /frely api list/],
     [["app"], /frely app status/],
   ];
   for (const [args, expected] of cases) {

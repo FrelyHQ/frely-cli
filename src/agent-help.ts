@@ -27,7 +27,7 @@ export const COMMANDS = [
   { id: "agent.remove", usage: "frely agent remove <distribution-id> [--json]", auth: "none", effect: "local-write", purpose: "Remove an installed Agent Skill and its saved API key." },
   { id: "provider.share", usage: "frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]", auth: "account", effect: "remote-write", purpose: "Publish a local model Provider. If a prepared Provider on this device is not finished, resume it instead." },
   { id: "provider.list", usage: "frely provider list [--json]", auth: "account", effect: "read", purpose: "List configured local Providers." },
-  { id: "cloud", usage: "frely cloud list|describe|call [--help]", auth: "cloud-oauth", effect: "subcommand-dependent", purpose: "Discover and call Frely cloud business operations at frely.cloud/mcp. The first call requests browser authorization. Use describe before call; parameters and results are JSON." },
+  { id: "api", usage: "frely api list|describe|call [--help]", auth: "cloud-oauth", effect: "subcommand-dependent", purpose: "Discover and call your Frely account's business operations (the same tools FrelyMCP offers through frely_list/frely_call). The first call requests browser authorization. Use describe before call; parameters and results are JSON; --input reads a file up to 512 KiB." },
   { id: "app.install", usage: "frely app install [--force] [--json]", auth: "local", effect: "local-write", purpose: "Install the Frely App: Homebrew cask when available, otherwise a verified download (SHA-256) from the FrelyHQ/frely-cli release mirror; quarantine is preserved." },
   { id: "app.open", usage: "frely app open [--window]", auth: "local", effect: "local-write", purpose: "Launch the Frely App in the background (menu bar) or with its main window via --window." },
   { id: "app.status", usage: "frely app status [--json]", auth: "local", effect: "read", purpose: "Show whether the Frely App is installed, its version, install path, running state and how it is managed." },
@@ -70,7 +70,7 @@ const GROUPS: readonly { title: string; ids: readonly string[] }[] = [
   { title: "Agents", ids: ["agent.install", "agent.run", "agent.status", "agent.remove"] },
   { title: "Marketplace items", ids: ["item.install", "item.trust"] },
   { title: "Providers", ids: ["provider.share", "provider.list"] },
-  { title: "Cloud", ids: ["cloud"] },
+  { title: "API", ids: ["api"] },
 ];
 
 // Short, flag-light forms for the human `--help` overview. The full usage
@@ -95,7 +95,7 @@ const SHORT_USAGE: Readonly<Record<string, string>> = {
   "agent.remove": "frely agent remove <distribution-id>",
   "provider.share": "frely provider share [ollama|openai-compatible] [--models <a,b>]",
   "provider.list": "frely provider list",
-  cloud: "frely cloud list|describe|call",
+  api: "frely api list|describe|call",
 };
 
 export function cliUsage(): string {

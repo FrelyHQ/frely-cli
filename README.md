@@ -87,8 +87,6 @@ frely mcp url --workspace /path/to/project
 
 Remote MCP clients can also reach MCP servers that only run on this computer, such as a browser-extension server listening on `127.0.0.1`. Servers listening only on loopback are found automatically (`frely mcp local list`); add others with `frely mcp local add <name> --url http://127.0.0.1:<port>/mcp` or `frely mcp local add <name> [--env KEY=VALUE] -- <command> [args...]` (stdio). Every server stays off for remote clients until you turn it on, one by one, on the Frely connections page. Enabled servers are then reachable through two device tools, `local_mcp_list` and `local_mcp_call`, and run outside the command sandbox with your user account. Only loopback addresses are ever contacted; headers and environment values stay on this computer.
 
-With the Frely app tools enabled on the connections page, remote MCP clients also get `cloud_list` and `cloud_call`: they call your Frely Cloud tools (the same as `frely cloud call`) with this device's own Cloud authorization, so the server's per-device permissions and per-call approvals still apply. The device must have run `frely cloud list` once to authorize Cloud; a background runtime never opens a browser for it.
-
 Add the exact printed URL to a remote MCP client with OAuth support, choose OAuth and complete authorization. Keep the computer online. Verify the first connection by asking the client to list the top-level names in your selected workspace, without writing files or running shell commands — a returned result that matches the folder confirms connectivity.
 
 For Claude Code on the calling computer:
@@ -226,7 +224,7 @@ Storage, migration, service injection, release requirements and threat boundarie
 - Product definition and generic client integration: [docs/device-mcp.md](docs/device-mcp.md)
 - Device Relay transport: subprotocol, connection grant, reconnection, fallback state machine: [docs/device-transport.md](docs/device-transport.md)
 - Relay OAuth 2.1 Authorization Code + PKCE, discovery and token endpoints: [docs/mcp-oauth-relay-contract.md](docs/mcp-oauth-relay-contract.md)
-- Cloud commands and authorization: [docs/cloud.md](docs/cloud.md)
+- Business API commands and authorization: [docs/api.md](docs/api.md)
 - Frely Network commands (preview, not listed in `frely --help`): [docs/frely-network.md](docs/frely-network.md)
 
 The public MCP URL is the canonical resource returned by Relay, `https://mcp.frely.cloud/mcp` (one URL per account, shared by all your devices). Use `frely mcp url`; do not derive the URL from the control-plane hostname. The URL contains no bearer secret.
@@ -252,7 +250,7 @@ frely agent remove <distribution-id> [--json]
 frely item install <item-id> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--json]
 frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id> | --creator] [--name <name>]
 frely provider list [--json]
-frely cloud list|describe|call
+frely api list|describe|call
 ```
 
 Not listed in `frely --help`, but in `frely help --agent --json`: `frely mcp stdio [--workspace <path>]` serves the tools over stdio for a local MCP client; `frely mcp serve` is the foreground Device Relay client the background service runs; `frely network` is the Network preview.

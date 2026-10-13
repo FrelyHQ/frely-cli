@@ -43,13 +43,13 @@ export function permissionHint(result: object): string | null {
 }
 
 const SCOPE = "openid profile offline_access cloud:read cloud:write cloud:execute cloud:publish";
-export const CLOUD_USAGE = `Frely Cloud — call your Frely application.
-  frely cloud list [--group <name>]
-  frely cloud describe <tool>
-  frely cloud call <tool> [--json '<object>' | --input <file>]
+export const API_USAGE = `Frely API — call your Frely account's business operations (keys, credits, orders, Creator items…).
+  frely api list [--group <name>]
+  frely api describe <tool>
+  frely api call <tool> [--json '<object>' | --input <file>]
 
-Results are JSON. The first command opens a browser for Cloud authorization;
-frely logout also revokes it. Cloud authorization is separate from device MCP.
+Results are JSON. The first command opens a browser for authorization;
+frely logout also revokes it. This authorization is separate from device MCP.
 Calls may create resources or incur usage. Failed writes are never replayed automatically.
 A new device may only read non-sensitive data; for anything else the error links to the web
 console page where you grant it (passkey or authenticator code required).
@@ -89,7 +89,7 @@ export async function logoutCloud(): Promise<void> {
   await credentialStore.deletePassword(SERVICE, identity.key);
 }
 
-async function connectCloud(interactive = true) {
+async function connectCloud() {
   const identity = await cloudIdentity();
   const raw = await credentialStore.getPassword(SERVICE, identity.key);
   let stored: StoredCloud = raw ? JSON.parse(raw) as StoredCloud : { version: 1, resource: identity.resource, redirectUrl: "" };
@@ -158,7 +158,6 @@ async function connectCloud(interactive = true) {
     codeVerifier: () => { if (!verifier) throw new Error("Cloud PKCE verifier is missing."); return verifier; },
     redirectToAuthorization: async url => {
       if (url.origin !== identity.origin) throw new Error("Unexpected Cloud authorization server.");
-      if (!interactive) throw new CloudNotAuthorizedError();
       if (!listener) await listen(Number(callback.port));
       pendingCode = new Promise<string>((resolve, reject) => { resolveCode = resolve; rejectCode = reject; });
       // Attach immediately so a callback rejection never becomes an unhandled promise.
@@ -205,10 +204,10 @@ async function connectCloud(interactive = true) {
   }
 }
 
-export async function runCloud(args: readonly string[]): Promise<{ value?: unknown; text?: string; failed?: boolean }> {
+export async function runApi(args: readonly string[]): Promise<{ value?: unknown; text?: string; failed?: boolean }> {
   const action = args[1] ?? "list";
-  if (action === "help" || args.includes("--help") || args.includes("-h")) return { text: CLOUD_USAGE };
-  if (!["list", "describe", "call"].includes(action)) throw new Error(CLOUD_USAGE);
+  if (action === "help" || args.includes("--help") || args.includes("-h")) return { text: API_USAGE };
+  if (!["list", "describe", "call"].includes(action)) throw new Error(API_USAGE);
   const named = action === "describe" || action === "call";
   const name = named ? args[2] : undefined;
   if (named && (!name || !/^[a-zA-Z0-9_.-]{1,128}$/.test(name))) throw new Error("A valid Cloud tool name is required.");
@@ -216,7 +215,7 @@ export async function runCloud(args: readonly string[]): Promise<{ value?: unkno
   for (let i = named ? 3 : 2; i < args.length; i++) {
     const option = args[i]!, value = args[++i];
     const allowed = action === "list" ? ["--group"] : action === "call" ? ["--json", "--input"] : [];
-    if (!allowed.includes(option) || options.has(option) || value === undefined) throw new Error(CLOUD_USAGE);
+    if (!allowed.includes(option) || options.has(option) || value === undefined) throw new Error(API_USAGE);
     options.set(option, value);
   }
   let input: Record<string, unknown> = {};
@@ -282,46 +281,3 @@ export async function callCloudTool(name: string, input: Record<string, unknown>
   } finally { await session.close(); }
 }
 
-/** Raised instead of opening a browser when a background runtime has no Cloud authorization. */
-export class CloudNotAuthorizedError extends Error {
-  constructor() { super("Frely Cloud is not authorized on this device. Ask the user to run `frely cloud list` in a terminal once, then retry."); }
-}
-
-/** Cloud tools for the device MCP runtime (frely-app toolset). Never opens a browser; permission and approval hints are returned to the caller. */
-export const cloudMcpBridge = {
-  async list(group?: string): Promise<unknown> {
-    const session = await connectCloudNonInteractive();
-    try {
-      const all = [];
-      let cursor: string | undefined;
-      for (let page = 0; page < 20; page++) {
-        const result = await session.client.listTools(cursor === undefined ? {} : { cursor });
-        all.push(...result.tools);
-        cursor = result.nextCursor;
-        if (!cursor) break;
-      }
-      return { tools: all.filter(tool => !group || tool.name.startsWith(group + ".")) };
-    } finally { await session.close(); }
-  },
-  async call(name: string, input: Record<string, unknown>): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
-    const session = await connectCloudNonInteractive();
-    try {
-      const result = await session.client.callTool({ name, arguments: input }, undefined, { timeout: 180000 });
-      const content = (Array.isArray(result.content) ? result.content : []).filter((part): part is { type: "text"; text: string } =>
-        (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string");
-      const hint = permissionHint(result);
-      if (hint) content.push({ type: "text", text: hint });
-      return { content, ...(result.isError === true ? { isError: true } : {}) };
-    } finally { await session.close(); }
-  },
-};
-
-async function connectCloudNonInteractive() {
-  try { return await connectCloud(false); }
-  catch (error) {
-    // The generic connection failure hides the cause; a missing authorization is the one case the caller can act on.
-    const raw = await credentialStore.getPassword(SERVICE, (await cloudIdentity()).key).catch(() => null);
-    if (!raw || !(JSON.parse(raw) as StoredCloud).tokens) throw new CloudNotAuthorizedError();
-    throw error;
-  }
-}
