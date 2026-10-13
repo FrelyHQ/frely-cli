@@ -22,7 +22,7 @@ import { installDeviceRelayService, serviceStatus, startMcpService, stopMcpServi
 import { discoverLocalModels } from "./provider/local.js";
 import { finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider, waitForLocalProviderRelay } from "./provider/control.js";
 import { isSupportedLocalModelName, listLocalProviders, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider, type LocalProviderBinding } from "./provider/state.js";
-import { CLOUD_USAGE, logoutCloud, runCloud } from "./cloud.js";
+import { API_USAGE, logoutCloud, runApi } from "./cloud.js";
 import { PiNodeSupervisor } from "./agent/pi-node-supervisor.js";
 import { readAppInstall } from "./agent/app-install.js";
 import { appInstallStatus, installApp, openApp, uninstallApp, updateApp } from "./app-manager.js";
@@ -74,9 +74,9 @@ async function main(): Promise<void> {
   }
   if (!command || command === "help" || command === "--help" || command === "-h") return usage();
 
-  if (command === "cloud") {
-    if (args[1] === undefined) { stdout.write(CLOUD_USAGE); return; }
-    const result = await runCloud(args);
+  if (command === "api") {
+    if (args[1] === undefined) { stdout.write(API_USAGE); return; }
+    const result = await runApi(args);
     stdout.write(result.text ?? JSON.stringify(result.value, null, 2) + "\n");
     if (result.failed) process.exitCode = 2;
     return;
@@ -166,7 +166,7 @@ async function main(): Promise<void> {
     if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
     stdout.write(`${value.kind === "prompt" ? "Prompt" : "Skill"}: ${value.name} (v${value.version})\nPath: ${value.path}\nFiles: ${value.files}\n`);
     if (value.premium === "installed") stdout.write("Paid part: installed\n");
-    if (value.premium === "pass_required") stdout.write(`Paid part: not installed. Buy a pass in the marketplace or with frely cloud call passes.buy --json '{"productKind":"cloud_skill","productId":"${value.id}","duration":"30d"}', then run this command again.\n`);
+    if (value.premium === "pass_required") stdout.write(`Paid part: not installed. Buy a pass in the marketplace or with frely api call passes.buy --json '{"productKind":"cloud_skill","productId":"${value.id}","duration":"30d"}', then run this command again.\n`);
     if (value.hasScripts) stdout.write("This item contains scripts. Read them before you let an agent run them; they were saved without execute permission.\n");
     if (value.scanned) stdout.write("Passed Frely automated scan for this version. This is an automated check, not a guarantee.\n");
     if (value.guarded) stdout.write("Frely has not scanned this Skill. Your agent reviews it with the frely-item-guard Skill before first use.\n");

@@ -87,8 +87,6 @@ frely mcp url --workspace /path/to/project
 
 远程 MCP 客户端也能访问只在这台电脑上运行的 MCP 服务，例如只监听 `127.0.0.1` 的浏览器插件 MCP。只监听本机回环地址的服务会被自动发现（`frely mcp local list`）；其他服务用 `frely mcp local add <name> --url http://127.0.0.1:<port>/mcp`，或 `frely mcp local add <name> [--env KEY=VALUE] -- <命令> [参数...]`（stdio）手动添加。每个服务默认对远程客户端关闭，需要在 Frely 连接页面逐个开启。开启后通过两个设备工具 `local_mcp_list` 和 `local_mcp_call` 访问，运行在命令沙箱之外，使用你的用户账号。只会连接回环地址；请求头和环境变量的值只保存在本机。
 
-在连接页面开启 Frely 应用工具后，远程 MCP 客户端还会得到 `cloud_list` 和 `cloud_call`：用这台设备自己的 Cloud 授权调用你的 Frely Cloud 工具（等同 `frely cloud call`），服务端的设备权限和逐次确认依然生效。设备需要先在终端运行一次 `frely cloud list` 完成 Cloud 授权；后台运行时不会为此打开浏览器。
-
 把打印的完整 URL 添加到支持 OAuth 的远程 MCP 客户端，选择 OAuth 并完成授权。保持电脑在线。验证首次连接：让客户端只列出所选工作区的顶层名称，不写文件、不跑 shell 命令——返回与目录一致的结果即连通。
 
 调用端的 Claude Code：
@@ -216,7 +214,7 @@ MCP 密钥使用 AES-256-GCM 文件，主密钥存 macOS Keychain、Windows 凭�
 - 产品定义与通用客户端接入：[docs/device-mcp.md](docs/device-mcp.md)
 - Device Relay 传输：子协议、连接 grant、重连、回退状态机：[docs/device-transport.md](docs/device-transport.md)
 - Relay OAuth 2.1 Authorization Code + PKCE、发现与 token 端点：[docs/mcp-oauth-relay-contract.md](docs/mcp-oauth-relay-contract.md)
-- Cloud 命令与授权：[docs/cloud.md](docs/cloud.md)
+- 业务 API 命令与授权：[docs/api.md](docs/api.md)
 - Frely Network 命令（预览，不在 `frely --help` 中列出）：[docs/frely-network.md](docs/frely-network.md)
 
 公网 MCP URL 是 Relay 返回的规范资源，即 `https://mcp.frely.cloud/mcp`（每个账户一个 URL，所有设备共用）。请使用 `frely mcp url` 输出的地址，不要从控制面域名推导。URL 不含 bearer secret。
@@ -241,7 +239,7 @@ frely agent status (<distribution-id>|--api-key-stdin [--relay <url>]) [--json]
 frely agent remove <distribution-id> [--json]
 frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id> | --creator] [--name <name>]
 frely provider list [--json]
-frely cloud list|describe|call
+frely api list|describe|call
 ```
 
 以下命令不在 `frely --help` 中列出，但在 `frely help --agent --json` 中：`frely mcp stdio [--workspace <path>]` 通过 stdio 为本地 MCP 客户端提供工具；`frely mcp serve` 是后台服务运行的前台 Device Relay 客户端；`frely network` 是 Network 预览。
