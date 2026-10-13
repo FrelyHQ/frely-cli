@@ -1,6 +1,6 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { chmod, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { cliLaunchArguments, IS_STANDALONE } from "./cli-launch.js";
@@ -35,10 +35,13 @@ export async function installDeviceRelayService(workspaceInput?: string): Promis
     await execFile("launchctl", ["bootstrap", domain, path]);
     await execFile("launchctl", ["kickstart", "-k", `${domain}/${LABEL}`]);
   } else if (process.platform === "linux") {
+    await assertSystemdUserManager();
     await writeDefinition(systemdUnitPath(), systemdUnit(command));
     await execFile("systemctl", ["--user", "daemon-reload"]);
     await execFile("systemctl", ["--user", "enable", "--now", "frely-mcp.service"]);
     await execFile("systemctl", ["--user", "restart", "frely-mcp.service"]);
+    const warning = await ensureLinger();
+    if (warning) process.stderr.write(`${warning}\n`);
   } else if (process.platform === "win32") {
     await windowsService("install", command);
   } else throw new Error("Device Relay background services support macOS, Windows and Linux.");
@@ -100,6 +103,31 @@ export async function serviceStatus(): Promise<McpServiceInfo> {
     return { ...common, installed, active, ...(pid ? { pid } : {}), ...(installed ? { definitionPath: path } : {}) };
   }
   return { ...common, installed: false, active: false };
+}
+
+type Run = (file: string, args: string[]) => Promise<{ stdout: string }>;
+const run: Run = async (file, args) => ({ stdout: String((await execFile(file, args)).stdout) });
+
+/** Containers and minimal hosts often have no systemd user manager; the service cannot be installed there. */
+export async function assertSystemdUserManager(exec: Run = run): Promise<void> {
+  await exec("systemctl", ["--user", "show-environment"]).catch(() => {
+    throw new Error("No systemd user manager is available (`systemctl --user` failed), so Frely cannot install its background service here. Run `frely mcp serve` in the foreground, or under your own process manager, to keep this device online.");
+  });
+}
+
+/**
+ * Without lingering, systemd stops user services when the last session (an SSH login) ends.
+ * Enabling it for oneself is often allowed; returns a warning when it stays off.
+ */
+export async function ensureLinger(exec: Run = run, user = currentUser()): Promise<string | null> {
+  if (!user) return null;
+  await exec("loginctl", ["enable-linger", user]).catch(() => undefined);
+  const linger = await exec("loginctl", ["show-user", user, "-p", "Linger"]).then(({ stdout }) => stdout.trim(), () => "");
+  if (linger === "Linger=yes") return null;
+  return `Warning: lingering is off for ${user}, so this device goes offline when your SSH session ends. Run \`sudo loginctl enable-linger ${user}\` to keep it online.`;
+}
+function currentUser(): string | undefined {
+  try { return userInfo().username || process.env.USER; } catch { return process.env.USER; }
 }
 
 /** Service definitions carry configuration paths and storage mode, not encryption keys. */

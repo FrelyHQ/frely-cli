@@ -212,6 +212,54 @@ export async function completeEmailDeviceLogin(
   return { user: publicUser, sessionBound: false, ...(typeof data.mcpPreapproval === "string" ? { mcpPreapproval: data.mcpPreapproval } : {}) };
 }
 
+/**
+ * Pre-login install command: a one-time install token gets this CLI's own device code approved, like
+ * the email code does. The token is not a credential and is never stored; the caller polls with finishDeviceLogin.
+ */
+export async function redeemInstallToken(
+  relayInput: string | undefined,
+  token: string,
+  mcp?: EmailDeviceChallenge["mcp"],
+): Promise<{ relayUrl: string; device: DeviceCodeResponse; user: PublicUser; mcpPreapproval?: string }> {
+  const relayUrl = normalizeRelayUrl(relayInput);
+  await probeCredentialStore();
+  const unreachable = (error: unknown): never => {
+    if (error instanceof TypeError || (error instanceof Error && error.message === "Frely request timed out.")) {
+      throw new Error(`Could not reach ${new URL(relayUrl).host}. Check this computer's internet connection (and proxy settings), then run the install command again.`);
+    }
+    throw error;
+  };
+  const device = await requestDeviceCode(relayUrl).catch(unreachable);
+  const response = await fetchWithTimeout(`${relayUrl}/api/auth/device/install/redeem`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: relayUrl, accept: "application/json" },
+    body: JSON.stringify({
+      token,
+      userCode: device.user_code,
+      ...(mcp ? { mcp: { keyThumbprint: mcp.keyThumbprint, workspace: mcp.workspace, days: mcp.days } } : {}),
+    }),
+    redirect: "error",
+  }).catch(unreachable);
+  const payload = await safeJson(response);
+  debugAuth(`stage=install-redeem status=${response.status}`);
+  if (!response.ok) throw new Error(installTokenError(payload, response.status));
+  const record = objectPayload(payload, "install command");
+  const user = parseUser(record);
+  return { relayUrl, device, user, ...(isString(record.mcpPreapproval) ? { mcpPreapproval: record.mcpPreapproval } : {}) };
+}
+
+/** Every install-token failure names the next step. */
+export function installTokenError(payload: unknown, status: number): string {
+  const root = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+  const error = root.error && typeof root.error === "object" ? root.error as Record<string, unknown> : {};
+  const code = typeof error.code === "string" ? error.code : "";
+  const message = typeof error.message === "string" && error.message ? error.message.replace(/\s*$/u, "") : `Frely rejected the install command (HTTP ${status}).`;
+  const sentence = /[.!?]$/u.test(message) ? message : `${message}.`;
+  if (code === "install_token_invalid") return `${sentence} The install command is invalid, expired or already used. Ask Claude (or the Frely console) for a new install command and run it again.`;
+  if (status === 429 || /rate/u.test(code)) return `${sentence} Wait a few minutes, then ask Claude (or the Frely console) for a new install command if this one has expired.`;
+  return `${sentence} Ask Claude (or the Frely console) for a new install command and run it again.`;
+}
+
 export async function loginDevice(
   relayInput?: string,
   notify?: (details: { verificationUri: string; userCode: string }) => void,

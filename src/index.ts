@@ -31,7 +31,7 @@ import { LocalMcpHub, loadManualEntries } from "./runtime/local-mcp.js";
 import { reportedWorkspaces } from "./runtime/workspace-registry.js";
 import { VERSION } from "./version.js";
 import { agentHelp, cliUsage, mcpUsage, subcommandUsage } from "./agent-help.js";
-import { ensureMcpAuthorization, grantInactive, normalizeMcpArgs, startMcp } from "./mcp-command.js";
+import { ensureMcpAuthorization, grantInactive, mcpStartLogin, normalizeMcpArgs, startMcp, takeInstallToken } from "./mcp-command.js";
 import { getKeyBudget, KeyBudgetError, publicKeyBudgetError } from "./key-budget.js";
 import { runNetwork, publicNetworkError } from "./network.js";
 import { runComputerCommand } from "./computer/command.js";
@@ -449,19 +449,18 @@ async function main(): Promise<void> {
     if (process.argv[3] === "url") process.stderr.write("`frely mcp url` is deprecated; use `frely mcp start`.\n");
     // Internal: update scripts only resume the installed service, never prompt for approval.
     if (args.includes("--resume")) { const service = await startMcpService(); stdout.write(`Frely MCP service ${service.active ? "started" : "not active"}.\n`); return; }
-    const workspace = option(args, "--workspace");
-    const days = option(args, "--days");
+    // Pre-login install command (start.sh / start.ps1): never inherited by the service, logged or stored.
+    const installToken = takeInstallToken();
+    let workspace = option(args, "--workspace");
+    let days = option(args, "--days");
     // --no-browser applies to both the sign-in and the MCP approval page: only the links are printed.
-    if (args.includes("--no-browser")) process.env.FRELY_NO_BROWSER = "1";
-    // MCP authorization needs an account: sign in first (the browser page also creates new accounts).
-    await requireLogin().catch(async (error: unknown) => {
-      if (!(error instanceof Error && /Run `frely login`/u.test(error.message))) throw error;
-      const { user } = await loginDevice(undefined, ({ verificationUri, userCode }) => {
-        process.stderr.write(`Sign in to Frely (new accounts can register on the same page):\n${verificationUri}\nDevice code: ${userCode}\nWaiting for approval...\n`);
-      });
-      process.stderr.write(`Logged in as ${user.email}.\n`);
-    });
-    const authorization = await startMcp({ ...(workspace ? { workspace } : {}), ...(days ? { days } : {}), notify: (message) => { process.stderr.write(message); } });
+    if (args.includes("--no-browser") || installToken) process.env.FRELY_NO_BROWSER = "1";
+    const notify = (message: string) => { process.stderr.write(message); };
+    const login = await mcpStartLogin({ ...(installToken ? { installToken } : {}), ...(workspace ? { workspace } : {}), ...(days ? { days } : {}), notify });
+    workspace = login.workspace ?? workspace;
+    days = login.days ?? days;
+    const authorization = await startMcp({ ...(workspace ? { workspace } : {}), ...(days ? { days } : {}), ...(login.preset ? { preset: login.preset } : {}), notify });
+    if (login.preset) process.stderr.write("This computer now appears in your FrelyMCP device list (list_devices).\n");
     if (activeDataDir()) process.stderr.write(`No background service with --data-dir. Keep the device online with: frely --data-dir ${activeDataDir()} mcp serve\n`);
     const value = { deviceId: authorization.grant.deviceId, mcpUrl: authorization.mcpUrl, transport: "http", authentication: "oauth", workspace: authorization.grant.workspace, expiresAt: authorization.grant.expiresAt };
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
