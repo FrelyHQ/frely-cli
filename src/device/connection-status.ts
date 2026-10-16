@@ -81,7 +81,11 @@ export function connectionReporter(binding: DeviceBinding, workspace?: string) {
       current = { ...current, state: "stopped", mcpEnabled: false };
     }
     const content = JSON.stringify(current) + "\n";
+    const terminal = event.type === "stopped";
     pending = pending.then(async () => {
+      // The status file is last-writer-wins across transports; a terminal stop must not
+      // erase a fresher record owned by another process that is still running.
+      if (terminal && await foreignTransportLive(path)) return;
       const temp = path + "." + process.pid + "." + randomUUID() + ".tmp";
       try {
         await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -91,6 +95,20 @@ export function connectionReporter(binding: DeviceBinding, workspace?: string) {
     }).catch(() => undefined);
   };
   return { report, flush: () => pending };
+}
+
+/** True when the record on disk belongs to a different, still-running transport process. */
+async function foreignTransportLive(path: string): Promise<boolean> {
+  const raw = await readFile(path, "utf8").catch(() => null);
+  if (!raw) return false;
+  try {
+    const record = JSON.parse(raw) as ConnectionStatus;
+    if (!Number.isSafeInteger(record?.pid) || record.pid === process.pid) return false;
+    process.kill(record.pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 export async function readConnectionStatus(binding: DeviceBinding): Promise<ConnectionStatus | null> {
