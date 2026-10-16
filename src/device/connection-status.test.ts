@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { WebSocketServer } from "ws";
-import { connectionReporter, connectionStatusPath, readConnectionStatus, connectionIsLive } from "./connection-status.js";
+import { connectionReporter, connectionStatusPath, readConnectionStatus, connectionIsLive, type ConnectionStatus } from "./connection-status.js";
 import { serveConnection } from "./relay-client.js";
 import { DEVICE_RELAY_PROTOCOL } from "./protocol.js";
 import type { DeviceBinding } from "./state.js";
@@ -53,4 +54,35 @@ test("real relay pong updates private status; lease disable and disconnect canno
   assert.equal(connectionIsLive(disconnected), false);
   assert.doesNotMatch(await readFile(connectionStatusPath(), "utf8"), /synthetic-secret-token/);
   if (process.platform !== "win32") assert.equal((await stat(connectionStatusPath())).mode & 0o777, 0o600);
+});
+
+test("a terminal stop never erases a fresher record owned by a live transport", async () => {
+  const root = await mkdtemp(join(tmpdir(), "frely-relay-status-"));
+  const previous = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = root;
+  const binding: DeviceBinding = { version: 2, relayUrl: "https://test.invalid", userId: "test",
+    deviceId: "drd_" + "a".repeat(32), publicKeySpki: "public", keyThumbprint: "public", updatedAt: new Date().toISOString() };
+  const live = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+  const reporter = connectionReporter(binding, "/test/workspace");
+  try {
+    const foreign: ConnectionStatus = { version: 1, pid: live.pid!, relayUrl: binding.relayUrl, userId: binding.userId,
+      deviceId: binding.deviceId, mcpEnabled: true, state: "connected", updatedAt: new Date().toISOString(),
+      heartbeatAt: new Date().toISOString() };
+    await mkdir(dirname(connectionStatusPath()), { recursive: true, mode: 0o700 });
+    await writeFile(connectionStatusPath(), `${JSON.stringify(foreign)}\n`, { mode: 0o600 });
+    reporter.report({ type: "stopped" });
+    await reporter.flush();
+    assert.equal(JSON.parse(await readFile(connectionStatusPath(), "utf8")).pid, live.pid);
+    live.kill();
+    await new Promise<void>((resolve) => live.once("exit", resolve));
+    reporter.report({ type: "stopped" });
+    await reporter.flush();
+    const stopped = await readConnectionStatus(binding);
+    assert.equal(stopped?.state, "stopped");
+    assert.equal(stopped?.pid, process.pid);
+  } finally {
+    if (previous === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = previous;
+    live.kill();
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -96,6 +96,19 @@ test("doctor distinguishes disconnected and stopped, and accepts a healthy foreg
   }
 });
 
+test("a stopped record beside an active service is stale, not a final stop", async () => {
+  const f = fixture();
+  f.connection.state = "stopped";
+  f.connection.heartbeatAt = undefined;
+  const report = await doctor({ verbose: true }, f.dependencies);
+  const check = report.checks.find((check) => check.name === "connection")!;
+  assert.equal(check.status, "info");
+  assert.match(check.detail, /Stale status record/);
+  assert.doesNotMatch(check.detail, /Run frely mcp start\./);
+  assert.match(report.summary.connection, /stale record; service running/);
+  assert.equal(report.details?.connection.state, "stopped");
+});
+
 test("unconfigured MCP is optional; legacy strict MCP diagnostics remain strict", async () => {
   const f = fixture();
   f.dependencies.inspectAuth = async () => ({ configured: false, credentialStored: false, configPath: "/test/config.json" });

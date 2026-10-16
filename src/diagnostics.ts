@@ -89,10 +89,14 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
     : !bindingMatches || !connection ? "unknown"
     : live ? "connected"
     : connection.state === "disconnected" || connection.state === "stopped" ? connection.state : "unknown";
-  add("connection", connectionState === "not_configured" ? "info" : live && (!metadata || mcpReady) ? "pass" : "fail",
+  // The status file is last-writer-wins across transports, so a stopped record beside an
+  // active service is a stale or overwritten observation, not a final stop.
+  const staleStopped = connectionState === "stopped" && Boolean(service?.active);
+  add("connection", connectionState === "not_configured" ? "info" : live && (!metadata || mcpReady) ? "pass" : staleStopped ? "info" : "fail",
     connectionState === "not_configured" ? "Not configured."
       : live && metadata && !mcpReady ? "Device transport connected, but this MCP authorization/workspace is not active in the running service."
       : live ? "Device transport connected; recent heartbeat received."
+      : staleStopped ? "Stale status record: a transport reported stopped, but the background service is running. Re-run frely doctor; restart with frely mcp start only if this persists."
       : connectionState === "disconnected" ? "Disconnected; the device transport is retrying."
       : connectionState === "stopped" ? "Device transport stopped. Run frely mcp start."
       : "Unknown: no recent heartbeat for this account/device. Run frely doctor -v.");
@@ -150,7 +154,8 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
         : service.installed ? "Stopped" : "Not installed",
       connection: connectionState === "not_configured" ? "Not configured"
         : live ? metadata && !mcpReady ? "Device transport connected; MCP unavailable" : "Connected (recent heartbeat)"
-        : connectionState === "disconnected" ? "Disconnected (retrying)" : connectionState === "stopped" ? "Stopped"
+        : connectionState === "disconnected" ? "Disconnected (retrying)"
+        : connectionState === "stopped" ? staleStopped ? "Stopped (stale record; service running)" : "Stopped"
         : "Unknown (no recent heartbeat)",
     },
     checks,
