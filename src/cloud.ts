@@ -98,6 +98,13 @@ export async function logoutCloud(): Promise<void> {
   await credentialStore.deletePassword(SERVICE, identity.key);
 }
 
+export const NON_INTERACTIVE_AUTHORIZATION = "Cloud authorization is required, but this is not an interactive terminal. Run frely api list in a terminal you can type in to authorize in the browser once, then run this command again.";
+
+/** True when a person can finish a browser authorization: both stdin and stderr (where the link is printed) are terminals. */
+export function isInteractiveTerminal(): boolean {
+  return process.stdin.isTTY === true && process.stderr.isTTY === true;
+}
+
 async function connectCloud() {
   const identity = await cloudIdentity();
   const raw = await credentialStore.getPassword(SERVICE, identity.key);
@@ -167,6 +174,8 @@ async function connectCloud() {
     redirectToAuthorization: async url => {
       if (url.origin !== identity.origin) throw new Error("Unexpected Cloud authorization server.");
       if (!listener) await listen(Number(callback.port));
+      // Scripts and AI tools cannot complete a browser authorization: fail now instead of waiting out the timeout.
+      if (!isInteractiveTerminal()) throw new Error(NON_INTERACTIVE_AUTHORIZATION);
       pendingCode = new Promise<string>((resolve, reject) => { resolveCode = resolve; rejectCode = reject; });
       // Attach immediately so a callback rejection never becomes an unhandled promise.
       pendingCode.catch(() => undefined);
@@ -208,6 +217,7 @@ async function connectCloud() {
   } catch (error) {
     await closeListener();
     await client.close().catch(() => undefined);
+    if (error instanceof Error && error.message === NON_INTERACTIVE_AUTHORIZATION) throw error;
     throw new Error(`Cloud connection or authorization failed${failureCause(error)}. Confirm app availability and account selection, then run the command again. No business call was replayed.`);
   }
 }

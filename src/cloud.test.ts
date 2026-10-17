@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cloudClientMetadata, cloudClientName, failureCause, formatApiList, permissionHint } from "./cloud.js";
+import { cloudClientMetadata, cloudClientName, failureCause, formatApiList, isInteractiveTerminal, permissionHint } from "./cloud.js";
 
 test("the Cloud client name carries a sanitized host so devices are told apart", () => {
   assert.equal(cloudClientName("mac-mini.local"), "Frely CLI Cloud (mac-mini.local)");
@@ -67,4 +67,19 @@ test("a connection failure keeps its real cause on one line of at most 200 chara
   assert.equal(failureCause(new Error("web clients require\nhttps   redirect URIs")), ": web clients require https redirect URIs");
   assert.equal(failureCause(new Error("x".repeat(500))).length, 2 + 200);
   assert.equal(failureCause(undefined), "");
+});
+
+test("browser authorization is only attempted from an interactive terminal", () => {
+  const stdin = Object.getOwnPropertyDescriptor(process.stdin, "isTTY"), stderr = Object.getOwnPropertyDescriptor(process.stderr, "isTTY");
+  try {
+    for (const [inTty, errTty, expected] of [[true, true, true], [false, true, false], [true, false, false], [undefined, undefined, false]] as const) {
+      Object.defineProperty(process.stdin, "isTTY", { value: inTty, configurable: true });
+      Object.defineProperty(process.stderr, "isTTY", { value: errTty, configurable: true });
+      assert.equal(isInteractiveTerminal(), expected);
+    }
+  } finally {
+    for (const [stream, original] of [[process.stdin, stdin], [process.stderr, stderr]] as const) {
+      if (original) Object.defineProperty(stream, "isTTY", original); else delete (stream as { isTTY?: boolean }).isTTY;
+    }
+  }
 });
