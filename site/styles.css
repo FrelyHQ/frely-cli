@@ -80,7 +80,7 @@ h3 { font-size:1.125rem; margin-bottom:0; }
   margin-bottom:2.5rem;
 }
 .section-heading > p { margin:0; max-width:30rem; color:var(--muted); }
-.hero > *, .section-heading > *, .workflow-layout > *, .open-source > * { min-width:0; }
+.hero > *, .section-heading > *, .method-grid > *, .open-source > * { min-width:0; }
 
 /* Navigation */
 .header {
@@ -268,33 +268,74 @@ h1 em { font-style:normal; color:var(--accent); }
 }
 .principles > * { overflow-wrap:anywhere; }
 .principles a:hover { color:var(--accent); }
-.workflow-layout { display:grid; grid-template-columns:1fr 1.55fr; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
-.workflow-tabs { display:flex; flex-direction:column; gap:.4rem; padding:1rem; background:#141a15; }
-.workflow-tab {
-  display:flex;
-  align-items:flex-start;
-  gap:.9rem;
-  width:100%;
-  padding:1.3rem 1rem;
-  border:1px solid transparent;
-  border-radius:5px;
-  background:transparent;
-  color:var(--text);
-  text-align:left;
+
+/* Client logo wall */
+.client-grid {
+  display:grid;
+  grid-template-columns:repeat(6,minmax(0,1fr));
+  gap:1rem;
+  margin:1.75rem 0 .75rem;
+  padding:0;
+  list-style:none;
 }
-.workflow-tab > .tab-label { flex:1; min-width:0; }
-.workflow-tab strong { display:block; font-size:1rem; font-weight:550; line-height:1.6; margin-bottom:.35rem; }
-.tab-arrow { color:var(--muted); font-size:1.1rem; }
-.workflow-tab[aria-selected="true"] { border-color:#637e4a; background:#29391f; }
-.workflow-tab[aria-selected="true"] .tab-arrow { color:var(--accent); }
-.workflow-tab:hover { background:var(--surface-raised); }
-.workflow-panels { min-width:0; border-left:1px solid var(--line); background:var(--surface); }
-.workflow-panel { padding:2.25rem; }
-.workflow-panel[hidden] { display:none; }
-.panel-label { margin-bottom:.8rem; color:var(--accent); font:.75rem/1.6 var(--mono); letter-spacing:.04em; }
-.workflow-panel h3 { font-size:1.85rem; letter-spacing:-.025em; margin-bottom:1.2rem; }
-.workflow-panel > p:not(.panel-label) { color:var(--muted); }
-.workflow-panel .fineprint { margin-bottom:1rem; }
+.client-card {
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:.55rem;
+  min-width:0;
+  padding:1.4rem .75rem 1.1rem;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--surface);
+  text-align:center;
+}
+.client-card img { display:block; width:44px; height:44px; object-fit:contain; }
+.client-name { font-size:.9375rem; font-weight:550; line-height:1.3; overflow-wrap:anywhere; }
+.client-method { color:var(--accent); font:.6875rem/1.4 var(--mono); letter-spacing:.04em; }
+.client-doc {
+  display:inline-flex;
+  align-items:center;
+  min-height:32px;
+  color:var(--muted);
+  font-size:.75rem;
+  text-decoration:underline;
+  text-underline-offset:4px;
+  text-decoration-color:#849486;
+}
+.client-doc:hover { color:var(--accent); }
+.client-more { border-style:dashed; justify-content:center; gap:.3rem; }
+.client-more-mark { color:var(--muted); font:2rem/1 var(--mono); }
+.clients-note { margin-top:.25rem; }
+
+/* Two universal add methods */
+.method-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1.5rem; margin-top:2rem; }
+.method-card {
+  display:flex;
+  flex-direction:column;
+  gap:.9rem;
+  min-width:0;
+  padding:2rem;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--surface);
+}
+.method-card h3 { font-size:1.5rem; letter-spacing:-.025em; }
+.method-card > p { margin:0; color:var(--muted); }
+.method-card .connection-steps { margin:0; }
+.method-card .command { margin-top:auto; }
+.command-block { align-items:flex-start; }
+.command-block pre { flex:1; min-width:0; margin:0; padding:0; border:0; background:transparent; }
+.cli-strip {
+  display:grid;
+  gap:.6rem;
+  margin-top:1.5rem;
+  padding:1.5rem 2rem;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:#141a15;
+}
+.cli-strip h3 { font-size:.75rem; color:var(--muted); font-family:var(--mono); letter-spacing:.08em; font-weight:500; margin:0 0 .4rem; }
 pre { padding:1rem 1.2rem; margin:1.4rem 0; border:1px solid var(--line); border-radius:5px; background:#101411; overflow-x:auto; font-size:.8125rem; line-height:1.85; }
 .connection-steps { padding-left:1.25rem; font-size:.9375rem; }
 .connection-steps li + li { margin-top:.8rem; }
@@ -319,13 +360,15 @@ pre { padding:1rem 1.2rem; margin:1.4rem 0; border:1px solid var(--line); border
 .sr-only { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 .skip-link { position:fixed; top:-5rem; left:1rem; padding:.7rem 1rem; background:var(--accent); color:var(--bg); z-index:10; }
 .skip-link:focus { top:1rem; }
-:lang(zh-CN) h1, :lang(zh-CN) h2, :lang(zh-CN) .workflow-panel h3 { letter-spacing:-.02em; line-height:1.25; }
+:lang(zh-CN) h1, :lang(zh-CN) h2, :lang(zh-CN) .method-card h3 { letter-spacing:-.02em; line-height:1.25; }
 :lang(zh-CN) h1 { font-size:clamp(2.6rem,4.1vw,3.9rem); }
 @media(max-width:1000px) {
   .wrap { width:calc(100% - 3rem); }
   .hero { gap:2rem; }
   .install-card { padding:1.5rem; }
   .footer-note { display:none; }
+  .client-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .method-grid { grid-template-columns:1fr; }
 }
 @media(max-width:800px) {
   .device-scenarios { grid-template-columns:1fr; }
@@ -344,11 +387,10 @@ pre { padding:1rem 1.2rem; margin:1.4rem 0; border:1px solid var(--line); border
   :lang(zh-CN) h1 { font-size:clamp(2.2rem,7.8vw,3.8rem); }
   .section { padding-block:3.5rem; }
   .section-heading { grid-template-columns:1fr; gap:1.25rem; margin-bottom:2rem; }
-  .workflow-layout { grid-template-columns:1fr; }
-  .workflow-tabs { gap:.25rem; }
-  .workflow-tab { padding:1rem; }
-  .workflow-panels { border-left:0; border-top:1px solid var(--line); }
-  .workflow-panel { padding:1.5rem; }
+  .client-grid { gap:.75rem; }
+  .client-card { padding:1.1rem .5rem .9rem; }
+  .method-card { padding:1.5rem; }
+  .cli-strip { padding:1.25rem 1rem; }
   .open-source { grid-template-columns:1fr; gap:1.5rem; }
   .source-actions { justify-self:start; }
 }
@@ -363,6 +405,7 @@ pre { padding:1rem 1.2rem; margin:1.4rem 0; border:1px solid var(--line); border
   .install-card { padding:1.25rem; }
   .command { padding:.8rem; gap:.6rem; }
   .command code { font-size:.75rem; }
+  .client-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .principles { grid-template-columns:1fr 1fr; gap:.75rem 1rem; }
 }
 @media(prefers-reduced-motion:reduce) {

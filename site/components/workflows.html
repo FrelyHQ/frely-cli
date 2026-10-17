@@ -5,53 +5,98 @@
   <a href="https://github.com/FrelyHQ/frely-cli/blob/main/LICENSE">{{principles.license}} <span aria-hidden="true">↗</span></a>
 </div>
 <section class="workflows wrap section" id="workflows" aria-labelledby="workflows-title">
-  <div id="panel-tools">
-    <div class="section-heading">
-      <div>
-        <p class="eyebrow">{{workflows.eyebrow}}</p>
-        <h2 id="workflows-title">{{workflows.line1}}<br>{{workflows.line2}}</h2>
-      </div>
-      <p>{{workflows.description}}</p>
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">{{workflows.eyebrow}}</p>
+      <h2 id="workflows-title">{{workflows.line1}}<br>{{workflows.line2}}</h2>
     </div>
-    <p class="fineprint">{{tools.connect}}</p>
-    <div class="workflow-layout">
-      <div class="workflow-tabs" role="tablist" aria-label="{{workflows.label}}" aria-orientation="vertical">
-        <button class="workflow-tab" id="tab-codex" role="tab" aria-selected="true" aria-controls="client-codex" tabindex="0">
-          <span class="tab-label"><strong>Codex</strong></span><span class="tab-arrow" aria-hidden="true">↗</span>
-        </button>
-        <button class="workflow-tab" id="tab-claude" role="tab" aria-selected="false" aria-controls="client-claude" tabindex="-1">
-          <span class="tab-label"><strong>Claude Code</strong></span><span class="tab-arrow" aria-hidden="true">↗</span>
-        </button>
-        <button class="workflow-tab" id="tab-web" role="tab" aria-selected="false" aria-controls="client-web" tabindex="-1">
-          <span class="tab-label"><strong>{{tools.webTab}}</strong></span><span class="tab-arrow" aria-hidden="true">↗</span>
-        </button>
+    <p>{{workflows.description}}</p>
+  </div>
+  <p class="fineprint">{{tools.connect}}</p>
+  <!-- Client wall: logos from each vendor's official assets; the badge shows which add method fits. -->
+  <ul class="client-grid" aria-label="{{workflows.label}}">
+    <li class="client-card">
+      <img src="{{page.base}}assets/clients/chatgpt.svg" alt="" width="44" height="44" loading="lazy">
+      <span class="client-name">ChatGPT</span>
+      <span class="client-method">{{clients.methodUrl}}</span>
+      <a class="client-doc" href="https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt"><span class="sr-only">ChatGPT </span>{{clients.docLabel}} <span aria-hidden="true">↗</span></a>
+    </li>
+    <li class="client-card">
+      <img src="{{page.base}}assets/clients/claude-code.png" alt="" width="44" height="44" loading="lazy">
+      <span class="client-name">Claude Code</span>
+      <span class="client-method">{{clients.methodCli}}</span>
+      <a class="client-doc" href="https://code.claude.com/docs/en/mcp"><span class="sr-only">Claude Code </span>{{clients.docLabel}} <span aria-hidden="true">↗</span></a>
+    </li>
+    <li class="client-card">
+      <img src="{{page.base}}assets/clients/workbuddy.svg" alt="" width="44" height="44" loading="lazy">
+      <span class="client-name">WorkBuddy</span>
+      <span class="client-method">{{clients.methodJson}}</span>
+      <a class="client-doc" href="https://www.workbuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/MCP-Guide"><span class="sr-only">WorkBuddy </span>{{clients.docLabel}} <span aria-hidden="true">↗</span></a>
+    </li>
+    <li class="client-card">
+      <img src="{{page.base}}assets/clients/doubao.png" alt="" width="44" height="44" loading="lazy">
+      <span class="client-name">{{clients.doubaoName}}</span>
+      <span class="client-method">{{clients.methodJson}}</span>
+    </li>
+    <li class="client-card">
+      <img src="{{page.base}}assets/clients/codex.png" alt="" width="44" height="44" loading="lazy">
+      <span class="client-name">Codex</span>
+      <span class="client-method">{{clients.methodCli}}</span>
+      <a class="client-doc" href="https://developers.openai.com/codex/mcp"><span class="sr-only">Codex </span>{{clients.docLabel}} <span aria-hidden="true">↗</span></a>
+    </li>
+    <li class="client-card client-more">
+      <span class="client-more-mark" aria-hidden="true">+</span>
+      <a class="client-doc" href="https://github.com/FrelyHQ/frely-cli/blob/main/docs/device-mcp.md">{{clients.more}} <span aria-hidden="true">↗</span></a>
+    </li>
+  </ul>
+  <p class="fineprint clients-note">{{clients.trademark}}</p>
+  <!-- Two universal add methods: paste a URL, or paste a JSON config. -->
+  <div class="method-grid" aria-label="{{clients.methodsLabel}}">
+    <div class="method-card" id="method-url">
+      <h3>{{clients.urlTitle}}</h3>
+      <p>{{clients.urlAudience}}</p>
+      <ol class="connection-steps">
+        <li>{{clients.urlStep1}}</li>
+        <li>{{clients.urlStep2}}</li>
+        <li>{{clients.urlStep3}}</li>
+      </ol>
+      <div class="command">
+        <code id="mcp-url-command">{{command.mcpUrl}}</code>
+        <button class="copy-button" data-copy="mcp-url-command" aria-label="{{copy.mcpUrl}}">{{copy.idle}}</button>
       </div>
-      <div class="workflow-panels">
-        <div class="workflow-panel" id="client-codex" role="tabpanel" aria-labelledby="tab-codex" tabindex="0">
-          <h3>Codex</h3>
-          <p>{{tools.codexPrepare}}</p>
-          <pre><code>{{command.codexConnect}}</code></pre>
-          <p>{{tools.codexAuthorize}}</p>
-          <pre><code>{{command.codexAuthorize}}</code></pre>
-        </div>
-        <div class="workflow-panel" id="client-claude" role="tabpanel" aria-labelledby="tab-claude" tabindex="0" hidden>
-          <h3>Claude Code</h3>
-          <p>{{tools.claudePrepare}}</p>
-          <pre><code>{{command.claudeConnect}}</code></pre>
-          <p>{{tools.claudeAuthorize}}</p>
-        </div>
-        <div class="workflow-panel" id="client-web" role="tabpanel" aria-labelledby="tab-web" tabindex="0" hidden>
-          <h3>{{tools.webTab}}</h3>
-          <p>ChatGPT Web</p>
-          <p>{{tools.chatgpt}}</p>
-        </div>
+      <a class="text-link" href="https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt">{{clients.chatgptDoc}} <span aria-hidden="true">↗</span></a>
+    </div>
+    <div class="method-card" id="method-json">
+      <h3>{{clients.jsonTitle}}</h3>
+      <p>{{clients.jsonAudience}}</p>
+      <ol class="connection-steps">
+        <li>{{clients.jsonStep1}}</li>
+        <li>{{clients.jsonStep2}}</li>
+        <li>{{clients.jsonStep3}}</li>
+      </ol>
+      <div class="command command-block">
+        <pre><code id="mcp-json-command">{{command.mcpJson}}</code></pre>
+        <button class="copy-button" data-copy="mcp-json-command" aria-label="{{copy.mcpJson}}">{{copy.idle}}</button>
       </div>
+      <a class="text-link" href="https://www.workbuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/MCP-Guide">{{clients.workbuddyDoc}} <span aria-hidden="true">↗</span></a>
     </div>
-    <div class="connection-check">
-      <p>{{tools.verify}}</p>
-      <p class="fineprint">{{tools.diagnostics}}</p>
-      <p class="fineprint">{{tools.note}}</p>
-      <a class="text-link" href="https://github.com/FrelyHQ/frely-cli/blob/main/docs/device-mcp.md#first-connection">{{tools.guide}} <span aria-hidden="true">↗</span></a>
+  </div>
+  <!-- Command-line agents keep their one-command setup. -->
+  <div class="cli-strip" aria-label="{{clients.cliTitle}}">
+    <h3>{{clients.cliTitle}}</h3>
+    <div class="command">
+      <code id="claude-connect-command">{{command.claudeConnect}}</code>
+      <button class="copy-button" data-copy="claude-connect-command" aria-label="{{copy.claudeConnect}}">{{copy.idle}}</button>
     </div>
+    <div class="command">
+      <code id="codex-connect-command">{{command.codexConnect}}</code>
+      <button class="copy-button" data-copy="codex-connect-command" aria-label="{{copy.codexConnect}}">{{copy.idle}}</button>
+    </div>
+  </div>
+  <div class="connection-check">
+    <p>{{tools.verify}}</p>
+    <p class="fineprint">{{tools.diagnostics}}</p>
+    <p class="fineprint">{{tools.note}}</p>
+    <a class="text-link" href="https://github.com/FrelyHQ/frely-cli/blob/main/docs/device-mcp.md#first-connection">{{tools.guide}} <span aria-hidden="true">↗</span></a>
   </div>
 </section>

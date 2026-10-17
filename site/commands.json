@@ -7,7 +7,8 @@
   "installPnpm": "pnpm add --global frely-cli@latest",
   "doctor": "frely doctor",
   "mcpSetup": "frely mcp start",
+  "mcpUrl": "https://mcp.frely.cloud/mcp",
+  "mcpJson": "{\n  \"mcpServers\": {\n    \"frely\": {\n      \"url\": \"https://mcp.frely.cloud/mcp\",\n      \"disabled\": false\n    }\n  }\n}",
   "claudeConnect": "claude mcp add --transport http frely \"https://mcp.frely.cloud/mcp\"",
-  "codexConnect": "codex mcp add frely --url \"https://mcp.frely.cloud/mcp\"",
-  "codexAuthorize": "codex mcp login frely"
+  "codexConnect": "codex mcp add frely --url \"https://mcp.frely.cloud/mcp\""
 }

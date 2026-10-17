@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFile, writeFile, mkdir, rm, copyFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm, copyFile, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -67,6 +67,11 @@ for (const { directory, html } of pages) {
 }
 for (const asset of ['styles.css', 'app.js', 'locale.js']) {
   await copyFile(resolve(root, 'site', asset), resolve(output, asset));
+}
+// Client logos ship with the landing; sources are re-fetched from each vendor's official assets.
+await mkdir(resolve(output, 'assets/clients'), { recursive: true });
+for (const client of await readdir(new URL('./assets/clients/', import.meta.url))) {
+  await copyFile(new URL('./assets/clients/' + client, import.meta.url), resolve(output, 'assets/clients', client));
 }
 // The one-line installers are served from the landing domain so both commands share one host.
 for (const installer of ['install.sh', 'install.ps1', 'start.sh', 'start.ps1']) {

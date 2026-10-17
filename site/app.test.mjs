@@ -21,8 +21,6 @@ function fixture({ url = 'https://cli.frely.cloud/zh/?ref=docs#install', lang = 
     focus() { this.focused = true; },
     scrollIntoView() { this.scrolled = true; },
   });
-  const tabs = ['codex', 'claude', 'web'].map((name) => element({ 'aria-controls': 'client-' + name, 'aria-selected': String(name === 'codex') }));
-  const panels = Object.fromEntries(tabs.map((tab, index) => [tab.getAttribute('aria-controls'), element({}, { hidden: index !== 0 })]));
   const links = ['en', 'zh'].map((language) => element({}, { href: new URL('../' + language + '/', location).href, dataset: { language } }));
   const osButtons = ['mac', 'linux', 'windows'].map((os) => element({ 'aria-pressed': String(os === 'mac') }, { dataset: { osSelect: os } }));
   const osOptions = ['mac', 'linux', 'windows'].map((os) => element({}, { dataset: { os }, hidden: false }));
@@ -33,8 +31,8 @@ function fixture({ url = 'https://cli.frely.cloud/zh/?ref=docs#install', lang = 
   runInNewContext(script, {
     URL,
     document: {
-      querySelectorAll(selector) { return selector === '[role="tab"]' ? tabs : selector === '[data-copy]' ? [button] : selector === '[data-os-select]' ? osButtons : selector === '[data-os]' ? osOptions : links; },
-      getElementById(id) { return id === 'copy-status' ? status : id === 'doctor-command' ? command : id === 'os-switch' ? osSwitch : panels[id]; },
+      querySelectorAll(selector) { return selector === '[data-copy]' ? [button] : selector === '[data-os-select]' ? osButtons : selector === '[data-os]' ? osOptions : links; },
+      getElementById(id) { return id === 'copy-status' ? status : id === 'doctor-command' ? command : id === 'os-switch' ? osSwitch : null; },
       createRange() { return { selectNodeContents(node) { selected = node; } }; },
     },
     navigator: { platform, clipboard: { async writeText(value) { if (copyFails) throw new Error('Denied'); copied = value; } } },
@@ -46,7 +44,7 @@ function fixture({ url = 'https://cli.frely.cloud/zh/?ref=docs#install', lang = 
       setTimeout(callback) { timers.push(callback); },
     },
   });
-  return { location, links, tabs, panels, osButtons, osOptions, osSwitch, button, status, command, saved, timers,
+  return { location, links, osButtons, osOptions, osSwitch, button, status, command, saved, timers,
     copied: () => copied, selected: () => selected,
     hash(value) { location.hash = value; events.get('hashchange')(); },
   };
@@ -61,24 +59,6 @@ test('language links retain queries and updated anchors on project paths even wi
   const enabled = fixture();
   enabled.links[0].events.get('click')();
   assert.deepEqual(enabled.saved, [['frely-cli-language', 'en']]);
-});
-
-test('client links select the right option across languages; optional features keep the client choice', () => {
-  const f = fixture({ url: 'https://cli.frely.cloud/en/?ref=docs#client-claude' });
-  assert.equal(f.panels['client-claude'].hidden, false);
-  assert.equal(f.panels['client-codex'].hidden, true);
-  assert.equal(f.panels['client-claude'].scrolled, true);
-  assert.equal(f.tabs[1].attrs['aria-selected'], 'true');
-  const translated = fixture({ url: f.links[1].href });
-  assert.equal(translated.panels['client-claude'].hidden, false);
-  f.hash('#client-web');
-  assert.equal(f.panels['client-web'].hidden, false);
-  assert.equal(f.panels['client-claude'].hidden, true);
-  f.hash('#panel-models');
-  assert.equal(f.panels['client-web'].hidden, false);
-  assert.equal(f.links[0].href.endsWith('#panel-models'), true);
-  f.hash('#panel-agents');
-  assert.equal(f.panels['client-web'].hidden, false);
 });
 
 for (const lang of ['en', 'zh-CN']) {
