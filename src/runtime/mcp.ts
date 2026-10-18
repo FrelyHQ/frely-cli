@@ -9,6 +9,7 @@ import { VERSION } from "../version.js";
 import { ensureWorkspaceRegistered, listWorkspaces } from "./workspace-registry.js";
 import { resolveWorkspace, resolveWorkspacePair } from "./workspace-router.js";
 import type { LocalMcpHub } from "./local-mcp.js";
+import type { LocalModelsHub } from "../provider/local-models.js";
 import { pathGrantsFromMeta } from "./sandbox.js";
 import { networkAllowFromMeta, webFetch } from "./web-fetch.js";
 
@@ -32,6 +33,8 @@ export interface McpRuntimeOptions {
   localMcp?: LocalMcpHub;
   /** Names the owner enabled on the current MCP authorization; absent or empty hides the local_mcp_* tools. */
   getLocalMcps?: () => string[];
+  /** Probes and shares loopback model servers from the daemon process. Without it (stdio mode) the local_models tool stays hidden. */
+  localModels?: LocalModelsHub;
 }
 
 function enabledLocalMcps(options: McpRuntimeOptions): string[] {
@@ -43,6 +46,13 @@ export const LOCAL_MCP_TOOLS = [
   tool("local_mcp_list", "List the MCP servers running on this device that the owner enabled. With `server`, list that server's tools and their input schemas.", { server: stringSchema("Server name from the list; omit to list servers") }, { readOnly: true, destructive: false, openWorld: false }),
   tool("local_mcp_call", "Call one tool of an enabled MCP server running on this device (for example a browser extension that only listens on 127.0.0.1). Use local_mcp_list with `server` first to see the tools and arguments.", { server: stringSchema("Server name"), tool: stringSchema("Tool name on that server"), arguments: { type: "object", description: "Arguments for the tool", additionalProperties: true }, timeoutMs: intSchema(60000, 100, 120000) }, { readOnly: false, destructive: true, openWorld: true, idempotent: false }),
 ];
+
+/**
+ * Share this device's loopback OpenAI-compatible model server (Ollama, LM Studio, vLLM, llama.cpp) as a Frely Provider.
+ * One tool, two actions; the daemon runs both, so probing is not limited by the command sandbox. It stays one tool for the
+ * hosts' tool lists, so its hints are those of the stronger action (share).
+ */
+export const LOCAL_MODELS_TOOL = tool("local_models", "Use a model server running on this device (Ollama, LM Studio, vLLM, llama.cpp, mltf) through Frely. action=list probes loopback OpenAI-compatible servers (the given url, else the usual ports 11434, 1234, 8000, 8080) and lists their models plus the local models already shared. action=share publishes the server's models (all of them, or `models`) as a Frely Provider, which uses one Provider slot of the account (without a free slot it counts against the Creator Plan Provider limit). Shared models then appear in models_list marked local: true; they run on this device at no Credit cost and suit low-priority, slow-ok tasks. The device must stay online.", { action: { type: "string", enum: ["list", "share"] }, url: stringSchema("Loopback OpenAI-compatible base URL such as http://127.0.0.1:1234/v1. Required for share; for list it limits the probe to that server."), models: { type: "array", maxItems: 256, items: { type: "string", maxLength: 256 }, description: "Model ids to share; omit to share every model the server reports." }, name: stringSchema("Provider name shown in Frely (at most 128 characters)") }, { readOnly: false, destructive: false, openWorld: true, idempotent: false });
 
 export async function createMcpServer(workspaceInput: string, options: McpRuntimeOptions = {}): Promise<Server> {
   // Ensure the primary workspace is registered
@@ -101,6 +111,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
     ...(enabledLocalMcps(options).length > 0 ? LOCAL_MCP_TOOLS : []),
+    ...(options.localModels ? [LOCAL_MODELS_TOOL] : []),
     tool("read", "Read the workspace. action=list lists a directory, or returns type/size/mtime for a file; read returns a UTF-8 file (max 1 MiB), or lines startLine..endLine; search finds `query` in file contents; find matches file names (*, **, ?); roots lists workspace roots. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { action: { type: "string", enum: ["list", "read", "search", "find", "roots"] }, path: stringSchema("Relative path", "."), startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, query: { type: "string" }, regex: boolSchema(false), caseSensitive: boolSchema(false), maxResults: intSchema(100, 1, 1000), contextLines: intSchema(0, 0, 10) }, { readOnly: true, destructive: false, openWorld: false }),
     tool("edit_file", "Change a UTF-8 workspace file: `content` atomically writes the whole file, creating parent directories (overwrite=true to replace one); `edits` replaces line ranges. Delete, move and mkdir with process. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { path: stringSchema("Relative path"), content: { type: "string" }, overwrite: boolSchema(false), edits: { type: "array", minItems: 1, maxItems: 100, items: { type: "object", additionalProperties: false, required: ["startLine", "endLine", "replacement"], properties: { startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, replacement: { type: "string" } } } } }, { readOnly: false, destructive: true, openWorld: false, idempotent: false }),
     tool("web_fetch", "Read a public http(s) URL (GET or HEAD, ports 80, 443) from this device's network; private addresses are refused. Read-only: it cannot send a request body. Returns status, content type and body text up to maxBytes. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { url: { type: "string" }, method: { type: "string", enum: ["GET", "HEAD"], default: "GET" }, headers: { type: "object", additionalProperties: { type: "string" } }, maxBytes: intSchema(262144, 1, 1048576), timeoutMs: intSchema(30000, 100, 120000) }, { readOnly: true, destructive: false, openWorld: true }),
@@ -127,6 +138,18 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
         if (!callArgs || typeof callArgs !== "object" || Array.isArray(callArgs)) throw new Error("arguments must be an object.");
         const result = await options.localMcp.call(enabled, textArg(args, "server"), textArg(args, "tool"), callArgs as Record<string, unknown>, { timeoutMs: intArg(args, "timeoutMs", 60000, 100, 120000), signal });
         return result as { content: Array<{ type: "text"; text: string }>; isError?: boolean };
+      }
+      if (name === LOCAL_MODELS_TOOL.name) {
+        if (!options.localModels) throw new Error("Sharing local models is not available on this connection.");
+        const signal = AbortSignal.any([lifecycle.signal, extra.signal]);
+        const action = textArg(args, "action");
+        const url = optionalTextArg(args, "url");
+        if (action === "list") return { content: [{ type: "text" as const, text: JSON.stringify(await options.localModels.list(url, signal)) }] };
+        if (action !== "share") throw new Error("action must be one of list, share.");
+        if (!url) throw new Error("url is required to share a model server; call local_models with action=list to find one.");
+        const models = args.models === undefined ? undefined : arrayArg(args, "models", 1, 256).map((model) => { if (typeof model !== "string") throw new Error("models must be strings."); return model.trim(); }).filter(Boolean);
+        const providerName = optionalTextArg(args, "name");
+        return { content: [{ type: "text" as const, text: JSON.stringify(await options.localModels.share({ url, ...(models?.length ? { models } : {}), ...(providerName ? { name: providerName.slice(0, 128) } : {}) }, signal)) }] };
       }
       // `frely mcp workspace add|remove` edits the registry while this runtime keeps running; pick the change up per call.
       await syncWorkspaces(workspaces, primaryRoot);

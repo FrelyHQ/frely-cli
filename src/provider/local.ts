@@ -5,8 +5,16 @@ const PROVIDER_RESPONSE_LIMIT = DEVICE_RELAY_MAX_FRAME_BYTES - 64 * 1024;
 const ALLOWED_PATHS = new Set(["/v1/models", "/v1/chat/completions", "/v1/embeddings", "/v1/responses"]);
 
 export async function discoverLocalModels(baseUrlInput: string): Promise<string[]> {
+  const unique = await fetchLocalModelIds(baseUrlInput, 15_000);
+  if (unique.length === 0) throw new Error("Local Provider did not report any models.");
+  if (unique.length > 256) throw new Error("Local Provider reported too many models.");
+  return unique;
+}
+
+/** The sorted, unique, shareable model ids a loopback OpenAI-compatible server reports on `GET /models`; empty when it reports none. */
+export async function fetchLocalModelIds(baseUrlInput: string, timeoutMs: number): Promise<string[]> {
   const baseUrl = normalizeLoopbackOpenAiBaseUrl(baseUrlInput);
-  const response = await fetch(`${baseUrl}/models`, { headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(15_000) });
+  const response = await fetch(`${baseUrl}/models`, { headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(timeoutMs) });
   const text = await readBounded(response, 2 * 1024 * 1024);
   if (!response.ok) throw new Error(`Local Provider model discovery failed with HTTP ${response.status}.`);
   let value: unknown;
@@ -20,10 +28,7 @@ export async function discoverLocalModels(baseUrlInput: string): Promise<string[
     const id = (item as Record<string, unknown>).id;
     if (typeof id === "string" && isSupportedLocalModelName(id)) models.push(id);
   }
-  const unique = [...new Set(models)].sort();
-  if (unique.length === 0) throw new Error("Local Provider did not report any models.");
-  if (unique.length > 256) throw new Error("Local Provider reported too many models.");
-  return unique;
+  return [...new Set(models)].sort();
 }
 
 export interface LocalProviderResponse {

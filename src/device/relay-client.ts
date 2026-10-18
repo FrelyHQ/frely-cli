@@ -20,6 +20,7 @@ import {
 import { diagnostic, mcpDiagnosticContext, type DiagnosticLog } from "../runtime/diagnostics.js";
 import { RelayMcpSession } from "../runtime/relay-mcp.js";
 import type { LocalMcpHub } from "../runtime/local-mcp.js";
+import type { LocalModelsHub } from "../provider/local-models.js";
 import type { RelaySession } from "../runtime/relay-session.js";
 import { openLocalProviderRequest, readLocalProviderBody } from "../provider/local.js";
 
@@ -41,6 +42,8 @@ export interface RelayServeOptions {
   capabilities?: () => Record<string, unknown> | Promise<Record<string, unknown>> | undefined;
   /** Device-local MCP servers; enabled names arrive on each mcp request (plan mcp/本机MCP转发-方案.md). */
   localMcp?: LocalMcpHub;
+  /** Lets device MCP probe and share loopback model servers (the local_models tool). */
+  localModels?: LocalModelsHub;
 }
 
 interface InflightRequest {
@@ -92,6 +95,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
             session = await RelayMcpSession.create(options.workspace, {
               assertAuthorized: () => guard.assert(), signal: guard.controller.signal, log, ...(maintenance ? { maintenance } : {}),
               ...(options.localMcp ? { localMcp: options.localMcp } : {}),
+              ...(options.localModels ? { localModels: options.localModels } : {}),
             });
             const activeSession = session;
             guard.controller.signal.addEventListener("abort", () => { void activeSession.close(); }, { once: true });
