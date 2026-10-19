@@ -3,6 +3,7 @@ import { readFile, writeFile, mkdir, rm, copyFile, readdir } from 'node:fs/promi
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import { categories, entries, entryUrl } from './docs-content.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = resolve(root, '_site');
@@ -60,6 +61,55 @@ for (const locale of locales) {
   }
 }
 
+// Static, crawlable help pages (English only). The index lists every question; /docs/help/ holds all answers on one page.
+const origin = 'https://cli.frely.cloud';
+const docsStyle = `<style>*{box-sizing:border-box}body{margin:0;background:#101211;color:#eef2ee;font:16px/1.7 system-ui,-apple-system,sans-serif}header,main{max-width:860px;margin:auto;padding:1.5rem}header{display:flex;justify-content:space-between;gap:1rem}main{padding-bottom:5rem}a{color:#d3fa6a;text-underline-offset:.2rem}h1{font-size:clamp(1.8rem,5vw,2.4rem);line-height:1.2}h2{margin-top:2.5rem}h3{margin:0 0 .4rem}.muted{color:#9aa59d}.qa{border-top:1px solid #2a312d;padding:1.2rem 0}.qa p{margin:.3rem 0;color:#d6ddd8}.links{list-style:none;padding:0;margin:.6rem 0 0;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem;font-size:.9rem}</style>`;
+const docsPage = (title, description, path, body) => `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="${escapeHtml(description)}">
+  <link rel="canonical" href="${origin}${path}">
+  <title>${escapeHtml(title)} — Frely CLI</title>
+  ${docsStyle}
+</head>
+<body>
+  <header><a href="/en/">frely CLI</a><nav><a href="/docs/">Docs</a> · <a href="/en/#install">Install</a> · <a href="https://frely.cloud/app/">Frely App</a></nav></header>
+  <main>
+${body}
+  </main>
+</body>
+</html>
+`;
+const qa = (entry, tag) => `    <article class="qa" id="${entry.slug}">
+      <${tag}>${tag === 'h3' ? `<a href="${entryUrl(entry)}">${escapeHtml(entry.question)}</a>` : escapeHtml(entry.question)}</${tag}>
+      <p>${escapeHtml(entry.answer)}</p>
+      <ul class="links">${entry.links.map((l) => `<li><a href="${escapeHtml(l.href)}">${escapeHtml(l.label)}</a></li>`).join('')}</ul>
+    </article>`;
+const byCategory = (render) => categories.map((category) => render(category, entries.filter((entry) => entry.category === category))).join('\n');
+const slugs = new Set();
+for (const entry of entries) {
+  if (slugs.has(entry.slug) || !categories.includes(entry.category) || !entry.links.length) throw new Error(`Invalid docs entry: ${entry.slug}`);
+  slugs.add(entry.slug);
+}
+pages.push({ directory: resolve(output, 'docs'), html: docsPage('Docs', 'Frely CLI documentation: questions, short answers, and links.', '/docs/', `    <h1>Frely CLI docs</h1>
+    <p class="muted">Short answers about installing, connecting AI clients and using your computer. Every page is static and crawlable. The full list is also on one page at <a href="/docs/help/">/docs/help/</a>.</p>
+${byCategory((category, list) => `    <section>
+      <h2>${escapeHtml(category)}</h2>
+      <ul>${list.map((entry) => `<li><a href="${entryUrl(entry)}">${escapeHtml(entry.question)}</a></li>`).join('')}</ul>
+    </section>`)}`) });
+pages.push({ directory: resolve(output, 'docs/help'), html: docsPage('Help', 'All Frely CLI questions and short answers on one page.', '/docs/help/', `    <h1>Help</h1>
+    <p class="muted">Question, short answer, related links. <a href="/docs/">Back to docs</a>.</p>
+${byCategory((category, list) => `    <section>
+      <h2>${escapeHtml(category)}</h2>
+${list.map((entry) => qa(entry, 'h3')).join('\n')}
+    </section>`)}`) });
+for (const entry of entries) {
+  pages.push({ directory: resolve(output, 'docs/help', entry.slug), html: docsPage(entry.question, entry.answer, entryUrl(entry), `    <p class="muted"><a href="/docs/">Docs</a> / <a href="/docs/help/">Help</a> / ${escapeHtml(entry.category)}</p>
+${qa(entry, 'h1')}`) });
+}
+
 await rm(output, { recursive: true, force: true });
 for (const { directory, html } of pages) {
   await mkdir(directory, { recursive: true });
@@ -83,7 +133,7 @@ for (const notice of ['LICENSE', 'NOTICE', 'TRADEMARKS.md']) {
 await writeFile(resolve(output, '.nojekyll'), '');
 await writeFile(resolve(output, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${locales.map(({ route }) => `  <url><loc>https://cli.frely.cloud/${route}/</loc></url>`).join('\n')}
+${[...locales.map(({ route }) => `/${route}/`), '/docs/', '/docs/help/', ...entries.map(entryUrl)].map((path) => `  <url><loc>https://cli.frely.cloud${path}</loc></url>`).join('\n')}
 </urlset>
 `);
-console.log('Built landing page: / (language selection), /en/, /zh/');
+console.log('Built landing page: / (language selection), /en/, /zh/, /docs/');
