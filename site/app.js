@@ -78,7 +78,18 @@ window.addEventListener('hashchange', () => {
   let consent = null;
   try { consent = window.localStorage.getItem(storageKey); } catch {}
 
+  // Customer-service chat (third-party). Loaded only after consent, never given user data.
+  const loadSupportWidget = () => {
+    if (document.querySelector('script[data-support-widget]')) return;
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = 'https://trtc.io/knocket-sdk/sdk.js?identifier=a2a8df8c01baf87ac7&v=1792430261372';
+    script.dataset.supportWidget = '';
+    document.head.appendChild(script);
+  };
+
   const loadClarity = () => {
+    loadSupportWidget();
     if (window.clarity) return;
     window.clarity = function () { (window.clarity.q = window.clarity.q || []).push(arguments); };
     const script = document.createElement('script');
@@ -102,7 +113,7 @@ window.addEventListener('hashchange', () => {
   panel.className = 'clarity-consent';
   panel.setAttribute('aria-label', zh ? '分析偏好' : 'Analytics preferences');
   panel.innerHTML = '<div><strong>' + (zh ? '分析偏好' : 'Analytics preferences') + '</strong><p>' +
-    (zh ? '我们使用 Microsoft Clarity 分析站点使用情况。广告存储保持关闭。' : 'We use Microsoft Clarity to understand site usage. Advertising storage stays disabled.') +
+    (zh ? '我们使用 Microsoft Clarity 分析站点使用情况。广告存储保持关闭。接受后也会启用客服聊天。' : 'We use Microsoft Clarity to understand site usage. Advertising storage stays disabled. Accepting also turns on the customer-service chat.') +
     '</p></div><div class="clarity-consent-actions"><button type="button" data-clarity="deny">' +
     (zh ? '拒绝' : 'Reject') + '</button><button type="button" class="clarity-consent-accept" data-clarity="grant">' +
     (zh ? '接受分析' : 'Accept analytics') + '</button></div>';
