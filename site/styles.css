@@ -398,7 +398,7 @@ pre { padding:1rem 1.2rem; margin:1.4rem 0; border:1px solid var(--line); border
   .wrap { width:calc(100% - 2rem); }
   .header { gap:.6rem; }
   .header nav { width:100%; justify-content:space-between; gap:.4rem; font-size:.8125rem; }
-  .header .nav-workflows { display:none; }
+  .header .nav-workflows, .header .nav-app { display:none; }
   .language-switch a { padding-inline:.4rem; }
   .hero { padding-top:2rem; }
   .hero-description { font-size:1rem; }
