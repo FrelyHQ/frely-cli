@@ -7,6 +7,7 @@
   "nav.main": "Main navigation",
   "nav.workflows": "Device MCP",
   "nav.docs": "Docs",
+  "nav.app": "Desktop app",
   "hero.openSource": "OPEN SOURCE",
   "hero.release": "FrelyMCP · Agent access to your device",
   "hero.line1": "Let agents access ",
