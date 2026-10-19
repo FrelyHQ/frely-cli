@@ -10,6 +10,8 @@ export interface LocalProviderBinding {
   providerBaseUrl: string;
   models: string[];
   createdAt: string;
+  /** Where the Provider counts: a personal Provider slot or the Creator Plan Provider limit. Absent on bindings saved by older versions. */
+  slot?: "personal" | "creator";
   /** Prepared on the server but not finalized yet; `frely provider share` resumes it. */
   pending?: boolean;
 }
@@ -57,7 +59,8 @@ export function normalizeLoopbackOpenAiBaseUrl(value: string): string {
 }
 
 export function isSupportedLocalModelName(value: string): boolean {
-  return value.length >= 1 && value.length <= 256 && !/[\s/]/u.test(value);
+  // Hugging Face style ids (`org/model`) are fine; whitespace and a leading, trailing or doubled `/` are not.
+  return value.length >= 1 && value.length <= 256 && !/\s/u.test(value) && !value.startsWith("/") && !value.endsWith("/") && !value.includes("//");
 }
 
 export function normalizeRelayProviderBaseUrl(value: string): string {
@@ -95,6 +98,7 @@ function parseProvider(value: unknown): LocalProviderBinding {
     providerBaseUrl: String(record.providerBaseUrl ?? ""),
     models: Array.isArray(record.models) ? record.models.map(String) : [],
     createdAt: String(record.createdAt ?? ""),
+    ...(record.slot === "personal" || record.slot === "creator" ? { slot: record.slot } : {}),
     ...(record.pending === true ? { pending: true } : {}),
   };
   validateProvider(provider);

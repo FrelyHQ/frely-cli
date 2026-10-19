@@ -95,6 +95,7 @@ To check the connection, ask the client to list the top-level names in your work
   - `process`: run shell commands, or start and manage long-running processes.
   - `web_fetch`: read public web pages.
 - `local_mcp_list` and `local_mcp_call` reach MCP servers on that computer that you turned on (see below).
+- `local_models` (background service only) lists model servers on that computer (Ollama, LM Studio, vLLM, llama.cpp) and shares them as a Frely Provider; it uses one Provider slot. Shared models appear in `models_list` marked `local: true`.
 - `frely_list` and `frely_call` manage your Frely account (API keys, credits, plans, orders). `frely api list|describe|call` is the same set from the terminal.
 
 The AI client's own shell still runs where the client runs; ask it to use the Frely tools for work on your computer. All clients share each computer's workspaces and running processes.

@@ -26,6 +26,8 @@ export interface PublicUser {
   id: string;
   email: string;
   name?: string | null;
+  /** Public Frely username, when the profile endpoint reports one. */
+  username?: string;
 }
 
 interface CliConfig {
@@ -320,7 +322,7 @@ export async function whoami(): Promise<PublicUser> {
   const credential = await loadCredential(config, true);
   if (!credential) throw new Error("No Frely login is stored. Run `frely login`.");
   const user = await fetchUser(config.relayUrl, credential);
-  if (config.version !== CONFIG_VERSION || user.id !== config.user.id || user.email !== config.user.email || user.name !== config.user.name) {
+  if (config.version !== CONFIG_VERSION || user.id !== config.user.id || user.email !== config.user.email || user.name !== config.user.name || user.username !== config.user.username) {
     await writeConfig({ ...config, user });
   }
   return user;
@@ -335,7 +337,7 @@ export async function requireLogin(): Promise<{ config: { relayUrl: string }; us
     if (error instanceof Error && error.message === "Frely login expired. Run `frely login`.") throw error;
     throw error;
   });
-  if (config.version !== CONFIG_VERSION || user.id !== config.user.id || user.email !== config.user.email || user.name !== config.user.name) await writeConfig({ ...config, version: CONFIG_VERSION, user });
+  if (config.version !== CONFIG_VERSION || user.id !== config.user.id || user.email !== config.user.email || user.name !== config.user.name || user.username !== config.user.username) await writeConfig({ ...config, version: CONFIG_VERSION, user });
   return { config: { relayUrl: config.relayUrl }, user, credential, ...(credential.scheme === "cookie" ? { cookie: credential.value } : {}) };
 }
 
@@ -679,7 +681,7 @@ function parseUser(payload: unknown): PublicUser {
     debugAuth(`profile validation=failed missing=${missing}`);
     throw new Error(`Frely returned an invalid user profile: missing ${missing}. Run with FRELY_DEBUG=1 for redacted diagnostics.`);
   }
-  return { id: candidate.id, email: candidate.email, ...(typeof candidate.name === "string" ? { name: candidate.name } : {}) };
+  return { id: candidate.id, email: candidate.email, ...(typeof candidate.name === "string" ? { name: candidate.name } : {}), ...(typeof candidate.username === "string" && candidate.username ? { username: candidate.username } : {}) };
 }
 
 function payloadShape(payload: unknown): string {
