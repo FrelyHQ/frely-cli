@@ -74,3 +74,27 @@ test('component, command and translation errors preserve the last valid site out
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+test('docs pages are static, crawlable and listed in the sitemap', async () => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const temp = await mkdtemp(resolve(tmpdir(), 'frely-site-docs-'));
+  try {
+    await cp(resolve(root, 'site'), resolve(temp, 'site'), { recursive: true });
+    for (const name of ['LICENSE', 'NOTICE', 'TRADEMARKS.md', 'install.sh', 'install.ps1', 'start.sh', 'start.ps1']) await cp(resolve(root, name), resolve(temp, name));
+    execFileSync(process.execPath, [resolve(temp, 'site/build.mjs')]);
+    const { entries } = await import(new URL('./docs-content.mjs', import.meta.url));
+    const sitemap = await readFile(resolve(temp, '_site/sitemap.xml'), 'utf8');
+    const index = await readFile(resolve(temp, '_site/docs/index.html'), 'utf8');
+    const help = await readFile(resolve(temp, '_site/docs/help/index.html'), 'utf8');
+    for (const path of ['/docs/', '/docs/help/']) assert.ok(sitemap.includes('https://cli.frely.cloud' + path));
+    for (const entry of entries) {
+      const page = await readFile(resolve(temp, '_site/docs/help', entry.slug, 'index.html'), 'utf8');
+      assert.ok(page.includes('<h1>'), entry.slug + ': page has a heading');
+      assert.ok(index.includes(`/docs/help/${entry.slug}/`), entry.slug + ': linked from index');
+      assert.ok(help.includes(`id="${entry.slug}"`), entry.slug + ': listed on help page');
+      assert.ok(sitemap.includes(`/docs/help/${entry.slug}/`), entry.slug + ': in sitemap');
+    }
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
