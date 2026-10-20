@@ -8,6 +8,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { ensureCredentialDirectory, readPrivateFile, writePrivateFile } from "../credential-file.js";
+import { builtinLocalMcps } from "../computer/builtin.js";
 import { VERSION } from "../version.js";
 import { safeEnv } from "./workspace.js";
 
@@ -261,6 +262,8 @@ interface Pooled { key: string; client: Client; lastUsed: number }
 export interface LocalMcpHubOptions {
   discovery?: DiscoveryDeps;
   loadManual?: () => Promise<LocalMcpEntry[]>;
+  /** Entries every device offers without local registration (computer use); a manual entry of the same name wins. */
+  loadBuiltin?: () => Promise<LocalMcpEntry[]>;
   idleMs?: number;
   refreshMs?: number;
   log?: (message: string) => void;
@@ -301,9 +304,11 @@ export class LocalMcpHub {
       this.options.log?.(`local MCP list unreadable: ${error instanceof Error ? error.message : String(error)}`);
       return [] as LocalMcpEntry[];
     });
+    const builtin = await (this.options.loadBuiltin ?? builtinLocalMcps)().catch(() => [] as LocalMcpEntry[]);
+    const own = [...builtin.filter((entry) => !manual.some((item) => item.name === entry.name)), ...manual];
     const covered = new Set(manual.flatMap((entry) => entry.transport === "http" ? [Number(new URL(entry.url).port)] : []));
     const hits = await discoverLoopbackMcps(this.options.discovery, covered);
-    this.entries = [...manual, ...nameDiscovered(hits, manual.map((entry) => entry.name))];
+    this.entries = [...own, ...nameDiscovered(hits, own.map((entry) => entry.name))];
     this.refreshedAt = Date.now();
     const live = new Map(this.entries.map((entry) => [entry.name, connectionKey(entry)]));
     for (const [name, item] of [...this.pool]) if (live.get(name) !== item.key) { this.pool.delete(name); void item.client.close().catch(() => undefined); }

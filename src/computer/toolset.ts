@@ -11,7 +11,7 @@ const MAX_RESULT_BYTES = 6 * 1024 * 1024;
 
 export interface ComputerToolsetOptions {
   backend: OcuBackend;
-  /** Local key of the two-key rule (the registered local MCP entry); checked on every list and call so `frely computer disable` takes effect at once. */
+  /** Local key of the two-key rule (false once `frely computer disable` vetoed computer use); checked on every list and call so the veto takes effect at once. */
   isLocallyEnabled: () => Promise<boolean>;
   audit?: (entry: ComputerAuditEntry) => Promise<void>;
 }
@@ -52,7 +52,7 @@ export class ComputerToolset {
     };
     const fail = (message: string, reason: string) => finish({ isError: true, content: [{ type: "text", text: message }] }, reason);
     if (!ALLOWED_TOOLS.has(tool)) return fail(`Unknown tool: ${name}`, "unknown_tool");
-    if (!(await this.available())) return fail("Computer use is turned off on this device. Run `frely computer enable` on it first.", "locally_disabled");
+    if (!(await this.available())) return fail("Computer use is turned off on this device (`frely computer disable`). Run `frely computer enable` on it to allow it again.", "locally_disabled");
     try {
       if (tool !== "list_apps") {
         try { assertAppAllowed(args.app); } catch (error) {

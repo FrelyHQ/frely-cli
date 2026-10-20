@@ -3,20 +3,21 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { VERSION } from "../version.js";
-import { loadManualEntries } from "../runtime/local-mcp.js";
-import { StdioOcuBackend } from "./ocu.js";
+import { COMPUTER_MCP_NAME, computerLocallyVetoed } from "./builtin.js";
+import { ocuBinaryPath, StdioOcuBackend } from "./ocu.js";
+import { installOcuRuntime } from "./runtime.js";
 import { ComputerToolset } from "./toolset.js";
 
-/** Name `frely computer enable` registers in the local MCP list; the web page turns it on by this name. */
-export const COMPUTER_MCP_NAME = "computer";
+export { COMPUTER_MCP_NAME };
 
-/** The local key of the two-key rule: computer use works only while its entry is in the local MCP list. */
-export async function computerEntryRegistered(): Promise<boolean> {
-  return (await loadManualEntries().catch(() => [])).some((entry) => entry.name === COMPUTER_MCP_NAME && entry.transport === "stdio");
+/** The local key of the two-key rule: computer use is on unless `frely computer disable` vetoed it; checked on every list and call. */
+export async function computerLocallyEnabled(): Promise<boolean> {
+  return !(await computerLocallyVetoed());
 }
 
+/** The runtime is installed on first use (pinned download, checksum verified), so turning computer use on from the web is enough. */
 export function createComputerToolset(): ComputerToolset {
-  return new ComputerToolset({ backend: new StdioOcuBackend(), isLocallyEnabled: computerEntryRegistered });
+  return new ComputerToolset({ backend: new StdioOcuBackend(ocuBinaryPath(), installOcuRuntime), isLocallyEnabled: computerLocallyEnabled });
 }
 
 /** MCP server over the guarded toolset. Local MCP forwarding starts it as a stdio server (`frely computer mcp`). */
