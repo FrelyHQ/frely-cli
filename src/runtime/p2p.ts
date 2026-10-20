@@ -59,6 +59,7 @@ export class P2pTransfers {
   private idle: NodeJS.Timeout | null = null;
   private active = 0;
   private readonly jobs = new Map<string, P2pJob>();
+  private readonly cancels = new Map<string, () => void>();
 
   async supported(): Promise<boolean> { return (await loadIroh()) !== null; }
 
@@ -94,11 +95,14 @@ export class P2pTransfers {
       job = this.newJob("receive", input.bytes);
       job.address = this.address(endpoint, relays);
     } catch (error) { this.release(); throw error; }
+    const waiting = new Promise<never>((_, reject) => { this.cancels.set(job.jobId, () => reject(new Error("Cancelled."))); });
+    waiting.catch(() => undefined);
     void (async () => {
       let peer: IrohTypes.Connection | undefined;
       let bi: IrohTypes.BiStream | undefined;
       try {
-        peer = await timeout(this.acceptFrom(endpoint, input.from), LISTEN_TIMEOUT_MS, "Nobody sent the file in time.");
+        peer = await Promise.race([timeout(this.acceptFrom(endpoint, input.from), LISTEN_TIMEOUT_MS, "Nobody sent the file in time."), waiting]);
+        this.cancels.delete(job.jobId);
         bi = await peer.acceptBi();
         const header = JSON.parse(Buffer.from(await bi.recv.readExact(Buffer.from(await bi.recv.readExact(4)).readUInt32BE(0))).toString("utf8")) as { bytes?: number; sha256?: string };
         if (header.bytes !== input.bytes || header.sha256 !== input.sha256) throw new Error("The sender offered a different file than expected.");
@@ -113,9 +117,15 @@ export class P2pTransfers {
         // Tell the sender why instead of leaving it to wait for the connection to time out.
         await bi?.send.writeAll(Array.from(Buffer.from(message.slice(0, 200)))).then(() => bi?.send.finish()).catch(() => undefined);
         peer?.close(2n, Array.from(Buffer.from("failed")));
-      } finally { this.release(); }
+      } finally { this.cancels.delete(job.jobId); this.release(); }
     })();
     return { ...job };
+  }
+
+  /** Stops a receive job that is still waiting for its sender (so a retry on another relay setting can bind); no effect once data flows. */
+  cancel(jobId: string): P2pJob {
+    this.cancels.get(jobId)?.();
+    return this.status(jobId);
   }
 
   /** Sends one file to a prepared peer. Waits up to 100 seconds, then leaves the job running. */

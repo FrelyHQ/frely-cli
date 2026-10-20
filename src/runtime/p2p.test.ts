@@ -66,3 +66,16 @@ test("relay URLs must be https", async () => {
   await assert.rejects(node.listen(await Workspace.open(tmpdir()), { path: "x", bytes: 1, sha256: "0".repeat(64), overwrite: false, from: "a", relayUrl: "http://example.com" }), /https/u);
   await node.close();
 });
+
+test("a listening job can be cancelled before the sender arrives", async (t) => {
+  const f = await setup();
+  if (!(await f.receiver.supported())) { t.skip("no iroh build on this platform"); await f.cleanup(); return; }
+  try {
+    const listening = await f.receiver.listen(f.wb, { path: "in/x.bin", bytes: 1, sha256: "0".repeat(64), overwrite: false, from: "a".repeat(64) });
+    assert.equal(listening.status, "running");
+    f.receiver.cancel(listening.jobId);
+    const done = await waitFor(f.receiver, listening.jobId);
+    assert.equal(done.status, "failed");
+    assert.match(String(done.error), /Cancelled/u);
+  } finally { await f.cleanup(f.receiver, f.sender); }
+});
