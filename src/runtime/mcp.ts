@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { MaintenanceGate } from "../update/maintenance.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -5,6 +6,11 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { ProcessManager } from "./process-manager.js";
 import { FairRwScheduler } from "./scheduler.js";
 import { safeEnv, Workspace } from "./workspace.js";
+
+/** A read that should reach the model as an MCP image block next to its text metadata. */
+class ImageResult {
+  constructor(readonly meta: Record<string, unknown>, readonly data: string, readonly mimeType: string) {}
+}
 import { VERSION } from "../version.js";
 import { ensureWorkspaceRegistered, listWorkspaces } from "./workspace-registry.js";
 import { resolveWorkspace, resolveWorkspacePair } from "./workspace-router.js";
@@ -112,8 +118,8 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
     ...(enabledLocalMcps(options).length > 0 ? LOCAL_MCP_TOOLS : []),
     ...(options.localModels ? [LOCAL_MODELS_TOOL] : []),
-    tool("read", "Read the workspace. action=list lists a directory, or returns type/size/mtime for a file; read returns a UTF-8 file (max 1 MiB), or lines startLine..endLine; search finds `query` in file contents; find matches file names (*, **, ?); roots lists workspace roots. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { action: { type: "string", enum: ["list", "read", "search", "find", "roots"] }, path: stringSchema("Relative path", "."), startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, query: { type: "string" }, regex: boolSchema(false), caseSensitive: boolSchema(false), maxResults: intSchema(100, 1, 1000), contextLines: intSchema(0, 0, 10) }, { readOnly: true, destructive: false, openWorld: false }),
-    tool("edit_file", "Change a UTF-8 workspace file: `content` atomically writes the whole file, creating parent directories (overwrite=true to replace one); `edits` replaces line ranges. Delete, move and mkdir with process. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { path: stringSchema("Relative path"), content: { type: "string" }, overwrite: boolSchema(false), edits: { type: "array", minItems: 1, maxItems: 100, items: { type: "object", additionalProperties: false, required: ["startLine", "endLine", "replacement"], properties: { startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, replacement: { type: "string" } } } } }, { readOnly: false, destructive: true, openWorld: false, idempotent: false }),
+    tool("read", "Read the workspace. action=list lists a directory, or returns type/size/mtime for a file; read returns a UTF-8 file (max 1 MiB), or lines startLine..endLine; encoding=base64 returns any file as base64 with its sha256, encoding=image returns a png/jpeg/gif/webp the model can see (both max 1 MiB); search finds `query` in file contents; find matches file names (*, **, ?); roots lists workspace roots. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { action: { type: "string", enum: ["list", "read", "search", "find", "roots"] }, path: stringSchema("Relative path", "."), encoding: { type: "string", enum: ["utf8", "base64", "image"], default: "utf8" }, startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, query: { type: "string" }, regex: boolSchema(false), caseSensitive: boolSchema(false), maxResults: intSchema(100, 1, 1000), contextLines: intSchema(0, 0, 10) }, { readOnly: true, destructive: false, openWorld: false }),
+    tool("edit_file", "Change a UTF-8 workspace file: `content` atomically writes the whole file, creating parent directories (overwrite=true to replace one); `contentBase64` does the same for binary data (max 1 MiB decoded); `edits` replaces line ranges. Delete, move and mkdir with process. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { path: stringSchema("Relative path"), content: { type: "string" }, contentBase64: { type: "string" }, overwrite: boolSchema(false), edits: { type: "array", minItems: 1, maxItems: 100, items: { type: "object", additionalProperties: false, required: ["startLine", "endLine", "replacement"], properties: { startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, replacement: { type: "string" } } } } }, { readOnly: false, destructive: true, openWorld: false, idempotent: false }),
     tool("web_fetch", "Read a public http(s) URL (GET or HEAD, ports 80, 443) from this device's network; private addresses are refused. Read-only: it cannot send a request body. Returns status, content type and body text up to maxBytes. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { url: { type: "string" }, method: { type: "string", enum: ["GET", "HEAD"], default: "GET" }, headers: { type: "object", additionalProperties: { type: "string" } }, maxBytes: intSchema(262144, 1, 1048576), timeoutMs: intSchema(30000, 100, 120000) }, { readOnly: true, destructive: false, openWorld: true }),
     tool("process", "Run shell commands as the current OS user, inside the OS sandbox, and refused when this device cannot sandbox them unless the owner turned the sandbox off: credential folders blocked (ask with request_permission), writes limited to workspace and temp, network to HTTP(S) and ssh (the connection needs no approval, but reading ~/.ssh config and keys does: request_permission resource=ssh). action=run waits up to timeoutMs and returns output; start returns an id for longer tasks; read returns output after stdoutCursor/stderrCursor; write sends `input` to stdin; list; stop. concurrency=exclusive for commands that change shared repo, dependency or build state.", { action: { type: "string", enum: ["run", "start", "read", "write", "list", "stop"] }, command: { type: "string" }, cwd: stringSchema("Relative path", "."), timeoutMs: intSchema(30000, 100, 120000), concurrency: { type: "string", enum: ["parallel", "exclusive"], default: "parallel" }, processId: { type: "string" }, stdoutCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), stderrCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), input: { type: "string" } }, { readOnly: false, destructive: true, openWorld: true, idempotent: false }),
   ] }));
@@ -154,6 +160,9 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
       // `frely mcp workspace add|remove` edits the registry while this runtime keeps running; pick the change up per call.
       await syncWorkspaces(workspaces, primaryRoot);
       const result = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]), pathGrantsFromMeta(request.params._meta), networkAllowFromMeta(request.params._meta));
+      if (result instanceof ImageResult) {
+        return { content: [{ type: "image" as const, data: result.data, mimeType: result.mimeType }, { type: "text" as const, text: JSON.stringify(result.meta) }] };
+      }
       return { content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result) }] };
     } catch (error) {
       try { options.onToolError?.(extra.requestId, name, error); } catch { /* Diagnostics cannot change tool results. */ }
@@ -224,7 +233,7 @@ async function dispatch(
     return dispatch(mapped, routed, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow);
   }
   if (name === "edit_file") {
-    if ((args.content === undefined) === (args.edits === undefined)) throw new Error("Pass exactly one of content or edits.");
+    if ([args.content, args.contentBase64, args.edits].filter((value) => value !== undefined).length !== 1) throw new Error("Pass exactly one of content, contentBase64 or edits.");
     return dispatch(args.edits === undefined ? "write_file" : "apply_patch", args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow);
   }
 
@@ -266,9 +275,28 @@ async function dispatch(
   if (name === "search_files" && args.mode === "name") return read(() => workspace.findFiles(relativeInput, textArg(args, "query"), intArg(args, "maxResults", 100, 1, 1000)));
   if (name === "search_files") return read(() => workspace.searchFiles(relativeInput, textArg(args, "query"), { regex: boolArg(args, "regex", false), caseSensitive: boolArg(args, "caseSensitive", false), maxResults: intArg(args, "maxResults", 100, 1, 500), contextLines: intArg(args, "contextLines", 0, 0, 10) }));
   if (name === "read_file" && (args.startLine !== undefined || args.endLine !== undefined)) return read(() => workspace.readFileLines(relativeInput, intArg(args, "startLine", 1, 1, Number.MAX_SAFE_INTEGER), optionalIntArg(args, "endLine", 1, Number.MAX_SAFE_INTEGER)));
+  if (name === "read_file" && args.encoding !== undefined && args.encoding !== "utf8") {
+    if (args.encoding !== "base64" && args.encoding !== "image") throw new Error("encoding must be one of utf8, base64, image.");
+    return read(async () => {
+      const file = await workspace.readFileBytes(relativeInput);
+      const meta = { path: file.path, bytes: file.bytes, mimeType: file.mimeType, sha256: createHash("sha256").update(file.data).digest("hex") };
+      const base64 = file.data.toString("base64");
+      if (args.encoding === "image") {
+        if (!file.mimeType.startsWith("image/")) throw new Error("Not a png, jpeg, gif or webp image; read it with encoding=base64.");
+        return new ImageResult(meta, base64, file.mimeType);
+      }
+      return { ...meta, encoding: "base64", content: base64 };
+    });
+  }
   if (name === "read_file") return read(() => workspace.readFile(relativeInput));
   if (name === "read_file_lines") return read(() => workspace.readFileLines(relativeInput, intArg(args, "startLine", 1, 1, Number.MAX_SAFE_INTEGER), optionalIntArg(args, "endLine", 1, Number.MAX_SAFE_INTEGER)));
   if (name === "write_file" && boolArg(args, "directory", false)) return write(() => workspace.createDirectory(relativeInput));
+  if (name === "write_file" && args.contentBase64 !== undefined) {
+    const encoded = textArg(args, "contentBase64");
+    if (encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(encoded)) throw new Error("contentBase64 is not valid base64.");
+    const data = Buffer.from(encoded, "base64");
+    return write(() => workspace.writeFile(relativeInput, data, boolArg(args, "overwrite", false)));
+  }
   if (name === "write_file") return write(() => workspace.writeFile(relativeInput, textArg(args, "content"), boolArg(args, "overwrite", false)));
   if (name === "apply_patch") return write(() => workspace.applyPatch(relativeInput, arrayArg(args, "edits", 1, 100), optionalTextArg(args, "expectedSha256")));
   if (name === "create_directory") return write(() => workspace.createDirectory(relativeInput));
