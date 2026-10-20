@@ -18,6 +18,7 @@ import type { LocalMcpHub } from "./local-mcp.js";
 import type { LocalModelsHub } from "../provider/local-models.js";
 import { pathGrantsFromMeta } from "./sandbox.js";
 import { networkAllowFromMeta, webFetch } from "./web-fetch.js";
+import { P2pTransfers, type P2pAddress } from "./p2p.js";
 import { TRANSFER_TOOLS, transferAllowedFromMeta, transferDownload, transferPrepare, transferUpload, type TransferTarget } from "./transfer.js";
 
 interface ToolFlags {
@@ -62,6 +63,7 @@ export const LOCAL_MCP_TOOLS = [
 export const LOCAL_MODELS_TOOL = tool("local_models", "Use a model server running on this device (Ollama, LM Studio, vLLM, llama.cpp, mltf) through Frely. action=list probes loopback OpenAI-compatible servers (the given url, else the usual ports 11434, 1234, 8000, 8080) and lists their models plus the local models already shared. action=share publishes the server's models (all of them, or `models`) as a Frely Provider, which uses one Provider slot of the account (without a free slot it counts against the Creator Plan Provider limit). Shared models then appear in models_list marked local: true; they run on this device at no Credit cost and suit low-priority, slow-ok tasks. The device must stay online.", { action: { type: "string", enum: ["list", "share"] }, url: stringSchema("Loopback OpenAI-compatible base URL such as http://127.0.0.1:1234/v1. Required for share; for list it limits the probe to that server."), models: { type: "array", maxItems: 256, items: { type: "string", maxLength: 256 }, description: "Model ids to share; omit to share every model the server reports." }, name: stringSchema("Provider name shown in Frely (at most 128 characters)") }, { readOnly: false, destructive: false, openWorld: true, idempotent: false });
 
 export async function createMcpServer(workspaceInput: string, options: McpRuntimeOptions = {}): Promise<Server> {
+  const p2p = new P2pTransfers();
   // Ensure the primary workspace is registered
   await ensureWorkspaceRegistered(workspaceInput);
 
@@ -160,7 +162,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
       }
       // `frely mcp workspace add|remove` edits the registry while this runtime keeps running; pick the change up per call.
       await syncWorkspaces(workspaces, primaryRoot);
-      const result = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]), pathGrantsFromMeta(request.params._meta), networkAllowFromMeta(request.params._meta), transferAllowedFromMeta(request.params._meta));
+      const result = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]), pathGrantsFromMeta(request.params._meta), networkAllowFromMeta(request.params._meta), transferAllowedFromMeta(request.params._meta), p2p);
       if (result instanceof ImageResult) {
         return { content: [{ type: "image" as const, data: result.data, mimeType: result.mimeType }, { type: "text" as const, text: JSON.stringify(result.meta) }] };
       }
@@ -208,6 +210,7 @@ async function dispatch(
   pathGrants: readonly string[] = [],
   networkAllow: readonly string[] = [],
   transferAllowed = false,
+  p2p: P2pTransfers = new P2pTransfers(),
 ): Promise<unknown> {
   const guarded = <T>(work: () => Promise<T>) => async () => { signal.throwIfAborted(); return work(); };
   const read = <T>(work: () => Promise<T>) => workspaceScheduler.read(guarded(work));
@@ -232,11 +235,11 @@ async function dispatch(
     const mapped = Object.hasOwn(merged, action) ? merged[action] : undefined;
     if (!mapped) throw new Error(`action must be one of ${Object.keys(merged).join(", ")}.`);
     const routed = mapped === "find_files" ? { ...args, pattern: args.query } : args;
-    return dispatch(mapped, routed, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow, transferAllowed);
+    return dispatch(mapped, routed, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow, transferAllowed, p2p);
   }
   if (name === "edit_file") {
     if ([args.content, args.contentBase64, args.edits].filter((value) => value !== undefined).length !== 1) throw new Error("Pass exactly one of content, contentBase64 or edits.");
-    return dispatch(args.edits === undefined ? "write_file" : "apply_patch", args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow, transferAllowed);
+    return dispatch(args.edits === undefined ? "write_file" : "apply_patch", args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow, transferAllowed, p2p);
   }
 
   // Process-management tools address a process id, not a path: no workspace routing.
@@ -248,8 +251,20 @@ async function dispatch(
   // Hidden from tools/list: only the relay's transfer tool calls these, and it marks them in `_meta`.
   if (TRANSFER_TOOLS.has(name)) {
     if (!transferAllowed) throw new Error(`Unknown tool: ${name}`);
+    if (name === "transfer_p2p_info") return p2p.info();
+    if (name === "transfer_p2p_status") return p2p.status(textArg(args, "jobId"));
     const resolvedPath = resolveWorkspace(workspaces as Map<string, Workspace>, textArg(args, "path"));
     const transferWorkspace = resolvedPath.workspace.withGrants(pathGrants);
+    if (name === "transfer_p2p_listen" || name === "transfer_p2p_send") {
+      const p2pBytes = intArg(args, "bytes", 0, 1, 104857600), p2pSha = textArg(args, "sha256");
+      if (!/^[0-9a-f]{64}$/u.test(p2pSha)) throw new Error("sha256 must be 64 hex characters.");
+      if (name === "transfer_p2p_listen") {
+        return write(() => p2p.listen(transferWorkspace, { path: resolvedPath.relativeInput, bytes: p2pBytes, sha256: p2pSha, overwrite: boolArg(args, "overwrite", false), from: textArg(args, "from"), relayUrl: args.relayUrl }));
+      }
+      const to = args.to as Partial<P2pAddress> | undefined;
+      if (!to || typeof to.id !== "string" || !Array.isArray(to.directAddresses)) throw new Error("to must be the other device's address.");
+      return read(() => p2p.send(transferWorkspace, { path: resolvedPath.relativeInput, bytes: p2pBytes, sha256: p2pSha, to: { id: to.id!, relayUrl: typeof to.relayUrl === "string" ? to.relayUrl : null, directAddresses: to.directAddresses!.filter((entry): entry is string => typeof entry === "string").slice(0, 16) }, relayUrl: args.relayUrl }));
+    }
     if (name === "transfer_prepare") return read(() => transferPrepare(transferWorkspace, resolvedPath.relativeInput));
     const headers = args.headers ?? {};
     if (!headers || typeof headers !== "object" || Array.isArray(headers)) throw new Error("headers must be an object.");
