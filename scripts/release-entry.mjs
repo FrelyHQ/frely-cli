@@ -144,6 +144,8 @@ export function main(args = process.argv.slice(2), entryArtifact = catalog.defau
   assertClean();
   if (git("symbolic-ref", "--quiet", "--short", "HEAD") !== "main") fail("Prepare releases from main");
   run("git", ["fetch", "origin", "main", "--tags"]);
+  // （环境：发版, 原因：发版必须基于最新 origin/main；落后自动快进，分叉需人工处理）
+  run("git", ["merge", "--ff-only", "refs/remotes/origin/main"]);
   const sha = git("rev-parse", "HEAD");
   run("git", ["merge-base", "--is-ancestor", "origin/main", sha]);
   const version = options.version || nextVersion(artifact);
