@@ -18,6 +18,7 @@ import type { LocalMcpHub } from "./local-mcp.js";
 import type { LocalModelsHub } from "../provider/local-models.js";
 import { pathGrantsFromMeta } from "./sandbox.js";
 import { networkAllowFromMeta, webFetch } from "./web-fetch.js";
+import { TRANSFER_TOOLS, transferAllowedFromMeta, transferDownload, transferPrepare, transferUpload, type TransferTarget } from "./transfer.js";
 
 interface ToolFlags {
   readOnly: boolean;
@@ -159,7 +160,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
       }
       // `frely mcp workspace add|remove` edits the registry while this runtime keeps running; pick the change up per call.
       await syncWorkspaces(workspaces, primaryRoot);
-      const result = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]), pathGrantsFromMeta(request.params._meta), networkAllowFromMeta(request.params._meta));
+      const result = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]), pathGrantsFromMeta(request.params._meta), networkAllowFromMeta(request.params._meta), transferAllowedFromMeta(request.params._meta));
       if (result instanceof ImageResult) {
         return { content: [{ type: "image" as const, data: result.data, mimeType: result.mimeType }, { type: "text" as const, text: JSON.stringify(result.meta) }] };
       }
@@ -206,6 +207,7 @@ async function dispatch(
   signal: AbortSignal,
   pathGrants: readonly string[] = [],
   networkAllow: readonly string[] = [],
+  transferAllowed = false,
 ): Promise<unknown> {
   const guarded = <T>(work: () => Promise<T>) => async () => { signal.throwIfAborted(); return work(); };
   const read = <T>(work: () => Promise<T>) => workspaceScheduler.read(guarded(work));
@@ -230,11 +232,11 @@ async function dispatch(
     const mapped = Object.hasOwn(merged, action) ? merged[action] : undefined;
     if (!mapped) throw new Error(`action must be one of ${Object.keys(merged).join(", ")}.`);
     const routed = mapped === "find_files" ? { ...args, pattern: args.query } : args;
-    return dispatch(mapped, routed, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow);
+    return dispatch(mapped, routed, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow, transferAllowed);
   }
   if (name === "edit_file") {
     if ([args.content, args.contentBase64, args.edits].filter((value) => value !== undefined).length !== 1) throw new Error("Pass exactly one of content, contentBase64 or edits.");
-    return dispatch(args.edits === undefined ? "write_file" : "apply_patch", args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow);
+    return dispatch(args.edits === undefined ? "write_file" : "apply_patch", args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow, transferAllowed);
   }
 
   // Process-management tools address a process id, not a path: no workspace routing.
@@ -242,6 +244,21 @@ async function dispatch(
   if (name === "read_process") return processRead(async () => processes.read(textArg(args, "processId"), intArg(args, "stdoutCursor", 0, 0, Number.MAX_SAFE_INTEGER), intArg(args, "stderrCursor", 0, 0, Number.MAX_SAFE_INTEGER)));
   if (name === "write_process") return processRead(() => processes.write(textArg(args, "processId"), textArg(args, "input")));
   if (name === "stop_process") return processRead(() => processes.stop(textArg(args, "processId")));
+
+  // Hidden from tools/list: only the relay's transfer tool calls these, and it marks them in `_meta`.
+  if (TRANSFER_TOOLS.has(name)) {
+    if (!transferAllowed) throw new Error(`Unknown tool: ${name}`);
+    const resolvedPath = resolveWorkspace(workspaces as Map<string, Workspace>, textArg(args, "path"));
+    const transferWorkspace = resolvedPath.workspace.withGrants(pathGrants);
+    if (name === "transfer_prepare") return read(() => transferPrepare(transferWorkspace, resolvedPath.relativeInput));
+    const headers = args.headers ?? {};
+    if (!headers || typeof headers !== "object" || Array.isArray(headers)) throw new Error("headers must be an object.");
+    const target: TransferTarget = { url: textArg(args, "url"), headers: headers as Record<string, string> };
+    const expected = { bytes: intArg(args, "bytes", 0, 1, 104857600), sha256: textArg(args, "sha256") };
+    if (!/^[0-9a-f]{64}$/u.test(expected.sha256)) throw new Error("sha256 must be 64 hex characters.");
+    if (name === "transfer_upload") return read(() => transferUpload(transferWorkspace, resolvedPath.relativeInput, target, expected, signal));
+    return write(() => transferDownload(transferWorkspace, resolvedPath.relativeInput, target, expected, boolArg(args, "overwrite", false), signal));
+  }
 
   // Network access is not a workspace operation: no path routing, no workspace locks.
   if (name === "web_fetch") {

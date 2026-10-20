@@ -3,7 +3,7 @@ import { sandboxCommand, sandboxDenialHint, sshConfigReadable } from "./sandbox.
 import { pathProtection, type PathProtection } from "./protected-paths.js";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, type FileHandle } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
@@ -135,6 +135,63 @@ export class Workspace {
     } finally {
       await handle.close();
     }
+  }
+
+  /** A regular file to stream out, up to the transfer limit. The caller closes the handle. */
+  async openForTransfer(input: string, maxBytes: number): Promise<{ handle: FileHandle; bytes: number; name: string }> {
+    const path = await this.existingPath(input, "file");
+    const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) throw new Error("Only regular files can be transferred.");
+      if (stat.size < 1) throw new Error("An empty file cannot be transferred.");
+      if (stat.size > maxBytes) throw new Error(`File exceeds the ${Math.floor(maxBytes / 1048576)} MiB transfer limit.`);
+      return { handle, bytes: stat.size, name: basename(path) };
+    } catch (error) {
+      await handle.close();
+      throw error;
+    }
+  }
+
+  /**
+   * Writes a stream to a new file the way writeFile does (workspace boundary, no symlink, hard-link or directory replacement,
+   * no overwrite unless asked, atomic rename), checking the byte count and SHA-256 before the file appears.
+   */
+  async writeStream(input: string, source: AsyncIterable<Buffer>, overwrite: boolean, expected: { bytes: number; sha256: string }) {
+    const path = await this.createPath(input);
+    const existing = await lstat(path).catch(() => null);
+    if (existing?.isSymbolicLink()) throw new Error("Refusing to replace a symbolic link.");
+    if (existing?.isDirectory()) throw new Error("Refusing to replace a directory.");
+    if (existing && existing.nlink > 1) throw new Error("Refusing to replace a file with multiple hard links.");
+    if (existing && !overwrite) throw new Error("File exists; set overwrite=true.");
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    await this.assertCanonicalInside(await realpath(dirname(path)));
+    const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+    const handle = await open(tmp, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
+    const hash = createHash("sha256");
+    let bytes = 0;
+    try {
+      for await (const chunk of source) {
+        bytes += chunk.byteLength;
+        if (bytes > expected.bytes) throw new Error("The download is larger than declared.");
+        hash.update(chunk);
+        await handle.write(chunk);
+      }
+      if (bytes !== expected.bytes) throw new Error(`The download is ${bytes} bytes, not ${expected.bytes}.`);
+      if (hash.digest("hex") !== expected.sha256) throw new Error("The download does not match its SHA-256.");
+      await handle.sync();
+    } catch (error) {
+      await handle.close();
+      await rm(tmp, { force: true });
+      throw error;
+    }
+    await handle.close();
+    await rename(tmp, path).catch(async (error) => {
+      await rm(tmp, { force: true });
+      throw error;
+    });
+    await chmod(path, 0o600).catch(() => undefined);
+    return { path: portableRelative(this.root, path), bytes };
   }
 
   async readFileLines(input: string, startLine: number, endLine?: number) {
