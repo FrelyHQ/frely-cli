@@ -8,7 +8,7 @@ import type { IncomingMessage } from "node:http";
 export const TRANSFER_MAX_BYTES = 100 * 1024 * 1024;
 /** Request `_meta` key the relay sets on the hidden transfer_* calls; the relay removes it from whatever a client sent. */
 export const TRANSFER_META_KEY = "frely/transfer";
-export const TRANSFER_TOOLS = new Set(["transfer_prepare", "transfer_upload", "transfer_download"]);
+export const TRANSFER_TOOLS = new Set(["transfer_prepare", "transfer_upload", "transfer_download", "transfer_p2p_info", "transfer_p2p_listen", "transfer_p2p_send", "transfer_p2p_status"]);
 
 const TIMEOUT_MS = 10 * 60_000;
 const HEADER_NAMES = /^(?:content-type|x-amz-[a-z0-9-]+)$/u;

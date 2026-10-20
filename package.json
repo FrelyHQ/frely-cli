@@ -50,5 +50,8 @@
     "@types/node": "^22.18.1",
     "@types/ws": "^8.18.1",
     "typescript": "^5.9.2"
+  },
+  "optionalDependencies": {
+    "@number0/iroh": "^1.1.0"
   }
 }
