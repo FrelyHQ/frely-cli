@@ -32,12 +32,16 @@ async function loadIroh(): Promise<Iroh | null> {
   try { return unwrap(await import(name)); } catch { return null; }
 }
 
-function relayUrlOf(value: unknown): string | null {
-  if (value === undefined || value === null || value === "") return null;
-  if (typeof value !== "string") throw new Error("relayUrl must be a string.");
-  const url = new URL(value);
-  if (url.protocol !== "https:" || url.username || url.password) throw new Error("The relay URL must be https without credentials.");
-  return url.toString();
+/** The relays to use: one https URL or a list of up to four (iroh picks the closest as home relay); none means direct only. */
+function relayUrlsOf(value: unknown): string[] {
+  if (value === undefined || value === null || value === "") return [];
+  const list = Array.isArray(value) ? value : [value];
+  if (list.length > 4 || list.some((entry) => typeof entry !== "string")) throw new Error("relayUrl must be a string or a list of at most four strings.");
+  return list.map((entry) => {
+    const url = new URL(entry as string);
+    if (url.protocol !== "https:" || url.username || url.password) throw new Error("The relay URL must be https without credentials.");
+    return url.toString();
+  });
 }
 
 const timeout = <T>(work: Promise<T>, ms: number, message: string) => new Promise<T>((resolve, reject) => {
@@ -66,11 +70,11 @@ export class P2pTransfers {
   }
 
   /** This endpoint's address once it is connected to the Frely relay (or, without one, its local sockets). */
-  private address(endpoint: IrohTypes.Endpoint, relayUrl: string | null): P2pAddress {
+  private address(endpoint: IrohTypes.Endpoint, relays: string[]): P2pAddress {
     const addr = endpoint.addr();
     const direct = addr.directAddresses();
-    const addresses = direct.length > 0 || relayUrl ? direct : endpoint.boundSockets().map((socket) => socket.replace("0.0.0.0", "127.0.0.1").replace("[::]", "[::1]"));
-    return { id: endpoint.id().toString(), relayUrl: addr.relayUrl() ?? relayUrl, directAddresses: addresses };
+    const addresses = direct.length > 0 || relays.length > 0 ? direct : endpoint.boundSockets().map((socket) => socket.replace("0.0.0.0", "127.0.0.1").replace("[::]", "[::1]"));
+    return { id: endpoint.id().toString(), relayUrl: addr.relayUrl() ?? relays[0] ?? null, directAddresses: addresses };
   }
 
   status(jobId: string): P2pJob {
@@ -81,14 +85,14 @@ export class P2pTransfers {
 
   /** Waits for the one expected peer and writes its file; returns at once, the job runs in the background. */
   async listen(workspace: Workspace, input: { path: string; bytes: number; sha256: string; overwrite: boolean; from: string; relayUrl?: unknown }): Promise<P2pJob> {
-    const relayUrl = relayUrlOf(input.relayUrl);
+    const relays = relayUrlsOf(input.relayUrl);
     this.hold();
     let job: P2pJob;
     let endpoint: IrohTypes.Endpoint;
     try {
-      endpoint = await this.start(relayUrl);
+      endpoint = await this.start(relays);
       job = this.newJob("receive", input.bytes);
-      job.address = this.address(endpoint, relayUrl);
+      job.address = this.address(endpoint, relays);
     } catch (error) { this.release(); throw error; }
     void (async () => {
       let peer: IrohTypes.Connection | undefined;
@@ -117,11 +121,11 @@ export class P2pTransfers {
   /** Sends one file to a prepared peer. Waits up to 100 seconds, then leaves the job running. */
   async send(workspace: Workspace, input: { path: string; bytes: number; sha256: string; to: P2pAddress; relayUrl?: unknown }): Promise<P2pJob> {
     const iroh = await this.module();
-    const relayUrl = relayUrlOf(input.relayUrl);
+    const relays = relayUrlsOf(input.relayUrl);
     const job = this.newJob("send", input.bytes);
     this.hold();
     const run = (async () => {
-      const endpoint = await this.start(relayUrl);
+      const endpoint = await this.start(relays);
       const { handle, bytes } = await workspace.openForTransfer(input.path, TRANSFER_MAX_BYTES);
       try {
         if (bytes !== input.bytes) throw new Error("The file changed after it was prepared.");
@@ -171,24 +175,25 @@ export class P2pTransfers {
    * The endpoint, bound with this process's key and only the Frely relay (no n0 public relays or discovery). It is bound when
    * a transfer needs it, after the relay has admitted the node id from `info`, and waits until the relay is its home.
    */
-  private async start(relayUrl: string | null): Promise<IrohTypes.Endpoint> {
+  private async start(relays: string[]): Promise<IrohTypes.Endpoint> {
+    const relayKey = relays.join(" ");
     const iroh = await this.module();
     this.secret ??= iroh.SecretKey.generate();
-    if (this.starting && this.boundRelay === relayUrl) return this.starting;
-    if (this.endpoint && this.boundRelay === relayUrl) return this.endpoint;
+    if (this.starting && this.boundRelay === relayKey) return this.starting;
+    if (this.endpoint && this.boundRelay === relayKey) return this.endpoint;
     if (this.active > 1) throw new Error("A transfer on another relay is running; try again when it has finished.");
     await this.close();
-    this.boundRelay = relayUrl;
+    this.boundRelay = relayKey;
     const secret = this.secret;
     this.starting = (async () => {
       const builder = iroh.Endpoint.builder();
       builder.applyMinimal();
       builder.secretKey(secret.toBytes());
       builder.alpns([ALPN]);
-      builder.relayMode(relayUrl ? iroh.RelayMode.customFromUrls([relayUrl]) : iroh.RelayMode.disabled());
+      builder.relayMode(relays.length > 0 ? iroh.RelayMode.customFromUrls(relays) : iroh.RelayMode.disabled());
       const endpoint = await builder.bind();
       this.endpoint = endpoint;
-      if (relayUrl) await timeout(endpoint.online(), CONNECT_TIMEOUT_MS, "Could not reach the Frely relay.");
+      if (relays.length > 0) await timeout(endpoint.online(), CONNECT_TIMEOUT_MS, "Could not reach the Frely relay.");
       return endpoint;
     })();
     this.starting.catch(() => { this.starting = null; this.boundRelay = null; });
