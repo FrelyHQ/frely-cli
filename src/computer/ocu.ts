@@ -27,7 +27,7 @@ export function ocuBinaryPath(): string {
 
 export class OcuNotInstalledError extends Error {
   constructor(path: string) {
-    super(`The computer-use runtime is not installed (expected ${path}). Run \`frely computer enable\` on this device to install it.`);
+    super(`The computer-use runtime is not installed (expected ${path}) and could not be installed automatically.`);
     this.name = "OcuNotInstalledError";
   }
 }
@@ -37,12 +37,25 @@ export class StdioOcuBackend implements OcuBackend {
   private client: Client | undefined;
   private starting: Promise<Client> | undefined;
 
-  constructor(private readonly binary: string = ocuBinaryPath()) {}
+  private installing: Promise<unknown> | undefined;
+
+  /** `install` fetches the pinned runtime when the binary is missing; one install serves every call waiting on it. */
+  constructor(private readonly binary: string = ocuBinaryPath(), private readonly install?: () => Promise<unknown>) {}
+
+  private async ensureInstalled(): Promise<void> {
+    if (await access(this.binary).then(() => true, () => false)) return;
+    if (!this.install) throw new OcuNotInstalledError(this.binary);
+    this.installing ??= this.install().finally(() => { this.installing = undefined; });
+    try { await this.installing; } catch (error) {
+      throw new Error(`Could not install the computer-use runtime: ${error instanceof Error ? error.message : "install failed"}`);
+    }
+    await access(this.binary).catch(() => { throw new OcuNotInstalledError(this.binary); });
+  }
 
   private async connect(): Promise<Client> {
     if (this.client) return this.client;
     this.starting ??= (async () => {
-      await access(this.binary).catch(() => { throw new OcuNotInstalledError(this.binary); });
+      await this.ensureInstalled();
       const transport = new StdioClientTransport({ command: this.binary, args: ["mcp"], stderr: "ignore" });
       const client = new Client({ name: "frely-cli-computer", version: "1" });
       client.onclose = () => { if (this.client === client) this.client = undefined; };

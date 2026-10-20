@@ -12,10 +12,12 @@ import { ComputerToolset } from "./toolset.js";
 import type { ComputerAuditEntry } from "./state.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createComputerMcpServer } from "./server.js";
+import { computerLocallyEnabled, createComputerMcpServer } from "./server.js";
 import { runComputerCommand } from "./command.js";
 import { installOcuRuntime, OcuRuntimeError } from "./runtime.js";
-import { loadManualEntries } from "../runtime/local-mcp.js";
+import { addManualEntry, loadManualEntries, LocalMcpHub } from "../runtime/local-mcp.js";
+import { builtinLocalMcps } from "./builtin.js";
+import { StdioOcuBackend } from "./ocu.js";
 
 test("blocklist covers terminals, password managers, OS prompts, settings and Frely, by name and bundle id", () => {
   for (const app of ["Terminal", "com.apple.Terminal", "iTerm2", "com.googlecode.iterm2", "Windows Terminal", "powershell.exe", "gnome-terminal", "1Password", "com.1password.1password", "Bitwarden", "KeePassXC", "Keychain Access", "SecurityAgent", "consent.exe", "System Settings", "com.apple.systempreferences", "Frely", "com.frely.app", "  TERMINAL  "]) {
@@ -149,7 +151,7 @@ test("the MCP server lists the reviewed tools and passes image blocks through in
   }
 });
 
-test("enable registers the local MCP entry, disable removes it, status reports both", async () => {
+test("computer use is built in: offered without registration, `disable` is a local veto and `enable` lifts it", async () => {
   const home = await mkdtemp(join(tmpdir(), "frely-computer-cmd-"));
   const previous = process.env.XDG_CONFIG_HOME;
   const previousBin = process.env.FRELY_COMPUTER_BIN;
@@ -157,23 +159,60 @@ test("enable registers the local MCP entry, disable removes it, status reports b
   process.env.FRELY_COMPUTER_BIN = join(home, "ocu-stub");
   await writeFile(process.env.FRELY_COMPUTER_BIN, "stub");
   try {
-    assert.match(await runComputerCommand(["status"]), /Computer use: off/);
-    assert.match(await runComputerCommand(["enable"]), /local MCP "computer"/);
-    const entries = await loadManualEntries();
-    const entry = entries.find((item) => item.name === "computer");
-    assert.equal(entry?.transport, "stdio");
-    assert.deepEqual(entry && entry.transport === "stdio" ? entry.args.slice(-2) : [], ["computer", "mcp"]);
-    assert.equal(JSON.parse(await runComputerCommand(["status", "--json"])).enabled, true);
-    await runComputerCommand(["enable"]);
-    assert.equal((await loadManualEntries()).filter((item) => item.name === "computer").length, 1);
-    assert.match(await runComputerCommand(["disable"]), /turned off/);
+    // Nothing is registered, yet the device offers `computer`.
+    assert.deepEqual(await loadManualEntries(), []);
+    const offered = await builtinLocalMcps("/cli/index.js");
+    assert.equal(offered[0]?.name, "computer");
+    assert.equal(offered[0]?.transport, "stdio");
+    assert.deepEqual(offered[0] && offered[0].transport === "stdio" ? offered[0].args.slice(-2) : [], ["computer", "mcp"]);
+    assert.equal(await computerLocallyEnabled(), true);
+    assert.match(await runComputerCommand(["status"]), /allowed here/);
+    // The veto removes it from the device's offer and from the toolset at once.
+    assert.match(await runComputerCommand(["disable"]), /blocked on this device/);
+    assert.deepEqual(await builtinLocalMcps("/cli/index.js"), []);
+    assert.equal(await computerLocallyEnabled(), false);
+    assert.equal(JSON.parse(await runComputerCommand(["status", "--json"])).enabled, false);
+    assert.match(await runComputerCommand(["disable"]), /already blocked/);
+    // Enable lifts the veto and drops an entry an older `frely computer enable` registered by hand.
+    await addManualEntry({ name: "computer", transport: "stdio", command: "old", args: [] });
+    assert.match(await runComputerCommand(["enable"]), /stays off until you turn it on/);
+    assert.equal((await builtinLocalMcps("/cli/index.js")).length, 1);
     assert.equal((await loadManualEntries()).some((item) => item.name === "computer"), false);
-    assert.match(await runComputerCommand(["disable"]), /already off/);
   } finally {
     if (previous === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = previous;
     if (previousBin === undefined) delete process.env.FRELY_COMPUTER_BIN; else process.env.FRELY_COMPUTER_BIN = previousBin;
     await rm(home, { recursive: true, force: true });
   }
+});
+
+test("the hub lists the built-in computer entry first, a manual entry of that name wins, and the veto hides it", async () => {
+  const builtin = async () => [{ name: "computer", source: "manual" as const, transport: "stdio" as const, command: "frely", args: ["computer", "mcp"] }];
+  const manual = [{ name: "notes", source: "manual" as const, transport: "http" as const, url: "http://127.0.0.1:9/mcp" }];
+  const scanned = async (loadBuiltin: () => Promise<never[] | Awaited<ReturnType<typeof builtin>>>, loadManual = async () => manual) => {
+    const hub = new LocalMcpHub({ loadManual, loadBuiltin, discovery: { listPorts: async () => [], probe: async () => null } });
+    await hub.refresh();
+    return hub.capabilities();
+  };
+  assert.deepEqual(await scanned(builtin), [{ name: "computer", transport: "stdio" }, { name: "notes", transport: "http" }]);
+  assert.deepEqual(await scanned(async () => []), [{ name: "notes", transport: "http" }]);
+  assert.deepEqual(await scanned(builtin, async () => [{ name: "computer", source: "manual" as const, transport: "http" as const, url: "http://127.0.0.1:9/mcp" }]), [{ name: "computer", transport: "http" }]);
+});
+
+test("the runtime installs on first use, once for concurrent calls, and a failed install is reported", async () => {
+  const home = await mkdtemp(join(tmpdir(), "frely-computer-first-"));
+  const binary = join(home, "bin", "open-computer-use");
+  try {
+    let installs = 0;
+    const install = async () => { installs += 1; await new Promise((resolve) => setTimeout(resolve, 20)); await mkdir(join(home, "bin"), { recursive: true }); await writeFile(binary, "stub"); };
+    const backend = new StdioOcuBackend(binary, install);
+    // The stub is not a real MCP server, so connecting fails after the install; the install itself is what is under test.
+    await Promise.allSettled([backend.listTools(), backend.listTools()]);
+    assert.equal(installs, 1);
+    await access(binary);
+    const failing = new StdioOcuBackend(join(home, "missing", "open-computer-use"), async () => { throw new Error("offline"); });
+    await assert.rejects(failing.listTools(), /Could not install the computer-use runtime: offline/);
+    await assert.rejects(new StdioOcuBackend(join(home, "none")).listTools(), /not installed/);
+  } finally { await rm(home, { recursive: true, force: true }); }
 });
 
 async function runtimeFixture(platform: NodeJS.Platform, arch: string) {

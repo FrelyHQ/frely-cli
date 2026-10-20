@@ -71,7 +71,7 @@ test("probeHttpMcp recognizes a loopback MCP server and ignores everything else"
 
 test("hub discovers a loopback server, names it from the server and serves enabled calls only", async () => {
   const mcp = await fakeHttpMcp();
-  const hub = new LocalMcpHub({ discovery: { listPorts: async () => [mcp.port] }, loadManual: async () => [] });
+  const hub = new LocalMcpHub({ loadBuiltin: async () => [], discovery: { listPorts: async () => [mcp.port] }, loadManual: async () => [] });
   try {
     await hub.refresh();
     assert.deepEqual(hub.capabilities(), [{ name: "browser-bridge", transport: "http" }]);
@@ -91,7 +91,7 @@ test("hub discovers a loopback server, names it from the server and serves enabl
 
 test("hub forwards a manually added stdio server with its own environment", async () => {
   const entry = await stdioEntry({ LOCAL_MCP_TEST: "yes" });
-  const hub = new LocalMcpHub({ discovery: noDiscovery, loadManual: async () => [entry] });
+  const hub = new LocalMcpHub({ loadBuiltin: async () => [], discovery: noDiscovery, loadManual: async () => [entry] });
   try {
     await hub.refresh();
     assert.deepEqual(hub.capabilities(), [{ name: "notes", transport: "stdio" }]);
@@ -103,7 +103,7 @@ test("hub forwards a manually added stdio server with its own environment", asyn
 test("a discovered server that stops listening is no longer callable after a rescan", async () => {
   const mcp = await fakeHttpMcp();
   let ports = [mcp.port];
-  const hub = new LocalMcpHub({ discovery: { listPorts: async () => ports }, loadManual: async () => [] });
+  const hub = new LocalMcpHub({ loadBuiltin: async () => [], discovery: { listPorts: async () => ports }, loadManual: async () => [] });
   try {
     await hub.refresh();
     await hub.call(["browser-bridge"], "browser-bridge", "echo", { text: "x" });
@@ -171,7 +171,7 @@ test("the manual list round-trips and rejects duplicates and non-loopback URLs",
 
 test("the MCP runtime exposes local_mcp_* only while a name is enabled and forwards the call", async () => {
   const mcp = await fakeHttpMcp();
-  const hub = new LocalMcpHub({ discovery: { listPorts: async () => [mcp.port] }, loadManual: async () => [] });
+  const hub = new LocalMcpHub({ loadBuiltin: async () => [], discovery: { listPorts: async () => [mcp.port] }, loadManual: async () => [] });
   await hub.refresh();
   let enabled: string[] = [];
   const workspace = await mkdtemp(join(tmpdir(), "frely-local-mcp-ws-"));
