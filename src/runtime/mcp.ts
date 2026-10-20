@@ -253,6 +253,7 @@ async function dispatch(
     if (!transferAllowed) throw new Error(`Unknown tool: ${name}`);
     if (name === "transfer_p2p_info") return p2p.info();
     if (name === "transfer_p2p_status") return p2p.status(textArg(args, "jobId"));
+    if (name === "transfer_p2p_cancel") return p2p.cancel(textArg(args, "jobId"));
     const resolvedPath = resolveWorkspace(workspaces as Map<string, Workspace>, textArg(args, "path"));
     const transferWorkspace = resolvedPath.workspace.withGrants(pathGrants);
     if (name === "transfer_p2p_listen" || name === "transfer_p2p_send") {
