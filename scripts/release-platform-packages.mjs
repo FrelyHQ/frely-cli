@@ -46,12 +46,25 @@ export function buildPlatformPackages(artifacts, version, output) {
   return directories;
 }
 
+function published(name, version) {
+  try { return execFileSync('npm', ['view', `${name}@${version}`, 'version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() === version; }
+  catch { return false; }
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [artifacts, version, ...flags] = process.argv.slice(2);
   if (!artifacts || !version) throw new Error('Usage: release-platform-packages.mjs <artifacts-dir> <version> [--publish]');
   const directories = buildPlatformPackages(resolve(artifacts), version, resolve('platform-packages'));
   if (flags.includes('--publish')) {
     const tag = version.includes('-') ? 'next' : 'latest';
-    for (const directory of directories) execFileSync('npm', ['publish', '--access', 'public', '--provenance', '--tag', tag], { cwd: directory, stdio: 'inherit' });
+    // Re-runs skip packages an earlier attempt already published; a transient registry or signing error gets two more tries.
+    for (const [index, directory] of directories.entries()) {
+      const name = platformPackageName(Object.keys(TARGETS)[index]);
+      if (published(name, version)) { process.stdout.write(`${name}@${version} already published, skipped\n`); continue; }
+      for (let attempt = 1; ; attempt++) {
+        try { execFileSync('npm', ['publish', '--access', 'public', '--provenance', '--tag', tag], { cwd: directory, stdio: 'inherit' }); break; }
+        catch (error) { if (published(name, version)) break; if (attempt >= 3) throw error; }
+      }
+    }
   } else process.stdout.write(`${directories.join('\n')}\n`);
 }
