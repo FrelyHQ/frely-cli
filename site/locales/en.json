@@ -1,5 +1,5 @@
 {
-  "meta.title": "Frely CLI — Let agents access your device from any location",
+  "meta.title": "Frely CLI & FrelyMCP — Let agents access your device from any location",
   "meta.description": "FrelyMCP lets browser agents and command-line agents such as Codex and Claude Code access your device's files, commands and processes through remote HTTP MCP with OAuth.",
   "meta.socialDescription": "Let agents access your device from any location. Connect browser and command-line agents to the computer you authorize through FrelyMCP.",
   "nav.skip": "Skip to content",
