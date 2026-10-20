@@ -251,7 +251,7 @@ async function dispatch(
   // Hidden from tools/list: only the relay's transfer tool calls these, and it marks them in `_meta`.
   if (TRANSFER_TOOLS.has(name)) {
     if (!transferAllowed) throw new Error(`Unknown tool: ${name}`);
-    if (name === "transfer_p2p_info") return p2p.info(args.relayUrl);
+    if (name === "transfer_p2p_info") return p2p.info();
     if (name === "transfer_p2p_status") return p2p.status(textArg(args, "jobId"));
     const resolvedPath = resolveWorkspace(workspaces as Map<string, Workspace>, textArg(args, "path"));
     const transferWorkspace = resolvedPath.workspace.withGrants(pathGrants);

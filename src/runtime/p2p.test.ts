@@ -25,10 +25,10 @@ test("a file goes device to device over iroh and lands only after size and sha25
     const data = Buffer.alloc(3 * 1024 * 1024 + 17, "frely");
     await writeFile(join(f.a, "big.bin"), data);
     const sha256 = createHash("sha256").update(data).digest("hex");
-    const target = await f.receiver.info(undefined);
-    const me = await f.sender.info(undefined);
+    await f.receiver.info();
+    const me = await f.sender.info();
     const listening = await f.receiver.listen(f.wb, { path: "in/big.bin", bytes: data.length, sha256, overwrite: false, from: me.id });
-    const sent = await f.sender.send(f.wa, { path: "big.bin", bytes: data.length, sha256, to: target });
+    const sent = await f.sender.send(f.wa, { path: "big.bin", bytes: data.length, sha256, to: listening.address! });
     assert.equal(sent.status, "done", sent.error);
     assert.equal(sent.relayBytes, 0);
     const received = await waitFor(f.receiver, listening.jobId);
@@ -43,17 +43,17 @@ test("the receiver refuses a sender it did not expect and a file other than the 
   try {
     await writeFile(join(f.a, "a.bin"), "hello world");
     const sha256 = createHash("sha256").update("hello world").digest("hex");
-    const target = await f.receiver.info(undefined);
-    const me = await f.sender.info(undefined);
+    await f.receiver.info();
+    const me = await f.sender.info();
     const wrongPeer = await f.receiver.listen(f.wb, { path: "x.bin", bytes: 11, sha256, overwrite: false, from: "a".repeat(52) });
-    const refused = await f.sender.send(f.wa, { path: "a.bin", bytes: 11, sha256, to: target });
+    const refused = await f.sender.send(f.wa, { path: "a.bin", bytes: 11, sha256, to: wrongPeer.address! });
     assert.equal(refused.status, "failed");
     assert.equal(f.receiver.status(wrongPeer.jobId).status, "running");
     await f.receiver.close();
     const other = new P2pTransfers();
-    const target2 = await other.info(undefined);
-    await other.listen(f.wb, { path: "y.bin", bytes: 11, sha256: "0".repeat(64), overwrite: false, from: me.id });
-    const mismatch = await f.sender.send(f.wa, { path: "a.bin", bytes: 11, sha256, to: target2 });
+    await other.info();
+    const wrongFile = await other.listen(f.wb, { path: "y.bin", bytes: 11, sha256: "0".repeat(64), overwrite: false, from: me.id });
+    const mismatch = await f.sender.send(f.wa, { path: "a.bin", bytes: 11, sha256, to: wrongFile.address! });
     assert.equal(mismatch.status, "failed");
     await assert.rejects(readFile(join(f.b, "y.bin")));
     await other.close();
@@ -61,5 +61,8 @@ test("the receiver refuses a sender it did not expect and a file other than the 
 });
 
 test("relay URLs must be https", async () => {
-  await assert.rejects(new P2pTransfers().info("http://example.com"), /https/u);
+  const node = new P2pTransfers();
+  await node.info();
+  await assert.rejects(node.listen(await Workspace.open(tmpdir()), { path: "x", bytes: 1, sha256: "0".repeat(64), overwrite: false, from: "a", relayUrl: "http://example.com" }), /https/u);
+  await node.close();
 });

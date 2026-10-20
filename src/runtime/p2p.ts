@@ -10,6 +10,8 @@ type Iroh = typeof IrohTypes;
 const ALPN = Array.from(Buffer.from("frely/transfer/1"));
 const CHUNK = 256 * 1024;
 const CONNECT_TIMEOUT_MS = 30_000;
+/** After connecting, wait this long for a direct path before sending over the relay. */
+const DIRECT_WAIT_MS = 5_000;
 const SEND_WAIT_MS = 100_000;
 const LISTEN_TIMEOUT_MS = 10 * 60_000;
 const IDLE_CLOSE_MS = 10 * 60_000;
@@ -17,8 +19,8 @@ const MAX_HEADER = 4096;
 const MAX_JOBS = 32;
 
 export interface P2pAddress { id: string; relayUrl: string | null; directAddresses: string[] }
-export interface P2pInfo extends P2pAddress { supported: true }
-export interface P2pJob { jobId: string; status: "running" | "done" | "failed"; role: "send" | "receive"; bytes: number; relayBytes?: number; viaRelay?: boolean; path?: string; error?: string }
+export interface P2pInfo { supported: true; id: string }
+export interface P2pJob { address?: P2pAddress; jobId: string; status: "running" | "done" | "failed"; role: "send" | "receive"; bytes: number; relayBytes?: number; viaRelay?: boolean; path?: string; error?: string }
 
 /** The module, or null on a platform that has no iroh build (Intel Macs) or when it cannot be loaded. */
 async function loadIroh(): Promise<Iroh | null> {
@@ -48,22 +50,27 @@ const timeout = <T>(work: Promise<T>, ms: number, message: string) => new Promis
 export class P2pTransfers {
   private endpoint: IrohTypes.Endpoint | null = null;
   private starting: Promise<IrohTypes.Endpoint> | null = null;
-  private relay: string | null = null;
+  private boundRelay: string | null = null;
+  private secret: IrohTypes.SecretKey | null = null;
   private idle: NodeJS.Timeout | null = null;
   private active = 0;
   private readonly jobs = new Map<string, P2pJob>();
 
   async supported(): Promise<boolean> { return (await loadIroh()) !== null; }
 
-  async info(relayInput: unknown): Promise<P2pInfo> {
-    const relayUrl = relayUrlOf(relayInput);
-    const endpoint = await this.start(relayUrl);
-    if (relayUrl) await timeout(endpoint.online(), CONNECT_TIMEOUT_MS, "Could not reach the Frely relay.");
+  /** This process's node id. The relay admits an id before it connects, so the key exists before any endpoint is bound. */
+  async info(): Promise<P2pInfo> {
+    const iroh = await this.module();
+    this.secret ??= iroh.SecretKey.generate();
+    return { supported: true, id: this.secret.public().toString() };
+  }
+
+  /** This endpoint's address once it is connected to the Frely relay (or, without one, its local sockets). */
+  private address(endpoint: IrohTypes.Endpoint, relayUrl: string | null): P2pAddress {
     const addr = endpoint.addr();
     const direct = addr.directAddresses();
-    // Without a relay (tests, LAN only) the bound sockets are the only addresses there are.
     const addresses = direct.length > 0 || relayUrl ? direct : endpoint.boundSockets().map((socket) => socket.replace("0.0.0.0", "127.0.0.1").replace("[::]", "[::1]"));
-    return { supported: true, id: endpoint.id().toString(), relayUrl: addr.relayUrl() ?? relayUrl, directAddresses: addresses };
+    return { id: endpoint.id().toString(), relayUrl: addr.relayUrl() ?? relayUrl, directAddresses: addresses };
   }
 
   status(jobId: string): P2pJob {
@@ -74,9 +81,15 @@ export class P2pTransfers {
 
   /** Waits for the one expected peer and writes its file; returns at once, the job runs in the background. */
   async listen(workspace: Workspace, input: { path: string; bytes: number; sha256: string; overwrite: boolean; from: string; relayUrl?: unknown }): Promise<P2pJob> {
-    const endpoint = await this.start(relayUrlOf(input.relayUrl));
-    const job = this.newJob("receive", input.bytes);
+    const relayUrl = relayUrlOf(input.relayUrl);
     this.hold();
+    let job: P2pJob;
+    let endpoint: IrohTypes.Endpoint;
+    try {
+      endpoint = await this.start(relayUrl);
+      job = this.newJob("receive", input.bytes);
+      job.address = this.address(endpoint, relayUrl);
+    } catch (error) { this.release(); throw error; }
     void (async () => {
       let peer: IrohTypes.Connection | undefined;
       let bi: IrohTypes.BiStream | undefined;
@@ -104,15 +117,17 @@ export class P2pTransfers {
   /** Sends one file to a prepared peer. Waits up to 100 seconds, then leaves the job running. */
   async send(workspace: Workspace, input: { path: string; bytes: number; sha256: string; to: P2pAddress; relayUrl?: unknown }): Promise<P2pJob> {
     const iroh = await this.module();
-    const endpoint = await this.start(relayUrlOf(input.relayUrl));
+    const relayUrl = relayUrlOf(input.relayUrl);
     const job = this.newJob("send", input.bytes);
     this.hold();
     const run = (async () => {
+      const endpoint = await this.start(relayUrl);
       const { handle, bytes } = await workspace.openForTransfer(input.path, TRANSFER_MAX_BYTES);
       try {
         if (bytes !== input.bytes) throw new Error("The file changed after it was prepared.");
         const target = new iroh.EndpointAddr(iroh.EndpointId.fromString(input.to.id), input.to.relayUrl, input.to.directAddresses);
         const connection = await timeout(endpoint.connect(target, ALPN), CONNECT_TIMEOUT_MS, "Could not reach the other device.");
+        await this.preferDirect(connection);
         const bi = await connection.openBi();
         const header = Buffer.from(JSON.stringify({ bytes, sha256: input.sha256 }));
         const length = Buffer.alloc(4);
@@ -142,6 +157,7 @@ export class P2pTransfers {
     const endpoint = this.endpoint;
     this.endpoint = null;
     this.starting = null;
+    this.boundRelay = null;
     await endpoint?.close().catch(() => undefined);
   }
 
@@ -151,25 +167,41 @@ export class P2pTransfers {
     return iroh;
   }
 
+  /**
+   * The endpoint, bound with this process's key and only the Frely relay (no n0 public relays or discovery). It is bound when
+   * a transfer needs it, after the relay has admitted the node id from `info`, and waits until the relay is its home.
+   */
   private async start(relayUrl: string | null): Promise<IrohTypes.Endpoint> {
-    if (this.endpoint && this.relay === relayUrl) return this.endpoint;
-    if (this.starting && this.relay === relayUrl) return this.starting;
-    if (this.endpoint && this.active > 0) throw new Error("A transfer is running; try again when it has finished.");
-    await this.close();
     const iroh = await this.module();
-    this.relay = relayUrl;
-    // Only the Frely relay: no n0 public relays or discovery, so devices find each other through Frely alone.
+    this.secret ??= iroh.SecretKey.generate();
+    if (this.starting && this.boundRelay === relayUrl) return this.starting;
+    if (this.endpoint && this.boundRelay === relayUrl) return this.endpoint;
+    if (this.active > 1) throw new Error("A transfer on another relay is running; try again when it has finished.");
+    await this.close();
+    this.boundRelay = relayUrl;
+    const secret = this.secret;
     this.starting = (async () => {
       const builder = iroh.Endpoint.builder();
       builder.applyMinimal();
+      builder.secretKey(secret.toBytes());
       builder.alpns([ALPN]);
       builder.relayMode(relayUrl ? iroh.RelayMode.customFromUrls([relayUrl]) : iroh.RelayMode.disabled());
       const endpoint = await builder.bind();
       this.endpoint = endpoint;
+      if (relayUrl) await timeout(endpoint.online(), CONNECT_TIMEOUT_MS, "Could not reach the Frely relay.");
       return endpoint;
     })();
-    this.armIdle();
+    this.starting.catch(() => { this.starting = null; this.boundRelay = null; });
     return this.starting;
+  }
+
+  /** The connection starts on the relay; give hole punching a few seconds so a file that can go direct does not use relay allowance. */
+  private async preferDirect(connection: IrohTypes.Connection): Promise<void> {
+    const deadline = Date.now() + DIRECT_WAIT_MS;
+    while (Date.now() < deadline) {
+      if (connection.paths().some((path) => path.isSelected && !path.isRelay)) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
   }
 
   private async acceptFrom(endpoint: IrohTypes.Endpoint, from: string): Promise<IrohTypes.Connection> {
