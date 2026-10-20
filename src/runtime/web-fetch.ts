@@ -115,7 +115,7 @@ async function resolveHost(hostname: string, options: WebFetchOptions): Promise<
   return (await dnsLookup(hostname, { all: true })).map((entry) => entry.address);
 }
 
-async function checkedTarget(url: URL, options: WebFetchOptions): Promise<{ address: string }> {
+export async function checkedTarget(url: URL, options: WebFetchOptions): Promise<{ address: string }> {
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Only http and https URLs can be fetched.");
   if (url.username || url.password) throw new Error("URLs with embedded credentials are not allowed.");
   const port = url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
