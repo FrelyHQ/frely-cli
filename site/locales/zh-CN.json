@@ -113,7 +113,7 @@
   "more.eyebrow": "可选功能",
   "more.title": "CLI 的其他用途",
   "install.agentTitle": "或者让 Agent 帮你安装",
-  "install.agentPrompt": "请在这台电脑上安装 Frely CLI，并把它连接为设备 MCP。macOS 或 Linux 运行：curl -fsSL https://frely.cloud/install.sh | sh；Windows PowerShell 运行：curl.exe -fsSLo \"$env:TEMP\\frely-install.ps1\" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:TEMP\\frely-install.ps1\"。然后用安装器输出的路径运行 frely mcp start。它输出登录或授权链接时，把链接发给我，并保持命令运行，等我在浏览器里批准。最后把它输出的 MCP 地址发给我。",
+  "install.agentPrompt": "请在这台电脑上安装 Frely CLI，并把它连接为设备 MCP。macOS 或 Linux 运行：curl -fsSL https://frely.cloud/install.sh | sh；Windows PowerShell 运行：curl.exe -fsSLo \"$env:TEMP\\frely-install.ps1\" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:TEMP\\frely-install.ps1\"。然后用安装器输出的路径运行 frely mcp start。它输出登录或授权链接时，把链接发给我，并保持命令运行，等我在浏览器里批准。最后把它输出的 MCP 地址发给我。接着检查你自己有没有配置 FrelyMCP：Claude Code 运行 claude mcp list，Codex 运行 codex mcp list，看列表里有没有 frely。没有的话，Claude Code 运行 claude mcp add --transport http frely \"https://mcp.frely.cloud/mcp\"，Codex 运行 codex mcp add frely --url \"https://mcp.frely.cloud/mcp\"，然后告诉我在浏览器里完成 OAuth 授权。如果你不是这两种客户端，只把这个 MCP 地址发给我，并告诉我要在客户端里添加远程 MCP 并选择 OAuth。",
   "install.packagesTitle": "包管理器",
   "copy.installMac": "复制 macOS 安装命令",
   "copy.installLinux": "复制 Linux 安装命令",
