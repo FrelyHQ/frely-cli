@@ -9,6 +9,16 @@ import { promisify } from "node:util";
 
 export const MAX_FILE_BYTES = 1024 * 1024;
 export const MAX_OUTPUT_BYTES = 1024 * 1024;
+
+/** Content type by magic bytes, never by file extension. Only formats a model can be shown are named. */
+export function sniffMimeType(data: Uint8Array): string {
+  const at = (offset: number, bytes: number[]) => bytes.every((byte, index) => data[offset + index] === byte);
+  if (at(0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "image/png";
+  if (at(0, [0xff, 0xd8, 0xff])) return "image/jpeg";
+  if (at(0, [0x47, 0x49, 0x46, 0x38])) return "image/gif";
+  if (at(0, [0x52, 0x49, 0x46, 0x46]) && at(8, [0x57, 0x45, 0x42, 0x50])) return "image/webp";
+  return "application/octet-stream";
+}
 const PROTECTED_MESSAGE = "This path holds credentials or shell start-up files and is protected from file tools. To read a credential store, call request_permission for it (the owner approves on the web), then read it with run_command, for example `cat ~/.ssh/config`.";
 
 export class Workspace {
@@ -112,6 +122,21 @@ export class Workspace {
     }
   }
 
+  /** Raw bytes of a regular file up to the 1 MiB limit, for binary and image reads. */
+  async readFileBytes(input: string): Promise<{ path: string; bytes: number; mimeType: string; data: Buffer }> {
+    const path = await this.existingPath(input, "file");
+    const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) throw new Error("Only regular files are readable.");
+      if (stat.size > MAX_FILE_BYTES) throw new Error("File exceeds 1 MiB limit.");
+      const data = await handle.readFile();
+      return { path: input, bytes: data.byteLength, mimeType: sniffMimeType(data), data };
+    } finally {
+      await handle.close();
+    }
+  }
+
   async readFileLines(input: string, startLine: number, endLine?: number) {
     const content = await this.readFile(input);
     const lines = content.split(/\r?\n/u);
@@ -128,7 +153,7 @@ export class Workspace {
     };
   }
 
-  async writeFile(input: string, content: string, overwrite: boolean) {
+  async writeFile(input: string, content: string | Buffer, overwrite: boolean) {
     if (Buffer.byteLength(content) > MAX_FILE_BYTES) throw new Error("Content exceeds 1 MiB limit.");
     const path = await this.createPath(input);
     const existing = await lstat(path).catch(() => null);
@@ -141,7 +166,7 @@ export class Workspace {
     const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
     const handle = await open(tmp, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
     try {
-      await handle.writeFile(content, "utf8");
+      await (typeof content === "string" ? handle.writeFile(content, "utf8") : handle.writeFile(content));
       await handle.sync();
     } finally {
       await handle.close();
