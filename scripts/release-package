@@ -121,6 +121,11 @@ print_plan() {
 
 require_clean_main
 git fetch origin main --tags
+# （环境：发版, 原因：发版必须基于最新 origin/main；落后自动快进，分叉需人工处理）
+if ! git merge --ff-only origin/main; then
+  echo "main has diverged from origin/main; resolve manually before release" >&2
+  exit 1
+fi
 sha="$(git rev-parse HEAD)"
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "unable to resolve source SHA" >&2; exit 1; }
 remote_sha="$(git rev-parse origin/main)"
