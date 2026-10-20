@@ -33,6 +33,23 @@ const locales = [
   { lang: 'zh-CN', route: 'zh', ogLocale: 'zh_CN', ogAlternate: 'en_US' },
 ];
 
+const softwareApplication = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'Frely CLI',
+  alternateName: 'FrelyMCP',
+  applicationCategory: 'DeveloperApplication',
+  operatingSystem: 'macOS, Linux, Windows',
+  url: 'https://cli.frely.cloud/',
+  downloadUrl: 'https://www.npmjs.com/package/frely-cli',
+  softwareHelp: 'https://cli.frely.cloud/docs/',
+  license: 'https://www.apache.org/licenses/LICENSE-2.0',
+  isAccessibleForFree: true,
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+  sameAs: ['https://github.com/FrelyHQ/frely-cli', 'https://www.npmjs.com/package/frely-cli'],
+  publisher: { '@type': 'Organization', '@id': 'https://frely.cloud/#organization', name: 'Frely', url: 'https://frely.cloud/' },
+};
+
 // New HTML must not reuse a cached script or stylesheet from an older deployment.
 // Keep stable filenames for cached HTML; the content version changes the cache key.
 const assetVersions = {};
@@ -51,7 +68,10 @@ for (const locale of locales) {
   }
   for (const entry of locale.lang === 'en' ? [false, true] : [false]) {
     const page = { ...locale, ...assetVersions, entry: String(entry), base: entry ? './' : '../', enCurrent: locale.lang === 'en' ? 'page' : 'false', zhCurrent: locale.lang === 'zh-CN' ? 'page' : 'false' };
+    // JSON-LD is JSON, not HTML text: escape "<" so no value can close the script element.
+    page.jsonLd = JSON.stringify({ ...softwareApplication, description: messages['meta.description'] }).replace(/</g, '\\u003c');
     const html = template.replace(token, (_, key) => {
+      if (key === 'page.jsonLd') return page.jsonLd;
       const value = key.startsWith('page.') ? page[key.slice(5)]
         : key.startsWith('command.') ? commands[key.slice(8)] : messages[key];
       if (typeof value !== 'string') throw new Error(`Unknown template key: ${key}`);
@@ -131,6 +151,7 @@ for (const notice of ['LICENSE', 'NOTICE', 'TRADEMARKS.md']) {
   await copyFile(resolve(root, notice), resolve(output, notice));
 }
 await writeFile(resolve(output, '.nojekyll'), '');
+await writeFile(resolve(output, 'robots.txt'), 'User-agent: *\nAllow: /\nSitemap: https://cli.frely.cloud/sitemap.xml\n');
 await writeFile(resolve(output, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${[...locales.map(({ route }) => `/${route}/`), '/docs/', '/docs/help/', ...entries.map(entryUrl)].map((path) => `  <url><loc>https://cli.frely.cloud${path}</loc></url>`).join('\n')}

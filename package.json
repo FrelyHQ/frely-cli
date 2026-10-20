@@ -1,13 +1,14 @@
 {
   "name": "frely-cli",
   "version": "0.20.5",
-  "description": "Frely account CLI and local MCP runtime",
+  "description": "Frely CLI — FrelyMCP gives ChatGPT, Claude, Codex and other MCP clients access to your computer",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/FrelyHQ/frely-cli.git"
   },
-  "homepage": "https://github.com/FrelyHQ/frely-cli#readme",
+  "homepage": "https://cli.frely.cloud",
+  "keywords": ["frely", "frelymcp", "frely-cli", "mcp", "mcp-server", "remote-mcp", "chatgpt", "claude", "codex", "claude-code"],
   "bugs": {
     "url": "https://github.com/FrelyHQ/frely-cli/issues"
   },
