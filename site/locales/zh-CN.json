@@ -1,5 +1,5 @@
 {
-  "meta.title": "Frely CLI — 让 Agent 从任何地方访问你的设备",
+  "meta.title": "Frely CLI 与 FrelyMCP — 让 Agent 从任何地方访问你的设备",
   "meta.description": "FrelyMCP 让网页中的 Agent，或另一台电脑上的 Codex、Claude Code，通过 MCP 访问你的设备，读写文件、运行命令、管理进程。客户端需支持远程 HTTP MCP 和 OAuth。",
   "meta.socialDescription": "让 Agent 从任何地方访问你的设备。通过 FrelyMCP，将网页和命令行中的 Agent 接入你授权的电脑。",
   "nav.skip": "跳转到正文",
