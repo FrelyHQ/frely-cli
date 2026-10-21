@@ -90,7 +90,7 @@ const docsPage = (title, description, path, body) => `<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="${escapeHtml(description)}">
-  <link rel="canonical" href="${origin}${path}">
+  ${path ? `<link rel="canonical" href="${origin}${path}">` : '<meta name="robots" content="noindex">'}
   <title>${escapeHtml(title)} — Frely CLI</title>
   ${docsStyle}
 </head>
@@ -150,6 +150,16 @@ for (const installer of ['install.sh', 'install.ps1', 'start.sh', 'start.ps1']) 
 for (const notice of ['LICENSE', 'NOTICE', 'TRADEMARKS.md']) {
   await copyFile(resolve(root, notice), resolve(output, notice));
 }
+// GitHub Pages serves 404.html for any missing path; list the main pages so a wrong link is not a dead end.
+await writeFile(resolve(output, '404.html'), docsPage('Page not found', 'This page does not exist on cli.frely.cloud.', null, `    <h1>Page not found</h1>
+    <p class="muted">This page does not exist. These are the main pages:</p>
+    <ul>
+      <li><a href="/en/">Frely CLI &amp; FrelyMCP</a> · <a href="/zh/">中文</a></li>
+      <li><a href="/en/#install">Install</a></li>
+      <li><a href="/docs/">Docs</a> · <a href="/docs/help/">Help</a></li>
+      <li><a href="https://frely.cloud/">Frely</a> · <a href="https://frely.cloud/app/">Frely App</a></li>
+      <li><a href="https://github.com/FrelyHQ/frely-cli">GitHub</a></li>
+    </ul>`));
 await writeFile(resolve(output, '.nojekyll'), '');
 await writeFile(resolve(output, 'robots.txt'), 'User-agent: *\nAllow: /\nSitemap: https://cli.frely.cloud/sitemap.xml\n');
 await writeFile(resolve(output, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>
