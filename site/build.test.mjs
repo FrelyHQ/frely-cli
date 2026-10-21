@@ -87,6 +87,9 @@ test('docs pages are static, crawlable and listed in the sitemap', async () => {
     const index = await readFile(resolve(temp, '_site/docs/index.html'), 'utf8');
     const help = await readFile(resolve(temp, '_site/docs/help/index.html'), 'utf8');
     for (const path of ['/docs/', '/docs/help/']) assert.ok(sitemap.includes('https://cli.frely.cloud' + path));
+    const notFound = await readFile(resolve(temp, '_site/404.html'), 'utf8');
+    assert.ok(notFound.includes('noindex'), '404 page is not indexed');
+    for (const path of ['/en/', '/zh/', '/docs/', '/en/#install']) assert.ok(notFound.includes(`href="${path}"`), `404 page links to ${path}`);
     for (const entry of entries) {
       const page = await readFile(resolve(temp, '_site/docs/help', entry.slug, 'index.html'), 'utf8');
       assert.ok(page.includes('<h1>'), entry.slug + ': page has a heading');
