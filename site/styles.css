@@ -121,6 +121,17 @@ h3 { font-size:1.125rem; margin-bottom:0; }
 .header nav, .footer nav { display:flex; align-items:center; flex-wrap:wrap; gap:.75rem 1.4rem; font-size:.875rem; }
 .header nav > a { display:inline-flex; align-items:center; min-height:44px; }
 .header nav a:hover, .footer nav a:hover { color:var(--accent); }
+.nav-products { position:relative; }
+.nav-products summary { display:inline-flex; align-items:center; gap:.35rem; min-height:44px; cursor:pointer; list-style:none; }
+.nav-products summary::-webkit-details-marker { display:none; }
+.nav-products summary::after { content:"▾"; font-size:.75em; }
+.nav-products summary:hover, .nav-products[open] summary { color:var(--accent); }
+.products-menu { position:absolute; top:100%; left:0; z-index:20; width:max-content; max-width:min(20rem,calc(100vw - 2rem)); margin:0; padding:.4rem; list-style:none; background:var(--surface-raised); border:1px solid var(--line); border-radius:6px; }
+.products-menu a { display:flex; flex-direction:column; gap:.15rem; min-height:44px; padding:.55rem .7rem; border-radius:4px; }
+.products-menu a:hover, .products-menu a:focus-visible { background:var(--surface); }
+.products-menu a[aria-current="page"] { color:var(--accent); }
+.product-name { font-weight:650; }
+.product-note { font-size:.8125rem; color:var(--muted); }
 .nav-install { color:var(--accent); font-weight:650; }
 .language-switch { display:inline-flex; gap:.2rem; padding:.2rem; border:1px solid var(--line); border-radius:5px; }
 .language-switch a { padding:.4rem .6rem; min-height:40px; border-radius:3px; white-space:nowrap; }
@@ -398,7 +409,10 @@ pre { padding:1rem 1.2rem; margin:1.4rem 0; border:1px solid var(--line); border
   .wrap { width:calc(100% - 2rem); }
   .header { gap:.6rem; }
   .header nav { width:100%; justify-content:space-between; gap:.4rem; font-size:.8125rem; }
-  .header .nav-workflows, .header .nav-app { display:none; }
+  .header .nav-workflows { display:none; }
+  .header nav { position:relative; }
+  .nav-products { position:static; }
+  .products-menu { left:0; right:0; width:auto; max-width:none; }
   .language-switch a { padding-inline:.4rem; }
   .hero { padding-top:2rem; }
   .hero-description { font-size:1rem; }

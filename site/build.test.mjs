@@ -101,3 +101,25 @@ test('docs pages are static, crawlable and listed in the sitemap', async () => {
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+test('header has a no-JavaScript Products dropdown with the current product marked', async () => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const temp = await mkdtemp(resolve(tmpdir(), 'frely-site-products-'));
+  try {
+    await cp(resolve(root, 'site'), resolve(temp, 'site'), { recursive: true });
+    for (const name of ['LICENSE', 'NOTICE', 'TRADEMARKS.md', 'install.sh', 'install.ps1', 'start.sh', 'start.ps1']) await cp(resolve(root, name), resolve(temp, name));
+    execFileSync(process.execPath, [resolve(temp, 'site/build.mjs')]);
+    for (const route of ['en', 'zh']) {
+      const html = await readFile(resolve(temp, '_site', route, 'index.html'), 'utf8');
+      const header = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
+      assert.ok(header.includes('<details class="nav-products">') && header.includes('<summary>'), route + ': dropdown uses details');
+      for (const href of ['https://frely.cloud/"', 'https://frely.cloud/app/"']) assert.ok(header.includes(`href="${href}`), route + ': links ' + href);
+      assert.equal(header.match(/aria-current="page"><span class="product-name">/g)?.length, 1, route + ': one current product');
+      assert.ok(header.includes('aria-current="page"><span class="product-name">Frely CLI'), route + ': CLI is current');
+      assert.ok(!header.includes('nav-app'), route + ': no Desktop app header link');
+      assert.ok(html.includes('<footer') && html.slice(html.indexOf('<footer')).includes('https://frely.cloud/app/'), route + ': footer keeps app link');
+    }
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});

@@ -1,9 +1,16 @@
 <header class="header wrap">
     <a class="brand" href="#" aria-label="{{nav.home}}"><span class="brand-symbol" aria-hidden="true">›_</span>frely<span class="brand-label">CLI</span></a>
     <nav aria-label="{{nav.main}}">
+      <details class="nav-products">
+        <summary>{{nav.products}}</summary>
+        <ul class="products-menu">
+          <li><a href="https://frely.cloud/"><span class="product-name">Frely</span><span class="product-note">{{nav.productsFrelyNote}}</span></a></li>
+          <li><a href="#" aria-current="page"><span class="product-name">Frely CLI</span><span class="product-note">{{nav.productsCliNote}}</span></a></li>
+          <li><a href="https://frely.cloud/app/"><span class="product-name">Frely App</span><span class="product-note">{{nav.productsAppNote}}</span></a></li>
+        </ul>
+      </details>
       <a class="nav-install" href="#install">{{nav.install}}</a>
       <a class="nav-workflows" href="#device-mcp">{{nav.workflows}}</a>
-      <a class="nav-app" href="https://frely.cloud/app/">{{nav.app}}</a>
       <a href="{{page.base}}docs/">{{nav.docs}}</a>
       <a class="github-link" href="https://github.com/FrelyHQ/frely-cli">GitHub <span aria-hidden="true">↗</span></a>
       <span class="language-switch" role="group" aria-label="{{nav.language}}">

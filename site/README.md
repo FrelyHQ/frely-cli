@@ -45,6 +45,8 @@ The content decisions are recorded in the revision document linked below; the de
   does not prevent navigation. With JavaScript disabled, both languages and the
   language links still work; automatic selection and preference storage are unavailable.
 
+The header has a **Products** dropdown built from `<details>`, so it opens without JavaScript and works with the keyboard. It lists Frely, Frely CLI (current, `aria-current="page"`) and Frely App, matching the dropdown on frely.cloud. The header has no separate Desktop app link; the footer keeps it. The mobile layout opens the menu at full navigation width.
+
 Edit `template.html` for the document shell, `components/*.html` for section
 markup, and `locales/en.json` / `locales/zh-CN.json` for copy. Keep the same keys in both catalogs. `{{key}}` values are HTML-escaped;
 put markup in the template, never in translation values. The build rejects missing,
