@@ -36,9 +36,3 @@ jobs:
         run: npm run test:standalone
       - name: Verify offline installer and checksum rejection
         run: npm run test:installer
-      - name: Preserve unsigned verification artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: standalone-${{ matrix.os }}
-          path: artifacts/
-          if-no-files-found: error
