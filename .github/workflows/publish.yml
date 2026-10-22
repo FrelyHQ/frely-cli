@@ -84,7 +84,7 @@ jobs:
           name: release-${{ matrix.target }}
           path: artifacts/frely-${{ matrix.target }}*
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   publish:
     needs: [verify, standalone, release-assets]
