@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { chmod, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, realpath, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -136,6 +136,17 @@ export function serviceLaunchArguments(entry: string, workspace?: string): strin
   return cliLaunchArguments(entry, ["mcp", "serve", "--service-config-home", resolve(process.env.XDG_CONFIG_HOME || join(homedir(), ".config")),
     "--service-credential-store", mode, ...(workspace ? ["--workspace", workspace] : ["--provider-only"])]);
 }
+/** launchd appends to this file for the life of the service, so it is trimmed in place at startup rather than rotated. */
+export function serviceLogPath(): string { return join(frelyStateDir(), "mcp.log"); }
+export async function trimServiceLog(path = serviceLogPath(), maxBytes = 5_000_000, keepBytes = 1_000_000): Promise<void> {
+  const size = (await stat(path).catch(() => null))?.size ?? 0;
+  if (size <= maxBytes) return;
+  const handle = await open(path, "r");
+  const tail = Buffer.alloc(keepBytes);
+  try { await handle.read(tail, 0, keepBytes, size - keepBytes); } finally { await handle.close(); }
+  await truncate(path, 0);
+  await writeFile(path, tail, { flag: "a" });
+}
 function frelyConfigDir(): string { return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "frely"); }
 function frelyStateDir(): string { return join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "frely"); }
 function serviceConfigPath(): string { return join(frelyConfigDir(), "mcp-service.json"); }
@@ -159,7 +170,7 @@ async function writeDefinition(path: string, value: string): Promise<void> {
 }
 export function launchAgentPlist(command: string[], stateDir: string): string {
   const argumentsXml = command.map((value) => `<string>${xml(value)}</string>`).join("");
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${LABEL}</string>\n<key>ProgramArguments</key><array>${argumentsXml}</array>\n<key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(process.env.PATH || "/usr/local/bin:/usr/bin:/bin")}</string></dict>\n<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>\n<key>StandardOutPath</key><string>${xml(join(stateDir, "mcp.log"))}</string>\n<key>StandardErrorPath</key><string>${xml(join(stateDir, "mcp.log"))}</string>\n</dict></plist>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${LABEL}</string>\n<key>ProgramArguments</key><array>${argumentsXml}</array>\n<key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(process.env.PATH || "/usr/local/bin:/usr/bin:/bin")}</string></dict>\n<key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>30</integer>\n<key>StandardOutPath</key><string>${xml(join(stateDir, "mcp.log"))}</string>\n<key>StandardErrorPath</key><string>${xml(join(stateDir, "mcp.log"))}</string>\n</dict></plist>\n`;
 }
 export function systemdUnit(command: string[]): string {
   const args = command.map(systemdQuote).join(" ");
