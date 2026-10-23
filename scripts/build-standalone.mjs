@@ -23,7 +23,8 @@ async function embedIroh() {
   await access(directory).catch(() => run("npm", ["install", "--no-save", "--no-package-lock", "--force", "--ignore-scripts", `@number0/${name}@${irohVersion}`]));
   const file = (await readdir(directory)).find((entry) => entry.endsWith(".node"));
   if (!file) throw new Error(`No iroh native module in @number0/${name}`);
-  await writeFile(irohNative, `import native from "@number0/${name}/${file}";\nexport const embeddedIroh: unknown = native;\n`);
+  // require() inside the loader: the file is still embedded, but only opened when a transfer needs it.
+  await writeFile(irohNative, `export const loadEmbeddedIroh: (() => unknown) | null = () => require("@number0/${name}/${file}");\n`);
 }
 function run(command, args) {
   return new Promise((resolve, reject) => {
