@@ -1,5 +1,5 @@
 import { IS_STANDALONE } from "../cli-launch.js";
-import { embeddedIroh } from "./iroh-native.js";
+import { loadEmbeddedIroh } from "./iroh-native.js";
 import { TRANSFER_MAX_BYTES } from "./transfer.js";
 import type { Workspace } from "./workspace.js";
 import { createHash, randomBytes } from "node:crypto";
@@ -22,10 +22,12 @@ export interface P2pAddress { id: string; relayUrl: string | null; directAddress
 export interface P2pInfo { supported: true; id: string }
 export interface P2pJob { address?: P2pAddress; jobId: string; status: "running" | "done" | "failed"; role: "send" | "receive"; bytes: number; relayBytes?: number; viaRelay?: boolean; path?: string; error?: string }
 
-/** The module, or null on a platform that has no iroh build (Intel Macs) or when it cannot be loaded. */
+/** The module, or null on a platform that has no iroh build (Intel Macs) or when it cannot be loaded (for example glibc older than the module needs). */
 async function loadIroh(): Promise<Iroh | null> {
   const unwrap = (module: unknown) => ((module as { default?: Iroh })?.default ?? module) as Iroh;
-  if (embeddedIroh) return unwrap(embeddedIroh);
+  if (loadEmbeddedIroh) {
+    try { return unwrap(loadEmbeddedIroh()); } catch { return null; }
+  }
   // The single file embeds the module or has none; only the npm package resolves it from node_modules (not bundled).
   if (IS_STANDALONE) return null;
   const name = "@number0/iroh";

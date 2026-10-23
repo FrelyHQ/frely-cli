@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { cliLaunchArguments } from "./cli-launch.js";
 import { windowsArgument, windowsService } from "./service-windows.js";
-import { systemdUnit, launchAgentPlist, serviceLaunchArguments, systemdUnitPath, parseServiceCommand, trimServiceLog } from "./service.js";
+import { startDetachedRelay, detachedRelayPid, stopDetachedRelay, systemdUnit, launchAgentPlist, serviceLaunchArguments, systemdUnitPath, parseServiceCommand, trimServiceLog } from "./service.js";
 import { join } from "node:path";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -65,4 +65,37 @@ test("a service log over the limit is trimmed to its tail, and launchd throttles
   await trimServiceLog(path, 50, 10);
   assert.equal(await readFile(path, "utf8"), "b".repeat(10));
   assert.match(launchAgentPlist(["/bin/frely"], "/state"), /<key>ThrottleInterval<\/key><integer>30<\/integer>/u);
+});
+
+test("without a systemd user manager the relay starts as a detached process and prints a crontab line", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "frely-detached-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const deps = { pidFile: join(directory, "mcp.pid"), logPath: join(directory, "state", "mcp.log"), settleMs: 0 };
+  const running = new Set<number>();
+  const calls: { file: string; args: readonly string[]; options: { detached?: boolean } }[] = [];
+  const spawnFake = ((file: string, args: readonly string[], options: { detached?: boolean }) => {
+    calls.push({ file, args, options }); running.add(4242);
+    return { pid: 4242, on() {}, unref() {} };
+  }) as unknown as typeof import("node:child_process").spawn;
+  const alive = async (pid: number) => running.has(pid);
+  const write = process.stderr.write.bind(process.stderr);
+  let output = "";
+  process.stderr.write = ((chunk: string) => { output += chunk; return true; }) as typeof process.stderr.write;
+  try {
+    const command = ["/opt/my frely/frely", "mcp", "serve", "--workspace", "/w"];
+    const info = await startDetachedRelay(command, { ...deps, spawn: spawnFake, alive });
+    assert.deepEqual([info.active, info.detached, info.pid], [true, true, 4242]);
+    assert.equal(calls[0]!.file, "/opt/my frely/frely");
+    assert.equal(calls[0]!.options.detached, true);
+    assert.equal(await readFile(deps.pidFile, "utf8"), "4242\n");
+    assert.match(output, /will not restart after a reboot/);
+    // The log path is quoted only when it needs it (Windows temp paths do), so compare the command part exactly.
+    assert.ok(info.crontab?.startsWith("@reboot '/opt/my frely/frely' mcp serve --workspace /w >> ") && info.crontab.endsWith(" 2>&1") && info.crontab.includes(deps.logPath));
+    assert.ok(output.includes(`${info.crontab}\n`));
+    assert.equal(await detachedRelayPid({ ...deps, alive }), 4242);
+    running.delete(4242);
+    assert.equal(await detachedRelayPid({ ...deps, alive }), undefined);
+    assert.equal(await stopDetachedRelay({ ...deps, alive }), false);
+    await assert.rejects(startDetachedRelay(command, { ...deps, spawn: (() => ({ pid: 7, on() {}, unref() {} })) as unknown as typeof spawnFake, alive }), /exited right away/);
+  } finally { process.stderr.write = write; }
 });

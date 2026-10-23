@@ -1,4 +1,4 @@
-import { execFile as execFileCallback } from "node:child_process";
+import { execFile as execFileCallback, spawn } from "node:child_process";
 import { chmod, mkdir, open, readFile, realpath, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -8,7 +8,7 @@ import { windowsService } from "./service-windows.js";
 
 const execFile = promisify(execFileCallback);
 const LABEL = "cloud.frely.cli-mcp";
-export interface McpServiceInfo { installed: boolean; active: boolean; platform: string; workspace?: string; definitionPath?: string; pid?: number }
+export interface McpServiceInfo { installed: boolean; active: boolean; platform: string; workspace?: string; definitionPath?: string; pid?: number; detached?: boolean; logPath?: string; crontab?: string }
 
 /** Development data directories (`--data-dir`) never register OS services: the launchd/systemd names are shared by the whole machine. */
 const noService = (): McpServiceInfo | null => process.env.FRELY_DATA_DIR ? { installed: false, active: false, platform: process.platform } : null;
@@ -35,7 +35,7 @@ export async function installDeviceRelayService(workspaceInput?: string): Promis
     await execFile("launchctl", ["bootstrap", domain, path]);
     await execFile("launchctl", ["kickstart", "-k", `${domain}/${LABEL}`]);
   } else if (process.platform === "linux") {
-    await assertSystemdUserManager();
+    if (!await hasSystemdUserManager()) return startDetachedRelay(command);
     await writeDefinition(systemdUnitPath(), systemdUnit(command));
     await execFile("systemctl", ["--user", "daemon-reload"]);
     await execFile("systemctl", ["--user", "enable", "--now", "frely-mcp.service"]);
@@ -64,8 +64,9 @@ export async function stopMcpService(): Promise<McpServiceInfo> {
   const skipped = noService();
   if (skipped) return skipped;
   if (process.platform === "darwin") await execFile("launchctl", ["bootout", `gui/${process.getuid?.() ?? 0}`, launchAgentPath()]).catch(() => undefined);
-  else if (process.platform === "linux") await execFile("systemctl", ["--user", "stop", "frely-mcp.service"]);
-  else if (process.platform === "win32") await windowsService("stop");
+  else if (process.platform === "linux") {
+    if (!await stopDetachedRelay() && await fileExists(systemdUnitPath())) await execFile("systemctl", ["--user", "stop", "frely-mcp.service"]);
+  } else if (process.platform === "win32") await windowsService("stop");
   else throw new Error("Background service is unsupported on this platform.");
   return serviceStatus();
 }
@@ -75,7 +76,7 @@ export async function uninstallMcpService(): Promise<void> {
   else {
     await stopMcpService();
     if (process.platform === "darwin") await rm(launchAgentPath(), { force: true });
-    else if (process.platform === "linux") {
+    else if (process.platform === "linux" && await fileExists(systemdUnitPath())) {
       await execFile("systemctl", ["--user", "disable", "frely-mcp.service"]);
       await rm(systemdUnitPath(), { force: true });
       await execFile("systemctl", ["--user", "daemon-reload"]);
@@ -98,6 +99,8 @@ export async function serviceStatus(): Promise<McpServiceInfo> {
   }
   if (process.platform === "linux") {
     const path = systemdUnitPath(), installed = await fileExists(path);
+    const detached = installed ? undefined : await detachedRelayPid();
+    if (detached) return { ...common, installed: false, active: true, pid: detached, detached: true, logPath: serviceLogPath() };
     const active = installed && await execFile("systemctl", ["--user", "is-active", "--quiet", "frely-mcp.service"]).then(() => true, () => false);
     const pid = active ? await execFile("systemctl", ["--user", "show", "--property=MainPID", "--value", "frely-mcp.service"]).then(({ stdout }) => Number(stdout.trim()) || undefined, () => undefined) : undefined;
     return { ...common, installed, active, ...(pid ? { pid } : {}), ...(installed ? { definitionPath: path } : {}) };
@@ -114,6 +117,48 @@ export async function assertSystemdUserManager(exec: Run = run): Promise<void> {
     throw new Error("No systemd user manager is available (`systemctl --user` failed), so Frely cannot install its background service here. Run `frely mcp serve` in the foreground, or under your own process manager, to keep this device online.");
   });
 }
+
+const hasSystemdUserManager = async (exec: Run = run): Promise<boolean> => assertSystemdUserManager(exec).then(() => true, () => false);
+
+/** Detached fallback: `mcp serve` as our own background process, tracked by a pid file; it does not survive a reboot. */
+export interface DetachedDeps { spawn: typeof spawn; alive: (pid: number) => Promise<boolean>; settleMs: number; pidFile: string; logPath: string }
+const detachedDeps = (): DetachedDeps => ({ spawn, alive: isRelayProcess, settleMs: 1000, pidFile: join(frelyStateDir(), "mcp.pid"), logPath: serviceLogPath() });
+async function isRelayProcess(pid: number): Promise<boolean> {
+  try { process.kill(pid, 0); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EPERM") return false; }
+  const cmdline = await readFile(`/proc/${pid}/cmdline`, "utf8").catch(() => null); // Guards against a recycled pid.
+  return cmdline === null || cmdline.includes("serve");
+}
+export async function detachedRelayPid(deps: Pick<DetachedDeps, "alive" | "pidFile"> = detachedDeps()): Promise<number | undefined> {
+  const pid = Number((await readFile(deps.pidFile, "utf8").catch(() => "")).trim());
+  return Number.isSafeInteger(pid) && pid > 0 && await deps.alive(pid) ? pid : undefined;
+}
+export async function stopDetachedRelay(deps: Pick<DetachedDeps, "alive" | "pidFile"> = detachedDeps()): Promise<boolean> {
+  const pid = await detachedRelayPid(deps);
+  if (!pid) return false;
+  process.kill(pid, "SIGTERM");
+  for (let i = 0; i < 50 && await deps.alive(pid); i++) await new Promise((done) => setTimeout(done, 100));
+  await rm(deps.pidFile, { force: true });
+  return true;
+}
+export async function startDetachedRelay(command: string[], deps: DetachedDeps = detachedDeps()): Promise<McpServiceInfo> {
+  await stopDetachedRelay(deps); // Matches `systemctl restart`: callers reinstall to pick up a new workspace.
+  await mkdir(dirname(deps.logPath), { recursive: true, mode: 0o700 });
+  const log = await open(deps.logPath, "a", 0o600);
+  let pid: number | undefined;
+  try {
+    const child = deps.spawn(command[0]!, command.slice(1), { detached: true, stdio: ["ignore", log.fd, log.fd], env: process.env });
+    child.on("error", () => undefined);
+    child.unref();
+    pid = child.pid;
+  } finally { await log.close(); }
+  await new Promise((done) => setTimeout(done, deps.settleMs));
+  if (!pid || !await deps.alive(pid)) throw new Error(`The background process exited right away. See ${deps.logPath}.`);
+  await writeFile(deps.pidFile, `${pid}\n`, { mode: 0o600 });
+  const crontab = `@reboot ${command.map(shellQuote).join(" ")} >> ${shellQuote(deps.logPath)} 2>&1`;
+  process.stderr.write(`No systemd user manager here, so Frely started the device in the background itself (pid ${pid}; log: ${deps.logPath}).\nThe device is online now but will not restart after a reboot. To start it at boot, add this line with \`crontab -e\`:\n${crontab}\n`);
+  return { installed: false, active: true, platform: process.platform, pid, detached: true, logPath: deps.logPath, crontab };
+}
+const shellQuote = (value: string): string => /^[\w@%+=:,./-]+$/u.test(value) ? value : `'${value.replace(/'/gu, `'\\''`)}'`;
 
 /**
  * Without lingering, systemd stops user services when the last session (an SSH login) ends.

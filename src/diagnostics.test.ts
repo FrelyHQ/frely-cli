@@ -24,6 +24,7 @@ function fixture() {
     inspectMcpMetadata: async () => metadata, readDeviceBinding: async () => binding,
     readConnectionStatus: async () => connection,
     serviceStatus: async () => ({ installed: true, active: true, platform: process.platform }),
+    sandboxUnavailableReason: () => undefined,
     probeCredentialStore: async () => { calls.storage++; },
     whoami: async () => { calls.session++; return { id: binding.userId, email: "user@example.com" }; },
     requireMcpAuthorization: async () => { calls.mcp++; return { ...metadata, mcpUrl: metadata.mcpResource, sign: () => "unused" }; },
@@ -169,4 +170,20 @@ test("doctor distinguishes automatic activation from legacy service maintenance 
   f.dependencies.serviceStatus = async () => ({ installed: true, active: true, platform: process.platform, pid: process.pid + 1 });
   const other = await doctor({}, f.dependencies);
   assert.equal(other.checks.some((check) => check.name === "service_version"), false);
+});
+
+test("doctor fails the sandbox check when device MCP is on and the sandbox cannot run", async () => {
+  const previous = process.env.FRELY_SANDBOX;
+  delete process.env.FRELY_SANDBOX; // test-preload turns the sandbox off for every test
+  try {
+  const f = fixture();
+  f.dependencies.sandboxUnavailableReason = () => "missing dependencies: bubblewrap (bwrap) not installed";
+  const enabled = (await doctor({}, f.dependencies)).checks.find((check) => check.name === "sandbox");
+  assert.equal(enabled?.status, "fail");
+  assert.match(enabled?.detail ?? "", /bubblewrap/u);
+  f.dependencies.inspectMcpMetadata = async () => null;
+  assert.equal((await doctor({}, f.dependencies)).checks.find((check) => check.name === "sandbox")?.status, "info");
+  } finally {
+    if (previous === undefined) delete process.env.FRELY_SANDBOX; else process.env.FRELY_SANDBOX = previous;
+  }
 });

@@ -455,10 +455,11 @@ async function main(): Promise<void> {
     const metadata = await inspectMcpMetadataOrQuarantine((message) => { process.stderr.write(message); });
     const service = await serviceStatus();
     const expired = metadata ? grantInactive(metadata) : false;
+    const running = service.detached ? "running (background process, not restarted after reboot)" : "running";
     const value = { configured: Boolean(metadata), service: { installed: service.installed, running: service.active }, ...(metadata ? { mcpUrl: metadata.mcpResource, workspace: metadata.grant.workspace, expiresAt: metadata.grant.expiresAt, expired } : {}) };
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
-    else if (!metadata) stdout.write(`Device MCP is not configured. Run frely mcp start.\nService: ${service.active ? "running" : service.installed ? "stopped" : "not installed"}\n`);
-    else stdout.write(`MCP URL: ${metadata.mcpResource}\nWorkspace: ${metadata.grant.workspace}\nAuthorization: ${expired ? "expired or inactive (run frely mcp start to renew)" : `active until ${metadata.grant.expiresAt}`}\nService: ${service.active ? "running" : service.installed ? "stopped (run frely mcp start)" : "not installed (run frely mcp start)"}\n`);
+    else if (!metadata) stdout.write(`Device MCP is not configured. Run frely mcp start.\nService: ${service.active ? running : service.installed ? "stopped" : "not installed"}\n`);
+    else stdout.write(`MCP URL: ${metadata.mcpResource}\nWorkspace: ${metadata.grant.workspace}\nAuthorization: ${expired ? "expired or inactive (run frely mcp start to renew)" : `active until ${metadata.grant.expiresAt}`}\nService: ${service.active ? running : service.installed ? "stopped (run frely mcp start)" : "not installed (run frely mcp start)"}\n`);
     return;
   }
   if (command === "mcp" && args[1] === "stop") { const service = await stopMcpService(); stdout.write(`Frely MCP service ${service.active ? "still active" : "stopped"}.\n`); return; }
