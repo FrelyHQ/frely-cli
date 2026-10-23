@@ -78,7 +78,7 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
   add("service", service?.active ? "pass" : "info",
     !metadata && !binding ? "Not configured."
       : !service ? "Service status unavailable."
-      : service.active ? "Background service running."
+      : service.active ? service.detached ? "Background process running (no systemd user manager; it will not restart after a reboot)." : "Background service running."
       : service.installed ? "Background service stopped; a foreground relay may still be running."
       : "Background service not installed; a foreground relay may still be running.");
 
