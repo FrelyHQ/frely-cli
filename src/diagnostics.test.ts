@@ -173,6 +173,9 @@ test("doctor distinguishes automatic activation from legacy service maintenance 
 });
 
 test("doctor fails the sandbox check when device MCP is on and the sandbox cannot run", async () => {
+  const previous = process.env.FRELY_SANDBOX;
+  delete process.env.FRELY_SANDBOX; // test-preload turns the sandbox off for every test
+  try {
   const f = fixture();
   f.dependencies.sandboxUnavailableReason = () => "missing dependencies: bubblewrap (bwrap) not installed";
   const enabled = (await doctor({}, f.dependencies)).checks.find((check) => check.name === "sandbox");
@@ -180,4 +183,7 @@ test("doctor fails the sandbox check when device MCP is on and the sandbox canno
   assert.match(enabled?.detail ?? "", /bubblewrap/u);
   f.dependencies.inspectMcpMetadata = async () => null;
   assert.equal((await doctor({}, f.dependencies)).checks.find((check) => check.name === "sandbox")?.status, "info");
+  } finally {
+    if (previous === undefined) delete process.env.FRELY_SANDBOX; else process.env.FRELY_SANDBOX = previous;
+  }
 });
