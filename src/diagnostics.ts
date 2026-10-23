@@ -8,7 +8,7 @@ import { serviceStatus } from "./service.js";
 import { VERSION } from "./version.js";
 import { dirname } from "node:path";
 import { readAppInstall, verifyCapsule } from "./agent/app-install.js";
-import { isSandboxDisabled } from "./runtime/sandbox.js";
+import { isSandboxDisabled, sandboxUnavailableReason } from "./runtime/sandbox.js";
 
 export interface DiagnosticCheck { name: string; ok: boolean; detail: string; status: "pass" | "fail" | "info" }
 export interface DoctorOptions { verbose?: boolean; /** Compatibility with doctor --mcp. */ mcp?: boolean }
@@ -18,7 +18,7 @@ const defaultDependencies = { inspectAuth, probeCredentialStore, whoami, inspect
     await clearMcpAuthorization(metadata);
     if (code === "device_not_found" || code === "device_revoked") await resetDeviceRegistration();
   },
-  readDeviceBinding, readConnectionStatus, serviceStatus, inspectUpdate };
+  readDeviceBinding, readConnectionStatus, serviceStatus, inspectUpdate, sandboxUnavailableReason };
 type DoctorDependencies = Omit<typeof defaultDependencies, "reconcileMcpAuthorization"> & {
   reconcileMcpAuthorization?: typeof defaultDependencies.reconcileMcpAuthorization;
 };
@@ -109,8 +109,12 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
   add("app", appInstall ? "pass" : "info",
     appInstall ? `Frely App ${appInstall.appVersion} installed (capsule verified).`
       : "Frely App not installed. Run frely app install.");
-  add("sandbox", isSandboxDisabled() ? "info" : "pass",
-    isSandboxDisabled() ? "Command sandbox disabled by environment (FRELY_SANDBOX=off)." : "Command sandbox active (workspace + temp writes only).");
+  const sandboxGap = dependencies.sandboxUnavailableReason();
+  // Without a sandbox remote commands are refused, which only matters once device MCP is enabled.
+  add("sandbox", isSandboxDisabled() ? "info" : sandboxGap ? (metadata ? "fail" : "info") : "pass",
+    isSandboxDisabled() ? "Command sandbox disabled by environment (FRELY_SANDBOX=off)."
+      : sandboxGap ? `Command sandbox unavailable (${sandboxGap}); remote commands are refused unless the owner approves running them unsandboxed. On Linux install bubblewrap, socat and ripgrep.`
+      : "Command sandbox active (workspace + temp writes only).");
   const refreshGuidance = connection?.autoRefresh && connection.pid === service?.pid
     ? "The service will switch after active work finishes and the installation passes its startup check."
     : "Finish running tasks and restart the service from a local terminal.";

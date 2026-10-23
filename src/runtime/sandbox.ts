@@ -178,6 +178,18 @@ export function detectSandboxBackend(): "srt" | "off" | "unavailable" {
   }
 }
 
+/** Why commands are refused here, or undefined when the sandbox can run (or is turned off). Same checks as detectSandboxBackend. */
+export function sandboxUnavailableReason(): string | undefined {
+  if (isSandboxDisabled()) return undefined;
+  try {
+    if (!SandboxManager.isSupportedPlatform()) return `unsupported platform ${process.platform}`;
+    const { errors } = SandboxManager.checkDependencies();
+    return errors.length > 0 ? `missing dependencies: ${errors.join("; ")}` : undefined;
+  } catch (error) {
+    return `sandbox check failed: ${errorText(error)}`;
+  }
+}
+
 /** Extra directories commands may write under, from the approved cache groups and custom `path:` grants. */
 export function writablePaths(allowedGroups: readonly string[]): string[] {
   return allowedGroups.flatMap((name) => Object.hasOwn(WRITABLE_PATH_GROUPS, name) ? [...WRITABLE_PATH_GROUPS[name]!] : customWritePath(name) ?? []);
