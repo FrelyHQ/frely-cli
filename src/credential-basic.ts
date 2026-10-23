@@ -7,13 +7,16 @@ import { runCredentialCommand } from "./credential-command.js";
 import type { CredentialStore } from "./credential-store.js";
 
 const SERVICES = new Set(["frely-cli-basic-v1", "frely-network", "frely-cli-provider-device-v1"]);
+/** The only extra service allowed in files, and only as the Linux auto-mode fallback when no Secret Service exists. */
+const MCP_AUTHORIZATION_SERVICE = "frely-cli-mcp-authorization-v1";
+export const basicFallbackEligible = (service: string): boolean => service === MCP_AUTHORIZATION_SERVICE;
 export const BASIC_CREDENTIAL_BACKEND = "private session files (not encrypted)";
 
 /** Layer-one credentials have no OS keyring or operator-supplied key dependency. */
-export function createBasicCredentialStore(rootInput?: string): CredentialStore {
+export function createBasicCredentialStore(rootInput?: string, extraServices: readonly string[] = []): CredentialStore {
   const root = () => rootInput ?? resolve(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "frely", "basic-credentials-v1");
   const entry = (service: string, account: string) => {
-    if (!SERVICES.has(service) || !account || /[\x00-\x1f\x7f]/u.test(account)) throw new Error("Credential is not eligible for basic storage.");
+    if (!(SERVICES.has(service) || extraServices.includes(service)) || !account || /[\x00-\x1f\x7f]/u.test(account)) throw new Error("Credential is not eligible for basic storage.");
     return join(root(), createHash("sha256").update(JSON.stringify([service, account])).digest("hex") + ".json");
   };
   return {
@@ -77,3 +80,4 @@ try {
 `;
 
 export const basicCredentialStore: CredentialStore = createBasicCredentialStore();
+export const mcpFallbackCredentialStore: CredentialStore = createBasicCredentialStore(undefined, [MCP_AUTHORIZATION_SERVICE]);

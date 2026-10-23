@@ -4,6 +4,7 @@ import { clearMcpAuthorization, inspectMcpMetadata, McpAuthorizationError, McpCo
 import { resetDeviceRegistration } from "./device/control.js";
 import { readDeviceBinding } from "./device/state.js";
 import { connectionIsLive, connectionStatusPath, readConnectionStatus } from "./device/connection-status.js";
+import { credentialStore } from "./credential-store.js";
 import { serviceStatus } from "./service.js";
 import { VERSION } from "./version.js";
 import { dirname } from "node:path";
@@ -130,7 +131,7 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
       catch { add("account_session", "fail", "Account session could not be verified. Check connectivity and login."); }
     } else add("account_session", "info", "Not checked: no stored account credential.");
     if (metadata && !expired && mcpMatches) {
-      try { await dependencies.requireMcpAuthorization(); add("mcp_authorization", "pass", "Secure key and server authorization verified."); }
+      try { await dependencies.requireMcpAuthorization(); add("mcp_authorization", "pass", `Secure key and server authorization verified${credentialStore.lastBackend() ? ` (key stored in ${credentialStore.lastBackend()})` : ""}.`); }
       catch (error) {
         if (metadata && error instanceof McpAuthorizationError && ["mcp_authorization_not_found", "mcp_authorization_invalid", "device_not_found", "device_revoked"].includes(error.code)) {
           try {

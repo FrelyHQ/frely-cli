@@ -301,3 +301,39 @@ test("command runner preserves split UTF-8 bytes and bounds output", async () =>
   await assert.rejects(runCredentialCommand(process.execPath, ["-e", "process.stdout.write('x'.repeat(3*1024*1024))"]), /size limit/);
   await assert.rejects(runCredentialCommand(join(tmpdir(), "frely-nonexistent-command"), []), /OS credential tool is unavailable/);
 });
+
+test("linux auto mode falls back to private files for MCP authorization only when the keyring is unavailable", async () => {
+  const MCP = "frely-cli-mcp-authorization-v1";
+  const missing: CredentialCommand = async () => { throw new Error("OS credential tool is unavailable."); };
+  const { store: basic, values } = memory();
+  const store = createCredentialStore({ env: {}, platform: "linux", run: missing, fallback: basic });
+  await store.setPassword(MCP, "a", "secret");
+  assert.equal(values.size, 1);
+  assert.equal(await store.getPassword(MCP, "a"), "secret");
+  assert.equal(store.lastBackend(), "private session files (not encrypted)");
+  assert.equal(await store.getPassword(MCP, "other"), null);
+  assert.equal(await store.deletePassword(MCP, "a"), true);
+  assert.equal(values.size, 0);
+  // Services that are not eligible, and explicit modes, still fail hard.
+  await assert.rejects(store.setPassword("frely-cli-skill-api-key", "a", "x"), /unavailable/);
+  const system = createCredentialStore({ env: { FRELY_CREDENTIAL_STORE: "system" }, platform: "linux", run: missing, fallback: basic });
+  await assert.rejects(system.setPassword(MCP, "a", "x"), /unavailable/);
+  assert.equal(values.size, 0);
+});
+
+test("linux auto mode keeps using the keyring when it works", async () => {
+  const MCP = "frely-cli-mcp-authorization-v1";
+  const { store: basic, values } = memory();
+  const stored = new Map<string, string>();
+  const run: CredentialCommand = async (_file, args, input) => {
+    const key = args.slice(args[0] === "store" ? 2 : 1).join("\0");
+    if (args[0] === "store") { stored.set(key, input ?? ""); return { code: 0, stdout: "", stderr: "" }; }
+    if (args[0] === "clear") { stored.delete(key); return { code: 0, stdout: "", stderr: "" }; }
+    return stored.has(key) ? { code: 0, stdout: stored.get(key)!, stderr: "" } : { code: 1, stdout: "", stderr: "" };
+  };
+  const store = createCredentialStore({ env: { XDG_CONFIG_HOME: join(tmpdir(), "frely-unused-" + randomBytes(4).toString("hex")) }, platform: "linux", run, fallback: basic });
+  await store.setPassword(MCP, "a", "secret");
+  assert.equal(values.size, 0);
+  assert.equal(await store.getPassword(MCP, "a"), "secret");
+  assert.equal(store.lastBackend(), undefined);
+});
