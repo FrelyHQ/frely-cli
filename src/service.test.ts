@@ -89,7 +89,9 @@ test("without a systemd user manager the relay starts as a detached process and 
     assert.equal(calls[0]!.options.detached, true);
     assert.equal(await readFile(deps.pidFile, "utf8"), "4242\n");
     assert.match(output, /will not restart after a reboot/);
-    assert.match(output, new RegExp(`@reboot '/opt/my frely/frely' mcp serve --workspace /w >> ${deps.logPath.replace(/\./gu, "\\.")} 2>&1`));
+    // The log path is quoted only when it needs it (Windows temp paths do), so compare the command part exactly.
+    assert.ok(info.crontab?.startsWith("@reboot '/opt/my frely/frely' mcp serve --workspace /w >> ") && info.crontab.endsWith(" 2>&1") && info.crontab.includes(deps.logPath));
+    assert.ok(output.includes(`${info.crontab}\n`));
     assert.equal(await detachedRelayPid({ ...deps, alive }), 4242);
     running.delete(4242);
     assert.equal(await detachedRelayPid({ ...deps, alive }), undefined);
