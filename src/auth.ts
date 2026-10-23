@@ -12,7 +12,7 @@ const LEGACY_CONFIG_VERSION = 1;
 const OAUTH_CLIENT_ID = "frely-cli-basic";
 const OAUTH_SCOPE = "openid profile profile:read email offline_access device-relay:provider";
 const DEFAULT_RELAY = "https://frely.cloud";
-// app.frely.cloud now belongs to the Frely App; logins saved against it must be redone on frely.cloud.
+// app.frely.cloud now belongs to the Frely App; logins saved against it move to frely.cloud (see currentRelayConfig).
 const RETIRED_RELAY_HOSTNAME = "app.frely.cloud";
 const REQUEST_TIMEOUT_MS = 15_000;
 const REFRESH_ATTEMPTS = 3;
@@ -317,8 +317,7 @@ function appendSessionBinding(body: URLSearchParams, deviceId?: string | null): 
 }
 
 export async function whoami(): Promise<PublicUser> {
-  const config = await readConfig();
-  assertCurrentRelay(config);
+  const config = await currentRelayConfig(await readConfig());
   const credential = await loadCredential(config, true);
   if (!credential) throw new Error("No Frely login is stored. Run `frely login`.");
   const user = await fetchUser(config.relayUrl, credential);
@@ -329,8 +328,7 @@ export async function whoami(): Promise<PublicUser> {
 }
 
 export async function requireLogin(): Promise<{ config: { relayUrl: string }; user: PublicUser; credential: AuthCredential; cookie?: string }> {
-  const config = await readConfig();
-  assertCurrentRelay(config);
+  const config = await currentRelayConfig(await readConfig());
   const credential = await loadCredential(config, true);
   if (!credential) throw new Error("No Frely login is stored. Run `frely login`.");
   const user = await fetchUser(config.relayUrl, credential).catch((error) => {
@@ -441,10 +439,21 @@ export async function probeCredentialStore(): Promise<void> {
   }
 }
 
-function assertCurrentRelay(config: CliConfig): void {
-  if (new URL(config.relayUrl).hostname === RETIRED_RELAY_HOSTNAME) {
-    throw new Error("Frely moved to https://frely.cloud. Run `frely login` again.");
-  }
+/**
+ * A login saved against the retired relay host moves to frely.cloud: the stored credential is copied under the new
+ * account key and the config rewritten. If frely.cloud rejects it, the caller reports an expired login as usual,
+ * so a background service never fails on the host name alone.
+ */
+async function currentRelayConfig(config: CliConfig): Promise<CliConfig> {
+  if (new URL(config.relayUrl).hostname !== RETIRED_RELAY_HOSTNAME) return config;
+  const raw = await credentialStore.getPassword(SERVICE, accountKey(config.relayUrl)).catch(() => null);
+  if (!raw) throw new Error("Frely moved to https://frely.cloud. Run `frely login` again.");
+  const relayUrl = normalizeRelayUrl(DEFAULT_RELAY);
+  await credentialStore.setPassword(SERVICE, accountKey(relayUrl), raw);
+  const migrated = { ...config, relayUrl };
+  await writeConfig(migrated);
+  await credentialStore.deletePassword(SERVICE, accountKey(config.relayUrl)).catch(() => false);
+  return migrated;
 }
 
 export async function readConfig(): Promise<CliConfig> {

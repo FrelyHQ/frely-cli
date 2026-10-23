@@ -18,7 +18,7 @@ import { ensureDevice } from "./device/control.js";
 import { createLocalProviderToken, loadOrCreateDeviceIdentity } from "./device/identity.js";
 import { serveDeviceRelay } from "./device/relay-client.js";
 import { startStdioMcp } from "./runtime/mcp.js";
-import { installDeviceRelayService, serviceStatus, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
+import { installDeviceRelayService, serviceStatus, trimServiceLog, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
 import { createLocalModelsHub } from "./provider/local-models.js";
 import { shareLocalProvider } from "./provider/share.js";
 import { listLocalProviders } from "./provider/state.js";
@@ -371,6 +371,7 @@ async function main(): Promise<void> {
     const serviceConfigHome = option(args, "--service-config-home");
     const serviceCredentialStore = option(args, "--service-credential-store");
     if (serviceConfigHome) process.env.XDG_CONFIG_HOME = resolve(serviceConfigHome);
+    if (serviceConfigHome) await trimServiceLog().catch(() => undefined);
     if (serviceCredentialStore) process.env.FRELY_CREDENTIAL_STORE = serviceCredentialStore;
     await requireLogin();
     const providerOnly = args.includes("--provider-only");
@@ -532,6 +533,7 @@ main().catch((error) => {
   const command = process.argv[2];
   if (jsonMode && command === "network") process.stdout.write(`${JSON.stringify(publicNetworkError(error))}\n`);
   else if (jsonMode && command === "agent") process.stdout.write(`${JSON.stringify(error instanceof KeyBudgetError ? publicKeyBudgetError(error) : publicSkillAccessError(error))}\n`);
-  else process.stderr.write(`${message}\n`);
+  // A managed service writes to a shared log, so startup failures there carry a time.
+  else process.stderr.write(`${process.argv.includes("--service-config-home") ? `${new Date().toISOString()} ` : ""}${message}\n`);
   process.exitCode = 1;
 });

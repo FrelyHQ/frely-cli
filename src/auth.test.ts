@@ -114,7 +114,7 @@ test("login without a session id from an older Relay stays backward compatible",
   await logout();
 });
 
-test("defaults to frely.cloud and asks logins saved on app.frely.cloud to log in again", async (t) => {
+test("defaults to frely.cloud and asks retired-host logins without a stored credential to log in again", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "frely-cli-retired-relay-"));
   const previous = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, FRELY_RELAY_URL: process.env.FRELY_RELAY_URL };
   process.env.XDG_CONFIG_HOME = directory;
@@ -127,6 +127,32 @@ test("defaults to frely.cloud and asks logins saved on app.frely.cloud to log in
   await mkdir(dirname(authConfigPath()), { recursive: true });
   await writeFile(authConfigPath(), JSON.stringify({ version: 3, relayUrl: "https://app.frely.cloud", user: { id: "user_test", email: "user@example.com" } }));
   await assert.rejects(requireLogin(), /Frely moved to https:\/\/frely\.cloud/);
+});
+
+test("moves a login saved on app.frely.cloud to frely.cloud", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "frely-cli-retired-migrate-"));
+  const oldFetch = globalThis.fetch;
+  const previous = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, FRELY_RELAY_URL: process.env.FRELY_RELAY_URL };
+  const restore = useMemoryCredentialStore();
+  process.env.XDG_CONFIG_HOME = directory;
+  delete process.env.FRELY_RELAY_URL;
+  t.after(async () => {
+    restore(); globalThis.fetch = oldFetch;
+    for (const [name, value] of Object.entries(previous)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+    await rm(directory, { recursive: true, force: true });
+  });
+  const stored = JSON.stringify({ version: 1, type: "basic-oauth", accessToken: "synthetic-old", expiresAt: Date.now() + 3_600_000 });
+  await basicCredentialStore.setPassword("frely-cli-basic-v1", "https://app.frely.cloud", stored);
+  await mkdir(dirname(authConfigPath()), { recursive: true });
+  await writeFile(authConfigPath(), JSON.stringify({ version: 3, relayUrl: "https://app.frely.cloud", user: { id: "user_test", email: "user@example.com" } }));
+  const urls: string[] = [];
+  globalThis.fetch = async (input) => { urls.push(String(input)); return Response.json({ user: { id: "user_test", email: "user@example.com" } }); };
+  const result = await requireLogin();
+  assert.equal(result.config.relayUrl, "https://frely.cloud");
+  assert.deepEqual(urls, ["https://frely.cloud/api/auth/me"]);
+  assert.equal(JSON.parse(await readFile(authConfigPath(), "utf8")).relayUrl, "https://frely.cloud");
+  assert.equal(await basicCredentialStore.getPassword("frely-cli-basic-v1", "https://frely.cloud"), stored);
+  assert.equal(await basicCredentialStore.getPassword("frely-cli-basic-v1", "https://app.frely.cloud"), null);
 });
 
 async function withExpiredLogin(t: import("node:test").TestContext, refresh: () => Response | Promise<Response>): Promise<{ refreshCalls: () => number }> {

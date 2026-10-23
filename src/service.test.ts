@@ -2,8 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { cliLaunchArguments } from "./cli-launch.js";
 import { windowsArgument, windowsService } from "./service-windows.js";
-import { systemdUnit, launchAgentPlist, serviceLaunchArguments, systemdUnitPath, parseServiceCommand } from "./service.js";
+import { systemdUnit, launchAgentPlist, serviceLaunchArguments, systemdUnitPath, parseServiceCommand, trimServiceLog } from "./service.js";
 import { join } from "node:path";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 
 test("standalone and npm services invoke the intended executable", () => {
   assert.deepEqual(cliLaunchArguments("/src/index.js", ["mcp", "serve"], true, "/bin/frely"), ["/bin/frely", "mcp", "serve"]);
@@ -51,4 +53,16 @@ test("update reads the existing service command without changing escaped paths",
   assert.deepEqual(parseServiceCommand("darwin", launchAgentPlist(command, "/state")), command);
   assert.deepEqual(parseServiceCommand("linux", systemdUnit(command)), command);
   assert.equal(parseServiceCommand("linux", "ExecStart=/custom/unrecognized-format"), null);
+});
+
+test("a service log over the limit is trimmed to its tail, and launchd throttles restarts", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "frely-cli-log-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, "mcp.log");
+  await writeFile(path, `${"a".repeat(90)}${"b".repeat(10)}`);
+  await trimServiceLog(path, 200, 10);
+  assert.equal((await stat(path)).size, 100);
+  await trimServiceLog(path, 50, 10);
+  assert.equal(await readFile(path, "utf8"), "b".repeat(10));
+  assert.match(launchAgentPlist(["/bin/frely"], "/state"), /<key>ThrottleInterval<\/key><integer>30<\/integer>/u);
 });
