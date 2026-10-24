@@ -8,12 +8,13 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { UnauthorizedError, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { credentialStore } from "./credential-store.js";
-import { inspectAuth, normalizeRelayUrl, openVerificationUrl } from "./auth.js";
+import { inspectAuth, normalizeRelayUrl, openVerificationUrl, requireLogin } from "./auth.js";
 import { VERSION } from "./version.js";
 import { CloudToolError } from "./skill/cloud-item.js";
+import { ensureDevice, relayFetch } from "./device/control.js";
 
 const SERVICE = "frely-cli-cloud-v1";
-/** Names this installation on the web console ("Frely CLI Cloud (host)"); the "Frely CLI" prefix selects per-device permissions on the server. */
+/** Names this installation on the web console ("Frely CLI Cloud (host)"). Display only: the server limits the client by its device binding (see bindCloudClient), not by this name. */
 export function cloudClientName(host = hostname()): string {
   const safe = host.replace(/[^A-Za-z0-9._ -]/g, "").trim().slice(0, 40);
   return safe ? `Frely CLI Cloud (${safe})` : "Frely CLI Cloud";
@@ -68,8 +69,28 @@ interface StoredCloud {
   resource: string;
   redirectUrl: string;
   client?: OAuthClientInformationMixed;
+  /** The device this client was last bound to on the server; the binding is what makes the client this computer's CLI. */
+  bound?: { clientId: string; deviceId: string };
   tokens?: OAuthTokens;
   expiresAt?: number;
+}
+
+/**
+ * Tells the server which enrolled device this Cloud client belongs to, so it is limited and shown as this computer's CLI. The server decides by
+ * this binding, not by the client's name. Skipped when the same client was already bound to the same device; throws when the server refuses.
+ */
+export async function bindCloudClient(stored: Pick<StoredCloud, "client" | "bound">, device: { deviceId: string },
+  post: (body: { clientId: string; deviceId: string }) => Promise<Response>): Promise<{ clientId: string; deviceId: string } | null> {
+  const clientId = stored.client?.client_id;
+  if (!clientId) return null;
+  if (stored.bound?.clientId === clientId && stored.bound.deviceId === device.deviceId) return stored.bound;
+  const response = await post({ clientId, deviceId: device.deviceId });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: { message?: unknown }; message?: unknown } | null;
+    const message = payload?.error?.message ?? payload?.message;
+    throw new Error(typeof message === "string" ? message : `The server refused to link this Cloud authorization to this computer (HTTP ${response.status}).`);
+  }
+  return { clientId, deviceId: device.deviceId };
 }
 
 async function cloudIdentity() {
@@ -188,7 +209,7 @@ async function connectCloud() {
       return new URL(identity.resource);
     },
     invalidateCredentials: async scope => {
-      if (scope === "all" || scope === "client") delete stored.client;
+      if (scope === "all" || scope === "client") { delete stored.client; delete stored.bound; }
       if (scope === "all" || scope === "tokens") { delete stored.tokens; delete stored.expiresAt; }
       if (scope === "all" || scope === "verifier") verifier = "";
       await save();
@@ -212,6 +233,12 @@ async function connectCloud() {
       client = new Client({ name: "frely-cli-cloud", version: VERSION });
       await client.connect(transport as unknown as Transport);
     }
+    // No call is made before the server knows this authorization belongs to this computer: an unbound client is not limited by approved permissions.
+    const device = await ensureDevice();
+    const account = await requireLogin();
+    const bound = await bindCloudClient(stored, device, body => relayFetch(account.config.relayUrl, account.credential, "/api/user/device-relay/cloud-client",
+      { method: "POST", body: JSON.stringify(body) }));
+    if (bound && bound !== stored.bound) { stored.bound = bound; await save(); }
     await closeListener();
     return { client, close: () => client.close() };
   } catch (error) {
