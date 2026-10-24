@@ -29,8 +29,9 @@ for (const [, key] of template.matchAll(token)) {
 }
 const escapeHtml = (value) => value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const locales = [
-  { lang: 'en', route: 'en', ogLocale: 'en_US', ogAlternate: 'zh_CN' },
-  { lang: 'zh-CN', route: 'zh', ogLocale: 'zh_CN', ogAlternate: 'en_US' },
+  // English is canonical at the root; /en/ stays reachable for old links and points its canonical there.
+  { lang: 'en', route: 'en', canonical: '', ogLocale: 'en_US', ogAlternate: 'zh_CN' },
+  { lang: 'zh-CN', route: 'zh', canonical: 'zh/', ogLocale: 'zh_CN', ogAlternate: 'en_US' },
 ];
 
 const softwareApplication = {
@@ -95,7 +96,7 @@ const docsPage = (title, description, path, body) => `<!doctype html>
   ${docsStyle}
 </head>
 <body>
-  <header><a href="/en/">frely CLI</a><nav><a href="/docs/">Docs</a> · <a href="/en/#install">Install</a> · <a href="https://frely.cloud/app/">Frely App</a></nav></header>
+  <header><a href="/">frely CLI</a><nav><a href="/docs/">Docs</a> · <a href="/#install">Install</a> · <a href="https://frely.cloud/app/">Frely App</a></nav></header>
   <main>
 ${body}
   </main>
@@ -143,6 +144,8 @@ await mkdir(resolve(output, 'assets/clients'), { recursive: true });
 for (const client of await readdir(new URL('./assets/clients/', import.meta.url))) {
   await copyFile(new URL('./assets/clients/' + client, import.meta.url), resolve(output, 'assets/clients', client));
 }
+// Share card for og:image (1200×630).
+await copyFile(new URL('./assets/og.png', import.meta.url), resolve(output, 'assets/og.png'));
 // The one-line installers are served from the landing domain so both commands share one host.
 for (const installer of ['install.sh', 'install.ps1', 'start.sh', 'start.ps1']) {
   await copyFile(resolve(root, installer), resolve(output, installer));
@@ -154,8 +157,8 @@ for (const notice of ['LICENSE', 'NOTICE', 'TRADEMARKS.md']) {
 await writeFile(resolve(output, '404.html'), docsPage('Page not found', 'This page does not exist on cli.frely.cloud.', null, `    <h1>Page not found</h1>
     <p class="muted">This page does not exist. These are the main pages:</p>
     <ul>
-      <li><a href="/en/">Frely CLI &amp; FrelyMCP</a> · <a href="/zh/">中文</a></li>
-      <li><a href="/en/#install">Install</a></li>
+      <li><a href="/">Frely CLI &amp; FrelyMCP</a> · <a href="/zh/">中文</a></li>
+      <li><a href="/#install">Install</a></li>
       <li><a href="/docs/">Docs</a> · <a href="/docs/help/">Help</a></li>
       <li><a href="https://frely.cloud/">Frely</a> · <a href="https://frely.cloud/app/">Frely App</a></li>
       <li><a href="https://github.com/FrelyHQ/frely-cli">GitHub</a></li>
@@ -164,7 +167,7 @@ await writeFile(resolve(output, '.nojekyll'), '');
 await writeFile(resolve(output, 'robots.txt'), 'User-agent: *\nAllow: /\nSitemap: https://cli.frely.cloud/sitemap.xml\n');
 await writeFile(resolve(output, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${[...locales.map(({ route }) => `/${route}/`), '/docs/', '/docs/help/', ...entries.map(entryUrl)].map((path) => `  <url><loc>https://cli.frely.cloud${path}</loc></url>`).join('\n')}
+${[...locales.map(({ canonical }) => `/${canonical}`), '/docs/', '/docs/help/', ...entries.map(entryUrl)].map((path) => `  <url><loc>https://cli.frely.cloud${path}</loc></url>`).join('\n')}
 </urlset>
 `);
-console.log('Built landing page: / (language selection), /en/, /zh/, /docs/');
+console.log('Built landing page: / (English, redirects Chinese browsers), /en/, /zh/, /docs/');

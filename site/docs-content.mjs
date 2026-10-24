@@ -5,7 +5,7 @@
 const REPO = 'https://github.com/FrelyHQ/frely-cli/blob/main';
 const link = (label, href) => ({ label, href });
 
-const install = link('Install page', 'https://cli.frely.cloud/en/#install');
+const install = link('Install page', 'https://cli.frely.cloud/#install');
 const app = link('Frely App (My Devices)', 'https://frely.cloud/app/');
 const connections = link('Connections page', 'https://frely.cloud/user/account/connections');
 const mcpUrl = link('FrelyMCP endpoint', 'https://mcp.frely.cloud/mcp');
@@ -26,7 +26,7 @@ export const entries = [
     question: 'What is Frely CLI?',
     answer:
       'Frely CLI (the `frely` command) turns a computer you choose into a device that AI agents can work on from anywhere. ChatGPT, Claude, Codex and other MCP clients connect through FrelyMCP and use the files, shell commands and processes in the folders you allow. The computer connects out to Frely, so you open no ports. It is also the command line for your Frely account.',
-    links: [link('Home', 'https://cli.frely.cloud/en/'), readme],
+    links: [link('Home', 'https://cli.frely.cloud/'), readme],
   },
   {
     slug: 'how-do-i-install',

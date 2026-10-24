@@ -20,18 +20,18 @@ function visit({ entry = true, languages = ['en-US'], language = 'en-US', saved,
   return redirect;
 }
 
-test('Chinese browser variants select Chinese and unsupported languages fall back to English', () => {
+test('Chinese browser variants select Chinese; other languages stay on the English root page', () => {
   for (const language of ['zh', 'zh-CN', 'zh-TW', 'zh-Hant-HK']) {
     assert.equal(visit({ languages: [language] }), 'https://cli.frely.cloud/zh/');
   }
-  assert.equal(visit({ languages: ['fr-FR', 'de-DE'] }), 'https://cli.frely.cloud/en/');
+  assert.equal(visit({ languages: ['fr-FR', 'de-DE'] }), undefined);
   assert.equal(visit({ languages: ['fr-FR', 'zh-CN', 'en-US'] }), 'https://cli.frely.cloud/zh/');
-  assert.equal(visit({ languages: ['en-US', 'zh-CN'] }), 'https://cli.frely.cloud/en/');
+  assert.equal(visit({ languages: ['en-US', 'zh-CN'] }), undefined);
   assert.equal(visit({ languages: [], language: 'zh-CN' }), 'https://cli.frely.cloud/zh/');
 });
 
 test('manual preference wins; disabled storage and invalid preferences remain usable', () => {
-  assert.equal(visit({ languages: ['zh-CN'], saved: 'en' }), 'https://cli.frely.cloud/en/');
+  assert.equal(visit({ languages: ['zh-CN'], saved: 'en' }), undefined);
   assert.equal(visit({ saved: 'zh' }), 'https://cli.frely.cloud/zh/');
   assert.equal(visit({ languages: ['zh-CN'], saved: 'invalid' }), 'https://cli.frely.cloud/zh/');
   assert.equal(visit({ languages: ['zh-CN'], storageBlocked: true }), 'https://cli.frely.cloud/zh/');

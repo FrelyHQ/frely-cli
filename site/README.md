@@ -21,7 +21,7 @@ The homepage leads with “让 Agent 从任何地方访问你的设备” / “L
 
 The page order is installation hero, a how-it-works diagram (your device running Frely CLI, reached by third-party chat apps through MCP via Frely; `frely doctor` below it), client connection choices, device-access use cases, optional CLI feature links, then open source. Client tabs are alternatives; local model sharing and hosted Agent invocation are independent optional features, not steps in device setup. Section and feature headings have no sequential numbers. The setup sequence is install → `frely mcp start` (signs in or registers on first run, then prints the MCP URL) → client OAuth → a real tool call. The page does not describe a separate login step. Diagnostics use `frely doctor` with `-v` for details.
 
-Frely's main site can link to `/zh/#install` or `/en/#install`. The neutral `/#install` entry selects a language and preserves the anchor. Copy targets for install, agent prompt, MCP setup, URL and diagnostics are independent. The agent prompt shows one line until clicked; Copy copies the full prompt. Codex and Claude Code examples label the URL placeholder. Codex command syntax was checked with the installed CLI's `mcp add --help` and `mcp login --help`; this is not a client OAuth acceptance test. The signed-in Frely Device MCP page provides a device-specific copy command.
+Frely's main site can link to `/zh/#install` or `/en/#install`. `/#install` is English and sends Chinese browsers to `/zh/#install`, preserving the anchor. Copy targets for install, agent prompt, MCP setup, URL and diagnostics are independent. The agent prompt shows one line until clicked; Copy copies the full prompt. Codex and Claude Code examples label the URL placeholder. Codex command syntax was checked with the installed CLI's `mcp add --help` and `mcp login --help`; this is not a client OAuth acceptance test. The signed-in Frely Device MCP page provides a device-specific copy command.
 
 ## Copy style
 
@@ -35,9 +35,9 @@ The content decisions are recorded in the revision document linked below; the de
 
 - `/en/`: English; `/zh/`: Simplified Chinese. Both are complete static pages,
   including translated metadata, navigation, accessibility labels and copy feedback.
-- `/`: an English fallback page that selects the first supported browser language
-  when JavaScript is available. Chinese language variants select Simplified Chinese;
-  unsupported language lists fall back to English.
+- `/`: the canonical English page (`/en/` is the same page and points its canonical
+  here, so search engines index `/`). With JavaScript, browsers whose first supported
+  language is Chinese are sent to `/zh/`; everyone else stays on `/`.
 - The header's **English / 中文** links remember an explicit selection locally.
   That preference wins on later visits to `/`. Direct language URLs always keep
   their language, regardless of browser settings or the saved preference.

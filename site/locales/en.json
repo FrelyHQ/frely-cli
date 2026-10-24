@@ -13,7 +13,7 @@
   "hero.line1": "Let agents access ",
   "hero.line2": "your device from ",
   "hero.accent": "any location",
-  "hero.description": "Run Frely CLI on your computer. Give browser agents, or Codex and Claude Code on another computer, MCP access to its files, commands and processes. You authorize access; tasks run on that computer.",
+  "hero.description": "Frely CLI is an open-source command line that connects your computer to FrelyMCP. Browser agents, or Codex and Claude Code on another computer, then get MCP access to its files, commands and processes. You authorize access; tasks run on that computer.",
   "hero.install": "Install & get started",
   "principles.label": "Project highlights",
   "principles.mcp": "Remote MCP + OAuth",
