@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, rename, unlink } from "node:fs/promises";
+import { lstat, mkdir, open, rename, rmdir, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -21,6 +21,8 @@ export interface ManagedSkillRecord {
   readonly skillPath: string;
   readonly sha256: string;
   readonly installedAt: string;
+  /** Hash of a Skill file being written; set only while a write is in flight. */
+  readonly pendingSha256?: string;
 }
 
 export class ManagedSkillError extends Error {
@@ -41,35 +43,30 @@ export function managedSkillRoot(host: SkillHost, scope: SkillScope, cwd = proce
   return join(home, ".agents", "skills");
 }
 
-export function skillSlug(name: string, distributionId: string): string {
-  const base = name.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "").replace(/-+/gu, "-").slice(0, 44) || "agent";
-  return `frely-${base}-${distributionId.slice(-8)}`.slice(0, 64).replace(/-+$/u, "");
+/** The Skill's own name, as its creator wrote it; nothing is added to it. */
+export function skillSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "").replace(/-+/gu, "-").slice(0, 64).replace(/-+$/u, "") || "agent";
 }
 
 export async function writeManagedSkill(input: {
-  readonly record: Omit<ManagedSkillRecord, "sha256" | "installedAt">;
+  readonly record: Omit<ManagedSkillRecord, "sha256" | "installedAt" | "pendingSha256">;
   readonly content: string;
   readonly home?: string;
 }): Promise<ManagedSkillRecord> {
-  const metadataPath = join(dirname(input.record.skillPath), ".frely-managed.json");
+  const home = input.home ?? homedir();
   const current = await readOwnedFile(input.record.skillPath);
-  const metadata = await readOwnedFile(metadataPath, 4096);
-  let marker: Record<string, unknown> | null = null;
-  if (metadata !== null) {
-    try { marker = recordValue(JSON.parse(metadata)); } catch { marker = null; }
-    if (!marker || marker.version !== 1 || marker.owner !== "frely-cli-skill" || marker.distributionId !== input.record.distributionId) {
-      throw new ManagedSkillError("unmanaged_skill_exists", "An unmanaged Skill already exists at the target path.");
-    }
-  }
-  if (current !== null && (!marker || (hashText(current) !== marker.sha256 && hashText(current) !== marker.pendingSha256))) {
-    throw new ManagedSkillError("managed_skill_modified", "The managed Skill was modified; refusing to overwrite it.");
+  const previous = await readManagedSkill(input.record.distributionId, home).catch(() => null);
+  if (current !== null) {
+    if (!previous || previous.skillPath !== input.record.skillPath) throw new ManagedSkillError("unmanaged_skill_exists", "A Skill Frely did not install for this Agent already exists at the target path.");
+    if (hashText(current) !== previous.sha256 && hashText(current) !== previous.pendingSha256) throw new ManagedSkillError("managed_skill_modified", "The managed Skill was modified; refusing to overwrite it.");
   }
   const sha256 = hashText(input.content);
-  await atomicWrite(metadataPath, JSON.stringify({ version: 1, owner: "frely-cli-skill", distributionId: input.record.distributionId, sha256: current === null ? null : hashText(current), pendingSha256: sha256 }));
+  const stamp = { ...input.record, installedAt: new Date().toISOString() };
+  // The record goes first with the new hash pending, so a crash between the two writes is recoverable.
+  await atomicWrite(recordPath(home, stamp.distributionId), `${JSON.stringify({ ...stamp, sha256: current === null ? sha256 : hashText(current), pendingSha256: sha256 }, null, 2)}\n`);
   await atomicWrite(input.record.skillPath, input.content);
-  await atomicWrite(metadataPath, JSON.stringify({ version: 1, owner: "frely-cli-skill", distributionId: input.record.distributionId, sha256 }));
-  const record: ManagedSkillRecord = Object.freeze({ ...input.record, sha256, installedAt: new Date().toISOString() });
-  await atomicWrite(recordPath(input.home ?? homedir(), record.distributionId), `${JSON.stringify(record, null, 2)}\n`);
+  const record: ManagedSkillRecord = Object.freeze({ ...stamp, sha256 });
+  await atomicWrite(recordPath(home, record.distributionId), `${JSON.stringify(record, null, 2)}\n`);
   return record;
 }
 
@@ -96,7 +93,7 @@ export async function removeManagedSkill(record: ManagedSkillRecord, home = home
   const state = await managedSkillState(record);
   if (state === "modified") throw new ManagedSkillError("managed_skill_modified", "Managed Skill was modified; refusing to remove it.");
   await unlink(record.skillPath).catch(ignoreAbsent);
-  await unlink(join(dirname(record.skillPath), ".frely-managed.json")).catch(ignoreAbsent);
+  await rmdir(dirname(record.skillPath)).catch(() => undefined);
   await unlink(recordPath(home, record.distributionId)).catch(ignoreAbsent);
 }
 

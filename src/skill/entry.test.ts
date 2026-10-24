@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { CloudItemError } from "./cloud-item.js";
-import { ENTRY_SKILL, installEntrySkill } from "./entry.js";
+import { ENTRY_SKILL, installEntrySkill, removeEntrySkill, untouchedEntrySkills } from "./entry.js";
 
 test("installs the entry Skill into the host folder and refreshes it on a second run", async () => {
   const home = await realpath(await mkdtemp(join(tmpdir(), "frely-entry-")));
@@ -33,4 +33,17 @@ test("the entry Skill keeps device MCP opt-in", () => {
   assert.match(ENTRY_SKILL, /^---\nname: frely\n/u);
   assert.doesNotMatch(ENTRY_SKILL, /login --email <address> --mcp/u);
   assert.match(ENTRY_SKILL, /Do nothing until the user agrees/u);
+});
+
+test("a project install goes under --dir and no marker file is left in the Skill folder", async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), "frely-entry-")));
+  try {
+    const project = join(home, "work");
+    const { path } = await installEntrySkill({ host: "claude-code", scope: "project", dir: project, home });
+    assert.equal(path, join(project, ".claude", "skills", "frely"));
+    assert.deepEqual(await readdir(path), ["SKILL.md"]);
+    assert.deepEqual(await untouchedEntrySkills(home), [path]);
+    await removeEntrySkill(path, home);
+    assert.deepEqual(await untouchedEntrySkills(home), []);
+  } finally { await rm(home, { recursive: true, force: true }); }
 });

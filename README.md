@@ -48,7 +48,7 @@ The workspace is your home directory by default (credential and shell start-up f
 
 ### Let your agent set it up (no device access)
 
-Ask an agent that has a shell (Claude Code, Codex, pi) to install the CLI, sign in with `frely login --email`, and run `frely skill install --host <host>`. The `frely` Skill it installs teaches the agent to use your account (`frely api`), install marketplace items and Agents, and to offer FrelyMCP only when a request needs it (another computer, Cloud MCPs, a browser, a client without a shell). This path does not open this computer to remote clients; `frely mcp start` does.
+Ask an agent that has a shell (Claude Code, Codex, pi) to install the CLI, sign in with `frely login --email`, and run `frely skill install --host <host>` (add `--scope project --dir <project>` for one project). The `frely` Skill it installs teaches the agent to use your account (`frely api`), install marketplace items and Agents, and to offer FrelyMCP only when a request needs it (another computer, Cloud MCPs, a browser, a client without a shell). This path does not open this computer to remote clients; `frely mcp start` does.
 
 ### Install only
 
@@ -136,7 +136,7 @@ printf '%s' 'Your complete task' | frely agent run <distribution-id> --input-std
 frely item install <item-id> --host claude-code
 ```
 
-The first call opens a browser for Frely Cloud authorization. A paid part is installed only if your account holds a pass; otherwise the command says how to buy one. Skills go to the host's Skill folder, Prompts to `--dir` (default: current directory), and scripts are saved without execute permission. Frely never overwrites a folder it did not install or a file you edited. After you review an installed item, `frely item trust <folder>` remembers it; a new version needs a new review.
+The first call opens a browser for Frely Cloud authorization. A paid part is installed only if your account holds a pass; otherwise the command says how to buy one. Skills go to the host's Skill folder under their own name (with `--scope project`, `--dir` is the project root; default: current directory), Prompts to `--dir`, and scripts are saved without execute permission. Nothing is added to the Skill folder: what Frely wrote is tracked under `~/.config/frely`. Frely never overwrites a folder it did not install or a file you edited. A Skill that Frely's scan has not passed is reported as such: read it before use, then `frely item trust <folder>` remembers the review; a new version needs a new review.
 
 Cloud MCPs you buy are not installed on the computer: enable them for a connection on the Frely website and their tools appear in FrelyMCP.
 
@@ -188,11 +188,11 @@ frely mcp workspace add|remove <path>
 frely mcp local list [--json]
 frely mcp local add <name> (--url <address> | [--env KEY=VALUE] -- <command> [args...])
 frely mcp local remove <name>
-frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--api-key-stdin] [--json]
+frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <project>] [--api-key-stdin] [--json]
 frely agent run <distribution-id> (--input <text>|--input-stdin) [--json]
 frely agent status (<distribution-id>|--api-key-stdin [--relay <url>]) [--json]
 frely agent remove <distribution-id> [--json]
-frely skill install [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--json]
+frely skill install [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <project>] [--json]
 frely item install <item-id> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--json]
 frely item trust <folder> [--check]
 frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id> | --creator] [--name <name>]

@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, posix, relative, resolve, sep } from "node:path";
 import { sandboxCommand } from "../runtime/sandbox.js";
 import { CloudItemError, CloudToolError, SEALED_DIR, SEALED_LEASE_FILE, sealedFilePath, writeLease, type CloudToolCaller, type SealedLeaseRecord } from "./cloud-item.js";
+import { readInstall, type InstallRecord } from "./registry.js";
 import { interpreterFor, loadOrCreateDeviceSealKey, openSealedFile, parseLease, unwrapLease, type DeviceSealKey } from "./sealed.js";
 
 /** A lease with less than this left is renewed before the run, when the server can be reached. */
@@ -35,7 +36,7 @@ const quote = (value: string): string => /^[\w./:@%+=,-]+$/u.test(value) ? value
 export async function runSealedScript(input: RunSealedScriptInput): Promise<number> {
   const cwd = input.cwd ?? process.cwd();
   const now = input.now ?? (() => new Date());
-  const { root, relativePath, marker } = await locateItem(resolve(cwd, input.target));
+  const { root, relativePath, marker } = await locateItem(resolve(cwd, input.target), input.home ?? homedir());
   const interpreter = interpreterFor(relativePath);
   if (!interpreter) throw new CloudItemError("input_invalid", `Frely cannot run ${relativePath}: its script type has no known interpreter.`);
   const sealedPaths = Object.keys(marker.files).filter((path) => path.startsWith(`${SEALED_DIR}/files/`) && path.endsWith(".sealed"));
@@ -75,15 +76,14 @@ async function put(workDir: string, path: string, content: Buffer): Promise<void
   await writeFile(target, content, { mode: 0o600 });
 }
 
-interface Marker { readonly owner: string; readonly itemId: string; readonly files: Record<string, string> }
+type Marker = Pick<InstallRecord, "itemId" | "files">;
 
-async function locateItem(target: string): Promise<{ root: string; relativePath: string; marker: Marker }> {
+/** The item folder a script belongs to: the nearest parent that has an install record. */
+async function locateItem(target: string, home: string): Promise<{ root: string; relativePath: string; marker: Marker }> {
   let folder = dirname(target);
   for (let depth = 0; depth < MAX_ROOT_SEARCH; depth += 1) {
-    const raw = await readFile(join(folder, ".frely-managed.json"), "utf8").catch(() => null);
-    if (raw !== null) {
-      const marker = JSON.parse(raw) as Marker;
-      if (marker.owner !== "frely-cli-cloud-item" || typeof marker.files !== "object" || marker.files === null) throw new CloudItemError("item_invalid", "This folder was not installed by frely item install.");
+    const marker = await readInstall(folder, home);
+    if (marker) {
       const relativePath = relative(folder, target).split(sep).join(posix.sep);
       if (relativePath.startsWith("..") || relativePath === "") throw new CloudItemError("input_invalid", "The script is outside its item folder.");
       return { root: folder, relativePath, marker };
