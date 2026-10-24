@@ -214,7 +214,7 @@ function safeRelativePath(path: string): string {
   return normalized;
 }
 
-async function writeItemFolder(target: string, itemId: string, files: readonly ItemFile[]): Promise<void> {
+export async function writeItemFolder(target: string, itemId: string, files: readonly ItemFile[]): Promise<void> {
   const markerPath = join(target, ".frely-managed.json");
   await assertManagedSkillPath(markerPath);
   const exists = await lstat(target).then(() => true, (error: unknown) => { if (isAbsent(error)) return false; throw error; });

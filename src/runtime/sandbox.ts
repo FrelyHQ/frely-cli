@@ -235,6 +235,8 @@ export function buildSandboxConfig(workspaceRoot: string, allowedGroups: readonl
       // still apply, so this is not a no-op.
       allowedDomains: ["*"],
       deniedDomains: [],
+      // Local dev servers and tests need to listen on and reach loopback ports. srt reads this only when it initializes, so it cannot vary per call.
+      allowLocalBinding: true,
     },
     filesystem: {
       denyRead: sensitiveReadPaths(allowedGroups),

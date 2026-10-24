@@ -20,7 +20,8 @@ test("Agent help runs offline without authentication or credential-store access"
   assert.equal(mcp?.effect, "authorization-if-needed");
   assert.match(mcp!.purpose, /browser approval/);
   assert.ok(help.commands.some(command => command.id === "agent.run"));
-  for (const removed of ["whoami", "key.budget", "skill.install", "agent.invoke", "mcp.renew", "mcp.revoke", "mcp.service", "provider.finalize"]) {
+  assert.ok(help.commands.some(command => command.id === "skill.install"));
+  for (const removed of ["whoami", "key.budget", "agent.invoke", "mcp.renew", "mcp.revoke", "mcp.service", "provider.finalize"]) {
     assert.ok(!help.commands.some(command => command.id === removed), removed);
   }
   assert.equal(help.commands.find(command => command.id === "doctor")?.usage, "frely doctor [-v] [--json]");
