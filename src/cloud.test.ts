@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cloudClientMetadata, cloudClientName, failureCause, formatApiList, isInteractiveTerminal, permissionHint } from "./cloud.js";
+import { bindCloudClient, cloudClientMetadata, cloudClientName, failureCause, formatApiList, isInteractiveTerminal, permissionHint } from "./cloud.js";
 
 test("the Cloud client name carries a sanitized host so devices are told apart", () => {
   assert.equal(cloudClientName("mac-mini.local"), "Frely CLI Cloud (mac-mini.local)");
@@ -82,4 +82,23 @@ test("browser authorization is only attempted from an interactive terminal", () 
       if (original) Object.defineProperty(stream, "isTTY", original); else delete (stream as { isTTY?: boolean }).isTTY;
     }
   }
+});
+
+const device = { deviceId: "drd_" + "a".repeat(32) };
+
+test("a Cloud client is bound to this computer's device once, and not again while both stay the same", async () => {
+  const calls: unknown[] = [];
+  const post = async (body: { clientId: string; deviceId: string }) => { calls.push(body); return Response.json({ status: "bound" }); };
+  const bound = await bindCloudClient({ client: { client_id: "c1" } }, device, post);
+  assert.deepEqual(bound, { clientId: "c1", deviceId: device.deviceId });
+  assert.deepEqual(calls, [{ clientId: "c1", deviceId: device.deviceId }]);
+  assert.deepEqual(await bindCloudClient({ client: { client_id: "c1" }, bound: bound! }, device, post), bound);
+  assert.equal(calls.length, 1);
+  await bindCloudClient({ client: { client_id: "c2" }, bound: bound! }, device, post);
+  assert.equal(calls.length, 2);
+});
+
+test("a refused binding stops the call with the server's message", async () => {
+  await assert.rejects(bindCloudClient({ client: { client_id: "c1" } }, device, async () => Response.json({ error: { message: "This computer is unavailable." } }, { status: 404 })), /This computer is unavailable\./);
+  await assert.rejects(bindCloudClient({ client: { client_id: "c1" } }, device, async () => new Response("", { status: 500 })), /HTTP 500/);
 });
