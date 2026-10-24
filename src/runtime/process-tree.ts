@@ -70,18 +70,25 @@ function childClosed(child: ChildProcess): boolean {
 function waitForChildClose(child: ChildProcess, timeoutMs: number): Promise<void> {
   if (childClosed(child)) return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
+    // A descendant outside the killed group (macOS) can keep the pipes open long after the shell is gone, so "close" never arrives.
+    // The tree has been killed by now, so once the shell exits drop our ends of the pipes and let "close" follow.
+    const onExit = () => { for (const stream of [child.stdin, child.stdout, child.stderr]) stream?.destroy(); };
+    if (child.exitCode !== null || child.signalCode !== null) onExit(); else child.once("exit", onExit);
     const onClose = () => {
+      child.removeListener("exit", onExit);
       clearTimeout(timer);
       resolve();
     };
     const timer = setTimeout(() => {
       child.removeListener("close", onClose);
+      child.removeListener("exit", onExit);
       reject(new Error(`Timed out waiting for process ${child.pid ?? "unknown"} to release its resources.`));
     }, timeoutMs);
     timer.unref?.();
     child.once("close", onClose);
     if (childClosed(child)) {
       child.removeListener("close", onClose);
+      child.removeListener("exit", onExit);
       clearTimeout(timer);
       resolve();
     }
