@@ -71,7 +71,7 @@ export async function installSkillAdapter(input: {
   const manifest = await fetchManifest(input.manifestUrl, fetchFn);
   const home = input.home ?? homedir();
   const existing = await readManagedSkill(manifest.id, home);
-  const slug = existing?.slug ?? skillSlug(manifest.name, manifest.id);
+  const slug = existing?.slug ?? skillSlug(manifest.name);
   const root = managedSkillRoot(input.host, input.scope, input.cwd, home);
   const skillPath = existing?.skillPath ?? join(root, slug, "SKILL.md");
   const content = renderSkill(manifest, slug);
