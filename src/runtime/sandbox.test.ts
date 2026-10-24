@@ -181,3 +181,7 @@ test("deniedReadReference names an unapproved credential path spelled in the com
   assert.equal(deniedReadReference("ls ~/.sshx ~/projects"), undefined);
   assert.equal(deniedReadReference("ssh ctb.example.com uptime"), undefined);
 });
+
+test("loopback binding is open by default so local servers and tests can run", () => {
+  assert.equal(buildSandboxConfig("/work", []).network?.allowLocalBinding, true);
+});
