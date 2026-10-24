@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { readFile, rmdir, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { writeItemFolder } from "./cloud-item.js";
@@ -54,4 +56,19 @@ export async function installEntrySkill(input: {
   const path = join(root, "frely");
   await writeItemFolder(path, ENTRY_SKILL_ID, [{ path: "SKILL.md", contentBase64: Buffer.from(ENTRY_SKILL).toString("base64"), isScript: false }]);
   return Object.freeze({ name: "frely", path });
+}
+
+/** True when the folder holds the entry Skill exactly as Frely wrote it. */
+export async function isUntouchedEntrySkill(folder: string): Promise<boolean> {
+  const marker = await readFile(join(folder, ".frely-managed.json"), "utf8").then((raw) => JSON.parse(raw) as { owner?: unknown; itemId?: unknown; files?: Record<string, unknown> }, () => null);
+  if (marker?.owner !== "frely-cli-cloud-item" || marker.itemId !== ENTRY_SKILL_ID || typeof marker.files?.["SKILL.md"] !== "string") return false;
+  const text = await readFile(join(folder, "SKILL.md")).catch(() => null);
+  return text !== null && createHash("sha256").update(text).digest("hex") === marker.files["SKILL.md"];
+}
+
+export async function removeEntrySkill(folder: string): Promise<void> {
+  if (!await isUntouchedEntrySkill(folder)) throw new Error("the Skill was modified; left in place");
+  await unlink(join(folder, "SKILL.md"));
+  await unlink(join(folder, ".frely-managed.json"));
+  await rmdir(folder).catch(() => undefined);
 }

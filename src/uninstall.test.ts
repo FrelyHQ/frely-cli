@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { installEntrySkill } from "./skill/entry.js";
 import { runsInsideService, runUninstall, defaultDeps, type UninstallDeps, type UninstallIo } from "./uninstall.js";
 import type { Installation } from "./update/installation.js";
 
@@ -207,4 +208,14 @@ test("unknown arguments are rejected before anything is read", async () => {
   const f = await fixture();
   await assert.rejects(() => runUninstall(["--purge"], io().value, f.deps), /Usage: frely uninstall/);
   await rm(f.home, { recursive: true, force: true });
+});
+
+test("the frely entry Skill is removed with the program unless the user edited it", async () => {
+  const f = await fixture();
+  const mine = await installEntrySkill({ host: "claude-code", home: f.home });
+  const edited = await installEntrySkill({ host: "pi", home: f.home });
+  await writeFile(join(edited.path, "SKILL.md"), "mine");
+  assert.equal(await runUninstall(["--yes"], io().value, f.deps), 0);
+  assert.equal(await exists(mine.path), false);
+  assert.ok(await exists(join(edited.path, "SKILL.md")), "an edited copy stays");
 });

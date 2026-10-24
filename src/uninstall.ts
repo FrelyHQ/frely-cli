@@ -9,6 +9,7 @@ import { inspectAuth, logout } from "./auth.js";
 import { logoutCloud } from "./cloud.js";
 import { revokeDevice } from "./device/control.js";
 import { readDeviceBinding } from "./device/state.js";
+import { isUntouchedEntrySkill, removeEntrySkill } from "./skill/entry.js";
 import { inspectMcpMetadata, revokeMcpAuthorization } from "./mcp-authorization.js";
 import { runNetwork } from "./network.js";
 import { listLocalProviders } from "./provider/state.js";
@@ -69,7 +70,7 @@ export const VAULT_SERVICE = "frely-cli-vault";
 const STAGE_PATTERNS = [/^\.frely-install\./u, /^\.frely-update-/u, /^\.frely-update\.lock$/u];
 const PROFILE_MARKER = "# Frely user bin";
 const DISTRIBUTION_FILE = /^([A-Za-z0-9_-]{1,128})\.json$/u;
-const NETWORK_HOST_ROOTS = (home: string) => [join(home, ".claude", "skills"), join(home, ".config", "opencode", "skills"), join(home, ".agents", "skills")];
+const NETWORK_HOST_ROOTS = (home: string) => [join(home, ".claude", "skills"), join(home, ".config", "opencode", "skills"), join(home, ".agents", "skills"), join(home, ".pi", "agent", "skills")];
 
 export const defaultDeps = (): UninstallDeps => ({
   platform: process.platform,
@@ -154,6 +155,8 @@ export async function buildPlan(deps: UninstallDeps = defaultDeps()): Promise<Un
   }
   for (const root of NETWORK_HOST_ROOTS(home)) {
     const folder = join(root, "frely-network");
+    const entry = join(root, "frely");
+    if (await isUntouchedEntrySkill(entry)) steps.push({ id: `entry-skill:${entry}`, group: "agents", label: "Remove the frely Skill", paths: [entry], run: () => removeEntrySkill(entry) });
     if (await managedNetworkSkill(folder)) steps.push({ id: `network-skill:${folder}`, group: "agents", label: "Remove the Frely Network Skill", paths: [folder], run: () => removeNetworkSkill(folder) });
   }
 
