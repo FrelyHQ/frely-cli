@@ -88,7 +88,7 @@ test("runs a sealed script from its decrypted copy and leaves no copy behind", a
     const code = await runSealedScript({ target: join(result.path, "premium", "run.sh"), args: ["arg", out], call: remote.call, env, home, sandbox: async (command) => { commands.push(command); return command; } });
     assert.equal(code, 0);
     assert.equal(await readFile(out, "utf8"), "the note|arg");
-    assert.match(commands[0]!, /^bash \S*frely-item-run-\S+\/premium\/run\.sh arg /u);
+    assert.match(commands[0]!, /^bash '?[^ ]*frely-item-run-[^ ]*premium[\\/]run\.sh'? arg /u);
     assert.equal(remote.calls.filter((input) => input.leaseOnly === true).length, 0);
   } finally { await rm(home, { recursive: true, force: true }); }
 });
