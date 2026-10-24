@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
-import { readFile, rmdir, unlink } from "node:fs/promises";
+import { rmdir, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { writeItemFolder } from "./cloud-item.js";
 import { managedSkillRoot, type SkillHost, type SkillScope } from "./managed.js";
+import { deleteInstall, listInstalls, readInstall, untouched } from "./registry.js";
 
 export const ENTRY_SKILL_ID = "frely-entry";
 
@@ -23,7 +23,7 @@ Run \`frely doctor --json\` to see whether the CLI is signed in. If not, ask the
 
 - Account operations (API keys, Credit, plans, orders, Creator items): \`frely api list\`, \`frely api describe <tool>\`, \`frely api call <tool> --json '{...}'\`. The first call needs a browser authorization the user completes; if it fails because there is no terminal, tell the user to run the command once themselves.
 - Ask the user before any call that spends Credit, buys something or changes credentials. Some actions also need a one-time approval on the Frely website; give the user the link from the error.
-- Install a marketplace Skill or Prompt: \`frely item install <item-id> --host <your host>\`. Install a published Agent: \`frely agent install <id> --host <your host>\`, then \`frely agent run\`. Review installed items with the frely-item-guard Skill before using them.
+- Install a marketplace Skill or Prompt: \`frely item install <item-id> --host <your host>\`; add \`--scope project --dir <project>\` to install it for one project instead of globally. Install a published Agent: \`frely agent install <id> --host <your host>\`, then \`frely agent run\`. If the install output says Frely has not scanned a Skill, read every file in it before you use it, and tell the user if anything looks unsafe.
 
 ## What needs FrelyMCP
 
@@ -45,30 +45,36 @@ export interface EntrySkillInstallResult {
   readonly path: string;
 }
 
-/** Writes (or refreshes) the entry Skill; a folder Frely did not write, or one the user edited, is never overwritten. */
+/**
+ * Writes (or refreshes) the entry Skill; a folder Frely did not write, or one
+ * the user edited, is never overwritten. For the project scope `dir` is the
+ * project root (default: the current directory).
+ */
 export async function installEntrySkill(input: {
   readonly host?: SkillHost;
   readonly scope?: SkillScope;
+  readonly dir?: string;
   readonly cwd?: string;
   readonly home?: string;
 }): Promise<EntrySkillInstallResult> {
-  const root = managedSkillRoot(input.host ?? "generic", input.scope ?? "global", input.cwd ?? process.cwd(), input.home ?? homedir());
-  const path = join(root, "frely");
-  await writeItemFolder(path, ENTRY_SKILL_ID, [{ path: "SKILL.md", contentBase64: Buffer.from(ENTRY_SKILL).toString("base64"), isScript: false }]);
+  const home = input.home ?? homedir();
+  const project = resolve(input.cwd ?? process.cwd(), input.dir ?? ".");
+  const path = join(managedSkillRoot(input.host ?? "generic", input.scope ?? "global", project, home), "frely");
+  await writeItemFolder(path, ENTRY_SKILL_ID, "entry", [{ path: "SKILL.md", contentBase64: Buffer.from(ENTRY_SKILL).toString("base64"), isScript: false }], home);
   return Object.freeze({ name: "frely", path });
 }
 
-/** True when the folder holds the entry Skill exactly as Frely wrote it. */
-export async function isUntouchedEntrySkill(folder: string): Promise<boolean> {
-  const marker = await readFile(join(folder, ".frely-managed.json"), "utf8").then((raw) => JSON.parse(raw) as { owner?: unknown; itemId?: unknown; files?: Record<string, unknown> }, () => null);
-  if (marker?.owner !== "frely-cli-cloud-item" || marker.itemId !== ENTRY_SKILL_ID || typeof marker.files?.["SKILL.md"] !== "string") return false;
-  const text = await readFile(join(folder, "SKILL.md")).catch(() => null);
-  return text !== null && createHash("sha256").update(text).digest("hex") === marker.files["SKILL.md"];
+/** Every entry Skill Frely wrote, in any host and scope, that is still exactly as written. */
+export async function untouchedEntrySkills(home = homedir()): Promise<string[]> {
+  const found: string[] = [];
+  for (const record of await listInstalls(home)) if (record.kind === "entry" && await untouched(record)) found.push(record.path);
+  return found;
 }
 
-export async function removeEntrySkill(folder: string): Promise<void> {
-  if (!await isUntouchedEntrySkill(folder)) throw new Error("the Skill was modified; left in place");
-  await unlink(join(folder, "SKILL.md"));
-  await unlink(join(folder, ".frely-managed.json"));
+export async function removeEntrySkill(folder: string, home = homedir()): Promise<void> {
+  const record = await readInstall(folder, home);
+  if (!record || record.kind !== "entry" || !await untouched(record)) throw new Error("the Skill was modified; left in place");
+  for (const path of Object.keys(record.files)) await unlink(join(folder, path));
   await rmdir(folder).catch(() => undefined);
+  await deleteInstall(folder, home);
 }

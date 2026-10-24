@@ -9,7 +9,7 @@ import { inspectAuth, logout } from "./auth.js";
 import { logoutCloud } from "./cloud.js";
 import { revokeDevice } from "./device/control.js";
 import { readDeviceBinding } from "./device/state.js";
-import { isUntouchedEntrySkill, removeEntrySkill } from "./skill/entry.js";
+import { removeEntrySkill, untouchedEntrySkills } from "./skill/entry.js";
 import { inspectMcpMetadata, revokeMcpAuthorization } from "./mcp-authorization.js";
 import { runNetwork } from "./network.js";
 import { listLocalProviders } from "./provider/state.js";
@@ -70,7 +70,7 @@ export const VAULT_SERVICE = "frely-cli-vault";
 const STAGE_PATTERNS = [/^\.frely-install\./u, /^\.frely-update-/u, /^\.frely-update\.lock$/u];
 const PROFILE_MARKER = "# Frely user bin";
 const DISTRIBUTION_FILE = /^([A-Za-z0-9_-]{1,128})\.json$/u;
-const NETWORK_HOST_ROOTS = (home: string) => [join(home, ".claude", "skills"), join(home, ".config", "opencode", "skills"), join(home, ".agents", "skills"), join(home, ".pi", "agent", "skills")];
+const NETWORK_HOST_ROOTS = (home: string) => [join(home, ".claude", "skills"), join(home, ".config", "opencode", "skills"), join(home, ".agents", "skills")];
 
 export const defaultDeps = (): UninstallDeps => ({
   platform: process.platform,
@@ -153,10 +153,9 @@ export async function buildPlan(deps: UninstallDeps = defaultDeps()): Promise<Un
     const skillPath = await readFile(join(recordsDir, name), "utf8").then((raw) => (JSON.parse(raw) as { skillPath?: unknown }).skillPath, () => undefined);
     steps.push({ id: `agent:${id}`, group: "agents", label: `Remove installed Agent Skill ${id}`, ...(typeof skillPath === "string" ? { paths: [skillPath] } : {}), run: () => deps.removeAgent(id, home) });
   }
+  for (const entry of await untouchedEntrySkills(home)) steps.push({ id: `entry-skill:${entry}`, group: "agents", label: "Remove the frely Skill", paths: [entry], run: () => removeEntrySkill(entry, home) });
   for (const root of NETWORK_HOST_ROOTS(home)) {
     const folder = join(root, "frely-network");
-    const entry = join(root, "frely");
-    if (await isUntouchedEntrySkill(entry)) steps.push({ id: `entry-skill:${entry}`, group: "agents", label: "Remove the frely Skill", paths: [entry], run: () => removeEntrySkill(entry) });
     if (await managedNetworkSkill(folder)) steps.push({ id: `network-skill:${folder}`, group: "agents", label: "Remove the Frely Network Skill", paths: [folder], run: () => removeNetworkSkill(folder) });
   }
 
@@ -195,7 +194,7 @@ export async function buildPlan(deps: UninstallDeps = defaultDeps()): Promise<Un
   }
   if (deps.platform === "darwin") notes.push("macOS may still list Open Computer Use under Accessibility / Screen Recording; remove it in System Settings if you enabled computer use.");
   notes.push("The Device MCP URL you added to MCP clients (Claude, ChatGPT, ...) stops working for this device; delete that connection in the client.");
-  notes.push("Marketplace items installed with `frely item install` (folders with .frely-managed.json) are not removed.");
+  notes.push("Marketplace items installed with `frely item install` are not removed.");
   return { steps, keeps, notes };
 }
 

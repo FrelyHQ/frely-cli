@@ -95,12 +95,13 @@ async function main(): Promise<void> {
     if (action === undefined) { stdout.write(subcommandUsage("agent")); return; }
     if (action === "install") {
       const target = args[2];
-      if (!target || target.startsWith("-")) throw new Error("Usage: frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--api-key-stdin] [--json]");
+      if (!target || target.startsWith("-")) throw new Error("Usage: frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <project>] [--api-key-stdin] [--json]");
       const host = skillHost(option(args, "--host") ?? "generic");
       const scope = skillScope(option(args, "--scope") ?? "global");
       const apiKey = args.includes("--api-key-stdin") ? await readStdinSecret(8192) : undefined;
       const relayUrl = normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl);
-      const value = await installSkillAdapter({ manifestUrl: agentManifestUrl(target, relayUrl), host, scope, ...(apiKey ? { apiKey } : {}) });
+      const projectDir = option(args, "--dir");
+      const value = await installSkillAdapter({ manifestUrl: agentManifestUrl(target, relayUrl), host, scope, ...(projectDir ? { cwd: resolve(projectDir) } : {}), ...(apiKey ? { apiKey } : {}) });
       if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
       else stdout.write(`Agent: ${value.name}\nSkill: ${value.skillPath}\nAuth: ${value.authMode}\nState: ${value.state}\n${value.hostAction ? `Host action: ${value.hostAction}\n` : ""}`);
       return;
@@ -151,7 +152,8 @@ async function main(): Promise<void> {
     if (args[1] !== "install") { stdout.write(subcommandUsage("skill")); return; }
     const host = skillHost(option(args, "--host") ?? "generic");
     const scope = skillScope(option(args, "--scope") ?? "global");
-    const value = await installEntrySkill({ host, scope });
+    const dir = option(args, "--dir");
+    const value = await installEntrySkill({ host, scope, ...(dir ? { dir } : {}) });
     if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
     stdout.write(`Skill: frely\nPath: ${value.path}\nRestart or reload the agent session so it rescans Skills.\n`);
     return;
@@ -180,7 +182,7 @@ async function main(): Promise<void> {
     if (value.premium === "pass_required") stdout.write(`Paid part: not installed. Buy a pass in the marketplace or with frely api call passes.buy --json '{"productKind":"cloud_skill","productId":"${value.id}","duration":"30d"}', then run this command again.\n`);
     if (value.hasScripts) stdout.write("This item contains scripts. Read them before you let an agent run them; they were saved without execute permission.\n");
     if (value.scanned) stdout.write("Passed Frely automated scan for this version. This is an automated check, not a guarantee.\n");
-    if (value.guarded) stdout.write("Frely has not scanned this Skill. Your agent reviews it with the frely-item-guard Skill before first use.\n");
+    if (value.needsReview) stdout.write(`Frely has not scanned this Skill. Read every file in it, including scripts, before you use it (look for deleting files, reading credentials, unrelated network calls, obfuscated code, or instructions to hide actions from the user). If it is safe, run: frely item trust ${value.path}\n`);
     if (value.kind === "skill") stdout.write("Restart or reload the agent session so it rescans Skills.\n");
     return;
   }

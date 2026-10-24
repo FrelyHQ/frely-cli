@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -28,7 +28,7 @@ test("installs a Skill with its paid part into the host Skill folder without exe
   const home = await realpath(await mkdtemp(join(tmpdir(), "frely-item-")));
   try {
     const result = await installCloudItem({ skillId, call: caller({ premium: "ok" }), host: "claude-code", scope: "global", home });
-    assert.equal(result.path, join(home, ".claude", "skills", "frely-review-01234567"));
+    assert.equal(result.path, join(home, ".claude", "skills", "review"));
     assert.equal(result.premium, "installed");
     assert.equal(result.files, 3);
     assert.equal(await readFile(join(result.path, "premium", "extra.md"), "utf8"), "paid");
@@ -43,7 +43,7 @@ test("installs the free part of a Prompt and reports a missing pass", async () =
   try {
     const result = await installCloudItem({ skillId, call: caller({ kind: "prompt", premium: "pass" }), cwd });
     assert.equal(result.premium, "pass_required");
-    assert.equal(await readFile(join(cwd, "frely-review-01234567", "PROMPT.md"), "utf8"), "content of PROMPT.md");
+    assert.equal(await readFile(join(cwd, "review", "PROMPT.md"), "utf8"), "content of PROMPT.md");
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 
@@ -56,36 +56,36 @@ test("refuses unsafe paths, unmanaged folders and edited files", async () => {
     const result = await installCloudItem({ skillId, call: caller(), home });
     await writeFile(join(result.path, "SKILL.md"), "edited");
     await assert.rejects(installCloudItem({ skillId, call: caller(), home }), (error: unknown) => error instanceof CloudItemError && error.code === "managed_item_modified");
-    await rm(join(result.path, ".frely-managed.json"));
+    await rm(join(home, ".config", "frely", "installs"), { recursive: true });
     await assert.rejects(installCloudItem({ skillId, call: caller(), home }), (error: unknown) => error instanceof CloudItemError && error.code === "unmanaged_item_exists");
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
-test("installs the guard Skill next to a Skill and tracks review per version", async () => {
+test("tracks review per version and leaves the Skill folder as it was delivered", async () => {
   const home = await realpath(await mkdtemp(join(tmpdir(), "frely-item-")));
   try {
     const result = await installCloudItem({ skillId, call: caller(), host: "claude-code", scope: "global", home });
-    assert.equal(result.guarded, true);
-    assert.match(await readFile(join(home, ".claude", "skills", "frely-item-guard", "SKILL.md"), "utf8"), /frely item trust/);
-    assert.deepEqual(await trustCloudItem(result.path, { check: true }), { trusted: false });
-    await trustCloudItem(result.path);
-    assert.deepEqual(await trustCloudItem(result.path, { check: true }), { trusted: true });
+    assert.equal(result.needsReview, true);
+    assert.deepEqual((await readdir(result.path)).sort(), ["SKILL.md", "scripts"]);
+    await assert.rejects(readFile(join(home, ".claude", "skills", "frely-item-guard", "SKILL.md"), "utf8"));
+    assert.deepEqual(await trustCloudItem(result.path, { check: true, home }), { trusted: false });
+    await trustCloudItem(result.path, { home });
+    assert.deepEqual(await trustCloudItem(result.path, { check: true, home }), { trusted: true });
     const updated: CloudToolCaller = async (name, input) => {
       const value = await caller()(name, input) as { files: Array<{ path: string; contentBase64: string }> };
       return { ...value, files: value.files.map((file) => (file.path === "SKILL.md" ? { ...file, contentBase64: b64("new version") } : file)) };
     };
     await installCloudItem({ skillId, call: updated, host: "claude-code", scope: "global", home });
-    assert.deepEqual(await trustCloudItem(result.path, { check: true }), { trusted: false });
-    await assert.rejects(trustCloudItem(home, { check: true }), CloudItemError);
+    assert.deepEqual(await trustCloudItem(result.path, { check: true, home }), { trusted: false });
+    await assert.rejects(trustCloudItem(home, { check: true, home }), CloudItemError);
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
-test("does not install the guard Skill for a Prompt", async () => {
+test("a Prompt needs no review", async () => {
   const home = await realpath(await mkdtemp(join(tmpdir(), "frely-item-")));
   try {
     const result = await installCloudItem({ skillId, call: caller({ kind: "prompt" }), home, cwd: home });
-    assert.equal(result.guarded, false);
-    await assert.rejects(readFile(join(home, ".claude", "skills", "frely-item-guard", "SKILL.md"), "utf8"));
+    assert.equal(result.needsReview, false);
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
@@ -94,12 +94,35 @@ test("a passing Frely scan for this version marks the Skill reviewed and drops t
   try {
     const result = await installCloudItem({ skillId, call: caller({ scan: "pass" }), host: "claude-code", scope: "global", home });
     assert.equal(result.scanned, true);
-    assert.equal(result.guarded, false);
-    assert.deepEqual(await trustCloudItem(result.path, { check: true }), { trusted: true });
+    assert.equal(result.needsReview, false);
+    assert.deepEqual(await trustCloudItem(result.path, { check: true, home }), { trusted: true });
     // A scan for another digest, or no scan, keeps the local review.
-    const stale = await installCloudItem({ skillId: "cloud_skill_" + "1".repeat(24), call: async (name, input) => ({ ...(await caller({ scan: "stale" })(name, input)), manifest: { ...(await caller({ scan: "stale" })(name, input) as { manifest: object }).manifest, id: "cloud_skill_" + "1".repeat(24) } }), host: "claude-code", scope: "global", home });
+    const stale = await installCloudItem({ skillId: "cloud_skill_" + "1".repeat(24), call: async (name, input) => ({ ...(await caller({ scan: "stale" })(name, input)), manifest: { ...(await caller({ scan: "stale" })(name, input) as { manifest: object }).manifest, id: "cloud_skill_" + "1".repeat(24), slug: "other" } }), host: "claude-code", scope: "global", home });
     assert.equal(stale.scanned, false);
-    assert.equal(stale.guarded, true);
-    assert.deepEqual(await trustCloudItem(stale.path, { check: true }), { trusted: false });
+    assert.equal(stale.needsReview, true);
+    assert.deepEqual(await trustCloudItem(stale.path, { check: true, home }), { trusted: false });
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test("two items with the same name never share a folder", async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), "frely-item-")));
+  try {
+    await installCloudItem({ skillId, call: caller(), host: "claude-code", home });
+    const otherId = "cloud_skill_" + "2".repeat(24);
+    const other: CloudToolCaller = async (name, input) => {
+      const value = await caller()(name, input) as { manifest: object };
+      return { ...value, manifest: { ...value.manifest, id: otherId } };
+    };
+    await assert.rejects(installCloudItem({ skillId: otherId, call: other, host: "claude-code", home }), (error: unknown) => error instanceof CloudItemError && error.code === "unmanaged_item_exists");
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test("a project install goes under --dir and is recorded", async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), "frely-item-")));
+  const project = join(home, "work");
+  try {
+    const result = await installCloudItem({ skillId, call: caller(), host: "claude-code", scope: "project", dir: project, home });
+    assert.equal(result.path, join(project, ".claude", "skills", "review"));
+    assert.deepEqual(await trustCloudItem(result.path, { check: true, home }), { trusted: false });
   } finally { await rm(home, { recursive: true, force: true }); }
 });
