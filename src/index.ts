@@ -39,6 +39,7 @@ import { runComputerMcpServer } from "./computer/server.js";
 import { agentManifestUrl, installSkillAdapter, invokeInstalledAgent, publicSkillAccessError, removeSkillAdapter, skillAdapterStatus } from "./skill/access.js";
 import type { SkillHost, SkillScope } from "./skill/managed.js";
 import { installCloudItem, trustCloudItem } from "./skill/cloud-item.js";
+import { runSealedScript } from "./skill/sealed-run.js";
 import { installEntrySkill } from "./skill/entry.js";
 import { callCloudTool } from "./cloud.js";
 import { createInterface } from "node:readline/promises";
@@ -167,6 +168,12 @@ async function main(): Promise<void> {
       if (check && !result.trusted) process.exitCode = 1;
       return;
     }
+    if (args[1] === "run") {
+      const target = args[2];
+      if (!target) throw new Error("Usage: frely item run <script> [args...]");
+      process.exitCode = await runSealedScript({ target, args: args.slice(3), call: callCloudTool });
+      return;
+    }
     if (args[1] !== "install") { stdout.write(subcommandUsage("item")); return; }
     const skillId = args[2];
     if (!skillId || skillId.startsWith("-")) throw new Error("Usage: frely item install <item-id> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--json]");
@@ -178,7 +185,8 @@ async function main(): Promise<void> {
     stdout.write(`${value.kind === "prompt" ? "Prompt" : "Skill"}: ${value.name} (v${value.version})\nPath: ${value.path}\nFiles: ${value.files}\n`);
     if (value.premium === "installed") stdout.write("Paid part: installed\n");
     if (value.premium === "pass_required") stdout.write(`Paid part: not installed. Buy a pass in the marketplace or with frely api call passes.buy --json '{"productKind":"cloud_skill","productId":"${value.id}","duration":"30d"}', then run this command again.\n`);
-    if (value.hasScripts) stdout.write("This item contains scripts. Read them before you let an agent run them; they were saved without execute permission.\n");
+    if (value.sealedScripts > 0) stdout.write(`${value.sealedScripts} paid script${value.sealedScripts === 1 ? " is" : "s are"} encrypted on this device. They run through frely item run (the placeholder files do that for you) inside the Frely command sandbox, and stop working when your pass ends. Frely cannot show you their source.\n`);
+    if (value.hasScripts && value.sealedScripts === 0) stdout.write("This item contains scripts. Read them before you let an agent run them; they were saved without execute permission.\n");
     if (value.scanned) stdout.write("Passed Frely automated scan for this version. This is an automated check, not a guarantee.\n");
     if (value.guarded) stdout.write("Frely has not scanned this Skill. Your agent reviews it with the frely-item-guard Skill before first use.\n");
     if (value.kind === "skill") stdout.write("Restart or reload the agent session so it rescans Skills.\n");
