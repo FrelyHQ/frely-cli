@@ -86,10 +86,19 @@ test('docs pages are static, crawlable and listed in the sitemap', async () => {
     const sitemap = await readFile(resolve(temp, '_site/sitemap.xml'), 'utf8');
     const index = await readFile(resolve(temp, '_site/docs/index.html'), 'utf8');
     const help = await readFile(resolve(temp, '_site/docs/help/index.html'), 'utf8');
-    for (const path of ['/docs/', '/docs/help/']) assert.ok(sitemap.includes('https://cli.frely.cloud' + path));
+    for (const path of ['/', '/zh/', '/docs/', '/docs/help/']) assert.ok(sitemap.includes(`<loc>https://cli.frely.cloud${path}</loc>`), 'sitemap lists ' + path);
+    assert.ok(!sitemap.includes('https://cli.frely.cloud/en/'), 'sitemap lists the English root, not /en/');
+    // English is canonical at the root; /en/ is a duplicate that points there.
+    for (const [route, canonical] of [['', '/'], ['en', '/'], ['zh', '/zh/']]) {
+      const html = await readFile(resolve(temp, '_site', route, 'index.html'), 'utf8');
+      assert.ok(html.includes(`<link rel="canonical" href="https://cli.frely.cloud${canonical}">`), (route || 'root') + ': canonical ' + canonical);
+      assert.ok(html.includes('<link rel="alternate" hreflang="en" href="https://cli.frely.cloud/">'), (route || 'root') + ': hreflang en is the root');
+      assert.ok(html.includes('<meta property="og:image" content="https://cli.frely.cloud/assets/og.png">'), (route || 'root') + ': og:image');
+    }
+    assert.ok((await readFile(resolve(temp, '_site/assets/og.png'))).length > 0, 'og:image is published');
     const notFound = await readFile(resolve(temp, '_site/404.html'), 'utf8');
     assert.ok(notFound.includes('noindex'), '404 page is not indexed');
-    for (const path of ['/en/', '/zh/', '/docs/', '/en/#install']) assert.ok(notFound.includes(`href="${path}"`), `404 page links to ${path}`);
+    for (const path of ['/', '/zh/', '/docs/', '/#install']) assert.ok(notFound.includes(`href="${path}"`), `404 page links to ${path}`);
     for (const entry of entries) {
       const page = await readFile(resolve(temp, '_site/docs/help', entry.slug, 'index.html'), 'utf8');
       assert.ok(page.includes('<h1>'), entry.slug + ': page has a heading');

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Only the neutral entry page negotiates language. Explicit URLs always win.
+// Only the root page negotiates language. It is the English page, so it redirects only to Chinese. Explicit URLs always win.
 (() => {
   if (document.documentElement.dataset.localeEntry !== 'true') return;
   let language;
@@ -9,7 +9,8 @@
     language = preferred.map((value) => String(value).toLowerCase().split('-')[0])
       .find((value) => value === 'en' || value === 'zh') || 'en';
   }
-  const target = new URL(`${language}/`, window.location.href);
+  if (language !== 'zh') return;
+  const target = new URL('zh/', window.location.href);
   target.search = window.location.search;
   target.hash = window.location.hash;
   window.location.replace(target.href);
