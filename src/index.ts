@@ -39,6 +39,7 @@ import { runComputerMcpServer } from "./computer/server.js";
 import { agentManifestUrl, installSkillAdapter, invokeInstalledAgent, publicSkillAccessError, removeSkillAdapter, skillAdapterStatus } from "./skill/access.js";
 import type { SkillHost, SkillScope } from "./skill/managed.js";
 import { installCloudItem, trustCloudItem } from "./skill/cloud-item.js";
+import { installEntrySkill } from "./skill/entry.js";
 import { callCloudTool } from "./cloud.js";
 import { createInterface } from "node:readline/promises";
 import { runUninstall } from "./uninstall.js";
@@ -144,6 +145,16 @@ async function main(): Promise<void> {
       return;
     }
     throw new Error(`Unknown agent command.\n${subcommandUsage("agent")}`);
+  }
+
+  if (command === "skill") {
+    if (args[1] !== "install") { stdout.write(subcommandUsage("skill")); return; }
+    const host = skillHost(option(args, "--host") ?? "generic");
+    const scope = skillScope(option(args, "--scope") ?? "global");
+    const value = await installEntrySkill({ host, scope });
+    if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
+    stdout.write(`Skill: frely\nPath: ${value.path}\nRestart or reload the agent session so it rescans Skills.\n`);
+    return;
   }
 
   if (command === "item") {

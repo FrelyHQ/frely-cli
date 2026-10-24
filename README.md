@@ -46,6 +46,10 @@ The script installs the latest `frely`, then runs `frely mcp start`: it opens th
 
 The workspace is your home directory by default (credential and shell start-up files stay protected). Set `FRELY_WORKSPACE=/path` to share another folder, and `FRELY_INSTALL_DIR` to install somewhere other than `~/.local/bin`.
 
+### Let your agent set it up (no device access)
+
+Ask an agent that has a shell (Claude Code, Codex, pi) to install the CLI, sign in with `frely login --email`, and run `frely skill install --host <host>`. The `frely` Skill it installs teaches the agent to use your account (`frely api`), install marketplace items and Agents, and to offer FrelyMCP only when a request needs it (another computer, Cloud MCPs, a browser, a client without a shell). This path does not open this computer to remote clients; `frely mcp start` does.
+
 ### Install only
 
 `install.sh` and `install.ps1` (same URLs, `https://frely.cloud/install.sh`) only install the program, for scripts, Skills and agents that need the CLI. Or use npm (Node.js 22 or newer):
@@ -188,6 +192,7 @@ frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-
 frely agent run <distribution-id> (--input <text>|--input-stdin) [--json]
 frely agent status (<distribution-id>|--api-key-stdin [--relay <url>]) [--json]
 frely agent remove <distribution-id> [--json]
+frely skill install [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--json]
 frely item install <item-id> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--json]
 frely item trust <folder> [--check]
 frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id> | --creator] [--name <name>]
