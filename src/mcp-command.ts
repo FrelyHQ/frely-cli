@@ -19,10 +19,14 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
   if (!args[1]) return ["mcp", "help"];
   // Deprecated alias: `mcp url` is `mcp start`.
   if (args[1] === "url") args[1] = "start";
-  if (!["workspace", "local", "stop", "start", "status", "remove", "serve", "stdio"].includes(args[1])) throw new Error("Unknown device MCP command. Run frely mcp --help.");
+  if (!["workspace", "local", "auto-update", "stop", "start", "status", "remove", "serve", "stdio"].includes(args[1])) throw new Error("Unknown device MCP command. Run frely mcp --help.");
   const action = args[1]!;
   if (action === "stop" || action === "remove") {
     if (args.length > 2) throw new Error("Unsupported MCP option. Run frely mcp --help.");
+    return args;
+  }
+  if (action === "auto-update") {
+    if (args.length > 3 || (args[2] !== undefined && args[2] !== "on" && args[2] !== "off")) throw new Error("Usage: frely mcp auto-update [on|off]");
     return args;
   }
   if (action === "workspace") {

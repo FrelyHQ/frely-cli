@@ -61,6 +61,7 @@ The installers check the SHA-256 and download from GitHub Releases first, then n
 | `frely mcp status` | Show the MCP URL, workspace, authorization expiry and service state. |
 | `frely mcp workspace add <path>` | Share another folder. `frely mcp workspace list` shows them all. |
 | `frely mcp stop` / `frely mcp start` | Pause or resume the background service. |
+| `frely mcp auto-update [on\|off]` | Let the background service update itself while idle (macOS/Linux, off by default). |
 | `frely mcp remove` | Revoke access for every client and uninstall the service. |
 | `frely doctor` | Check sign-in, installation, service and connection. `-v` for details. |
 | `frely update` | Update to the latest version in place. |

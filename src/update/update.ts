@@ -122,14 +122,14 @@ export async function prepareStandalone(installation: Installation, release: Rel
   } catch (error) { await rm(stage, { recursive: true, force: true }); throw error; }
 }
 
-async function installPackage(installation: Installation, version: string): Promise<void> {
+export async function installPackage(installation: Installation, version: string): Promise<void> {
   // Installation failures may contain registry credentials. Expose a bounded generic error instead.
   try {
     await execFile(installation.manager!, packageArguments(installation, version), { cwd: homedir(), timeout: 180000, maxBuffer: 1024 * 1024 });
   } catch { throw new Error("The package manager could not update frely-cli. Check its registry, permissions and global installation; no other manager was tried."); }
 }
 
-async function lockInstallation(installation: Installation): Promise<() => Promise<void>> {
+export async function lockInstallation(installation: Installation): Promise<() => Promise<void>> {
   const directory = installation.method === "standalone" ? dirname(installation.entry) : dirname(dirname(dirname(installation.entry)));
   const path = join(directory, ".frely-update.lock");
   const file = await open(path, "wx", 0o600).catch(() => { throw new Error(`Cannot acquire update lock: ${path}. Check directory permissions or another update. Remove a stale lock only after confirming no update is running.`); });
