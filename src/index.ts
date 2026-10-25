@@ -40,7 +40,7 @@ import { runComputerCommand } from "./computer/command.js";
 import { runComputerMcpServer } from "./computer/server.js";
 import { agentManifestUrl, installSkillAdapter, invokeInstalledAgent, publicSkillAccessError, removeSkillAdapter, skillAdapterStatus } from "./skill/access.js";
 import type { SkillHost, SkillScope } from "./skill/managed.js";
-import { installCloudItem, trustCloudItem } from "./skill/cloud-item.js";
+import { installCloudItem, parseItemRef, trustCloudItem } from "./skill/cloud-item.js";
 import { runSealedScript } from "./skill/sealed-run.js";
 import { installEntrySkill } from "./skill/entry.js";
 import { callCloudTool } from "./cloud.js";
@@ -197,12 +197,12 @@ async function main(): Promise<void> {
       return;
     }
     if (args[1] !== "install") { stdout.write(subcommandUsage("item")); return; }
-    const skillId = args[2];
-    if (!skillId || skillId.startsWith("-")) throw new Error("Usage: frely item install <item-id> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--json]");
+    const itemRef = args[2];
+    if (!itemRef || itemRef.startsWith("-")) throw new Error("Usage: frely item install <username/skill-name[@version]> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--json]");
     const host = skillHost(option(args, "--host") ?? "generic");
     const scope = skillScope(option(args, "--scope") ?? "global");
     const dir = option(args, "--dir");
-    const value = await installCloudItem({ skillId, call: callCloudTool, host, scope, ...(dir ? { dir } : {}) });
+    const value = await installCloudItem({ ...parseItemRef(itemRef), call: callCloudTool, host, scope, ...(dir ? { dir } : {}) });
     if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
     stdout.write(`${value.kind === "prompt" ? "Prompt" : "Skill"}: ${value.name} (v${value.version})\nPath: ${value.path}\nFiles: ${value.files}\n`);
     if (value.premium === "installed") stdout.write("Paid part: installed\n");

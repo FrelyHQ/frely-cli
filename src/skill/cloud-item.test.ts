@@ -3,7 +3,7 @@ import { mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { CloudItemError, CloudToolError, installCloudItem, trustCloudItem, type CloudToolCaller } from "./cloud-item.js";
+import { CloudItemError, CloudToolError, installCloudItem, parseItemRef, trustCloudItem, type CloudToolCaller } from "./cloud-item.js";
 
 const skillId = "cloud_skill_0123456789abcdef01234567";
 const b64 = (text: string) => Buffer.from(text).toString("base64");
@@ -125,4 +125,31 @@ test("a project install goes under --dir and is recorded", async () => {
     assert.equal(result.path, join(project, ".claude", "skills", "review"));
     assert.deepEqual(await trustCloudItem(result.path, { check: true, home }), { trusted: false });
   } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test("installs by username/skill-name and pins a version by name; the paid call reuses the resolved id and version", async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), "frely-item-")));
+  try {
+    const calls: Array<Record<string, unknown>> = [];
+    const base = caller({ premium: "ok" });
+    const result = await installCloudItem({ ...parseItemRef("Ada/review@2".replace("Ada", "ada")), call: async (name, input) => { calls.push(input); return base(name, input); }, host: "claude-code", scope: "global", home });
+    assert.equal(result.id, skillId);
+    assert.equal(calls[0]?.name, "ada/review");
+    assert.equal(calls[0]?.version, 2);
+    assert.equal(calls[1]?.skillId, skillId);
+    assert.equal(calls[1]?.name, undefined);
+    assert.equal(calls[1]?.version, 2);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("parses names and ids, with an optional @version", () => {
+  assert.deepEqual(parseItemRef("ada/review"), { name: "ada/review" });
+  assert.deepEqual(parseItemRef("ada/review@3"), { name: "ada/review", version: 3 });
+  assert.deepEqual(parseItemRef("skill_0123456789abcdef01234567"), { skillId: "skill_0123456789abcdef01234567" });
+  assert.deepEqual(parseItemRef(`${skillId}@4`), { skillId, version: 4 });
+  for (const bad of ["review", "ada/", "/review", "ada/review@0", "ada/review@x", "../x", "ada/review/extra"]) {
+    assert.throws(() => parseItemRef(bad), (error: unknown) => error instanceof CloudItemError && error.code === "input_invalid", bad);
+  }
 });

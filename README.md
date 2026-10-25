@@ -90,7 +90,7 @@ To check the connection, ask the client to list the top-level names in your work
 ## More features
 
 - **Frely-hosted Agents**: `frely agent install <distribution-id> --host claude-code` installs an Agent as a local Skill; `frely agent run` calls it. [More](https://cli.frely.cloud/docs/help/install-agents-and-items/)
-- **Marketplace Prompts and Skills**: `frely item install <item-id> --host claude-code`. Paid parts install only when your account holds a pass. [More](https://cli.frely.cloud/docs/help/install-agents-and-items/)
+- **Marketplace Prompts and Skills**: `frely item install <username/skill-name> --host claude-code`. Paid parts install only when your account holds a pass. [More](https://cli.frely.cloud/docs/help/install-agents-and-items/)
 - **Local model sharing**: `frely provider share ollama` publishes a loopback model server as your personal Frely Provider. [More](https://cli.frely.cloud/docs/help/share-local-model/)
 - **Your account from the terminal**: `frely api list|describe|call`. [More](https://cli.frely.cloud/docs/help/manage-account-from-cli/)
 

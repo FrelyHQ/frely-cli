@@ -90,7 +90,7 @@ FrelyMCP 是整个账号共用的一个 MCP 地址：`https://mcp.frely.cloud/mc
 ## 更多功能
 
 - **Frely 托管的 Agent**：`frely agent install <distribution-id> --host claude-code` 安装为本地 Skill，`frely agent run` 调用。[详情](https://cli.frely.cloud/docs/help/install-agents-and-items/)
-- **市场里的 Prompt 和 Skill**：`frely item install <item-id> --host claude-code`，付费部分需要账号持有通行证。[详情](https://cli.frely.cloud/docs/help/install-agents-and-items/)
+- **市场里的 Prompt 和 Skill**：`frely item install <username/skill-name> --host claude-code`，付费部分需要账号持有通行证。[详情](https://cli.frely.cloud/docs/help/install-agents-and-items/)
 - **本地模型共享**：`frely provider share ollama` 把本机模型服务发布为你的个人 Frely Provider。[详情](https://cli.frely.cloud/docs/help/share-local-model/)
 - **在终端管理账号**：`frely api list|describe|call`。[详情](https://cli.frely.cloud/docs/help/manage-account-from-cli/)
 

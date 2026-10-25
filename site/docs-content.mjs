@@ -121,7 +121,7 @@ export const entries = [
     category: 'Account and API',
     question: 'How do I install a Frely Agent, Prompt or Skill?',
     answer:
-      'Agent: frely agent install <distribution-id> --host claude-code --scope global (hosts: chatgpt, codex, claude-code, pi, generic). Run it with: printf \'%s\' \'Your task\' | frely agent run <distribution-id> --input-stdin --json. Marketplace items: frely item install <item-id> --host claude-code. The first call opens a browser for authorization, and a paid part installs only if your account holds a pass; otherwise the command says how to buy one. Frely never overwrites a folder it did not install or a file you edited.',
+      'Agent: frely agent install <distribution-id> --host claude-code --scope global (hosts: chatgpt, codex, claude-code, pi, generic). Run it with: printf \'%s\' \'Your task\' | frely agent run <distribution-id> --input-stdin --json. Marketplace items: frely item install <username/skill-name> --host claude-code. The first call opens a browser for authorization, and a paid part installs only if your account holds a pass; otherwise the command says how to buy one. Frely never overwrites a folder it did not install or a file you edited.',
     links: [app, readme],
   },
   {
