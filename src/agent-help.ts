@@ -29,6 +29,8 @@ export const COMMANDS = [
   { id: "agent.remove", usage: "frely agent remove <distribution-id> [--json]", auth: "none", effect: "local-write", purpose: "Remove an installed Agent Skill and its saved API key." },
   { id: "provider.share", usage: "frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]", auth: "account", effect: "remote-write", purpose: "Publish a local model Provider. If a prepared Provider on this device is not finished, resume it instead." },
   { id: "provider.list", usage: "frely provider list [--json]", auth: "account", effect: "read", purpose: "List configured local Providers." },
+  { id: "tunnel", usage: "frely tunnel <host>:<port> [--local-port N]", auth: "none", effect: "local-execution", purpose: "Run inside a sandboxed command (run_command): listen on 127.0.0.1:<local-port> (default: the same port) and forward each TCP connection to host:port through the command sandbox's proxy, so database and redis clients connect to 127.0.0.1 without turning the sandbox off. Start it in the same command as the client, for example `frely tunnel db.example.com:5432 & sleep 1; psql -h 127.0.0.1 ...`. Prints the local address and runs until killed." },
+  { id: "sandbox.proxy", usage: "frely sandbox proxy [<http://host:port> [--no-proxy <list>] | --clear]", auth: "none", effect: "local-write", purpose: "Show, save or remove the HTTP(S) proxy that the command sandbox forwards its network traffic to (your own proxy, for example Clash). Without one saved it uses the HTTPS_PROXY / HTTP_PROXY / ALL_PROXY of the CLI process and, on macOS, the system proxy. Your proxy settings are never changed. Takes effect when the MCP service restarts." },
   { id: "api", usage: "frely api list|describe|call [--help]", auth: "cloud-oauth", effect: "subcommand-dependent", purpose: "Discover and call your Frely account's business operations (the same tools FrelyMCP offers through frely_list/frely_call). The first call requests browser authorization. `list` is grouped and compact (add --json for the full tool list); use describe before call; parameters and results are JSON; --input reads a file up to 512 KiB." },
   { id: "app.install", usage: "frely app install [--force] [--json]", auth: "local", effect: "local-write", purpose: "Install the Frely App: Homebrew cask when available, otherwise a verified download (SHA-256) from the FrelyHQ/frely-cli release mirror; quarantine is preserved." },
   { id: "app.open", usage: "frely app open [--window]", auth: "local", effect: "local-write", purpose: "Launch the Frely App in the background (menu bar) or with its main window via --window." },
@@ -73,6 +75,7 @@ const GROUPS: readonly { title: string; ids: readonly string[] }[] = [
   { title: "Skills", ids: ["skill.install"] },
   { title: "Marketplace items", ids: ["item.install", "item.run", "item.trust"] },
   { title: "Providers", ids: ["provider.share", "provider.list"] },
+  { title: "Command sandbox", ids: ["tunnel", "sandbox.proxy"] },
   { title: "API", ids: ["api"] },
 ];
 
@@ -100,6 +103,8 @@ const SHORT_USAGE: Readonly<Record<string, string>> = {
   "agent.remove": "frely agent remove <distribution-id>",
   "provider.share": "frely provider share [ollama|openai-compatible] [--models <a,b>]",
   "provider.list": "frely provider list",
+  tunnel: "frely tunnel <host>:<port> [--local-port N]",
+  "sandbox.proxy": "frely sandbox proxy [<url> [--no-proxy <list>] | --clear]",
   api: "frely api list|describe|call",
 };
 

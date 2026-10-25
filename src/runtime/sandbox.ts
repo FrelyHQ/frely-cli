@@ -1,8 +1,11 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { isAbsolute, join, normalize, parse, sep } from "node:path";
+import { dirname, isAbsolute, join, normalize, parse, sep } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { cliLaunchArguments } from "../cli-launch.js";
+import { gitConfigGuardAvailable } from "./git-config-guard.js";
+import { resolveUpstreamProxy, type UpstreamProxy } from "./sandbox-proxy.js";
 
 /**
  * OS-level sandboxing for `run_command` / `start_process`.
@@ -225,7 +228,30 @@ function helperEntry(): string {
   try { return realpathSync(process.argv[1] ?? ""); } catch { return process.argv[1] ?? ""; }
 }
 
-export function buildSandboxConfig(workspaceRoot: string, allowedGroups: readonly string[] = []): SandboxRuntimeConfig {
+/** A directory `path` inside the workspace, or false when it is missing or only a link (a worktree's `.git` file). */
+const isDirectory = (path: string): boolean => { try { return statSync(path).isDirectory(); } catch { return false; } };
+
+/**
+ * `.git` paths of the workspace root that srt does not (or no longer) protect on its own. srt derives its `.git/hooks` and `.git/config`
+ * denials from the CLI process's current directory, not from the workspace a command runs in, so they are named here as well.
+ * `.git/hooks` is always denied (hooks run programs outside the sandbox). `.git/config` is denied unless the command may change it
+ * (run_command with the guard in git-config-guard.ts).
+ */
+function gitWriteDenials(workspaceRoot: string, allowGitConfig: boolean): string[] {
+  const dotGit = join(workspaceRoot, ".git");
+  if (!isDirectory(dotGit)) return [];
+  return [...(isDirectory(join(dotGit, "hooks")) ? [join(dotGit, "hooks")] : []), ...(allowGitConfig ? [] : [join(dotGit, "config")])];
+}
+
+export interface SandboxConfigOptions {
+  /** run_command only: the command may write the workspace `.git/config`; the caller then runs the guard in git-config-guard.ts. */
+  allowGitConfig?: boolean;
+  /** The user's own proxy that srt forwards to. Read once when the sandbox starts. */
+  parentProxy?: UpstreamProxy | undefined;
+}
+
+export function buildSandboxConfig(workspaceRoot: string, allowedGroups: readonly string[] = [], options: SandboxConfigOptions = {}): SandboxRuntimeConfig {
+  const allowGitConfig = options.allowGitConfig === true;
   return {
     network: {
       // Left open by default: an empty allowlist would break ordinary
@@ -237,11 +263,13 @@ export function buildSandboxConfig(workspaceRoot: string, allowedGroups: readonl
       deniedDomains: [],
       // Local dev servers and tests need to listen on and reach loopback ports. srt reads this only when it initializes, so it cannot vary per call.
       allowLocalBinding: true,
+      ...(options.parentProxy ? { parentProxy: options.parentProxy } : {}),
     },
     filesystem: {
       denyRead: sensitiveReadPaths(allowedGroups),
       allowWrite: [workspaceRoot, tmpdir(), ...writablePaths(allowedGroups)],
-      denyWrite: protectedWriteDenials(allowedGroups),
+      denyWrite: [...protectedWriteDenials(allowedGroups), ...gitWriteDenials(workspaceRoot, allowGitConfig)],
+      ...(allowGitConfig ? { allowGitConfig: true } : {}),
     },
   };
 }
@@ -264,6 +292,8 @@ export function sandboxUnavailableMessage(reason: string): string {
 
 type Init = { ready: true } | { ready: false; reason: string };
 let initialized: Promise<Init> | undefined;
+/** The configuration srt was initialized with: what every command runs under, and what is put back after a git-config wrap. */
+let baseConfig: SandboxRuntimeConfig | undefined;
 
 async function ensureInitialized(workspaceRoot: string): Promise<Init> {
   initialized ??= (async (): Promise<Init> => {
@@ -280,7 +310,9 @@ async function ensureInitialized(workspaceRoot: string): Promise<Init> {
     }
     for (const warning of dependencies.warnings) warnOnce(warning);
     try {
-      await SandboxManager.initialize(buildSandboxConfig(workspaceRoot));
+      // The proxy servers keep the upstream proxy they start with, so a changed proxy needs a restart of the service.
+      baseConfig = buildSandboxConfig(workspaceRoot, [], { parentProxy: resolveUpstreamProxy() });
+      await SandboxManager.initialize(structuredClone(baseConfig));
       return { ready: true };
     } catch (error) {
       const reason = `sandbox initialization failed: ${errorText(error)}`;
@@ -291,6 +323,50 @@ async function ensureInitialized(workspaceRoot: string): Promise<Init> {
   return initialized;
 }
 
+/** What the sandbox needs to wrap one command: the parts of srt that `wrapSerialized` uses, so tests can stand in for it. */
+export interface WrapManager {
+  updateConfig(config: SandboxRuntimeConfig): void;
+  wrapWithSandbox(command: string, binShell?: string, customConfig?: Partial<SandboxRuntimeConfig>, abortSignal?: AbortSignal, options?: { commandId?: string; commandText?: string }): Promise<string>;
+}
+
+let wrapQueue: Promise<unknown> = Promise.resolve();
+
+/**
+ * Wrap one command. Every wrap goes through this queue, one at a time, because a command that may change `.git/config` needs srt's
+ * global `filesystem.allowGitConfig` switched on while it is wrapped. srt bakes that switch into the command's own sandbox profile
+ * (the macOS seatbelt profile string, the Linux bubblewrap arguments) inside `wrapWithSandbox`, and reads it nowhere afterwards, so
+ * switching it back right after the wrap leaves that command's sandbox as it was made and later commands without it. Only the wrap
+ * (milliseconds) is queued; the commands themselves run concurrently.
+ */
+export function wrapSerialized(manager: WrapManager, base: SandboxRuntimeConfig, wrap: () => Promise<string>, allowGitConfig: boolean): Promise<string> {
+  const task = async (): Promise<string> => {
+    if (!allowGitConfig) return wrap();
+    manager.updateConfig({ ...base, filesystem: { ...base.filesystem, allowGitConfig: true } as SandboxRuntimeConfig["filesystem"] });
+    try {
+      return await wrap();
+    } finally {
+      manager.updateConfig(base);
+    }
+  };
+  const run = wrapQueue.then(task, task);
+  wrapQueue = run.catch(() => undefined);
+  return run;
+}
+
+export interface SandboxedCommand {
+  /** The command to spawn with `shell: true`. */
+  command: string;
+  /** The key under which srt records this command's violations; undefined when the command is not sandboxed. */
+  commandId?: string;
+  /** The command may change `.git/config`: snapshot it before the spawn and run the guard after the exit. */
+  gitConfig: boolean;
+}
+
+export interface SandboxCommandOptions {
+  /** run_command only: allow writing the workspace `.git/config` (the caller must run the guard). start_process never sets this. */
+  allowGitConfig?: boolean;
+}
+
 /**
  * Wrap a shell command with sandbox restrictions before it is spawned with
  * `shell: true`. Fails closed: when the sandbox cannot run (unsupported
@@ -299,19 +375,38 @@ async function ensureInitialized(workspaceRoot: string): Promise<Init> {
  * is returned unchanged only when the owner turned the sandbox off
  * (`FRELY_SANDBOX=off`) or approved the `unsandboxed` grant for this call.
  */
-export async function sandboxCommand(command: string, workspaceRoot: string, allowedGroups: readonly string[] = []): Promise<string> {
-  if (isSandboxDisabled()) return command;
+export async function sandboxCommandDetailed(command: string, workspaceRoot: string, allowedGroups: readonly string[] = [], options: SandboxCommandOptions = {}): Promise<SandboxedCommand> {
+  if (isSandboxDisabled()) return { command, gitConfig: false };
   // The owner opened raw outbound connections for this call, which the sandbox cannot offer without losing its other limits.
-  if (allowedGroups.includes(UNSANDBOXED_GROUP)) return command;
+  if (allowedGroups.includes(UNSANDBOXED_GROUP)) return { command, gitConfig: false };
   const denied = deniedReadReference(command, allowedGroups);
   if (denied) throw new Error(deniedReadMessage(denied));
   const init = await ensureInitialized(workspaceRoot);
-  if (!init.ready) throw new Error(sandboxUnavailableMessage(init.reason));
+  if (!init.ready || !baseConfig) throw new Error(sandboxUnavailableMessage(init.ready ? "sandbox configuration missing" : init.reason));
+  // Without git the guard cannot check the file afterwards, so `.git/config` then stays read-only.
+  const gitConfig = options.allowGitConfig === true && await gitConfigGuardAvailable();
+  const commandId = randomUUID();
+  // initialize() fixed allowWrite to the first workspace that ran a command; give every call its own workspace.
+  const { allowGitConfig: _unused, ...filesystem } = buildSandboxConfig(workspaceRoot, allowedGroups, { allowGitConfig: gitConfig }).filesystem ?? {};
   try {
-    // initialize() fixed allowWrite to the first workspace that ran a command; give every call its own workspace.
-    return await SandboxManager.wrapWithSandbox(sshProxyPrefix() + command, undefined, { filesystem: buildSandboxConfig(workspaceRoot, allowedGroups).filesystem });
+    const wrapped = await wrapSerialized(SandboxManager, baseConfig, () => SandboxManager.wrapWithSandbox(sshProxyPrefix() + command, undefined, { filesystem }, undefined, { commandId, commandText: command }), gitConfig);
+    return { command: wrapped, commandId, gitConfig };
   } catch (error) {
     throw new Error(sandboxUnavailableMessage(`wrapping the command failed: ${errorText(error)}`));
+  }
+}
+
+export async function sandboxCommand(command: string, workspaceRoot: string, allowedGroups: readonly string[] = []): Promise<string> {
+  return (await sandboxCommandDetailed(command, workspaceRoot, allowedGroups)).command;
+}
+
+/** The violations srt recorded for one wrapped command (proxy denials always; file and socket denials where srt's log monitor runs). */
+export function sandboxViolationLines(commandId: string | undefined): string[] {
+  if (!commandId) return [];
+  try {
+    return SandboxManager.getSandboxViolationStore().getViolationsForCommand(commandId).map((violation) => violation.line);
+  } catch {
+    return [];
   }
 }
 
@@ -348,16 +443,87 @@ function deniedReadMessage({ path, group }: DeniedRead): string {
     + `Call request_permission with resource "${group}", the reason and this exact command; it returns a link where the owner approves it with a passkey or authenticator code. Then run the same command again.`;
 }
 
+/** What the caller knows about a failed command beyond its stderr: srt's recorded violations and the workspace it ran in. */
+export interface DenialContext { violations?: readonly string[]; workspaceRoot?: string }
+
+const DENIAL_TEXT = /operation not permitted|permission denied|read-only file system|sandbox/iu;
+const DOCKER_SOCKET = /docker\.sock|cannot connect to the docker daemon|docker daemon socket/iu;
+const RAW_TCP_CLIENT = /(?:^|[\s;&|(])(?:psql|pg_dump|pg_restore|mysql|mysqldump|mariadb|redis-cli|mongosh?|nc|ncat|netcat|telnet|sqlcmd|cqlsh|clickhouse-client)(?=\s|$)/u;
+const CONNECTION_FAILURE = /connection refused|econnrefused|network is unreachable|no route to host|could not connect|can't connect|connection timed out|operation not permitted/iu;
+const XPC_DENIAL = /mach-lookup|\bxpc\b|connection invalid|bootstrap_look_up/iu;
+const SEATBELT_NETWORK_DENIAL = /deny(?:\(\d+\))? network-outbound/u;
+
+/** `~/x` for paths below the home directory, the plain path otherwise. */
+const shortPath = (path: string): string => path === homedir() ? "~" : path.startsWith(homedir() + sep) ? `~/${path.slice(homedir().length + 1)}` : path;
+
+/** Absolute paths named on the lines of `text` that look like a refused operation. */
+function deniedPaths(lines: readonly string[]): string[] {
+  const found: string[] = [];
+  for (const line of lines) {
+    if (!/operation not permitted|permission denied|read-only file system|deny(?:\(\d+\))? file-write/iu.test(line)) continue;
+    for (const match of line.matchAll(/(?<![\w.~-])(\/[^\s'"`:;,)<>|]+)/gu)) found.push(match[1]!);
+  }
+  return [...new Set(found)];
+}
+
+/** The `path:` resource that would open the write `path` for a command, or undefined when no grant can. */
+function writeGrantFor(path: string, workspaceRoot: string | undefined): string | undefined {
+  const target = normalize(path);
+  if (workspaceRoot && within(target, normalize(workspaceRoot))) return undefined;
+  if (within(target, normalize(tmpdir())) || /^\/(?:dev|proc|sys)(?:\/|$)/u.test(target)) return undefined;
+  // A protected path (a shell start-up file, a credential folder) can only be opened by naming it exactly.
+  const protectedPath = PROTECTED_PATHS.map(expanded).find((item) => within(target, item));
+  const dir = protectedPath ?? dirname(target);
+  return customWritePath(`path:${shortPath(dir)}`) === undefined ? undefined : `path:${shortPath(dir)}`;
+}
+
 /**
- * Hint for a failed sandboxed command whose stderr looks like a sandbox denial, so the caller asks the owner for approval
- * (request_permission) instead of giving up on a bare "Operation not permitted".
+ * Hint for a failed sandboxed command whose output looks like a sandbox denial, so the caller asks for the narrowest approval
+ * (request_permission) instead of giving up on a bare "Operation not permitted" or reaching for `unsandboxed`. It reads srt's
+ * recorded violations, then stderr and the command text. Nothing is guessed beyond that: a denial it cannot place gets the generic hint.
  */
-export function sandboxDenialHint(stderr: string, command?: string, exitCode?: number | null, sshConfigReadable?: boolean): string | undefined {
+export function sandboxDenialHint(stderr: string, command?: string, exitCode?: number | null, sshConfigReadable?: boolean, context: DenialContext = {}): string | undefined {
   const ssh = command !== undefined ? sshHint(stderr, command, exitCode, sshConfigReadable) : undefined;
   if (ssh) return ssh;
-  if (!/operation not permitted|permission denied|read-only file system|sandbox/iu.test(stderr)) return undefined;
+  const violations = context.violations ?? [];
+  const lines = [...stderr.split(/\r?\n/u), ...violations];
+  const text = lines.join("\n");
+  const rawTcp = command !== undefined && RAW_TCP_CLIENT.test(command) && CONNECTION_FAILURE.test(stderr) || violations.some((line) => SEATBELT_NETWORK_DENIAL.test(line));
+  if (!(DENIAL_TEXT.test(text) || DOCKER_SOCKET.test(text) || XPC_DENIAL.test(text) || rawTcp || violations.length > 0)) return undefined;
+  const hints: string[] = [];
+
+  if (/\.git[\\/]hooks\b/u.test(text)) {
+    hints.push("Writing to .git/hooks stays blocked in the Frely command sandbox: hooks run programs outside it, so no approval opens it and request_permission will not help. Ask the user to add or change the hook themselves.");
+  }
+  if (/\.git[\\/]config\b/u.test(text) && DENIAL_TEXT.test(text)) {
+    hints.push("Writing .git/config is allowed in run_command for a .git directory inside the workspace, and never in start_process (run it with run_command instead).");
+  }
+  const groups = [...Object.entries(SENSITIVE_PATH_GROUPS), ["friday-admin", ADMIN_SESSION_PATHS] as const]
+    .filter(([, paths]) => paths.some((path) => commandNamesPath(text, path))).map(([group]) => group);
+  for (const group of groups) {
+    hints.push(`The Frely command sandbox hides these credential folders until the device owner approves them. Call request_permission with resource "${group}", the reason and this exact command; the owner approves it on the web. Then run the same command again.`);
+  }
+  if (groups.length === 0) {
+    const grants = [...new Set(deniedPaths(lines).flatMap((path) => writeGrantFor(path, context.workspaceRoot) ?? []))];
+    if (grants.length > 0 && !/\.git[\\/]hooks\b/u.test(text)) {
+      hints.push(`The command tried to write outside the workspace and temp directory, which the Frely command sandbox blocks. Call request_permission with ${grants.map((grant) => `resource "${grant}"`).join(" and ")}, the reason and this exact command; the owner approves it on the web. Then run the same command again.`);
+    }
+  }
+  const UNSANDBOXED_ASK = `Call request_permission with resource "${UNSANDBOXED_GROUP}", the reason and this exact command; the owner approves it once by default, for just this command. Then run the same command again.`;
+  if (DOCKER_SOCKET.test(text)) {
+    hints.push(`The Docker socket cannot be opened from the Frely command sandbox, and nothing narrower than ${UNSANDBOXED_GROUP} reaches it (a container can mount the whole home directory). ${UNSANDBOXED_ASK}`);
+  } else if (rawTcp) {
+    hints.push("The Frely command sandbox only routes HTTP(S) and SOCKS traffic, so a direct TCP connection (database and redis clients, nc) is blocked. "
+      + "Stay in the sandbox: start `frely tunnel <host>:<port>` in the same command and point the client at 127.0.0.1:<port>, for example `frely tunnel db.example.com:5432 & sleep 1; psql -h 127.0.0.1 -p 5432 ...`. "
+      + `If a tunnel cannot work for this client, ${UNSANDBOXED_ASK.replace(/^Call/u, "call")}`);
+  } else if (XPC_DENIAL.test(text)) {
+    hints.push(`The command needs a macOS system service (XPC) that the Frely command sandbox does not open, and only ${UNSANDBOXED_GROUP} reaches it. ${UNSANDBOXED_ASK}`);
+  }
+  if (hints.length > 0) return hints.join(" ");
+
+  if (!DENIAL_TEXT.test(text)) return undefined;
   return "This command may have been blocked by the Frely command sandbox (writes only to the workspace and temp directory; credential folders unreadable; only HTTP(S) and ssh reach the network). "
-    + "Call request_permission with the reason and the exact command (a credential group, cache directories, a specific path, or unsandboxed); the owner approves it on the web with a passkey or authenticator code. Then run the same command again.";
+    + `Name what was blocked and ask for the narrowest approval: call request_permission with the reason and the exact command (a credential group, cache directories or a specific path:<dir> first, ${UNSANDBOXED_GROUP} only when nothing narrower fits); the owner approves it on the web with a passkey or authenticator code. Then run the same command again.`;
 }
 
 const SSH_COMMAND = /(?:^|[\s;&|(])(?:ssh|scp|sftp|git)\s/u;
@@ -386,6 +552,8 @@ export function sshConfigReadable(): boolean {
 /** Exposed for tests: resets the module-level init state and the underlying manager. */
 export async function resetSandboxForTests(): Promise<void> {
   initialized = undefined;
+  baseConfig = undefined;
+  wrapQueue = Promise.resolve();
   warned = false;
   await SandboxManager.reset().catch(() => undefined);
 }

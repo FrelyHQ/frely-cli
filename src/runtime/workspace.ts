@@ -1,5 +1,6 @@
 import { CommandFailedError, runShellCommand } from "./process-tree.js";
-import { sandboxCommand, sandboxDenialHint, sshConfigReadable } from "./sandbox.js";
+import { GitConfigGuard, guardNote } from "./git-config-guard.js";
+import { sandboxCommandDetailed, sandboxDenialHint, sandboxViolationLines, sshConfigReadable } from "./sandbox.js";
 import { pathProtection, type PathProtection } from "./protected-paths.js";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
@@ -300,14 +301,23 @@ export class Workspace {
   async runCommand(command: string, cwdInput: string, timeoutMs: number, signal?: AbortSignal, pathGrants: readonly string[] = []) {
     if (!command.trim()) throw new Error("command is required.");
     const cwd = await this.existingPath(cwdInput || ".", "directory");
-    const sandboxed = await sandboxCommand(command, this.root, pathGrants);
+    const prepared = await sandboxCommandDetailed(command, this.root, pathGrants, { allowGitConfig: true });
+    const guard = prepared.gitConfig ? await GitConfigGuard.snapshot(this.root) : undefined;
+    let outcome: { ok: true; value: { stdout: string; stderr: string } } | { ok: false; error: unknown };
     try {
-      const { stdout, stderr } = await runShellCommand(sandboxed, cwd, safeEnv(), timeoutMs, MAX_OUTPUT_BYTES, signal);
-      return { stdout: truncate(stdout), stderr: truncate(stderr) };
+      outcome = { ok: true, value: await runShellCommand(prepared.command, cwd, safeEnv(), timeoutMs, MAX_OUTPUT_BYTES, signal) };
     } catch (error) {
-      const hint = error instanceof CommandFailedError && sandboxed !== command ? sandboxDenialHint(error.stderr, command, error.exitCode, sshConfigReadable()) : undefined;
-      throw hint && error instanceof CommandFailedError ? new CommandFailedError(error.exitCode, error.stdout, error.stderr, hint) : error;
+      outcome = { ok: false, error };
     }
+    // The command has exited: undo any .git/config setting it made that would make git run a program, and say so in the result.
+    const note = guard ? guardNote(await guard.restore()) : undefined;
+    const withNote = (stderr: string): string => note ? `${stderr}${stderr && !stderr.endsWith("\n") ? "\n" : ""}${note}\n` : stderr;
+    if (outcome.ok) return { stdout: truncate(outcome.value.stdout), stderr: truncate(withNote(outcome.value.stderr)) };
+    const error = outcome.error;
+    if (!(error instanceof CommandFailedError)) throw error;
+    const hint = prepared.command !== command ? sandboxDenialHint(error.stderr, command, error.exitCode, sshConfigReadable(), { violations: sandboxViolationLines(prepared.commandId), workspaceRoot: this.root }) : undefined;
+    if (!hint && !note) throw error;
+    throw new CommandFailedError(error.exitCode, error.stdout, withNote(error.stderr), hint);
   }
 
   async processCwd(cwdInput: string): Promise<string> {

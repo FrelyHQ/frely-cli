@@ -25,7 +25,7 @@ export function parseProxyUrl(value: string): ProxyEndpoint {
  * proxy authentication. It is what ssh runs as ProxyCommand inside the macOS sandbox, where the stock `nc` can only speak SOCKS5
  * without credentials. Nothing from the proxy reply header reaches `output`; the credentials are never printed.
  */
-export function sshProxyConnect(options: { proxyUrl: string; host: string; port: number; input: Readable; output: Writable }): Promise<void> {
+export function sshProxyConnect(options: { proxyUrl: string; host: string; port: number; input: Readable; output: Writable; signal?: AbortSignal }): Promise<void> {
   const proxy = parseProxyUrl(options.proxyUrl);
   const authority = `${options.host.includes(":") ? `[${options.host}]` : options.host}:${options.port}`;
   return new Promise((resolve, reject) => {
@@ -67,5 +67,7 @@ export function sshProxyConnect(options: { proxyUrl: string; host: string; port:
     socket.once("end", () => { if (!tunnelled) finish(new Error("The proxy closed the connection before answering.")); else finish(); });
     socket.once("error", (error) => finish(new Error(`Cannot reach the proxy: ${error.message}`)));
     options.output.once("error", () => finish());
+    // Used by `frely tunnel`, where one process serves many connections and a client that vanishes must not leave its proxy socket open.
+    if (options.signal?.aborted) finish(new Error("The connection was closed.")); else options.signal?.addEventListener("abort", () => finish(new Error("The connection was closed.")), { once: true });
   });
 }
