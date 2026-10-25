@@ -104,3 +104,48 @@ test("a client that vanishes releases its proxy connection, and a busy port is e
     await proxy.stop();
   }
 });
+
+test("a failing upstream closes only that client with one error line, and the tunnel keeps serving", async () => {
+  const sockets = new Set<Socket>();
+  let connections = 0;
+  const server = createServer((socket) => {
+    sockets.add(socket);
+    socket.on("error", () => undefined);
+    connections++;
+    const attempt = connections;
+    let head = "";
+    socket.on("data", function onData(chunk: Buffer) {
+      head += chunk.toString("latin1");
+      if (!head.includes("\r\n\r\n")) return;
+      socket.off("data", onData);
+      if (attempt === 1) { socket.destroy(); return; }
+      if (attempt === 2) { socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n"); return; }
+      if (attempt === 3) { socket.write("HTTP/1.1 200 OK\r\n\r\n"); setTimeout(() => socket.destroy(), 20); return; }
+      socket.write("HTTP/1.1 200 OK\r\n\r\n");
+      socket.on("data", (data) => socket.write(data));
+    });
+  });
+  const proxyPort = await listen(server);
+  const errors: string[] = [];
+  const tunnel = await startTunnel({ proxyUrl: `http://127.0.0.1:${proxyPort}`, host: "ssh.example.com", port: 22, localPort: 0, onError: (error) => errors.push(error.message) });
+  const port = Number(tunnel.address.split(":")[1]);
+  // A client that keeps writing while the upstream fails, like ssh waiting for a banner.
+  const chatty = (): Promise<void> => new Promise((resolve) => {
+    const client = connect(port, "127.0.0.1");
+    client.on("error", () => undefined);
+    const timer = setInterval(() => client.write("SSH-2.0-test\r\n"), 5);
+    client.once("close", () => { clearInterval(timer); resolve(); });
+  });
+  try {
+    await chatty();
+    await chatty();
+    await chatty();
+    assert.equal(errors.length, 2, "the third upstream died after tunnelling and is not an error line");
+    assert.deepEqual(errors, ["The proxy closed the connection before answering.", "The proxy refused the tunnel (HTTP 502)."]);
+    assert.equal(await roundTrip(port, "still serving"), "still serving");
+  } finally {
+    await close(tunnel.server);
+    for (const socket of sockets) socket.destroy();
+    await close(server);
+  }
+});

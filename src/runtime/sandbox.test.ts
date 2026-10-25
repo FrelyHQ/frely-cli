@@ -323,3 +323,14 @@ test("docker.sock, raw TCP and XPC are the only denials that point at unsandboxe
 test(".git/config denials say it is a run_command thing", () => {
   assert.match(sandboxDenialHint("error: could not lock config file /work/.git/config: Operation not permitted", "git remote add x y", 1, undefined, { workspaceRoot: "/work" }) ?? "", /run_command/u);
 });
+
+test("a Docker socket denial gets only the unsandboxed hint, never a path: grant for ~/.docker or the socket's directory", () => {
+  const stderr = `WARNING: Error loading config file: open ${homedir()}/.docker/config.json: operation not permitted\npermission denied while trying to connect to the docker API at unix:///var/run/docker.sock`;
+  const hint = sandboxDenialHint(stderr, "docker ps", 1, undefined, { workspaceRoot: "/work" }) ?? "";
+  assert.match(hint, /resource "unsandboxed"/u);
+  assert.match(hint, /once by default/u);
+  assert.doesNotMatch(hint, /path:/u);
+  assert.doesNotMatch(hint, /\.docker/u);
+  assert.doesNotMatch(hint, /\/var\/run/u);
+  assert.equal(hint.match(/request_permission/gu)?.length, 1);
+});

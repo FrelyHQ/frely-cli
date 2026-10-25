@@ -74,6 +74,10 @@ async function main(): Promise<void> {
     const proxyUrl = process.env.HTTP_PROXY ?? process.env.http_proxy;
     if (!proxyUrl) throw new Error("frely tunnel must run inside the Frely command sandbox: HTTP_PROXY does not name the sandbox proxy here.");
     const { host, port, localPort } = parseTunnelArguments(args.slice(1));
+    // One failed connection must never take the tunnel down: log a line and keep serving.
+    const survive = (error: unknown) => { process.stderr.write(`frely tunnel: ${error instanceof Error ? error.message : String(error)}\n`); };
+    process.on("uncaughtException", survive);
+    process.on("unhandledRejection", survive);
     const { address } = await startTunnel({ proxyUrl, host, port, localPort, onError: (error) => process.stderr.write(`frely tunnel: ${error.message}\n`) });
     stdout.write(`Tunnel listening on ${address} -> ${host}:${port}. Connect your client to ${address}; stop with Ctrl+C or by killing this process.\n`);
     await new Promise<never>(() => undefined);

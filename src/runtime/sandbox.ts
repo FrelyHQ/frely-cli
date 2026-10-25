@@ -492,6 +492,12 @@ export function sandboxDenialHint(stderr: string, command?: string, exitCode?: n
   const text = lines.join("\n");
   const rawTcp = command !== undefined && RAW_TCP_CLIENT.test(command) && CONNECTION_FAILURE.test(stderr) || violations.some((line) => SEATBELT_NETWORK_DENIAL.test(line));
   if (!(DENIAL_TEXT.test(text) || DOCKER_SOCKET.test(text) || XPC_DENIAL.test(text) || rawTcp || violations.length > 0)) return undefined;
+  const UNSANDBOXED_ASK = `Call request_permission with resource "${UNSANDBOXED_GROUP}", the reason and this exact command; the owner approves it once by default, for just this command. Then run the same command again.`;
+  // The Docker socket is the whole story: nothing narrower opens it, and the config.json / socket directory that show up in the same
+  // output are not something a path: grant can or should open (~/.docker is never opened; /var/run is far too broad).
+  if (DOCKER_SOCKET.test(text)) {
+    return `The Docker socket cannot be opened from the Frely command sandbox, and nothing narrower than ${UNSANDBOXED_GROUP} reaches it (a container can mount the whole home directory). ${UNSANDBOXED_ASK}`;
+  }
   const hints: string[] = [];
 
   if (/\.git[\\/]hooks\b/u.test(text)) {
@@ -511,10 +517,7 @@ export function sandboxDenialHint(stderr: string, command?: string, exitCode?: n
       hints.push(`The command tried to write outside the workspace and temp directory, which the Frely command sandbox blocks. Call request_permission with ${grants.map((grant) => `resource "${grant}"`).join(" and ")}, the reason and this exact command; the owner approves it on the web. Then run the same command again.`);
     }
   }
-  const UNSANDBOXED_ASK = `Call request_permission with resource "${UNSANDBOXED_GROUP}", the reason and this exact command; the owner approves it once by default, for just this command. Then run the same command again.`;
-  if (DOCKER_SOCKET.test(text)) {
-    hints.push(`The Docker socket cannot be opened from the Frely command sandbox, and nothing narrower than ${UNSANDBOXED_GROUP} reaches it (a container can mount the whole home directory). ${UNSANDBOXED_ASK}`);
-  } else if (rawTcp) {
+  if (rawTcp) {
     hints.push("The Frely command sandbox only routes HTTP(S) and SOCKS traffic, so a direct TCP connection (database and redis clients, nc) is blocked. "
       + "Stay in the sandbox: start `frely tunnel <host>:<port>` in the same command and point the client at 127.0.0.1:<port>, for example `frely tunnel db.example.com:5432 & sleep 1; psql -h 127.0.0.1 -p 5432 ...`. "
       + `If a tunnel cannot work for this client, ${UNSANDBOXED_ASK.replace(/^Call/u, "call")}`);
