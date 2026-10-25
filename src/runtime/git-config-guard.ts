@@ -201,3 +201,36 @@ export function guardNote(result: GuardResult): string | undefined {
   if (result.unreadable.length > 0) parts.push(`could not check ${result.unreadable.join(", ")}; look at it before running git there`);
   return parts.length === 0 ? undefined : `[Frely sandbox] .git/config: ${parts.join("; ")}.`;
 }
+
+/** Per workspace, the state of its `.git/config` files right after the last guarded command's check. */
+const lastChecked = new Map<string, GitConfigGuard>();
+
+/** Remember the current state of the workspace's `.git/config` files as the reference for the next check. */
+export async function rememberGitConfigs(root: string): Promise<void> {
+  lastChecked.set(root, await GitConfigGuard.snapshot(root));
+}
+
+/**
+ * Run the guard against the state remembered after the previous guarded command in this workspace. It catches a write made between
+ * commands by a process that escaped the process-group kill (setsid, double fork). Does nothing for a workspace without a remembered state.
+ */
+export async function checkRememberedGitConfigs(root: string): Promise<GuardResult | undefined> {
+  const previous = lastChecked.get(root);
+  if (!previous) return undefined;
+  const result = await previous.restore();
+  await rememberGitConfigs(root);
+  return result;
+}
+
+/** Test hook. */
+export function forgetRememberedGitConfigsForTests(): void {
+  lastChecked.clear();
+}
+
+/** Joins notes, skipping empty ones. */
+export const joinNotes = (...notes: (string | undefined)[]): string | undefined => {
+  const present = notes.filter((note): note is string => note !== undefined);
+  return present.length === 0 ? undefined : present.join("\n");
+};
+
+export const LEFTOVERS_NOTE = "[Frely sandbox] Background processes left running by this command were stopped (commands that may change .git/config cannot leave processes behind).";

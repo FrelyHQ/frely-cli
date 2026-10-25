@@ -1,5 +1,5 @@
 import { CommandFailedError, runShellCommand } from "./process-tree.js";
-import { GitConfigGuard, guardNote } from "./git-config-guard.js";
+import { checkRememberedGitConfigs, GitConfigGuard, guardNote, joinNotes, LEFTOVERS_NOTE, rememberGitConfigs } from "./git-config-guard.js";
 import { sandboxCommandDetailed, sandboxDenialHint, sandboxViolationLines, sshConfigReadable } from "./sandbox.js";
 import { pathProtection, type PathProtection } from "./protected-paths.js";
 import { createHash } from "node:crypto";
@@ -301,16 +301,21 @@ export class Workspace {
   async runCommand(command: string, cwdInput: string, timeoutMs: number, signal?: AbortSignal, pathGrants: readonly string[] = []) {
     if (!command.trim()) throw new Error("command is required.");
     const cwd = await this.existingPath(cwdInput || ".", "directory");
+    // A process that escaped the previous command's cleanup may have written .git/config since: check before anything new runs.
+    const late = await checkRememberedGitConfigs(this.root);
+    const lateNote = late ? guardNote(late) : undefined;
     const prepared = await sandboxCommandDetailed(command, this.root, pathGrants, { allowGitConfig: true });
     const guard = prepared.gitConfig ? await GitConfigGuard.snapshot(this.root) : undefined;
+    let leftovers = false;
     let outcome: { ok: true; value: { stdout: string; stderr: string } } | { ok: false; error: unknown };
     try {
-      outcome = { ok: true, value: await runShellCommand(prepared.command, cwd, safeEnv(), timeoutMs, MAX_OUTPUT_BYTES, signal) };
+      outcome = { ok: true, value: await runShellCommand(prepared.command, cwd, safeEnv(), timeoutMs, MAX_OUTPUT_BYTES, signal, guard ? { killLeftovers: true, onLeftoversKilled: () => { leftovers = true; } } : {}) };
     } catch (error) {
       outcome = { ok: false, error };
     }
     // The command has exited: undo any .git/config setting it made that would make git run a program, and say so in the result.
-    const note = guard ? guardNote(await guard.restore()) : undefined;
+    const note = joinNotes(lateNote, leftovers ? LEFTOVERS_NOTE : undefined, guard ? guardNote(await guard.restore()) : undefined);
+    if (guard) await rememberGitConfigs(this.root);
     const withNote = (stderr: string): string => note ? `${stderr}${stderr && !stderr.endsWith("\n") ? "\n" : ""}${note}\n` : stderr;
     if (outcome.ok) return { stdout: truncate(outcome.value.stdout), stderr: truncate(withNote(outcome.value.stderr)) };
     const error = outcome.error;

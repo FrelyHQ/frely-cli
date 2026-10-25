@@ -1,4 +1,5 @@
 import { terminateProcessTree } from "./process-tree.js";
+import { checkRememberedGitConfigs } from "./git-config-guard.js";
 import { sandboxCommand } from "./sandbox.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -51,6 +52,8 @@ export class ProcessManager {
     if (!command.trim()) throw new Error("command is required.");
     this.pruneExited();
     if (this.processes.size >= MAX_PROCESSES) throw new Error(`At most ${MAX_PROCESSES} managed processes may exist in one MCP session.`);
+    // Same late check as run_command (the note has no place in a start result; the next run_command in this workspace reports new findings).
+    await checkRememberedGitConfigs(workspaceRoot).catch(() => undefined);
     const sandboxed = await sandboxCommand(command, workspaceRoot, pathGrants);
     const id = randomUUID();
     const child = spawn(sandboxed, { cwd, env, shell: true, stdio: "pipe", detached: process.platform !== "win32", windowsHide: true });

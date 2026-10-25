@@ -36,7 +36,14 @@ export class CommandFailedError extends Error {
   }
 }
 
-export function runShellCommand(command: string, cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number, maxBytes: number, signal?: AbortSignal): Promise<{ stdout: string; stderr: string }> {
+export interface RunShellOptions {
+  /** Kill the shell's process group once the shell has closed, so no background child outlives the command. */
+  killLeftovers?: boolean;
+  /** Called when that kill found processes still running. */
+  onLeftoversKilled?: () => void;
+}
+
+export function runShellCommand(command: string, cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number, maxBytes: number, signal?: AbortSignal, options: RunShellOptions = {}): Promise<{ stdout: string; stderr: string }> {
   signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const child = spawn(command, { cwd, env, shell: true, stdio: "pipe", detached: process.platform !== "win32", windowsHide: true });
@@ -54,6 +61,10 @@ export function runShellCommand(command: string, cwd: string, env: NodeJS.Proces
     child.once("error", () => { failure ??= new Error("MCP command could not be started."); });
     child.once("close", (code) => {
       clearTimeout(timer); signal?.removeEventListener("abort", abort);
+      if (options.killLeftovers && child.pid !== undefined && process.platform !== "win32") {
+        // The shell is gone; whatever is still in its process group was left running in the background by the command.
+        try { process.kill(-child.pid, "SIGKILL"); options.onLeftoversKilled?.(); } catch { /* ESRCH: nothing was left */ }
+      }
       if (failure) reject(failure);
       else if (code !== 0) reject(new CommandFailedError(code, Buffer.concat(output).toString("utf8"), Buffer.concat(errors).toString("utf8")));
       else resolve({ stdout: Buffer.concat(output).toString("utf8"), stderr: Buffer.concat(errors).toString("utf8") });

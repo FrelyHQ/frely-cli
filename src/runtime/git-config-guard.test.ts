@@ -151,3 +151,49 @@ test("repository scanning skips node_modules, links to worktrees and deep trees"
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+import { checkRememberedGitConfigs, forgetRememberedGitConfigsForTests, rememberGitConfigs } from "./git-config-guard.js";
+import { existsSync } from "node:fs";
+import { runShellCommand } from "./process-tree.js";
+
+test("a write between commands is caught by the check at the start of the next command, once", async () => {
+  const root = workspace();
+  forgetRememberedGitConfigsForTests();
+  try {
+    assert.equal(await checkRememberedGitConfigs(root), undefined, "nothing remembered yet");
+    await rememberGitConfigs(root);
+    git(root, "config", "user.name", "late but harmless");
+    git(root, "config", "core.fsmonitor", "/tmp/escaped");
+    const first = await checkRememberedGitConfigs(root);
+    assert.deepEqual(first?.removed.map((item) => item.key), ["core.fsmonitor"]);
+    assert.ok((await listConfigEntries(join(root, ".git", "config"))).some((entry) => entry.key === "user.name"));
+    assert.deepEqual((await checkRememberedGitConfigs(root))?.removed, []);
+    // Another workspace is not affected.
+    assert.equal(await checkRememberedGitConfigs(join(root, "elsewhere")), undefined);
+  } finally {
+    forgetRememberedGitConfigsForTests();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("with killLeftovers a background child of the command is stopped when the shell closes; without it the child survives", { skip: process.platform === "win32" }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "frely-leftover-"));
+  try {
+    const run = async (name: string, killLeftovers: boolean): Promise<boolean> => {
+      const marker = join(dir, name);
+      let killed = false;
+      await runShellCommand(`nohup sh -c 'sleep 1; echo x > "${marker}"' >/dev/null 2>&1 &`, dir, process.env, 5000, 1024, undefined, { killLeftovers, onLeftoversKilled: () => { killed = true; } });
+      return killed;
+    };
+    assert.equal(await run("guarded", true), true);
+    assert.equal(await run("plain", false), false);
+    await new Promise((resolve) => setTimeout(resolve, 1600));
+    assert.equal(existsSync(join(dir, "guarded")), false, "the leftover was killed before it could write");
+    assert.equal(existsSync(join(dir, "plain")), true, "other commands keep today's behaviour");
+    let killed = false;
+    await runShellCommand("true", dir, process.env, 5000, 1024, undefined, { killLeftovers: true, onLeftoversKilled: () => { killed = true; } });
+    assert.equal(killed, false, "nothing left, nothing reported");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

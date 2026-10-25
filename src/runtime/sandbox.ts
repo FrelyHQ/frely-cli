@@ -474,7 +474,9 @@ function writeGrantFor(path: string, workspaceRoot: string | undefined): string 
   // A protected path (a shell start-up file, a credential folder) can only be opened by naming it exactly.
   const protectedPath = PROTECTED_PATHS.map(expanded).find((item) => within(target, item));
   const dir = protectedPath ?? dirname(target);
-  return customWritePath(`path:${shortPath(dir)}`) === undefined ? undefined : `path:${shortPath(dir)}`;
+  // Grant names always use forward slashes, whatever the platform separator is.
+  const grant = `path:${shortPath(dir)}`.replace(/\\/gu, "/");
+  return customWritePath(grant) === undefined ? undefined : grant;
 }
 
 /**
