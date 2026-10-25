@@ -169,7 +169,7 @@ test("the manual list round-trips and rejects duplicates and non-loopback URLs",
   await assert.rejects(() => removeManualEntry("bridge"), /No manually added/);
 });
 
-test("the MCP runtime exposes local_mcp_* only while a name is enabled and forwards the call", async () => {
+test("the MCP runtime always lists local_mcp_*, refuses them until a name is enabled, and forwards the call", async () => {
   const mcp = await fakeHttpMcp();
   const hub = new LocalMcpHub({ loadBuiltin: async () => [], discovery: { listPorts: async () => [mcp.port] }, loadManual: async () => [] });
   await hub.refresh();
@@ -180,10 +180,10 @@ test("the MCP runtime exposes local_mcp_* only while a name is enabled and forwa
   try {
     await session.execute({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } }, "relay_request_init_xxxxxxxx");
     const names = (reply: { result?: { tools?: Array<{ name: string }> } }) => (reply.result?.tools ?? []).map((tool) => tool.name);
-    assert.ok(!names(await rpc(2, "tools/list", {}, enabled)).includes("local_mcp_call"));
+    assert.ok(names(await rpc(2, "tools/list", {}, enabled)).includes("local_mcp_call"));
     const denied = await rpc(3, "tools/call", { name: "local_mcp_call", arguments: { server: "browser-bridge", tool: "echo" } }, enabled);
     assert.equal(denied.result?.isError, true);
-    assert.match(denied.result?.content?.[0]?.text ?? "", /not enabled/u);
+    assert.match(denied.result?.content?.[0]?.text ?? "", /No local MCP is enabled/u);
 
     enabled = ["browser-bridge"];
     const listed = names(await rpc(4, "tools/list", {}, enabled));

@@ -37,9 +37,9 @@ export interface McpRuntimeOptions {
   onToolError?: (requestId: string | number, tool: string, error: unknown) => void;
   /** Enabled toolsets on the current MCP authorization; absent or empty means workspace only (plan §6.4). */
   getToolsets?: () => string[];
-  /** Device-local MCP servers (plan mcp/本机MCP转发-方案.md). Without a hub the local_mcp_* tools stay hidden. */
+  /** Device-local MCP servers (plan mcp/本机MCP转发-方案.md). Without a hub the local_mcp_* tools stay hidden; with one they are always listed so an MCP client that cached tools/list before the owner enabled a name needs no reconnect. */
   localMcp?: LocalMcpHub;
-  /** Names the owner enabled on the current MCP authorization; absent or empty hides the local_mcp_* tools. */
+  /** Names the owner enabled on the current MCP authorization; absent or empty makes the local_mcp_* tools answer that nothing is enabled yet. */
   getLocalMcps?: () => string[];
   /** Probes and shares loopback model servers from the daemon process. Without it (stdio mode) the local_models tool stays hidden. */
   localModels?: LocalModelsHub;
@@ -119,7 +119,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
   server.onclose = () => { options.signal?.removeEventListener("abort", stop); stop(); };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
-    ...(enabledLocalMcps(options).length > 0 ? LOCAL_MCP_TOOLS : []),
+    ...(options.localMcp ? LOCAL_MCP_TOOLS : []),
     ...(options.localModels ? [LOCAL_MODELS_TOOL] : []),
     tool("read", "Read the workspace. action=list lists a directory, or returns type/size/mtime for a file; read returns a UTF-8 file (max 1 MiB), or lines startLine..endLine; encoding=base64 returns any file as base64 with its sha256, encoding=image returns a png/jpeg/gif/webp the model can see (both max 1 MiB); search finds `query` in file contents; find matches file names (*, **, ?); roots lists workspace roots. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { action: { type: "string", enum: ["list", "read", "search", "find", "roots"] }, path: stringSchema("Relative path", "."), encoding: { type: "string", enum: ["utf8", "base64", "image"], default: "utf8" }, startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, query: { type: "string" }, regex: boolSchema(false), caseSensitive: boolSchema(false), maxResults: intSchema(100, 1, 1000), contextLines: intSchema(0, 0, 10) }, { readOnly: true, destructive: false, openWorld: false }),
     tool("edit_file", "Change a UTF-8 workspace file: `content` atomically writes the whole file, creating parent directories (overwrite=true to replace one); `contentBase64` does the same for binary data (max 1 MiB decoded); `edits` replaces line ranges. Delete, move and mkdir with process. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { path: stringSchema("Relative path"), content: { type: "string" }, contentBase64: { type: "string" }, overwrite: boolSchema(false), edits: { type: "array", minItems: 1, maxItems: 100, items: { type: "object", additionalProperties: false, required: ["startLine", "endLine", "replacement"], properties: { startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, replacement: { type: "string" } } } } }, { readOnly: false, destructive: true, openWorld: false, idempotent: false }),
@@ -137,7 +137,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
     try {
       if (name === "local_mcp_list" || name === "local_mcp_call") {
         const enabled = enabledLocalMcps(options);
-        if (enabled.length === 0 || !options.localMcp) throw new Error("Local MCP access is not enabled for this device. Enable a local MCP on the Frely connections page.");
+        if (enabled.length === 0 || !options.localMcp) throw new Error("No local MCP is enabled for this device yet. Ask the user to enable one (for example computer) on the Frely connections page; it works right away, no reconnect needed.");
         const signal = AbortSignal.any([lifecycle.signal, extra.signal]);
         if (name === "local_mcp_list") {
           const server = optionalTextArg(args, "server");
