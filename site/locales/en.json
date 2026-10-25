@@ -131,7 +131,7 @@
   "more.eyebrow": "OPTIONAL FEATURES",
   "more.title": "More uses for Frely CLI",
   "install.remoteTitle": "Or connect this computer for remote control with one command",
-  "install.agentPrompt": "Set up Frely on this computer. First install the CLI: on macOS or Linux run curl -fsSL https://frely.cloud/install.sh | sh; on Windows PowerShell run curl.exe -fsSLo \"$env:TEMP\\frely-install.ps1\" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:TEMP\\frely-install.ps1\" (use the path the installer printed if frely is not on PATH). Then sign in: ask me for my email, run frely login --email <my email>, ask me for the 6-digit code from the email, then run frely login --code <code>. Finally run frely skill install --host <your own host: claude-code, codex, pi or generic> and read the frely Skill it installs to learn what to do next. Do not run frely mcp start unless I ask for it.",
+  "install.agentPrompt": "Install Frely on this computer. On macOS or Linux run curl -fsSL https://frely.cloud/start.sh | sh; on Windows PowerShell run curl.exe -fsSLo \"$env:TEMP\\frely-start.ps1\" https://frely.cloud/start.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:TEMP\\frely-start.ps1\". It installs the CLI and runs frely mcp start, which prints a sign-in link: show me the link and wait while I sign in and approve. Then run frely skill install --host <your host: claude-code, codex, pi or generic> and read the Skill it installs.",
   "install.packagesTitle": "Package managers",
   "copy.installMac": "Copy macOS install command",
   "copy.installLinux": "Copy Linux install command",

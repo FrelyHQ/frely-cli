@@ -131,7 +131,7 @@
   "more.eyebrow": "可选功能",
   "more.title": "CLI 的其他用途",
   "install.remoteTitle": "或者用一条命令把这台电脑连接为远程控制设备",
-  "install.agentPrompt": "请在这台电脑上设置 Frely。先安装 CLI：macOS 或 Linux 运行 curl -fsSL https://frely.cloud/install.sh | sh；Windows PowerShell 运行 curl.exe -fsSLo \"$env:TEMP\\frely-install.ps1\" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:TEMP\\frely-install.ps1\"（如果 frely 不在 PATH 中，使用安装器输出的路径）。然后登录：向我要邮箱，运行 frely login --email <我的邮箱>，让我提供邮件里的 6 位验证码，再运行 frely login --code <验证码>。最后运行 frely skill install --host <你自己所在的宿主：claude-code、codex、pi 或 generic>，并阅读它安装的 frely Skill 了解下一步。除非我要求，不要运行 frely mcp start。",
+  "install.agentPrompt": "Install Frely on this computer. On macOS or Linux run curl -fsSL https://frely.cloud/start.sh | sh; on Windows PowerShell run curl.exe -fsSLo \"$env:TEMP\\frely-start.ps1\" https://frely.cloud/start.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:TEMP\\frely-start.ps1\". It installs the CLI and runs frely mcp start, which prints a sign-in link: show me the link and wait while I sign in and approve. Then run frely skill install --host <your host: claude-code, codex, pi or generic> and read the Skill it installs.",
   "install.packagesTitle": "包管理器",
   "copy.installMac": "复制 macOS 安装命令",
   "copy.installLinux": "复制 Linux 安装命令",
