@@ -29,6 +29,20 @@ export async function writeAutoUpdate(enabled: boolean, path = autoUpdatePath())
   await chmod(path, 0o600);
 }
 
+/** The owner's Web switch as last seen on an MCP frame, kept in a file so a restarted service keeps it until the next frame says otherwise. */
+export function remoteAutoUpdatePath(): string { return `${autoUpdatePath()}-remote`; }
+let remoteSeen: boolean | undefined;
+export async function setRemoteAutoUpdate(enabled: boolean, path = remoteAutoUpdatePath()): Promise<void> {
+  if (remoteSeen === enabled) return;
+  remoteSeen = enabled;
+  await writeAutoUpdate(enabled, path).catch(() => { remoteSeen = undefined; });
+}
+
+/** On when either the local command or the owner's Web switch is on. */
+export async function readEffectiveAutoUpdate(): Promise<boolean> {
+  return (await readAutoUpdate()) || (await readAutoUpdate(remoteAutoUpdatePath()));
+}
+
 /**
  * Updates the installation this service runs from, only while idle and only when the owner switched it on.
  * It swaps files and leaves the restart to the existing installation watcher (service-refresh), so there is no

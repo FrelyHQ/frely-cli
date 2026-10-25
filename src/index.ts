@@ -446,6 +446,8 @@ async function main(): Promise<void> {
         return {
           app: { ...(install ? { installed: true, version: install.appVersion } : { installed: false }) },
           sandbox: detectSandboxBackend(),
+          // The relay sends the Web switch for automatic updates only to a CLI that says it understands it.
+          autoUpdate: true,
           workspaces: providerOnly ? [] : await reportedWorkspaces(workspace),
           ...(localMcp ? { localMcp: localMcp.capabilities() } : {}),
         };

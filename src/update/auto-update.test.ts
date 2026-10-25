@@ -67,3 +67,20 @@ test("a package-manager installation updates without pausing admission", async (
   assert.equal(await updater(gate, pm).check(), "updated");
   assert.deepEqual(calls, ["pkg 2.0.0", "unlock"]);
 });
+
+test("the Web switch is remembered across restarts and combined with the local one", async () => {
+  const home = await mkdtemp(join(tmpdir(), "frely-au-remote-"));
+  const saved = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = home;
+  try {
+    const { readEffectiveAutoUpdate, setRemoteAutoUpdate, remoteAutoUpdatePath } = await import("./auto-update.js");
+    assert.equal(await readEffectiveAutoUpdate(), false);
+    await setRemoteAutoUpdate(true);
+    assert.equal(await readAutoUpdate(remoteAutoUpdatePath()), true);
+    assert.equal(await readEffectiveAutoUpdate(), true);
+    await setRemoteAutoUpdate(false);
+    assert.equal(await readEffectiveAutoUpdate(), false);
+    await writeAutoUpdate(true);
+    assert.equal(await readEffectiveAutoUpdate(), true);
+  } finally { if (saved === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = saved; }
+});
