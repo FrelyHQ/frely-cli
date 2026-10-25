@@ -229,11 +229,15 @@ test("only the wraps are queued: wrapped commands keep running concurrently", as
   const base = baseConfig();
   const running: string[] = [];
   const peak = { value: 0 };
+  // Each "command" keeps running until all three are wrapped (or 2 s pass), so a slow runner cannot finish one before the last wrap.
+  let allWrapped!: () => void;
+  const wrappedAll = new Promise<void>((resolve) => { allWrapped = resolve; });
   const spawn = async (name: string) => {
     const wrapped = await wrapSerialized(manager, base, () => manager.wrapWithSandbox(name), name === "git");
     running.push(wrapped);
     peak.value = Math.max(peak.value, running.length);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    if (running.length === 3) allWrapped();
+    await Promise.race([wrappedAll, new Promise((resolve) => setTimeout(resolve, 2000))]);
     running.splice(running.indexOf(wrapped), 1);
   };
   await Promise.all([spawn("git"), spawn("one"), spawn("two")]);
