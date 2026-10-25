@@ -23,6 +23,7 @@ import type { LocalMcpHub } from "../runtime/local-mcp.js";
 import type { LocalModelsHub } from "../provider/local-models.js";
 import type { RelaySession } from "../runtime/relay-session.js";
 import { openLocalProviderRequest, readLocalProviderBody } from "../provider/local.js";
+import { forwardCoalesced } from "./stream-coalesce.js";
 
 export interface RelayServeOptions {
   workspace?: string;
@@ -345,18 +346,11 @@ async function executeProviderRequest(request: DeviceRelayRequest, socket: WebSo
   }
   let completed = false;
   try {
-    while (!cancelled.has(request.id)) {
-      const part = await reader.read();
-      if (part.done) {
-        completed = true;
-        break;
-      }
-      for (let offset = 0; offset < part.value.byteLength; offset += 256 * 1024) {
-        const chunk = part.value.subarray(offset, Math.min(offset + 256 * 1024, part.value.byteLength));
-        if (cancelled.has(request.id)) break;
-        await sendAsync(socket, { protocol: DEVICE_RELAY_PROTOCOL, type: "stream_chunk", id: request.id, data: Buffer.from(chunk).toString("base64url") });
-      }
-    }
+    completed = await forwardCoalesced(
+      reader,
+      (piece) => sendAsync(socket, { protocol: DEVICE_RELAY_PROTOCOL, type: "stream_chunk", id: request.id, data: Buffer.from(piece).toString("base64url") }),
+      () => cancelled.has(request.id),
+    );
   } catch (error) {
     if (signal.aborted || cancelled.has(request.id)) return;
     throw error;
