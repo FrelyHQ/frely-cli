@@ -277,12 +277,17 @@ test("denial hints name the narrowest approval for what was blocked", () => {
   const write = sandboxDenialHint("mkdir: cannot create directory '/opt/homebrew/Cellar/x': Operation not permitted", "brew x", 1, undefined, { workspaceRoot: "/work" });
   assert.match(write ?? "", /resource "path:\/opt\/homebrew\/Cellar"/u);
   assert.doesNotMatch(write ?? "", /unsandboxed/u);
-  const home_ = sandboxDenialHint(`touch: cannot touch '${home}/.local/share/tool/x': Permission denied`, "tool", 1, undefined, { workspaceRoot: "/work" });
-  assert.match(home_ ?? "", /resource "path:~\/\.local\/share\/tool"/u);
+  // Home-relative paths are POSIX-only: the command sandbox does not run on Windows, whose paths ("C:\\...") the hint does not parse.
+  if (process.platform !== "win32") {
+    const home_ = sandboxDenialHint(`touch: cannot touch '${home}/.local/share/tool/x': Permission denied`, "tool", 1, undefined, { workspaceRoot: "/work" });
+    assert.match(home_ ?? "", /resource "path:~\/\.local\/share\/tool"/u);
+  }
   // Inside the workspace or temp directory a denial is not a missing grant.
   assert.doesNotMatch(sandboxDenialHint("touch: cannot touch '/work/a/b': Permission denied", "touch a/b", 1, undefined, { workspaceRoot: "/work" }) ?? "", /resource "path:/u);
-  // A protected file can only be opened by naming it exactly.
-  assert.match(sandboxDenialHint(`bash: ${home}/.zshrc: Operation not permitted`, "echo x >> ~/.zshrc", 1, undefined, { workspaceRoot: "/work" }) ?? "", /resource "path:~\/\.zshrc"/u);
+  if (process.platform !== "win32") {
+    // A protected file can only be opened by naming it exactly.
+    assert.match(sandboxDenialHint(`bash: ${home}/.zshrc: Operation not permitted`, "echo x >> ~/.zshrc", 1, undefined, { workspaceRoot: "/work" }) ?? "", /resource "path:~\/\.zshrc"/u);
+  }
 });
 
 test("violations recorded by srt are used when stderr names nothing", () => {
