@@ -25,7 +25,7 @@ export function parseProxyUrl(value: string): ProxyEndpoint {
  * proxy authentication. It is what ssh runs as ProxyCommand inside the macOS sandbox, where the stock `nc` can only speak SOCKS5
  * without credentials. Nothing from the proxy reply header reaches `output`; the credentials are never printed.
  */
-export function sshProxyConnect(options: { proxyUrl: string; host: string; port: number; input: Readable; output: Writable }): Promise<void> {
+export function sshProxyConnect(options: { proxyUrl: string; host: string; port: number; input: Readable; output: Writable; signal?: AbortSignal }): Promise<void> {
   const proxy = parseProxyUrl(options.proxyUrl);
   const authority = `${options.host.includes(":") ? `[${options.host}]` : options.host}:${options.port}`;
   return new Promise((resolve, reject) => {
@@ -45,7 +45,7 @@ export function sshProxyConnect(options: { proxyUrl: string; host: string; port:
       socket.write(`CONNECT ${authority} HTTP/1.1\r\nHost: ${authority}\r\n${proxy.authorization ? `Proxy-Authorization: ${proxy.authorization}\r\n` : ""}\r\n`);
     });
     socket.on("data", (chunk: Buffer) => {
-      if (tunnelled) { options.output.write(chunk); return; }
+      if (tunnelled) { if (!settled) options.output.write(chunk); return; }
       header = Buffer.concat([header, chunk]);
       const end = header.indexOf("\r\n\r\n");
       if (end === -1) {
@@ -61,11 +61,15 @@ export function sshProxyConnect(options: { proxyUrl: string; host: string; port:
       clearTimeout(timer);
       const rest = header.subarray(end + 4);
       if (rest.length > 0) options.output.write(rest);
-      options.input.on("data", (data: Buffer) => socket.write(data));
+      options.input.on("data", (data: Buffer) => { if (!settled && !socket.destroyed) socket.write(data); });
       options.input.once("end", () => socket.end());
     });
     socket.once("end", () => { if (!tunnelled) finish(new Error("The proxy closed the connection before answering.")); else finish(); });
-    socket.once("error", (error) => finish(new Error(`Cannot reach the proxy: ${error.message}`)));
+    // Not `once`: after the first failure the socket can still report errors (a write racing the close), and an unhandled one would crash a long-lived `frely tunnel`.
+    // Once tunnelled, a reset (Windows reports a remote close as ECONNRESET) just ends the connection, like "end" above.
+    socket.on("error", (error) => finish(tunnelled ? undefined : new Error(`Cannot reach the proxy: ${error.message}`)));
     options.output.once("error", () => finish());
+    // Used by `frely tunnel`, where one process serves many connections and a client that vanishes must not leave its proxy socket open.
+    if (options.signal?.aborted) finish(new Error("The connection was closed.")); else options.signal?.addEventListener("abort", () => finish(new Error("The connection was closed.")), { once: true });
   });
 }

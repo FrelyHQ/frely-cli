@@ -5,6 +5,8 @@ import { requireMcpAuthorization, inspectMcpMetadataOrQuarantine, revokeMcpAutho
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { sshProxyConnect } from "./runtime/ssh-proxy.js";
+import { parseTunnelArguments, startTunnel, tunnelUsage } from "./runtime/tunnel.js";
+import { runSandboxProxyCommand } from "./runtime/sandbox-proxy.js";
 import { runLocalMcpCommand } from "./local-mcp-command.js";
 import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
@@ -65,6 +67,24 @@ async function main(): Promise<void> {
     if (args.length !== 3 || !args[1] || !Number.isInteger(port) || port < 1 || port > 65535 || !proxyUrl) throw new Error("Usage: frely ssh-proxy <host> <port> (HTTP_PROXY must name the proxy).");
     await sshProxyConnect({ proxyUrl, host: args[1], port, input: process.stdin, output: process.stdout });
     process.exit(0);
+  }
+  // Run inside the command sandbox: a loopback port that forwards to host:port through the sandbox proxy, for clients that need a raw TCP connection.
+  if (command === "tunnel") {
+    if (args.length < 2 || args[1] === "help" || args[1] === "--help") { stdout.write(`${tunnelUsage()}\n`); return; }
+    const proxyUrl = process.env.HTTP_PROXY ?? process.env.http_proxy;
+    if (!proxyUrl) throw new Error("frely tunnel must run inside the Frely command sandbox: HTTP_PROXY does not name the sandbox proxy here.");
+    const { host, port, localPort } = parseTunnelArguments(args.slice(1));
+    // One failed connection must never take the tunnel down: log a line and keep serving.
+    const survive = (error: unknown) => { process.stderr.write(`frely tunnel: ${error instanceof Error ? error.message : String(error)}\n`); };
+    process.on("uncaughtException", survive);
+    process.on("unhandledRejection", survive);
+    const { address } = await startTunnel({ proxyUrl, host, port, localPort, onError: (error) => process.stderr.write(`frely tunnel: ${error.message}\n`) });
+    stdout.write(`Tunnel listening on ${address} -> ${host}:${port}. Connect your client to ${address}; stop with Ctrl+C or by killing this process.\n`);
+    await new Promise<never>(() => undefined);
+  }
+  if (command === "sandbox" && args[1] === "proxy") {
+    await runSandboxProxyCommand(args.slice(2), (text) => { stdout.write(text); });
+    return;
   }
   if (command === "--version" || command === "-v" || command === "version") {
     stdout.write(`${VERSION}\n`);

@@ -65,6 +65,8 @@ npm install --global --ignore-scripts frely-cli@latest
 | `frely doctor` | 检查登录、安装、服务和连接。`-v` 显示详情。 |
 | `frely update` | 原地升级到最新版本。 |
 | `frely login` / `frely logout` | 登录或退出 Frely 账号。 |
+| `frely sandbox proxy <url>` | 让命令沙箱的网络流量转发到你自己的 HTTP(S) 代理。未设置时使用 CLI 进程的 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`，macOS 上还会读系统代理。`--clear` 删除；重启服务后生效。 |
+| `frely tunnel <host>:<port>` | 在沙箱命令内使用：监听 `127.0.0.1`，把 TCP 连接经沙箱转发到 `host:port`，供数据库、redis 客户端使用。`--local-port N` 指定本地端口。 |
 | `frely uninstall` | 从这台电脑移除 Frely（先列出全部内容）。 |
 
 全部命令和参数见[命令参考](https://cli.frely.cloud/docs/help/commands/)。`frely help --agent --json` 输出完整的机器可读契约。

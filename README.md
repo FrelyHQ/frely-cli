@@ -65,6 +65,8 @@ The installers check the SHA-256 and download from GitHub Releases first, then n
 | `frely doctor` | Check sign-in, installation, service and connection. `-v` for details. |
 | `frely update` | Update to the latest version in place. |
 | `frely login` / `frely logout` | Sign in or out of your Frely account. |
+| `frely sandbox proxy <url>` | Forward the command sandbox's network traffic to your own HTTP(S) proxy. Without it the CLI uses `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` and, on macOS, the system proxy. `--clear` removes it; restart the service to apply. |
+| `frely tunnel <host>:<port>` | Inside a sandboxed command: listen on `127.0.0.1` and forward TCP connections to `host:port` through the sandbox, for database and redis clients. `--local-port N` picks the local port. |
 | `frely uninstall` | Remove Frely from this computer (lists everything first). |
 
 All commands and options: [command reference](https://cli.frely.cloud/docs/help/commands/). `frely help --agent --json` prints the full machine-readable contract.

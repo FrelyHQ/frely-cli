@@ -185,3 +185,156 @@ test("deniedReadReference names an unapproved credential path spelled in the com
 test("loopback binding is open by default so local servers and tests can run", () => {
   assert.equal(buildSandboxConfig("/work", []).network?.allowLocalBinding, true);
 });
+
+import { mkdtempSync, rmSync } from "node:fs";
+import { sandboxViolationLines, wrapSerialized, type WrapManager } from "./sandbox.js";
+import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
+
+const baseConfig = (): SandboxRuntimeConfig => buildSandboxConfig("/work");
+
+/** A stand-in for srt that records the global allowGitConfig switch at the moment each command is wrapped. */
+function fakeManager(): { manager: WrapManager; seen: Map<string, boolean | undefined>; updates: (boolean | undefined)[]; current: () => boolean | undefined } {
+  let flag: boolean | undefined;
+  const seen = new Map<string, boolean | undefined>();
+  const updates: (boolean | undefined)[] = [];
+  const manager: WrapManager = {
+    updateConfig(config) { flag = config.filesystem?.allowGitConfig; updates.push(flag); },
+    async wrapWithSandbox(command) { await new Promise((resolve) => setTimeout(resolve, 5)); seen.set(command, flag); return `wrapped:${command}`; },
+  };
+  return { manager, seen, updates, current: () => flag };
+}
+
+test("allowGitConfig is on only while the wrap of the one command that asked for it runs, even with commands wrapped at the same time", async () => {
+  const { manager, seen, updates, current } = fakeManager();
+  const base = baseConfig();
+  const wrap = (command: string, gitConfig: boolean) => wrapSerialized(manager, base, () => manager.wrapWithSandbox(command), gitConfig);
+  const results = await Promise.all([wrap("a", false), wrap("b", true), wrap("c", false), wrap("d", true), wrap("e", false)]);
+  assert.deepEqual(results, ["wrapped:a", "wrapped:b", "wrapped:c", "wrapped:d", "wrapped:e"]);
+  assert.deepEqual([...seen], [["a", undefined], ["b", true], ["c", undefined], ["d", true], ["e", undefined]]);
+  assert.equal(current(), undefined, "switched back after the last git-config wrap");
+  assert.deepEqual(updates, [true, undefined, true, undefined]);
+});
+
+test("a failed wrap still switches allowGitConfig back and does not block later wraps", async () => {
+  const { manager, seen, current } = fakeManager();
+  const base = baseConfig();
+  await assert.rejects(wrapSerialized(manager, base, async () => { throw new Error("bwrap failed"); }, true), /bwrap failed/u);
+  assert.equal(current(), undefined);
+  assert.equal(await wrapSerialized(manager, base, () => manager.wrapWithSandbox("next"), false), "wrapped:next");
+  assert.equal(seen.get("next"), undefined);
+});
+
+test("only the wraps are queued: wrapped commands keep running concurrently", async () => {
+  const { manager } = fakeManager();
+  const base = baseConfig();
+  const running: string[] = [];
+  const peak = { value: 0 };
+  // Each "command" keeps running until all three are wrapped (or 2 s pass), so a slow runner cannot finish one before the last wrap.
+  let allWrapped!: () => void;
+  const wrappedAll = new Promise<void>((resolve) => { allWrapped = resolve; });
+  const spawn = async (name: string) => {
+    const wrapped = await wrapSerialized(manager, base, () => manager.wrapWithSandbox(name), name === "git");
+    running.push(wrapped);
+    peak.value = Math.max(peak.value, running.length);
+    if (running.length === 3) allWrapped();
+    await Promise.race([wrappedAll, new Promise((resolve) => setTimeout(resolve, 2000))]);
+    running.splice(running.indexOf(wrapped), 1);
+  };
+  await Promise.all([spawn("git"), spawn("one"), spawn("two")]);
+  assert.equal(peak.value, 3);
+});
+
+test("run_command's profile may write .git/config, start_process's may not, and .git/hooks is denied in both", () => {
+  const root = mkdtempSync(join(tmpdir(), "frely-sbx-"));
+  try {
+    mkdirSync(join(root, ".git", "hooks"), { recursive: true });
+    const denied = buildSandboxConfig(root).filesystem;
+    assert.ok(denied?.denyWrite?.includes(join(root, ".git", "config")));
+    assert.ok(denied?.denyWrite?.includes(join(root, ".git", "hooks")));
+    assert.equal(denied?.allowGitConfig, undefined);
+    const allowed = buildSandboxConfig(root, [], { allowGitConfig: true }).filesystem;
+    assert.ok(!allowed?.denyWrite?.includes(join(root, ".git", "config")));
+    assert.ok(allowed?.denyWrite?.includes(join(root, ".git", "hooks")));
+    assert.equal(allowed?.allowGitConfig, true);
+    // No .git directory (a fresh folder, or a worktree whose .git is a file): nothing extra is denied.
+    assert.deepEqual(buildSandboxConfig("/nonexistent-workspace").filesystem?.denyWrite, protectedWriteDenials([]));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the user's upstream proxy is passed to srt only when there is one", () => {
+  assert.equal(buildSandboxConfig("/work").network?.parentProxy, undefined);
+  assert.deepEqual(buildSandboxConfig("/work", [], { parentProxy: { http: "http://127.0.0.1:7890", https: "http://127.0.0.1:7890", noProxy: "corp.example" } }).network?.parentProxy, { http: "http://127.0.0.1:7890", https: "http://127.0.0.1:7890", noProxy: "corp.example" });
+});
+
+test("violation lines of an unknown command are empty and never throw", () => {
+  assert.deepEqual(sandboxViolationLines(undefined), []);
+  assert.deepEqual(sandboxViolationLines("no-such-command"), []);
+});
+
+test("denial hints name the narrowest approval for what was blocked", () => {
+  const home = homedir();
+  const credential = sandboxDenialHint(`cat: ${home}/.aws/credentials: Operation not permitted`, "cat x");
+  assert.match(credential ?? "", /resource "aws"/u);
+  assert.doesNotMatch(credential ?? "", /unsandboxed/u);
+  const write = sandboxDenialHint("mkdir: cannot create directory '/opt/homebrew/Cellar/x': Operation not permitted", "brew x", 1, undefined, { workspaceRoot: "/work" });
+  assert.match(write ?? "", /resource "path:\/opt\/homebrew\/Cellar"/u);
+  assert.doesNotMatch(write ?? "", /unsandboxed/u);
+  // Home-relative paths are POSIX-only: the command sandbox does not run on Windows, whose paths ("C:\\...") the hint does not parse.
+  if (process.platform !== "win32") {
+    const home_ = sandboxDenialHint(`touch: cannot touch '${home}/.local/share/tool/x': Permission denied`, "tool", 1, undefined, { workspaceRoot: "/work" });
+    assert.match(home_ ?? "", /resource "path:~\/\.local\/share\/tool"/u);
+  }
+  // Inside the workspace or temp directory a denial is not a missing grant.
+  assert.doesNotMatch(sandboxDenialHint("touch: cannot touch '/work/a/b': Permission denied", "touch a/b", 1, undefined, { workspaceRoot: "/work" }) ?? "", /resource "path:/u);
+  if (process.platform !== "win32") {
+    // A protected file can only be opened by naming it exactly.
+    assert.match(sandboxDenialHint(`bash: ${home}/.zshrc: Operation not permitted`, "echo x >> ~/.zshrc", 1, undefined, { workspaceRoot: "/work" }) ?? "", /resource "path:~\/\.zshrc"/u);
+  }
+});
+
+test("violations recorded by srt are used when stderr names nothing", () => {
+  const hint = sandboxDenialHint("make: *** [all] Error 1", "make", 2, undefined, { violations: ["deny(1) file-write-create /opt/tools/out.bin"], workspaceRoot: "/work" });
+  assert.match(hint ?? "", /resource "path:\/opt\/tools"/u);
+});
+
+test(".git/hooks stays blocked and the hint says no approval opens it", () => {
+  const hint = sandboxDenialHint("error: unable to create '/work/.git/hooks/pre-commit': Operation not permitted", "cp x .git/hooks/pre-commit", 1, undefined, { workspaceRoot: "/work" });
+  assert.match(hint ?? "", /\.git\/hooks stays blocked/u);
+  assert.match(hint ?? "", /no approval opens it/u);
+  assert.doesNotMatch(hint ?? "", /resource "path:/u);
+  assert.doesNotMatch(hint ?? "", /unsandboxed/u);
+});
+
+test("docker.sock, raw TCP and XPC are the only denials that point at unsandboxed; raw TCP also names frely tunnel", () => {
+  const docker = sandboxDenialHint("permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock", "docker ps", 1);
+  assert.match(docker ?? "", /resource "unsandboxed"/u);
+  assert.match(docker ?? "", /once by default/u);
+  assert.doesNotMatch(docker ?? "", /frely tunnel/u);
+  const tcp = sandboxDenialHint("psql: error: connection to server at \"db.example.com\" (10.1.2.3), port 5432 failed: Connection refused", "psql -h db.example.com -c 'select 1'", 2);
+  assert.match(tcp ?? "", /frely tunnel <host>:<port>/u);
+  assert.match(tcp ?? "", /resource "unsandboxed"/u);
+  assert.match(sandboxDenialHint("redis-cli: Could not connect", "redis-cli -h cache.example.com ping", 1) ?? "", /frely tunnel/u);
+  assert.match(sandboxDenialHint("anything", "node x.js", 1, undefined, { violations: ["deny(1) network-outbound 10.1.2.3:5432"] }) ?? "", /frely tunnel/u);
+  const xpc = sandboxDenialHint("error: Connection invalid (mach-lookup com.apple.CoreSimulator.CoreSimulatorService)", "xcrun simctl list", 1);
+  assert.match(xpc ?? "", /XPC/u);
+  assert.match(xpc ?? "", /resource "unsandboxed"/u);
+  // Ordinary network failures of other commands are not a sandbox matter.
+  assert.equal(sandboxDenialHint("curl: (7) Failed to connect: Connection refused", "curl http://localhost:1", 7), undefined);
+});
+
+test(".git/config denials say it is a run_command thing", () => {
+  assert.match(sandboxDenialHint("error: could not lock config file /work/.git/config: Operation not permitted", "git remote add x y", 1, undefined, { workspaceRoot: "/work" }) ?? "", /run_command/u);
+});
+
+test("a Docker socket denial gets only the unsandboxed hint, never a path: grant for ~/.docker or the socket's directory", () => {
+  const stderr = `WARNING: Error loading config file: open ${homedir()}/.docker/config.json: operation not permitted\npermission denied while trying to connect to the docker API at unix:///var/run/docker.sock`;
+  const hint = sandboxDenialHint(stderr, "docker ps", 1, undefined, { workspaceRoot: "/work" }) ?? "";
+  assert.match(hint, /resource "unsandboxed"/u);
+  assert.match(hint, /once by default/u);
+  assert.doesNotMatch(hint, /path:/u);
+  assert.doesNotMatch(hint, /\.docker/u);
+  assert.doesNotMatch(hint, /\/var\/run/u);
+  assert.equal(hint.match(/request_permission/gu)?.length, 1);
+});
