@@ -74,6 +74,40 @@
         <li>{{clients.jsonStep2}}</li>
         <li>{{clients.jsonStep3}}</li>
       </ol>
+      <a class="text-link" href="https://frely.cloud/user/device?connect=token">{{clients.jsonOpenDevices}} <span aria-hidden="true">↗</span></a>
+      <!-- Looping mini-window walkthrough (CSS only; static stack under reduced motion). -->
+      <figure class="token-demo" role="img" aria-label="{{clients.animLabel}}">
+        <div class="demo-stage" aria-hidden="true">
+          <div class="demo-window demo-s1">
+            <div class="demo-bar"><i></i><i></i><i></i><span>frely.cloud/user/device</span></div>
+            <div class="demo-body">
+              <div class="demo-row"><b>{{clients.animDevices}}</b><em class="demo-btn demo-pulse">{{clients.animAddDevice}}</em></div>
+              <div class="demo-line"></div><div class="demo-line short"></div>
+            </div>
+          </div>
+          <div class="demo-window demo-s2">
+            <div class="demo-bar"><i></i><i></i><i></i><span>frely.cloud/user/device</span></div>
+            <div class="demo-body">
+              <div class="demo-tabs"><span>{{clients.animOauth}}</span><span class="on">{{clients.animTokenTab}}</span></div>
+              <pre class="demo-code">"Authorization":
+  "Bearer fmcp_pat_••••••"</pre>
+              <div class="demo-row"><em class="demo-btn ghost">{{clients.animCreate}}</em><em class="demo-btn demo-pulse">{{clients.animCopy}}</em></div>
+            </div>
+          </div>
+          <div class="demo-window demo-s3">
+            <div class="demo-bar"><i></i><i></i><i></i><span>WorkBuddy</span></div>
+            <div class="demo-body">
+              <div class="demo-row"><b>{{clients.animSettings}}</b></div>
+              <pre class="demo-code demo-type">{ "mcpServers": { "frely": {
+  "headers": { "Authorization":
+    "Bearer fmcp_pat_••••••" } } } }</pre>
+              <div class="demo-row"><em class="demo-btn demo-pulse">{{clients.animSave}}</em></div>
+            </div>
+          </div>
+        </div>
+        <figcaption class="demo-caps" aria-hidden="true"><span class="c1">{{clients.animCap1}}</span><span class="c2">{{clients.animCap2}}</span><span class="c3">{{clients.animCap3}}</span></figcaption>
+      </figure>
+      <p class="fineprint">{{clients.jsonShape}}</p>
       <div class="command command-block">
         <pre><code id="mcp-json-command">{{command.mcpJson}}</code></pre>
         <button class="copy-button" data-copy="mcp-json-command" aria-label="{{copy.mcpJson}}">{{copy.idle}}</button>
