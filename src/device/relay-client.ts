@@ -1,4 +1,5 @@
 import { watchServiceInstallation } from "../update/service-refresh.js";
+import { readEffectiveAutoUpdate, setRemoteAutoUpdate, watchAutoUpdate } from "../update/auto-update.js";
 import { MaintenanceGate, serveMaintenance } from "../update/maintenance.js";
 import { isDefinitiveAuthorizationFailure, requireLocalMcpAuthorization, requireMcpAuthorization } from "../mcp-authorization.js";
 import { McpLease } from "../runtime/mcp-lease.js";
@@ -65,6 +66,8 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
     ? watchServiceInstallation({ gate: maintenance, signal: options.signal, restart: options.restartForUpdate, log, onEnabled: () => reporter.report({ type: "upgrade_watch", enabled: true }) })
       .catch((error) => { diagnostic(log, "relay.upgrade_watch_unavailable", {}, error); return () => {}; })
     : Promise.resolve(() => {});
+  // Off unless the owner switched it on; the swap happens while idle and the watcher above restarts the service.
+  const closeAutoUpdate = maintenance && options.restartForUpdate ? watchAutoUpdate({ gate: maintenance, signal: options.signal, enabled: () => readEffectiveAutoUpdate(), log }) : () => {};
   let delayMs = 1000;
   let preferredTransport: DeviceTransportKind | undefined;
   try {
@@ -159,7 +162,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
     }
     reporter.report({ type: "stopped" });
     await reporter.flush();
-  } finally { (await closeRefresh)(); await closeMaintenance?.(); }
+  } finally { closeAutoUpdate(); (await closeRefresh)(); await closeMaintenance?.(); }
 }
 
 class DeviceTransportConnectionError extends Error {
@@ -313,6 +316,8 @@ async function handleFrame(
 async function executeMcpRequest(request: DeviceRelayRequest, session: RelaySession | null, lease: McpLease | null): Promise<unknown> {
   if (!session || !lease || request.authorizationId !== lease.authorizationId) throw new Error("MCP execution authorization is missing or mismatched.");
   lease.assert();
+  // The owner's Web switch rides on every authorized MCP frame; absent means off.
+  await setRemoteAutoUpdate(request.autoUpdate === true);
   return session.execute(request.payload, request.id, request.toolsets, request.localMcps);
 }
 

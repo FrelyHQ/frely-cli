@@ -12,6 +12,8 @@ export type DeviceRelayRequest = {
   toolsets?: string[];
   /** Device-local MCP servers the owner enabled on the authorization (relay server -> device). Absent means none. */
   localMcps?: string[];
+  /** The owner let this computer install new versions of itself while idle (relay server -> device). Only ever true; absent means off. */
+  autoUpdate?: boolean;
   payload: unknown;
 };
 
@@ -95,10 +97,11 @@ export function validateDeviceRelayEnvelope(value: unknown): asserts value is De
   if (record.protocol !== DEVICE_RELAY_PROTOCOL || typeof record.type !== "string" || typeof record.id !== "string") throw new DeviceRelayProtocolError("frame_invalid");
   assertRequestId(record.id);
   if (record.type === "request") {
-    exactKeys(record, ["protocol", "type", "id", "method", "payload", ...(record.authorizationId !== undefined ? ["authorizationId"] : []), ...(record.toolsets !== undefined ? ["toolsets"] : []), ...(record.localMcps !== undefined ? ["localMcps"] : [])]);
+    exactKeys(record, ["protocol", "type", "id", "method", "payload", ...(record.authorizationId !== undefined ? ["authorizationId"] : []), ...(record.toolsets !== undefined ? ["toolsets"] : []), ...(record.autoUpdate !== undefined ? ["autoUpdate"] : []), ...(record.localMcps !== undefined ? ["localMcps"] : [])]);
     if (record.authorizationId !== undefined && (record.method !== "mcp" || typeof record.authorizationId !== "string" || !/^mca_[a-f0-9]{32}$/u.test(record.authorizationId))) throw new DeviceRelayProtocolError("frame_invalid");
     if (record.toolsets !== undefined && (record.method !== "mcp" || !isToolsetList(record.toolsets))) throw new DeviceRelayProtocolError("frame_invalid");
     if (record.localMcps !== undefined && (record.method !== "mcp" || !isLocalMcpList(record.localMcps))) throw new DeviceRelayProtocolError("frame_invalid");
+    if (record.autoUpdate !== undefined && (record.method !== "mcp" || record.autoUpdate !== true)) throw new DeviceRelayProtocolError("frame_invalid");
     if (record.method !== "mcp" && record.method !== "provider" && record.method !== "node") throw new DeviceRelayProtocolError("frame_invalid");
     return;
   }
