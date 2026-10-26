@@ -37,4 +37,5 @@ if (!(Test-Path -LiteralPath $frely)) { throw "Frely was not installed at $frely
 if ($installToken) { $env:FRELY_INSTALL_TOKEN = $installToken; Remove-Variable installToken }
 # Default workspace: the home directory (credential and start-up files stay protected); FRELY_WORKSPACE picks another.
 if ($env:FRELY_WORKSPACE) { & $frely mcp start --workspace $env:FRELY_WORKSPACE } else { & $frely mcp start }
-exit $LASTEXITCODE
+# Run through `irm https://frely.cloud/w | iex` there is no script file; `exit` would close the user's PowerShell window.
+if ($PSCommandPath) { exit $LASTEXITCODE }
