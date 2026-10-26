@@ -4,7 +4,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { VERSION } from "../version.js";
 import { COMPUTER_MCP_NAME, computerLocallyVetoed } from "./builtin.js";
-import { ocuBinaryPath, StdioOcuBackend } from "./ocu.js";
+import { ocuBinaryPath, runOcuDoctor, StdioOcuBackend } from "./ocu.js";
 import { installOcuRuntime } from "./runtime.js";
 import { ComputerToolset } from "./toolset.js";
 
@@ -17,7 +17,7 @@ export async function computerLocallyEnabled(): Promise<boolean> {
 
 /** The runtime is installed on first use (pinned download, checksum verified), so turning computer use on from the web is enough. */
 export function createComputerToolset(): ComputerToolset {
-  return new ComputerToolset({ backend: new StdioOcuBackend(ocuBinaryPath(), installOcuRuntime), isLocallyEnabled: computerLocallyEnabled });
+  return new ComputerToolset({ backend: new StdioOcuBackend(ocuBinaryPath(), installOcuRuntime), isLocallyEnabled: computerLocallyEnabled, runDoctor: () => runOcuDoctor() });
 }
 
 /** MCP server over the guarded toolset. Local MCP forwarding starts it as a stdio server (`frely computer mcp`). */
