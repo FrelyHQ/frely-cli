@@ -2,7 +2,7 @@
 import { applyDataDir, activeDataDir } from "./data-dir.js";
 import { update } from "./update/update.js";
 import { requireMcpAuthorization, inspectMcpMetadata, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, generateMcpKey, parseMcpDays, MCP_DEFAULT_DAYS } from "./mcp-authorization.js";
-import { realpath } from "node:fs/promises";
+import { chmod, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { sshProxyConnect } from "./runtime/ssh-proxy.js";
 import { parseTunnelArguments, startTunnel, tunnelUsage } from "./runtime/tunnel.js";
@@ -41,10 +41,11 @@ import { runComputerCommand } from "./computer/command.js";
 import { runComputerMcpServer } from "./computer/server.js";
 import { agentManifestUrl, installSkillAdapter, invokeInstalledAgent, publicSkillAccessError, removeSkillAdapter, resolveAgentTarget, SkillAccessError, skillAdapterStatus } from "./skill/access.js";
 import type { SkillHost, SkillScope } from "./skill/managed.js";
-import { installCloudItem, parseItemRef, trustCloudItem } from "./skill/cloud-item.js";
+import { CloudToolError, installCloudItem, parseItemRef, trustCloudItem } from "./skill/cloud-item.js";
 import { checkItemUpdates, updateCloudItem } from "./skill/item-update.js";
 import { runSealedScript } from "./skill/sealed-run.js";
 import { installEntrySkill } from "./skill/entry.js";
+import { callRemoteTool, connectRemoteMcp, installRemoteMcpSkill, isNotASkill, listRemoteTools, mcpClientConfig, parseMcpName, RemoteMcpError } from "./skill/remote-mcp.js";
 import { callCloudTool } from "./cloud.js";
 import { createInterface } from "node:readline/promises";
 import { runUninstall } from "./uninstall.js";
@@ -116,6 +117,47 @@ async function main(): Promise<void> {
     stdout.write(result.text ?? JSON.stringify(result.value, null, 2) + "\n");
     if (result.failed) process.exitCode = 2;
     return;
+  }
+
+  if (command === "remote") {
+    const action = args[1];
+    const ref = args[2];
+    if (action !== "tools" && action !== "call" && action !== "config") { stdout.write(subcommandUsage("remote")); return; }
+    if (!ref || ref.startsWith("-")) throw new Error(`Usage: frely remote ${action} <username/name>${action === "call" ? " <tool> [--json '<object>' | --input <file>]" : ""}`);
+    parseMcpName(ref);
+    const deps = { call: callCloudTool };
+    try {
+      if (action === "tools") {
+        const tools = await listRemoteTools(ref, deps);
+        if (args.includes("--json")) stdout.write(`${JSON.stringify(tools, null, 2)}\n`);
+        else stdout.write(tools.map((tool) => `${tool.name}${tool.description ? `: ${tool.description.replace(/\s+/gu, " ").slice(0, 200)}` : ""}\n`).join(""));
+        return;
+      }
+      if (action === "config") {
+        const connection = await connectRemoteMcp(ref, deps);
+        const config = mcpClientConfig(connection);
+        const file = option(args, "--write");
+        if (file === undefined) { stdout.write(`${JSON.stringify(config, null, 2)}\n`); return; }
+        await mergeMcpServers(file, config.mcpServers);
+        stdout.write(`Wrote ${Object.keys(config.mcpServers)[0]} to ${file}. The file holds a key that works only for ${connection.name}; keep it private.\n`);
+        return;
+      }
+      const tool = args[3];
+      if (!tool || tool.startsWith("-")) throw new Error("Usage: frely remote call <username/name> <tool> [--json '<object>' | --input <file>]");
+      if (args.includes("--json") && args.includes("--input")) throw new Error("Use --json or --input.");
+      const inline = option(args, "--json"), path = option(args, "--input");
+      const text = path !== undefined ? await readInputFile(path) : inline ?? "{}";
+      let input: unknown;
+      try { input = JSON.parse(text); } catch { throw new Error("The tool arguments must be a JSON object."); }
+      if (input === null || typeof input !== "object" || Array.isArray(input)) throw new Error("The tool arguments must be a JSON object.");
+      const result = await callRemoteTool(ref, tool, input as Record<string, unknown>, deps);
+      stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      if ((result as { isError?: unknown } | null)?.isError === true) process.exitCode = 1;
+      return;
+    } catch (error) {
+      if (error instanceof RemoteMcpError) throw new Error(error.message);
+      throw error;
+    }
   }
 
   if (command === "network") {
@@ -239,7 +281,16 @@ async function main(): Promise<void> {
     const host = skillHost(option(args, "--host") ?? "generic");
     const scope = skillScope(option(args, "--scope") ?? "global");
     const dir = option(args, "--dir");
-    const value = await installCloudItem({ ...parseItemRef(itemRef), call: callCloudTool, host, scope, ...(dir ? { dir } : {}) });
+    const value = await installCloudItem({ ...parseItemRef(itemRef), call: callCloudTool, host, scope, ...(dir ? { dir } : {}) }).catch(async (error: unknown) => {
+      // A name that is not a Skill may be a remote MCP: install the Skill that uses it through `frely remote`.
+      if (!isNotASkill(error) || itemRef.includes("@") || !/^[^/@]+\/[^/@]+$/u.test(itemRef)) throw error;
+      return installRemoteMcpSkill({ ref: itemRef, call: callCloudTool, host, scope, ...(dir ? { dir } : {}) }).catch((mcpError: unknown) => { throw isNotASkill(mcpError) || (mcpError instanceof CloudToolError && mcpError.code === "remote_mcp_not_found") ? error : mcpError; });
+    });
+    if ("tools" in value) {
+      if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
+      stdout.write(`MCP: ${value.name}\nPath: ${value.path}\nTools: ${value.tools}\nThe Skill calls this MCP through frely remote; no MCP client configuration is needed. Restart or reload the agent session so it rescans Skills.\n`);
+      return;
+    }
     if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
     stdout.write(`${value.kind === "prompt" ? "Prompt" : "Skill"}: ${value.name} (v${value.version})\nPath: ${value.path}\nFiles: ${value.files}\n`);
     if (value.premium === "installed") stdout.write("Paid part: installed\n");
@@ -596,6 +647,27 @@ function skillHost(value: string): SkillHost {
 function skillScope(value: string): SkillScope {
   if (value === "global" || value === "project") return value;
   throw new Error("--scope must be global or project.");
+}
+
+async function readInputFile(path: string): Promise<string> {
+  const info = await stat(path);
+  if (!info.isFile() || info.size > 512 * 1024) throw new Error("--input must be a file of at most 512 KiB.");
+  return readFile(path, "utf8");
+}
+
+/** Adds the entries to the file's `mcpServers`, keeping everything else; the file is created readable only by its owner. */
+async function mergeMcpServers(path: string, servers: Record<string, unknown>): Promise<void> {
+  let current: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    current = parsed as Record<string, unknown>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error(`${path} is not a JSON object; left unchanged.`);
+  }
+  const existing = current.mcpServers !== null && typeof current.mcpServers === "object" && !Array.isArray(current.mcpServers) ? current.mcpServers as Record<string, unknown> : {};
+  await writeFile(path, `${JSON.stringify({ ...current, mcpServers: { ...existing, ...servers } }, null, 2)}\n`, { mode: 0o600 });
+  await chmod(path, 0o600);
 }
 
 async function readStdinText(maxBytes: number): Promise<string> {
