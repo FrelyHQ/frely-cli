@@ -39,7 +39,7 @@ import { getKeyBudget, KeyBudgetError, publicKeyBudgetError } from "./key-budget
 import { runNetwork, publicNetworkError } from "./network.js";
 import { runComputerCommand } from "./computer/command.js";
 import { runComputerMcpServer } from "./computer/server.js";
-import { agentManifestUrl, installSkillAdapter, invokeInstalledAgent, publicSkillAccessError, removeSkillAdapter, skillAdapterStatus } from "./skill/access.js";
+import { agentManifestUrl, installSkillAdapter, invokeInstalledAgent, publicSkillAccessError, removeSkillAdapter, resolveAgentTarget, SkillAccessError, skillAdapterStatus } from "./skill/access.js";
 import type { SkillHost, SkillScope } from "./skill/managed.js";
 import { installCloudItem, parseItemRef, trustCloudItem } from "./skill/cloud-item.js";
 import { checkItemUpdates, updateCloudItem } from "./skill/item-update.js";
@@ -51,6 +51,18 @@ import { runUninstall } from "./uninstall.js";
 
 
 const DEFAULT_EMAIL_LOGIN_MCP_DAYS = MCP_DEFAULT_DAYS;
+
+/** Installs a published Agent as a local trigger Skill, from `username/name[@version]` (or the distribution id older scripts use). */
+async function installAgent(target: string, args: string[]): Promise<void> {
+  const host = skillHost(option(args, "--host") ?? "generic");
+  const scope = skillScope(option(args, "--scope") ?? "global");
+  const apiKey = args.includes("--api-key-stdin") ? await readStdinSecret(8192) : undefined;
+  const relayUrl = normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl);
+  const projectDir = option(args, "--dir");
+  const value = await installSkillAdapter({ manifestUrl: agentManifestUrl(target, relayUrl), host, scope, ...(projectDir ? { cwd: resolve(projectDir) } : {}), ...(apiKey ? { apiKey } : {}) });
+  if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
+  else stdout.write(`Agent: ${value.name}\nSkill: ${value.skillPath}\nAuth: ${value.authMode}\nState: ${value.state}\n${value.hostAction ? `Host action: ${value.hostAction}\n` : ""}`);
+}
 
 async function main(): Promise<void> {
   const args = normalizeMcpArgs(applyDataDir(process.argv.slice(2)));
@@ -118,20 +130,14 @@ async function main(): Promise<void> {
     if (action === undefined) { stdout.write(subcommandUsage("agent")); return; }
     if (action === "install") {
       const target = args[2];
-      if (!target || target.startsWith("-")) throw new Error("Usage: frely agent install <distribution-id|manifest-url> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <project>] [--api-key-stdin] [--json]");
-      const host = skillHost(option(args, "--host") ?? "generic");
-      const scope = skillScope(option(args, "--scope") ?? "global");
-      const apiKey = args.includes("--api-key-stdin") ? await readStdinSecret(8192) : undefined;
-      const relayUrl = normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl);
-      const projectDir = option(args, "--dir");
-      const value = await installSkillAdapter({ manifestUrl: agentManifestUrl(target, relayUrl), host, scope, ...(projectDir ? { cwd: resolve(projectDir) } : {}), ...(apiKey ? { apiKey } : {}) });
-      if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
-      else stdout.write(`Agent: ${value.name}\nSkill: ${value.skillPath}\nAuth: ${value.authMode}\nState: ${value.state}\n${value.hostAction ? `Host action: ${value.hostAction}\n` : ""}`);
+      if (!target || target.startsWith("-")) throw new Error("Usage: frely agent install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <project>] [--api-key-stdin] [--json]");
+      await installAgent(target, args);
       return;
     }
     if (action === "run") {
-      const distributionId = args[2];
-      if (!distributionId || distributionId.startsWith("-")) throw new Error("Usage: frely agent run <distribution-id> (--input <text>|--input-stdin) [--json]");
+      const target = args[2];
+      if (!target || target.startsWith("-")) throw new Error("Usage: frely agent run <username/name> (--input <text>|--input-stdin) [--json]");
+      const distributionId = await resolveAgentTarget(target, normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl));
       const task = args.includes("--input-stdin") ? await readStdinText(128 * 1024) : option(args, "--input");
       if (!task) throw new Error("Agent input is required. Use --input or --input-stdin.");
       const value = await invokeInstalledAgent({ distributionId, task });
@@ -147,8 +153,9 @@ async function main(): Promise<void> {
         stdout.write(JSON.stringify({ ok: true, budget }, null, json ? undefined : 2) + "\n");
         return;
       }
-      const distributionId = args[2];
-      if (!distributionId || distributionId.startsWith("-")) throw new KeyBudgetError("input_invalid", "Usage: frely agent status (<distribution-id>|--api-key-stdin [--relay <url>]) [--json]");
+      const target = args[2];
+      if (!target || target.startsWith("-")) throw new KeyBudgetError("input_invalid", "Usage: frely agent status (<username/name>|--api-key-stdin [--relay <url>]) [--json]");
+      const distributionId = await resolveAgentTarget(target, normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl));
       const status = await skillAdapterStatus(distributionId);
       let budget: Record<string, unknown> | undefined;
       if (status.installed && status.authMode === "api-key") {
@@ -161,8 +168,9 @@ async function main(): Promise<void> {
       return;
     }
     if (action === "remove") {
-      const distributionId = args[2];
-      if (!distributionId || distributionId.startsWith("-")) throw new Error("Usage: frely agent remove <distribution-id> [--json]");
+      const target = args[2];
+      if (!target || target.startsWith("-")) throw new Error("Usage: frely agent remove <username/name> [--json]");
+      const distributionId = await resolveAgentTarget(target, normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl));
       const value = await removeSkillAdapter(distributionId);
       if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
       else stdout.write(value.removed ? "Agent removed.\n" : "Agent was not installed.\n");
@@ -221,7 +229,13 @@ async function main(): Promise<void> {
     }
     if (args[1] !== "install") { stdout.write(subcommandUsage("item")); return; }
     const itemRef = args[2];
-    if (!itemRef || itemRef.startsWith("-")) throw new Error("Usage: frely item install <username/skill-name[@version]> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--json]");
+    if (!itemRef || itemRef.startsWith("-")) throw new Error("Usage: frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--json]");
+    // Skills, Prompts and Agents are named alike. An Agent's manifest is public, so it is asked first; a name no Agent has is a Skill or Prompt.
+    if (/^creator_distribution_/u.test(itemRef) || args.includes("--api-key-stdin")) { await installAgent(itemRef, args); return; }
+    if (!(/^cloud_skill_|^skill_/u.test(itemRef))) {
+      const installed = await installAgent(itemRef, args).then(() => true, (error: unknown) => { if (error instanceof SkillAccessError && error.code === "agent_not_found") return false; throw error; });
+      if (installed) return;
+    }
     const host = skillHost(option(args, "--host") ?? "generic");
     const scope = skillScope(option(args, "--scope") ?? "global");
     const dir = option(args, "--dir");

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, rename, rmdir, unlink } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, rename, rmdir, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -14,6 +14,8 @@ export interface ManagedSkillRecord {
   readonly modelId: string;
   readonly mcpUrl: string;
   readonly name: string;
+  /** `username/name` at install time; absent in records written before names existed. */
+  readonly installName?: string;
   readonly slug: string;
   readonly host: SkillHost;
   readonly scope: SkillScope;
@@ -81,6 +83,17 @@ export async function readManagedSkill(distributionId: string, home = homedir())
     throw new ManagedSkillError("local_state_invalid", "Installed Frely Skill metadata is invalid.");
   }
   return Object.freeze({ ...item, authMode }) as unknown as ManagedSkillRecord;
+}
+
+/** The installed Agent whose install name is `installName`, or null; records written before names existed never match. */
+export async function findManagedSkillByInstallName(installName: string, home = homedir()): Promise<ManagedSkillRecord | null> {
+  const names = await readdir(join(home, ".config", "frely", "skills")).catch((error: unknown) => { if (isAbsent(error)) return []; throw error; });
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    const record = await readManagedSkill(name.slice(0, -".json".length), home).catch(() => null);
+    if (record?.installName === installName) return record;
+  }
+  return null;
 }
 
 export async function managedSkillState(record: ManagedSkillRecord): Promise<"managed" | "modified" | "missing"> {
