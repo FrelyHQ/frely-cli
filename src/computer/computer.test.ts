@@ -258,3 +258,19 @@ test("runtime install refuses a wrong checksum, a failed download and unsupporte
     await assert.rejects(installOcuRuntime({ url: "http://example.invalid/pkg.tgz", platform: "linux", arch: "x64", binaryPath }), (error: unknown) => error instanceof OcuRuntimeError && error.code === "download_failed");
   } finally { await rm(home, { recursive: true, force: true }); await rm(fixture.root, { recursive: true, force: true }); }
 });
+
+test("a missing-permission error is rewritten and starts doctor once per interval", async () => {
+  const backend: OcuBackend = {
+    listTools: async () => [],
+    callTool: async () => ({ isError: true, content: [{ type: "text", text: "Accessibility permission is required. Run `open-computer-use doctor`." }] }),
+    close: async () => undefined,
+  };
+  let doctorRuns = 0;
+  const toolset = new ComputerToolset({ backend, isLocallyEnabled: async () => true, audit: async () => undefined, runDoctor: async () => { doctorRuns += 1; } });
+  const first = await toolset.call("click", { app: "Safari", x: 1, y: 1 });
+  await toolset.call("click", { app: "Safari", x: 1, y: 1 });
+  assert.equal(first.isError, true);
+  assert.match(first.content[0]!.text!, /frely computer doctor/);
+  assert.doesNotMatch(first.content[0]!.text!, /open-computer-use doctor/);
+  assert.equal(doctorRuns, 1);
+});

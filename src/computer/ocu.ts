@@ -1,8 +1,12 @@
+import { execFile as execFileCallback } from "node:child_process";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { promisify } from "node:util";
 import { computerDir } from "./state.js";
+
+const execFile = promisify(execFileCallback);
 
 /** Pinned open-computer-use release the CLI is built and tested against (plan computer-use D1/D7). */
 export const OCU_VERSION = "0.3.6";
@@ -80,4 +84,19 @@ export class StdioOcuBackend implements OcuBackend {
     const client = this.client; this.client = undefined;
     await client?.close().catch(() => undefined);
   }
+}
+
+/** What open-computer-use prints when the OS has not yet granted it Accessibility or Screen Recording. */
+export function needsPermissionText(text: string): boolean {
+  return /permission is required|open-computer-use doctor/iu.test(text);
+}
+
+/**
+ * Runs `open-computer-use doctor`, which shows the OS permission prompts and walks the user through granting them.
+ * The binary lives under the Frely data directory, not on PATH, so the bare command is never available to the user.
+ */
+export async function runOcuDoctor(binary: string = ocuBinaryPath()): Promise<string> {
+  await access(binary).catch(() => { throw new OcuNotInstalledError(binary); });
+  const { stdout, stderr } = await execFile(binary, ["doctor"], { timeout: 120_000, windowsHide: false }).catch((error: { stdout?: string; stderr?: string; message?: string }) => ({ stdout: error.stdout ?? "", stderr: error.stderr ?? error.message ?? "doctor failed" }));
+  return `${stdout}${stderr}`.trim();
 }
