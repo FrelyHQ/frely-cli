@@ -7,7 +7,29 @@ import { assertManagedSkillPath, managedSkillRoot, type SkillHost, type SkillSco
 import { loadOrCreateDeviceSealKey, parseLease, stubFor, type SealedLease } from "./sealed.js";
 import { filesDigest, readInstall, untouched, writeInstall, type InstallRecord } from "./registry.js";
 
-export const CLOUD_SKILL_ID = /^cloud_skill_[0-9a-f]{24}$/u;
+/** New ids are `skill_<24 hex>`; `cloud_skill_…` ids from before the prefix was shortened still work. */
+export const CLOUD_SKILL_ID = /^(?:cloud_)?skill_[0-9a-f]{24}$/u;
+const ITEM_NAME = /^([A-Za-z0-9][A-Za-z0-9-]{0,63})\/([A-Za-z0-9][A-Za-z0-9-]{0,63})(?:@([1-9][0-9]{0,8}))?$/u;
+
+/** What the user typed after `frely item install`: `username/skill-name[@version]`, or an item id (older scripts) with an optional `@version`. */
+export type ItemRef = { readonly name: string; readonly version?: number } | { readonly skillId: string; readonly version?: number };
+
+export function parseItemRef(value: string): ItemRef {
+  const at = value.lastIndexOf("@");
+  const id = at > 0 && !value.includes("/") ? value.slice(0, at) : value;
+  if (CLOUD_SKILL_ID.test(id)) {
+    const version = id === value ? undefined : parseVersion(value.slice(at + 1));
+    return { skillId: id, ...(version === undefined ? {} : { version }) };
+  }
+  const match = ITEM_NAME.exec(value);
+  if (match === null) throw new CloudItemError("input_invalid", "Use the name shown in the marketplace, for example username/skill-name, or username/skill-name@3 for an earlier version.");
+  return { name: `${match[1]}/${match[2]}`, ...(match[3] === undefined ? {} : { version: Number(match[3]) }) };
+}
+
+function parseVersion(text: string): number {
+  if (!/^[1-9][0-9]{0,8}$/u.test(text)) throw new CloudItemError("input_invalid", "The version after @ must be a positive number.");
+  return Number(text);
+}
 const MAX_FILES = 512;
 const MAX_TOTAL_BYTES = 8 * 1024 * 1024;
 
@@ -56,24 +78,33 @@ export interface CloudItemInstallResult {
  * create, or one edited since install, is never overwritten.
  */
 export async function installCloudItem(input: {
-  readonly skillId: string;
+  /** An item id (older scripts) or, instead, `name` as `username/skill-name`; `version` pins an earlier version. */
+  readonly skillId?: string;
+  readonly name?: string;
+  readonly version?: number;
   readonly call: CloudToolCaller;
   readonly host?: SkillHost;
   readonly scope?: SkillScope;
   readonly dir?: string;
+  /** Install into exactly this folder (an update of a folder Frely already wrote), instead of the one `host`, `scope` and `dir` give. */
+  readonly target?: string;
   readonly cwd?: string;
   readonly home?: string;
   readonly env?: NodeJS.ProcessEnv;
 }): Promise<CloudItemInstallResult> {
-  if (!CLOUD_SKILL_ID.test(input.skillId)) throw new CloudItemError("input_invalid", "Use the item id shown in the marketplace, for example cloud_skill_0123456789abcdef01234567.");
-  const free = parseContent(await input.call("skills.install", { skillId: input.skillId, part: "free" }), input.skillId);
+  if ((input.skillId === undefined) === (input.name === undefined)) throw new CloudItemError("input_invalid", "Give the item as username/skill-name.");
+  if (input.skillId !== undefined && !CLOUD_SKILL_ID.test(input.skillId)) throw new CloudItemError("input_invalid", "Use the name shown in the marketplace, for example username/skill-name.");
+  const pin = input.version === undefined ? {} : { version: input.version };
+  const free = parseContent(await input.call("skills.install", { ...(input.skillId !== undefined ? { skillId: input.skillId } : { name: input.name }), ...pin, part: "free" }), input.skillId ?? null);
+  // Everything after the first call names the item by the id Frely resolved, so a rename cannot make the parts disagree.
+  const skillId = free.manifest.id;
   let files = free.files;
   let lease: SealedLease | null = null;
   let premium: CloudItemInstallResult["premium"] = "none";
   if (free.manifest.premiumFileCount > 0) {
     try {
       const device = await loadOrCreateDeviceSealKey(input.env, input.home);
-      const paid = parseContent(await input.call("skills.install", { skillId: input.skillId, part: "premium", sealTo: device.publicKey }), input.skillId);
+      const paid = parseContent(await input.call("skills.install", { skillId, ...pin, part: "premium", sealTo: device.publicKey }), skillId);
       files = [...files, ...paid.files];
       lease = paid.lease;
       premium = "installed";
@@ -86,11 +117,11 @@ export async function installCloudItem(input: {
   const cwd = input.cwd ?? process.cwd();
   const home = input.home ?? homedir();
   // An item keeps the name its creator gave it, exactly like a Skill copied there by hand.
-  const target = manifest.kind === "skill"
+  const target = input.target !== undefined ? resolve(input.target) : manifest.kind === "skill"
     ? join(managedSkillRoot(input.host ?? "generic", input.scope ?? "global", resolve(cwd, input.scope === "project" ? input.dir ?? "." : "."), home), manifest.slug)
     : join(resolve(cwd, input.dir ?? "."), manifest.slug);
   const placed = placeSealedScripts(files);
-  const written = await writeItemFolder(target, manifest.id, manifest.kind, placed.files, home);
+  const written = await writeItemFolder(target, manifest.id, manifest.kind, placed.files, home, manifest.version);
   if (lease !== null && placed.sealed > 0) await writeLease(target, { skillId: manifest.id, version: manifest.version, lease });
   // A passing scan is bound to this version's files on the server, so the local review is already done.
   const scanned = manifest.kind === "skill" && manifest.scanned;
@@ -137,10 +168,10 @@ export async function trustCloudItem(folder: string, options: { readonly check?:
   return { trusted: true };
 }
 
-function parseContent(value: Record<string, unknown>, skillId: string): { manifest: ItemManifest; files: ItemFile[]; lease: SealedLease | null } {
+function parseContent(value: Record<string, unknown>, skillId: string | null): { manifest: ItemManifest; files: ItemFile[]; lease: SealedLease | null } {
   const manifest = record(value.manifest);
   const premium = record(manifest?.premium);
-  if (!manifest || manifest.id !== skillId || (manifest.kind !== "prompt" && manifest.kind !== "skill")
+  if (!manifest || typeof manifest.id !== "string" || !CLOUD_SKILL_ID.test(manifest.id) || (skillId !== null && manifest.id !== skillId) || (manifest.kind !== "prompt" && manifest.kind !== "skill")
     || typeof manifest.slug !== "string" || !/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/u.test(manifest.slug)
     || typeof manifest.displayName !== "string" || !Number.isSafeInteger(manifest.version) || !Array.isArray(value.files) || value.files.length > MAX_FILES) {
     throw new CloudItemError("item_invalid", "Frely returned an invalid item.");
@@ -161,7 +192,7 @@ function parseContent(value: Record<string, unknown>, skillId: string): { manife
   if (total > MAX_TOTAL_BYTES) throw new CloudItemError("item_invalid", "The item is too large.");
   return {
     manifest: {
-      id: skillId, kind: manifest.kind, slug: manifest.slug, displayName: manifest.displayName, version: manifest.version as number,
+      id: manifest.id, kind: manifest.kind, slug: manifest.slug, displayName: manifest.displayName, version: manifest.version as number,
       hasScripts: manifest.hasScripts === true, premiumFileCount: typeof premium?.fileCount === "number" ? premium.fileCount : 0, scanned,
     },
     files,
@@ -183,7 +214,7 @@ function safeRelativePath(path: string): string {
  * exists is replaced only when Frely wrote it for this same item and nothing in
  * it was edited since.
  */
-export async function writeItemFolder(target: string, itemId: string, kind: InstallRecord["kind"], files: readonly ItemFile[], home: string): Promise<InstallRecord> {
+export async function writeItemFolder(target: string, itemId: string, kind: InstallRecord["kind"], files: readonly ItemFile[], home: string, itemVersion?: number): Promise<InstallRecord> {
   await assertManagedSkillPath(join(target, "SKILL.md"));
   const exists = await lstat(target).then(() => true, (error: unknown) => { if (isAbsent(error)) return false; throw error; });
   if (exists) {
@@ -202,7 +233,7 @@ export async function writeItemFolder(target: string, itemId: string, kind: Inst
     await atomicWrite(join(target, file.path), content);
     written[file.path] = hash(content);
   }
-  const record: InstallRecord = { version: 1, kind, itemId, path: resolve(target), files: written };
+  const record: InstallRecord = { version: 1, kind, itemId, ...(itemVersion === undefined ? {} : { itemVersion }), path: resolve(target), files: written };
   await writeInstall(record, home);
   return record;
 }
@@ -222,3 +253,8 @@ async function atomicWrite(path: string, value: Buffer): Promise<void> {
 function hash(value: Buffer): string { return createHash("sha256").update(value).digest("hex"); }
 function record(value: unknown): Record<string, unknown> | null { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null; }
 function isAbsent(error: unknown): boolean { return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT"; }
+
+/** The version of an item Frely serves now, as the account sees it. */
+export async function latestItemVersion(call: CloudToolCaller, skillId: string): Promise<number> {
+  return parseContent(await call("skills.install", { skillId, part: "free" }), skillId).manifest.version;
+}

@@ -41,7 +41,8 @@ import { runComputerCommand } from "./computer/command.js";
 import { runComputerMcpServer } from "./computer/server.js";
 import { agentManifestUrl, installSkillAdapter, invokeInstalledAgent, publicSkillAccessError, removeSkillAdapter, skillAdapterStatus } from "./skill/access.js";
 import type { SkillHost, SkillScope } from "./skill/managed.js";
-import { installCloudItem, trustCloudItem } from "./skill/cloud-item.js";
+import { installCloudItem, parseItemRef, trustCloudItem } from "./skill/cloud-item.js";
+import { checkItemUpdates, updateCloudItem } from "./skill/item-update.js";
 import { runSealedScript } from "./skill/sealed-run.js";
 import { installEntrySkill } from "./skill/entry.js";
 import { callCloudTool } from "./cloud.js";
@@ -197,13 +198,34 @@ async function main(): Promise<void> {
       process.exitCode = await runSealedScript({ target, args: args.slice(3), call: callCloudTool });
       return;
     }
+    if (args[1] === "update") {
+      const folder = args[2] && !args[2].startsWith("-") ? args[2] : undefined;
+      if (folder === undefined) {
+        const statuses = await checkItemUpdates({ call: callCloudTool });
+        if (args.includes("--json")) { stdout.write(`${JSON.stringify(statuses)}\n`); return; }
+        if (statuses.length === 0) { stdout.write("No marketplace items installed.\n"); return; }
+        for (const status of statuses) {
+          const line = status.state === "available" ? `v${status.installed} installed, v${status.latest} available. To update: frely item update ${status.path}`
+            : status.state === "unknown" ? `installed version unknown, v${status.latest} is current. To refresh: frely item update ${status.path}` : `up to date (v${status.latest})`;
+          stdout.write(`${status.path}: ${line}\n`);
+        }
+        return;
+      }
+      const value = await updateCloudItem({ folder, call: callCloudTool });
+      if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
+      stdout.write(`${value.kind === "prompt" ? "Prompt" : "Skill"}: ${value.name} (v${value.version})\nPath: ${value.path}\nFiles: ${value.files}\n`);
+      if (value.premium === "pass_required") stdout.write("Paid part: not updated. Your pass has ended; buy a new one, then run this command again.\n");
+      if (value.needsReview) stdout.write(`Frely has not scanned this version. Read every file in it, including scripts, before you use it. If it is safe, run: frely item trust ${value.path}\n`);
+      if (value.kind === "skill") stdout.write("Restart or reload the agent session so it rescans Skills.\n");
+      return;
+    }
     if (args[1] !== "install") { stdout.write(subcommandUsage("item")); return; }
-    const skillId = args[2];
-    if (!skillId || skillId.startsWith("-")) throw new Error("Usage: frely item install <item-id> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--json]");
+    const itemRef = args[2];
+    if (!itemRef || itemRef.startsWith("-")) throw new Error("Usage: frely item install <username/skill-name[@version]> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--json]");
     const host = skillHost(option(args, "--host") ?? "generic");
     const scope = skillScope(option(args, "--scope") ?? "global");
     const dir = option(args, "--dir");
-    const value = await installCloudItem({ skillId, call: callCloudTool, host, scope, ...(dir ? { dir } : {}) });
+    const value = await installCloudItem({ ...parseItemRef(itemRef), call: callCloudTool, host, scope, ...(dir ? { dir } : {}) });
     if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
     stdout.write(`${value.kind === "prompt" ? "Prompt" : "Skill"}: ${value.name} (v${value.version})\nPath: ${value.path}\nFiles: ${value.files}\n`);
     if (value.premium === "installed") stdout.write("Paid part: installed\n");

@@ -23,7 +23,7 @@ Run \`frely doctor --json\` to see whether the CLI is signed in. If not, ask the
 
 - Account operations (API keys, Credit, plans, orders, Creator items): \`frely api list\`, \`frely api describe <tool>\`, \`frely api call <tool> --json '{...}'\`. The first call needs a browser authorization the user completes; if it fails because there is no terminal, tell the user to run the command once themselves.
 - Ask the user before any call that spends Credit, buys something or changes credentials. Some actions also need a one-time approval on the Frely website; give the user the link from the error.
-- Install a marketplace Skill or Prompt: \`frely item install <item-id> --host <your host>\`; add \`--scope project --dir <project>\` to install it for one project instead of globally. Install a published Agent: \`frely agent install <id> --host <your host>\`, then \`frely agent run\`. If the install output says Frely has not scanned a Skill, read every file in it before you use it, and tell the user if anything looks unsafe.
+- Install a marketplace Skill or Prompt: \`frely item install <username/skill-name> --host <your host>\`; add \`--scope project --dir <project>\` to install it for one project instead of globally. Install a published Agent: \`frely agent install <id> --host <your host>\`, then \`frely agent run\`. If the install output says Frely has not scanned a Skill, read every file in it before you use it, and tell the user if anything looks unsafe.
 
 ## What needs FrelyMCP
 

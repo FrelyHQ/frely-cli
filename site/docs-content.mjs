@@ -121,7 +121,7 @@ export const entries = [
     category: 'Account and API',
     question: 'How do I install a Frely Agent, Prompt or Skill?',
     answer:
-      'Agent: frely agent install <distribution-id> --host claude-code --scope global (hosts: chatgpt, codex, claude-code, pi, generic). Run it with: printf \'%s\' \'Your task\' | frely agent run <distribution-id> --input-stdin --json. Marketplace items: frely item install <item-id> --host claude-code. Find the id on the creator profile page (frely.cloud/@<username>) or in the share link the creator sent you; creator items are not listed in the public Store, which shows only products Frely picks. The first call opens a browser for authorization, and a paid part installs only if your account holds a pass; otherwise the command says how to buy one. Frely never overwrites a folder it did not install or a file you edited.',
+      'Agent: frely agent install <distribution-id> --host claude-code --scope global (hosts: chatgpt, codex, claude-code, pi, generic). Run it with: printf \'%s\' \'Your task\' | frely agent run <distribution-id> --input-stdin --json. Marketplace items: frely item install <username/skill-name> --host claude-code. Find the name on the creator profile page (frely.cloud/@<username>) or in the share link the creator sent you; creator items are not listed in the public Store, which shows only products Frely picks. The first call opens a browser for authorization, and a paid part installs only if your account holds a pass; otherwise the command says how to buy one. Frely never overwrites a folder it did not install or a file you edited.',
     links: [app, readme],
   },
   {
@@ -193,7 +193,7 @@ export const entries = [
     category: 'Maintenance',
     question: 'Which commands does the CLI have?',
     answer:
-      'Main ones: frely mcp start|status|stop|remove, frely mcp workspace list|add|remove, frely mcp local list|add|remove, frely doctor, frely update, frely login, frely logout, frely uninstall, frely agent install|run|status|remove, frely item install|trust, frely provider share|list and frely api list|describe|call. Run any command group without a subcommand (for example `frely mcp`) to see what it offers; `frely help --agent --json` prints the full machine-readable contract.',
+      'Main ones: frely mcp start|status|stop|remove, frely mcp workspace list|add|remove, frely mcp local list|add|remove, frely doctor, frely update, frely login, frely logout, frely uninstall, frely agent install|run|status|remove, frely item install|update|trust, frely provider share|list and frely api list|describe|call. Run any command group without a subcommand (for example `frely mcp`) to see what it offers; `frely help --agent --json` prints the full machine-readable contract.',
     links: [readme],
   },
 ];
