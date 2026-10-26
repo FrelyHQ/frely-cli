@@ -106,6 +106,11 @@ try {
   if (($env:PATH -split ';') -notcontains $directory) { $env:PATH = "$directory;$env:PATH" }
   $installedVersion = & $target --version
   Write-Output "Installed Frely $installedVersion at $target"
-  if ($pathPersisted -and $env:FRELY_INSTALL_NO_PROFILE -ne '1') { Write-Output "If 'frely' is not found in a terminal that was already open, open a new terminal window (an open terminal keeps its old PATH)." }
+  if ($env:FRELY_INSTALL_NO_PROFILE -ne '1') {
+    # A terminal that was already open keeps its old PATH: give the user both ways out.
+    Write-Output "To use 'frely' now, open a new terminal window, or run this in the current one:"
+    Write-Output "  `$env:PATH = `"$directory;`$env:PATH`""
+    if (-not $pathPersisted) { Write-Output "(The user PATH was not updated, so new terminals will need the full path $target, or add $directory to PATH manually.)" }
+  }
   Write-Output 'Basic commands require no keyring setup. MCP authorization begins with frely mcp start.'
 } finally { Remove-Item -LiteralPath $stage -Recurse -Force }
