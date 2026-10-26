@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { applyDataDir, activeDataDir } from "./data-dir.js";
 import { update } from "./update/update.js";
-import { requireMcpAuthorization, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, generateMcpKey, parseMcpDays, MCP_DEFAULT_DAYS } from "./mcp-authorization.js";
+import { requireMcpAuthorization, inspectMcpMetadata, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, generateMcpKey, parseMcpDays, MCP_DEFAULT_DAYS } from "./mcp-authorization.js";
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { sshProxyConnect } from "./runtime/ssh-proxy.js";
@@ -439,7 +439,9 @@ async function main(): Promise<void> {
     if (serviceCredentialStore) process.env.FRELY_CREDENTIAL_STORE = serviceCredentialStore;
     await requireLogin();
     const providerOnly = args.includes("--provider-only");
-    const workspace = providerOnly ? undefined : resolve(option(args, "--workspace") || process.cwd());
+    // Without --workspace (a service re-registered by hand, Windows after a reboot) use the workspace the device MCP grant is bound to; a different directory never matches the grant and would leave remote execution disabled.
+    const grantWorkspace = providerOnly || option(args, "--workspace") ? undefined : (await inspectMcpMetadata().catch(() => null))?.grant.workspace;
+    const workspace = providerOnly ? undefined : resolve(option(args, "--workspace") || grantWorkspace || process.cwd());
     const nodeLog = (message: string) => process.stderr.write(`${message}\n`);
     const controller = new AbortController();
     const stop = () => controller.abort();
