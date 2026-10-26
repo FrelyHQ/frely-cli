@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { CredentialStore } from "../credential-store.js";
-import { installSkillAdapter, invokeInstalledAgent, removeSkillAdapter, skillAdapterStatus } from "./access.js";
+import { agentManifestUrl, installSkillAdapter, invokeInstalledAgent, removeSkillAdapter, resolveAgentTarget, skillAdapterStatus } from "./access.js";
 import { LOGIN_REFRESH_UNAVAILABLE, loginDevice } from "../auth.js";
 import { basicCredentialStore } from "../credential-basic.js";
 import { useMemoryCredentialStore } from "../test-support.js";
@@ -258,4 +258,31 @@ test("account-mode invocation tells a refresh outage apart from a missing login"
     assert.equal((error as { code?: string }).code, "remote_call_failed");
     return true;
   });
+});
+
+test("an Agent is installed and found by username/name, and an id keeps working", async () => {
+  const root = await tempRoot();
+  try {
+    assert.equal(agentManifestUrl("ada/tripready", "https://app.frely.cloud"), "https://app.frely.cloud/api/public/virtual-models/ada%2Ftripready");
+    assert.equal(agentManifestUrl("ada/tripready@2", "https://app.frely.cloud"), "https://app.frely.cloud/api/public/virtual-models/ada%2Ftripready%402");
+    assert.equal(agentManifestUrl(distributionId, "https://app.frely.cloud"), manifestUrl);
+    assert.throws(() => agentManifestUrl("https://example.com/manifest.json", "https://app.frely.cloud"), /Use the Agent's name/u);
+
+    const named = { ...manifest(), installName: "ada/tripready", urls: { ...manifest().urls, manifest: "https://app.frely.cloud/api/public/virtual-models/ada%2Ftripready" } };
+    await installSkillAdapter({ manifestUrl: agentManifestUrl("ada/tripready", "https://app.frely.cloud"), host: "pi", scope: "global", home: root, fetchFn: fetchManifest(named) });
+    const never = (async () => { throw new Error("must not fetch"); }) as unknown as typeof fetch;
+    assert.equal(await resolveAgentTarget("ada/tripready", "https://app.frely.cloud", root, never), distributionId);
+    assert.equal(await resolveAgentTarget("ada/tripready@2", "https://app.frely.cloud", root, never), distributionId);
+    assert.equal(await resolveAgentTarget(distributionId, "https://app.frely.cloud", root, never), distributionId);
+    // A name never installed here is asked of the server.
+    assert.equal(await resolveAgentTarget("bob/other", "https://app.frely.cloud", root, fetchManifest()), distributionId);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a name no Agent has is reported as not found", async () => {
+  const missing = (async () => new Response("{}", { status: 404 })) as unknown as typeof fetch;
+  await assert.rejects(
+    installSkillAdapter({ manifestUrl: agentManifestUrl("ada/nothing", "https://app.frely.cloud"), host: "pi", scope: "global", fetchFn: missing }),
+    (error: unknown) => (error as { code?: string }).code === "agent_not_found",
+  );
 });

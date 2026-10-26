@@ -90,8 +90,8 @@ To check the connection, ask the client to list the top-level names in your work
 
 ## More features
 
-- **Frely-hosted Agents**: `frely agent install <distribution-id> --host claude-code` installs an Agent as a local Skill; `frely agent run` calls it. [More](https://cli.frely.cloud/docs/help/install-agents-and-items/)
-- **Marketplace Prompts and Skills**: `frely item install <username/skill-name> --host claude-code`. Paid parts install only when your account holds a pass. `frely item update` lists installed items that have a newer version; it changes nothing until you run `frely item update <folder>`. [More](https://cli.frely.cloud/docs/help/install-agents-and-items/)
+- **Frely-hosted Agents**: `frely item install <username/name> --host claude-code` installs an Agent as a local Skill; `frely agent run <username/name>` calls it. [More](https://cli.frely.cloud/docs/help/install-agents-and-items/)
+- **Marketplace Prompts and Skills**: `frely item install <username/name> --host claude-code` (the same command installs Agents too; add `@3` for version 3). Paid parts install only when your account holds a pass. `frely item update` lists installed items that have a newer version; it changes nothing until you run `frely item update <folder>`. [More](https://cli.frely.cloud/docs/help/install-agents-and-items/)
 - **Local model sharing**: `frely provider share ollama` publishes a loopback model server as your personal Frely Provider. [More](https://cli.frely.cloud/docs/help/share-local-model/)
 - **Your account from the terminal**: `frely api list|describe|call`. [More](https://cli.frely.cloud/docs/help/manage-account-from-cli/)
 

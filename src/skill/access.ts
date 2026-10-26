@@ -4,6 +4,7 @@ import { LOGIN_REFRESH_UNAVAILABLE, requireLogin } from "../auth.js";
 import { credentialStore as secureCredentialStore, type CredentialStore } from "../credential-store.js";
 import { remoteAgentMcpInvoker, SkillInvocationError, type RemoteAgentMcpInvoker } from "./router.js";
 import {
+  findManagedSkillByInstallName,
   ManagedSkillError,
   managedSkillRoot,
   managedSkillState,
@@ -31,6 +32,7 @@ interface PublicCapability {
 interface PublicVirtualModelManifest {
   readonly schemaVersion: typeof MANIFEST_SCHEMA;
   readonly id: string;
+  readonly installName?: string;
   readonly modelId: string;
   readonly version: string;
   readonly name: string;
@@ -44,7 +46,7 @@ interface PublicVirtualModelManifest {
 }
 export class SkillAccessError extends Error {
   constructor(
-    readonly code: "invalid_manifest_url" | "manifest_fetch_failed" | "manifest_invalid" | "target_not_installed" | "auth_required" | "remote_authorization_failed" | "entitlement_required" | "remote_call_failed" | "input_invalid" | "host_unsupported" | "credential_store_failed",
+    readonly code: "invalid_manifest_url" | "agent_not_found" | "manifest_fetch_failed" | "manifest_invalid" | "target_not_installed" | "auth_required" | "remote_authorization_failed" | "entitlement_required" | "remote_call_failed" | "input_invalid" | "host_unsupported" | "credential_store_failed",
     message: string,
   ) {
     super(message);
@@ -52,9 +54,23 @@ export class SkillAccessError extends Error {
   }
 }
 
-/** `frely agent install` accepts a distribution id and resolves its public manifest on the account's Frely origin. */
+/** An Agent is named like every product: `username/name`, optionally `@<version>`. */
+const AGENT_NAME = /^([^/@\s]{1,64})\/([^/@\s]{1,64})(?:@([1-9][0-9]{0,8}))?$/u;
+
+/** `frely agent install` takes `username/name[@version]` (or the distribution id older scripts use) and reads its public manifest on the account's Frely origin. */
 export function agentManifestUrl(target: string, relayUrl: string): string {
-  return DISTRIBUTION_ID.test(target) ? `${relayUrl}/api/public/virtual-models/${target}` : target;
+  if (!DISTRIBUTION_ID.test(target) && !AGENT_NAME.test(target)) throw new SkillAccessError("input_invalid", "Use the Agent's name, for example username/name, or username/name@3 for a version.");
+  return `${relayUrl}/api/public/virtual-models/${encodeURIComponent(target)}`;
+}
+
+/** An installed Agent's distribution id from the id or `username/name` a user typed; a version written after the name is ignored. */
+export async function resolveAgentTarget(target: string, relayUrl: string, home = homedir(), fetchFn: typeof fetch = fetch): Promise<string> {
+  if (DISTRIBUTION_ID.test(target)) return target;
+  const match = AGENT_NAME.exec(target);
+  if (match === null) throw new SkillAccessError("input_invalid", "Use the Agent's name, for example username/name.");
+  const installed = await findManagedSkillByInstallName(`${match[1]}/${match[2]}`, home);
+  if (installed) return installed.distributionId;
+  return (await fetchManifest(agentManifestUrl(`${match[1]}/${match[2]}`, relayUrl), fetchFn)).id;
 }
 
 export async function installSkillAdapter(input: {
@@ -83,6 +99,7 @@ export async function installSkillAdapter(input: {
     modelId: manifest.modelId,
     mcpUrl: manifest.urls.mcp,
     name: manifest.name,
+    ...(manifest.installName === undefined ? {} : { installName: manifest.installName }),
     slug,
     host: input.host,
     scope: input.scope,
@@ -175,7 +192,7 @@ export async function invokeInstalledAgent(input: {
   if (record.authMode === "api-key") {
     const store = input.credentialStore ?? secureCredentialStore;
     token = await store.getPassword(SKILL_API_KEY_SERVICE, record.distributionId).catch(() => null) ?? "";
-    if (!token) throw new SkillAccessError("auth_required", "The model-scoped API key is unavailable. Reinstall with frely agent install <distribution-id> --api-key-stdin.");
+    if (!token) throw new SkillAccessError("auth_required", "The model-scoped API key is unavailable. Reinstall with frely item install <username/name> --api-key-stdin.");
   } else {
     const login = await requireLogin().catch((error: unknown) => {
       // A refresh outage is not a missing login: tell the caller to retry instead of asking for `frely login`.
@@ -197,7 +214,7 @@ export async function invokeInstalledAgent(input: {
     return Object.freeze({ ok: true, distributionId: record.distributionId, modelId: record.modelId, text: result.text, ...(result.usage ? { usage: result.usage } : {}) });
   } catch (error) {
     if (error instanceof SkillInvocationError && error.code === "entitlement_required") throw new SkillAccessError("entitlement_required", "This Frely Agent is not available to the configured credential.");
-    if (error instanceof SkillInvocationError && error.code === "remote_authorization_failed") throw new SkillAccessError("remote_authorization_failed", record.authMode === "api-key" ? "The model-scoped API key was rejected. Reinstall with frely agent install <distribution-id> --api-key-stdin." : "Frely authorization failed. Run `frely login` again.");
+    if (error instanceof SkillInvocationError && error.code === "remote_authorization_failed") throw new SkillAccessError("remote_authorization_failed", record.authMode === "api-key" ? "The model-scoped API key was rejected. Reinstall with frely item install <username/name> --api-key-stdin." : "Frely authorization failed. Run `frely login` again.");
     throw new SkillAccessError("remote_call_failed", "The remote Frely Agent call failed.");
   }
 }
@@ -255,6 +272,7 @@ async function fetchManifest(value: string, fetchFn: typeof fetch): Promise<Publ
   } catch {
     throw new SkillAccessError("manifest_fetch_failed", "Unable to fetch the Frely manifest.");
   }
+  if (response.status === 404) throw new SkillAccessError("agent_not_found", "No Agent has this name.");
   if (!response.ok) throw new SkillAccessError("manifest_fetch_failed", `Frely manifest request failed with HTTP ${response.status}.`);
   const text = await response.text();
   if (Buffer.byteLength(text, "utf8") > MAX_MANIFEST_BYTES) throw new SkillAccessError("manifest_invalid", "Frely manifest is too large.");
@@ -271,7 +289,8 @@ function parseManifest(value: unknown, sourceUrl: URL): PublicVirtualModelManife
     throw new SkillAccessError("manifest_invalid", "Frely manifest shape is invalid.");
   }
   const canonical = normalizedFrelyUrl(urls.manifest, "manifest_invalid");
-  if (canonical.toString() !== sourceUrl.toString()) throw new SkillAccessError("manifest_invalid", "Frely manifest canonical URL does not match the requested URL.");
+  // The manifest answers under its install name however it was asked for (id, name or a former username), so only the origin is compared.
+  if (canonical.origin !== sourceUrl.origin || !canonical.pathname.startsWith("/api/public/virtual-models/")) throw new SkillAccessError("manifest_invalid", "Frely manifest canonical URL does not match the requested URL.");
   const mcp = normalizedFrelyUrl(urls.mcp, "manifest_invalid");
   const expectedMcpPath = `/mcp/${encodeURIComponent(root.modelId)}`;
   if (mcp.pathname !== expectedMcpPath || mcp.search) throw new SkillAccessError("manifest_invalid", "Frely MCP URL does not match the published model identity.");
@@ -282,6 +301,7 @@ function parseManifest(value: unknown, sourceUrl: URL): PublicVirtualModelManife
     modelId: root.modelId,
     version: root.version,
     name: root.name,
+    ...(typeof root.installName === "string" && AGENT_NAME.test(root.installName) ? { installName: root.installName } : {}),
     description: root.description as string | null,
     capabilities,
     ...(root.clientTrigger === undefined ? {} : { clientTrigger: parseClientTrigger(root.clientTrigger) }),
