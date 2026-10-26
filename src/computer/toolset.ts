@@ -1,6 +1,6 @@
 import { assertAppAllowed, ComputerBlockedError, normalizeApp, redactBlockedAppLines } from "./guard.js";
 import { downscalePng, pngSize } from "./image.js";
-import type { OcuBackend, OcuContent, OcuResult, OcuTool } from "./ocu.js";
+import { needsPermissionText, type OcuBackend, type OcuContent, type OcuResult, type OcuTool } from "./ocu.js";
 import { appendComputerAudit, type ComputerAuditEntry } from "./state.js";
 
 /** Only these open-computer-use tools are ever exposed; a future upstream tool stays hidden until reviewed. */
@@ -14,7 +14,12 @@ export interface ComputerToolsetOptions {
   /** Local key of the two-key rule (false once `frely computer disable` vetoed computer use); checked on every list and call so the veto takes effect at once. */
   isLocallyEnabled: () => Promise<boolean>;
   audit?: (entry: ComputerAuditEntry) => Promise<void>;
+  /** Starts the OS permission walkthrough (`open-computer-use doctor`); called at most once per `doctorIntervalMs` when a call fails for lack of permission. */
+  runDoctor?: () => Promise<unknown>;
+  doctorIntervalMs?: number;
 }
+
+const PERMISSION_HINT = "Computer use needs OS permission on this device. A permission guide was opened there; ask the user to grant Accessibility and Screen Recording, or run `frely computer doctor` on the device, then retry.";
 
 export class ComputerToolset {
   private readonly backend: OcuBackend;
@@ -23,7 +28,13 @@ export class ComputerToolset {
   /** original / sent size per app, from its latest screenshot, to map model coordinates back to device pixels. */
   private readonly scales = new Map<string, number>();
 
+  private readonly runDoctor: (() => Promise<unknown>) | undefined;
+  private readonly doctorIntervalMs: number;
+  private lastDoctor = 0;
+
   constructor(options: ComputerToolsetOptions) {
+    this.runDoctor = options.runDoctor;
+    this.doctorIntervalMs = options.doctorIntervalMs ?? 10 * 60_000;
     this.backend = options.backend;
     this.isLocallyEnabled = options.isLocallyEnabled;
     this.audit = options.audit ?? appendComputerAudit;
@@ -61,13 +72,24 @@ export class ComputerToolset {
         }
       }
       const sent = this.scaleCoordinates(tool, args);
-      const result = await this.backend.callTool(tool, sent, signal);
+      const result = this.guidePermission(await this.backend.callTool(tool, sent, signal));
       const shaped = tool === "list_apps" ? redactList(result) : this.shapeScreenshots(result, app);
       return finish(shaped);
     } catch (error) {
       if (error instanceof ComputerBlockedError) return fail(error.message, "blocked");
       return fail(error instanceof Error ? error.message : "Computer use failed.", "backend_error");
     }
+  }
+
+  /** Rewrites the upstream "run open-computer-use doctor" error, which names a command that is not on PATH, and runs doctor for the user. */
+  private guidePermission(result: OcuResult): OcuResult {
+    if (!result.isError || !result.content.some((item) => item.type === "text" && needsPermissionText(item.text ?? ""))) return result;
+    const now = Date.now();
+    if (this.runDoctor && now - this.lastDoctor >= this.doctorIntervalMs) {
+      this.lastDoctor = now;
+      void this.runDoctor().catch(() => undefined);
+    }
+    return { isError: true, content: [{ type: "text", text: PERMISSION_HINT }] };
   }
 
   async close(): Promise<void> {

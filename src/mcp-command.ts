@@ -1,8 +1,8 @@
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { finishDeviceLogin, localDeviceId, loginDevice, readConfig, redeemInstallToken, requireLogin } from "./auth.js";
-import { discardForeignMcpAuthorization, generateMcpKey, inspectMcpMetadata, inspectMcpMetadataOrQuarantine, MCP_DEFAULT_DAYS, parseMcpDays, requireMcpAuthorization, setupMcpAuthorization, type McpAuthorization, type McpMetadata, type McpPreset } from "./mcp-authorization.js";
+import { attachDeviceCodeMcp, finishDeviceLogin, localDeviceId, loginDevice, readConfig, redeemInstallToken, requireLogin } from "./auth.js";
+import { discardForeignMcpAuthorization, generateMcpKey, inspectMcpMetadata, inspectMcpMetadataOrQuarantine, MCP_DEFAULT_DAYS, parseMcpDays, requireMcpAuthorization, setupMcpAuthorization, takeDeviceCodeMcpPreapproval, type McpAuthorization, type McpMetadata, type McpPreset } from "./mcp-authorization.js";
 import { installMcpService, serviceStatus, startMcpService } from "./service.js";
 
 /**
@@ -19,10 +19,14 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
   if (!args[1]) return ["mcp", "help"];
   // Deprecated alias: `mcp url` is `mcp start`.
   if (args[1] === "url") args[1] = "start";
-  if (!["workspace", "local", "stop", "start", "status", "remove", "serve", "stdio"].includes(args[1])) throw new Error("Unknown device MCP command. Run frely mcp --help.");
+  if (!["workspace", "local", "auto-update", "stop", "start", "status", "remove", "serve", "stdio"].includes(args[1])) throw new Error("Unknown device MCP command. Run frely mcp --help.");
   const action = args[1]!;
   if (action === "stop" || action === "remove") {
     if (args.length > 2) throw new Error("Unsupported MCP option. Run frely mcp --help.");
+    return args;
+  }
+  if (action === "auto-update") {
+    if (args.length > 3 || (args[2] !== undefined && args[2] !== "on" && args[2] !== "off")) throw new Error("Usage: frely mcp auto-update [on|off]");
     return args;
   }
   if (action === "workspace") {
@@ -168,6 +172,9 @@ export interface McpStartLoginDeps {
   redeemInstallToken: typeof redeemInstallToken;
   finishDeviceLogin: typeof finishDeviceLogin;
   readConfig: typeof readConfig;
+  /** One browser approval for sign-in and device MCP; absent in tests that do not cover it. */
+  attachDeviceCodeMcp?: typeof attachDeviceCodeMcp;
+  takeDeviceCodeMcpPreapproval?: typeof takeDeviceCodeMcpPreapproval;
 }
 
 type McpStartLoginInput = { installToken?: string; workspace?: string; days?: string; notify: (message: string) => void };
@@ -180,26 +187,33 @@ type McpStartLoginInput = { installToken?: string; workspace?: string; days?: st
  */
 export async function mcpStartLogin(
   input: McpStartLoginInput,
-  deps: McpStartLoginDeps = { requireLogin, loginDevice, redeemInstallToken, finishDeviceLogin, readConfig },
+  deps: McpStartLoginDeps = { requireLogin, loginDevice, redeemInstallToken, finishDeviceLogin, readConfig, attachDeviceCodeMcp, takeDeviceCodeMcpPreapproval },
 ): Promise<{ workspace?: string; days?: string; preset?: McpPreset }> {
   const signedIn = await deps.requireLogin().then((auth) => auth.user, (error: unknown) => {
     if (!(error instanceof Error && /Run `frely login`/u.test(error.message))) throw error;
     return null;
   });
   if (signedIn && !input.installToken) return {};
-  if (!input.installToken) {
-    // MCP authorization needs an account: sign in first (the browser page also creates new accounts).
-    const { user } = await deps.loginDevice(undefined, ({ verificationUri, userCode }) => {
-      input.notify(`Sign in to Frely (new accounts can register on the same page):\n${verificationUri}\nDevice code: ${userCode}\nWaiting for approval...\n`);
-    });
-    input.notify(`Logged in as ${user.email}.\n`);
-    return {};
-  }
   // The preapproval is bound to the workspace: keep the one an earlier setup on this computer used.
   const earlier = input.workspace ? null : await inspectMcpMetadata().catch(() => null);
   const workspace = await realpath(resolve(input.workspace || earlier?.grant.workspace || homedir()));
   const days = parseMcpDays(input.days ?? process.env.FRELY_MCP_DAYS ?? MCP_DEFAULT_DAYS);
   const mcp = { ...generateMcpKey(), workspace, days };
+  if (!input.installToken) {
+    // MCP authorization needs an account: sign in first (the browser page also creates new accounts). The device MCP request is attached
+    // to the device code, so approving the code on that page also enables device MCP and no second approval link is needed.
+    let attached = false;
+    const { user, userCode } = await deps.loginDevice(undefined, ({ verificationUri, userCode }) => {
+      input.notify(`Sign in to Frely (new accounts can register on the same page):\n${verificationUri}\nDevice code: ${userCode}\n`
+        + (attached ? `Approving also enables device MCP for ${workspace} (${days} days, key ${mcp.keyThumbprint}).\n` : "") + "Waiting for approval...\n");
+    }, deps.attachDeviceCodeMcp ? {
+      beforeNotify: async ({ relayUrl, userCode }) => { attached = await deps.attachDeviceCodeMcp!(relayUrl, userCode, { keyThumbprint: mcp.keyThumbprint, workspace, days }); },
+    } : {});
+    input.notify(`Logged in as ${user.email}.\n`);
+    const preapproval = attached && deps.takeDeviceCodeMcpPreapproval ? await deps.takeDeviceCodeMcpPreapproval(userCode).catch(() => null) : null;
+    if (!preapproval) return {};
+    return { workspace, days: String(days), preset: { privateKeyPem: mcp.privateKeyPem, preapproval } };
+  }
   const previous = await deps.readConfig().catch(() => null);
   const redeemed = await deps.redeemInstallToken(undefined, input.installToken, mcp);
   const { user } = await deps.finishDeviceLogin(redeemed.relayUrl, redeemed.device, localDeviceId(previous?.deviceId));

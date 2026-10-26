@@ -62,6 +62,14 @@ test("device relay request localMcps round trip, validate and stay mcp-only", ()
   assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...good, method: "provider", authorizationId: undefined })));
 });
 
+test("device relay request autoUpdate is true-only and mcp-only", () => {
+  const good = { protocol: DEVICE_RELAY_PROTOCOL, type: "request" as const, id: "abcdefghijklmnop", method: "mcp" as const,
+    authorizationId: "mca_" + "a".repeat(32), autoUpdate: true, payload: { jsonrpc: "2.0", id: 1, method: "tools/list" } };
+  assert.deepEqual(decodeDeviceRelayEnvelope(encodeDeviceRelayEnvelope(good)), good);
+  for (const autoUpdate of [false, "true", 1, null]) assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...good, autoUpdate })), /frame_invalid/);
+  assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...good, method: "provider", authorizationId: undefined })));
+});
+
 test("device relay capabilities envelope round trips within 4KB", () => {
   const report = {
     protocol: DEVICE_RELAY_PROTOCOL,

@@ -2,7 +2,7 @@ import { access } from "node:fs/promises";
 import { subcommandUsage } from "../agent-help.js";
 import { loadManualEntries, removeManualEntry } from "../runtime/local-mcp.js";
 import { COMPUTER_MCP_NAME, computerLocallyVetoed, setComputerLocalVeto } from "./builtin.js";
-import { OCU_VERSION, ocuBinaryPath } from "./ocu.js";
+import { OCU_VERSION, ocuBinaryPath, runOcuDoctor } from "./ocu.js";
 import { installOcuRuntime } from "./runtime.js";
 
 /** An entry named `computer` that an earlier `frely computer enable` registered by hand; the built-in entry replaces it. */
@@ -27,13 +27,20 @@ export async function runComputerCommand(args: string[]): Promise<string> {
     if (downloaded) await installOcuRuntime();
     await setComputerLocalVeto(false);
     await removeLegacyEntry();
+    // macOS and Windows gate screen access behind OS permissions; doctor shows the prompts now instead of on the first remote call.
+    const guide = process.platform === "darwin" || process.platform === "win32" ? await runOcuDoctor().catch((error: unknown) => `Permission check could not run: ${error instanceof Error ? error.message : "failed"}. Run \`frely computer doctor\` later.`) : "";
     return [
       "Computer use is allowed on this device. It stays off until you turn it on for this device on the Frely connections page.",
       "While it is on, a connected client can see this screen and operate apps as you, except terminals, password managers, OS security prompts, system settings and Frely itself.",
       downloaded ? `Installed the computer-use runtime (open-computer-use ${OCU_VERSION}, checksum verified).` : "",
-      process.platform === "darwin" ? "macOS: the first use asks this Mac for Accessibility and Screen Recording permission for \"Open Computer Use\"; grant both in System Settings." : "",
+      guide ? `Permission check:\n${guide}` : "",
+      process.platform === "darwin" ? "macOS: grant Accessibility and Screen Recording to \"Open Computer Use\" in System Settings if asked." : "",
       "Block it on this device at any time with `frely computer disable`; the web page cannot override that.",
     ].filter(Boolean).join("\n") + "\n";
+  }
+  if (action === "doctor") {
+    const output = await runOcuDoctor();
+    return `${output || "Permission check finished."}\n`;
   }
   if (action === "disable") {
     const vetoed = await computerLocallyVetoed();

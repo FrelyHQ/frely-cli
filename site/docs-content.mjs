@@ -73,7 +73,7 @@ export const entries = [
     category: 'Connecting AI clients',
     question: 'How do I connect Claude Code or Codex?',
     answer:
-      'Claude Code: claude mcp add --transport http frely "https://mcp.frely.cloud/mcp", then open /mcp in Claude Code to authorize. Codex: codex mcp add frely --url "https://mcp.frely.cloud/mcp". Both use OAuth, so sign in to Frely and approve the client when asked. Any other MCP client that supports remote HTTP MCP with OAuth can use the same URL.',
+      'Claude Code: claude mcp add --transport http frelymcp "https://mcp.frely.cloud/mcp", then open /mcp in Claude Code to authorize. Codex: codex mcp add frelymcp --url "https://mcp.frely.cloud/mcp". Both use OAuth, so sign in to Frely and approve the client when asked. Any other MCP client that supports remote HTTP MCP with OAuth can use the same URL.',
     links: [mcpUrl, install, readme],
   },
   {
@@ -121,7 +121,7 @@ export const entries = [
     category: 'Account and API',
     question: 'How do I install a Frely Agent, Prompt or Skill?',
     answer:
-      'Agent: frely agent install <distribution-id> --host claude-code --scope global (hosts: chatgpt, codex, claude-code, pi, generic). Run it with: printf \'%s\' \'Your task\' | frely agent run <distribution-id> --input-stdin --json. Marketplace items: frely item install <username/skill-name> --host claude-code. The first call opens a browser for authorization, and a paid part installs only if your account holds a pass; otherwise the command says how to buy one. Frely never overwrites a folder it did not install or a file you edited.',
+      'Agent: frely agent install <distribution-id> --host claude-code --scope global (hosts: chatgpt, codex, claude-code, pi, generic). Run it with: printf \'%s\' \'Your task\' | frely agent run <distribution-id> --input-stdin --json. Marketplace items: frely item install <username/skill-name> --host claude-code. Find the name on the creator profile page (frely.cloud/@<username>) or in the share link the creator sent you; creator items are not listed in the public Store, which shows only products Frely picks. The first call opens a browser for authorization, and a paid part installs only if your account holds a pass; otherwise the command says how to buy one. Frely never overwrites a folder it did not install or a file you edited.',
     links: [app, readme],
   },
   {

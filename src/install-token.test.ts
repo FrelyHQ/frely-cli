@@ -128,3 +128,54 @@ test("Linux service setup enables lingering and explains a missing systemd user 
   await assertSystemdUserManager(async () => ({ stdout: "" }));
   await assert.rejects(assertSystemdUserManager(async () => { throw new Error("Failed to connect to bus"); }), /frely mcp serve/);
 });
+
+test("without an install token one browser approval signs in and preapproves device MCP", async (t) => {
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "frely-device-mcp-")));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  useSyntheticRelay(t, () => { throw new Error("must not redeem"); });
+  const messages: string[] = [];
+  let attached: { userCode: string; mcp: { keyThumbprint: string; workspace: string; days: number } } | undefined;
+  const loginDevice: McpStartLoginDeps["loginDevice"] = async (_relay, notify, options) => {
+    await options?.beforeNotify?.({ relayUrl: "https://test.invalid", userCode: "SYNTH-CODE" });
+    notify?.({ verificationUri: "https://test.invalid/device?user_code=SYNTH-CODE", userCode: "SYNTH-CODE" });
+    return { user: { id: "user_test", email: "user@example.com" } as never, verificationUri: "", userCode: "SYNTH-CODE", sessionBound: false };
+  };
+  const result = await mcpStartLogin({ workspace, days: "30", notify: (message) => { messages.push(message); } }, {
+    requireLogin: async () => { throw new Error("Run `frely login`"); },
+    loginDevice,
+    redeemInstallToken: async () => { throw new Error("must not redeem"); },
+    finishDeviceLogin: async () => { throw new Error("must not poll"); },
+    readConfig,
+    attachDeviceCodeMcp: async (_relay, userCode, mcp) => { attached = { userCode, mcp }; return true; },
+    takeDeviceCodeMcpPreapproval: async (userCode) => userCode === "SYNTH-CODE" ? "synthetic-preapproval" : null,
+  });
+  assert.equal(attached?.userCode, "SYNTH-CODE");
+  assert.deepEqual({ workspace: attached?.mcp.workspace, days: attached?.mcp.days }, { workspace, days: 30 });
+  assert.equal(result.workspace, workspace);
+  assert.equal(result.days, "30");
+  assert.equal(result.preset?.preapproval, "synthetic-preapproval");
+  assert.match(result.preset?.privateKeyPem ?? "", /PRIVATE KEY/);
+  assert.match(messages.join(""), /Approving also enables device MCP for/);
+});
+
+test("when the server cannot attach the request, sign-in keeps the separate MCP approval", async (t) => {
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "frely-device-mcp-")));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  useSyntheticRelay(t, () => { throw new Error("must not redeem"); });
+  const messages: string[] = [];
+  const result = await mcpStartLogin({ workspace, notify: (message) => { messages.push(message); } }, {
+    requireLogin: async () => { throw new Error("Run `frely login`"); },
+    loginDevice: async (_relay, notify, options) => {
+      await options?.beforeNotify?.({ relayUrl: "https://test.invalid", userCode: "SYNTH-CODE" });
+      notify?.({ verificationUri: "https://test.invalid/device", userCode: "SYNTH-CODE" });
+      return { user: { id: "user_test", email: "user@example.com" } as never, verificationUri: "", userCode: "SYNTH-CODE", sessionBound: false };
+    },
+    redeemInstallToken: async () => { throw new Error("must not redeem"); },
+    finishDeviceLogin: async () => { throw new Error("must not poll"); },
+    readConfig,
+    attachDeviceCodeMcp: async () => false,
+    takeDeviceCodeMcpPreapproval: async () => { throw new Error("must not take"); },
+  });
+  assert.deepEqual(result, {});
+  assert.doesNotMatch(messages.join(""), /Approving also enables/);
+});
