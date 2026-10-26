@@ -86,6 +86,8 @@ export async function installCloudItem(input: {
   readonly host?: SkillHost;
   readonly scope?: SkillScope;
   readonly dir?: string;
+  /** Install into exactly this folder (an update of a folder Frely already wrote), instead of the one `host`, `scope` and `dir` give. */
+  readonly target?: string;
   readonly cwd?: string;
   readonly home?: string;
   readonly env?: NodeJS.ProcessEnv;
@@ -115,11 +117,11 @@ export async function installCloudItem(input: {
   const cwd = input.cwd ?? process.cwd();
   const home = input.home ?? homedir();
   // An item keeps the name its creator gave it, exactly like a Skill copied there by hand.
-  const target = manifest.kind === "skill"
+  const target = input.target !== undefined ? resolve(input.target) : manifest.kind === "skill"
     ? join(managedSkillRoot(input.host ?? "generic", input.scope ?? "global", resolve(cwd, input.scope === "project" ? input.dir ?? "." : "."), home), manifest.slug)
     : join(resolve(cwd, input.dir ?? "."), manifest.slug);
   const placed = placeSealedScripts(files);
-  const written = await writeItemFolder(target, manifest.id, manifest.kind, placed.files, home);
+  const written = await writeItemFolder(target, manifest.id, manifest.kind, placed.files, home, manifest.version);
   if (lease !== null && placed.sealed > 0) await writeLease(target, { skillId: manifest.id, version: manifest.version, lease });
   // A passing scan is bound to this version's files on the server, so the local review is already done.
   const scanned = manifest.kind === "skill" && manifest.scanned;
@@ -212,7 +214,7 @@ function safeRelativePath(path: string): string {
  * exists is replaced only when Frely wrote it for this same item and nothing in
  * it was edited since.
  */
-export async function writeItemFolder(target: string, itemId: string, kind: InstallRecord["kind"], files: readonly ItemFile[], home: string): Promise<InstallRecord> {
+export async function writeItemFolder(target: string, itemId: string, kind: InstallRecord["kind"], files: readonly ItemFile[], home: string, itemVersion?: number): Promise<InstallRecord> {
   await assertManagedSkillPath(join(target, "SKILL.md"));
   const exists = await lstat(target).then(() => true, (error: unknown) => { if (isAbsent(error)) return false; throw error; });
   if (exists) {
@@ -231,7 +233,7 @@ export async function writeItemFolder(target: string, itemId: string, kind: Inst
     await atomicWrite(join(target, file.path), content);
     written[file.path] = hash(content);
   }
-  const record: InstallRecord = { version: 1, kind, itemId, path: resolve(target), files: written };
+  const record: InstallRecord = { version: 1, kind, itemId, ...(itemVersion === undefined ? {} : { itemVersion }), path: resolve(target), files: written };
   await writeInstall(record, home);
   return record;
 }
@@ -251,3 +253,8 @@ async function atomicWrite(path: string, value: Buffer): Promise<void> {
 function hash(value: Buffer): string { return createHash("sha256").update(value).digest("hex"); }
 function record(value: unknown): Record<string, unknown> | null { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null; }
 function isAbsent(error: unknown): boolean { return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT"; }
+
+/** The version of an item Frely serves now, as the account sees it. */
+export async function latestItemVersion(call: CloudToolCaller, skillId: string): Promise<number> {
+  return parseContent(await call("skills.install", { skillId, part: "free" }), skillId).manifest.version;
+}

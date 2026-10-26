@@ -193,7 +193,7 @@ export const entries = [
     category: 'Maintenance',
     question: 'Which commands does the CLI have?',
     answer:
-      'Main ones: frely mcp start|status|stop|remove, frely mcp workspace list|add|remove, frely mcp local list|add|remove, frely doctor, frely update, frely login, frely logout, frely uninstall, frely agent install|run|status|remove, frely item install|trust, frely provider share|list and frely api list|describe|call. Run any command group without a subcommand (for example `frely mcp`) to see what it offers; `frely help --agent --json` prints the full machine-readable contract.',
+      'Main ones: frely mcp start|status|stop|remove, frely mcp workspace list|add|remove, frely mcp local list|add|remove, frely doctor, frely update, frely login, frely logout, frely uninstall, frely agent install|run|status|remove, frely item install|update|trust, frely provider share|list and frely api list|describe|call. Run any command group without a subcommand (for example `frely mcp`) to see what it offers; `frely help --agent --json` prints the full machine-readable contract.',
     links: [readme],
   },
 ];

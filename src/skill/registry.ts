@@ -13,6 +13,8 @@ export interface InstallRecord {
   readonly version: 1;
   readonly kind: "skill" | "prompt" | "entry";
   readonly itemId: string;
+  /** The version of the item that was installed, when known (folders installed by older versions of the CLI lack it). */
+  readonly itemVersion?: number;
   readonly path: string;
   /** Relative path to SHA-256 of every file Frely wrote. */
   readonly files: Readonly<Record<string, string>>;
@@ -76,5 +78,5 @@ function parse(text: string, expectedPath: string | null): InstallRecord | null 
   if (!item || !files || item.version !== 1 || !["skill", "prompt", "entry"].includes(String(item.kind)) || typeof item.itemId !== "string" || typeof item.path !== "string") return null;
   if (expectedPath !== null && item.path !== expectedPath) return null;
   if (!Object.values(files).every((entry) => typeof entry === "string")) return null;
-  return Object.freeze({ version: 1, kind: item.kind as InstallRecord["kind"], itemId: item.itemId, path: item.path, files: files as Record<string, string>, ...(typeof item.trustedDigest === "string" ? { trustedDigest: item.trustedDigest } : {}) });
+  return Object.freeze({ version: 1, kind: item.kind as InstallRecord["kind"], itemId: item.itemId, path: item.path, files: files as Record<string, string>, ...(Number.isSafeInteger(item.itemVersion) ? { itemVersion: item.itemVersion as number } : {}), ...(typeof item.trustedDigest === "string" ? { trustedDigest: item.trustedDigest } : {}) });
 }
