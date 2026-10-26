@@ -9,6 +9,6 @@
   "mcpSetup": "frely mcp start",
   "mcpUrl": "https://mcp.frely.cloud/mcp",
   "mcpJson": "{\n  \"mcpServers\": {\n    \"frely\": {\n      \"url\": \"https://mcp.frely.cloud/mcp\",\n      \"headers\": {\n        \"Authorization\": \"Bearer <token from the devices page>\"\n      },\n      \"disabled\": false\n    }\n  }\n}",
-  "claudeConnect": "claude mcp add --transport http frely \"https://mcp.frely.cloud/mcp\"",
-  "codexConnect": "codex mcp add frely --url \"https://mcp.frely.cloud/mcp\""
+  "claudeConnect": "claude mcp add --transport http frelymcp \"https://mcp.frely.cloud/mcp\"",
+  "codexConnect": "codex mcp add frelymcp --url \"https://mcp.frely.cloud/mcp\""
 }
