@@ -84,18 +84,33 @@ try {
     if (((Get-Item -LiteralPath $target -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Existing executable must not be a reparse point.' }
     [IO.File]::Replace($download, $target, $null)
   } else { [IO.File]::Move($download, $target) }
+  $pathPersisted = $true
   if ($env:FRELY_INSTALL_NO_PROFILE -ne '1') {
     try {
-      $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
-      if (($userPath -split ';') -notcontains $directory) {
-        [Environment]::SetEnvironmentVariable('PATH', "$directory;$userPath", 'User')
-      }
+      # Edit the raw registry value so REG_EXPAND_SZ entries such as %USERPROFILE%\bin stay unexpanded, then broadcast the change.
+      $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+      try {
+        $raw = [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        $entries = @($raw -split ';' | Where-Object { $_ })
+        if (($entries | ForEach-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') }) -notcontains $directory.TrimEnd('\')) {
+          $key.SetValue('Path', (@($directory) + $entries) -join ';', [Microsoft.Win32.RegistryValueKind]::ExpandString)
+        }
+      } finally { $key.Dispose() }
+      # SetEnvironmentVariable broadcasts WM_SETTINGCHANGE so new Explorer-launched terminals pick the PATH up.
+      [Environment]::SetEnvironmentVariable('FRELY_PATH_REFRESH', $null, 'User')
     } catch {
+      $pathPersisted = $false
       Write-Warning "Frely was installed, but the user PATH could not be updated: $($_.Exception.Message)"
     }
   }
   if (($env:PATH -split ';') -notcontains $directory) { $env:PATH = "$directory;$env:PATH" }
   $installedVersion = & $target --version
   Write-Output "Installed Frely $installedVersion at $target"
+  if ($env:FRELY_INSTALL_NO_PROFILE -ne '1') {
+    # A terminal that was already open keeps its old PATH: give the user both ways out.
+    Write-Output "To use 'frely' now, open a new terminal window, or run this in the current one:"
+    Write-Output "  `$env:PATH = `"$directory;`$env:PATH`""
+    if (-not $pathPersisted) { Write-Output "(The user PATH was not updated, so new terminals will need the full path $target, or add $directory to PATH manually.)" }
+  }
   Write-Output 'Basic commands require no keyring setup. MCP authorization begins with frely mcp start.'
 } finally { Remove-Item -LiteralPath $stage -Recurse -Force }
