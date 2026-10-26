@@ -250,6 +250,21 @@ export async function redeemInstallToken(
   return { relayUrl, device, user, ...(isString(record.mcpPreapproval) ? { mcpPreapproval: record.mcpPreapproval } : {}) };
 }
 
+/**
+ * Asks the server to show a device MCP request on the approval page for this device code, so one browser approval signs the CLI in
+ * and enables device MCP. False when the server does not support it (older deployment) or refuses; the caller then uses the separate MCP approval.
+ */
+export async function attachDeviceCodeMcp(relayUrl: string, userCode: string, mcp: { keyThumbprint: string; workspace: string; days: number }): Promise<boolean> {
+  const response = await fetchWithTimeout(`${relayUrl}/api/auth/device/mcp`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: relayUrl, accept: "application/json" },
+    body: JSON.stringify({ action: "put", userCode, mcp }),
+    redirect: "error",
+  }).catch(() => null);
+  debugAuth(`stage=device-code-mcp-put status=${response?.status ?? "none"}`);
+  return response?.ok === true;
+}
+
 /** Every install-token failure names the next step. */
 export function installTokenError(payload: unknown, status: number): string {
   const root = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
@@ -265,12 +280,13 @@ export function installTokenError(payload: unknown, status: number): string {
 export async function loginDevice(
   relayInput?: string,
   notify?: (details: { verificationUri: string; userCode: string }) => void,
-  options: { openBrowser?: boolean } = {},
+  options: { openBrowser?: boolean; /** Runs after the device code exists and before the link is shown, e.g. to attach a device MCP request to it. */ beforeNotify?: (details: { relayUrl: string; userCode: string }) => Promise<void> } = {},
 ): Promise<{ user: PublicUser; verificationUri: string; userCode: string; sessionBound: boolean }> {
   const relayUrl = normalizeRelayUrl(relayInput);
   await probeCredentialStore();
   const deviceId = localDeviceId((await readConfig().catch(() => null))?.deviceId);
   const device = await requestDeviceCode(relayUrl);
+  await options.beforeNotify?.({ relayUrl, userCode: device.user_code });
   const verificationUri = validateVerificationUrl(device.verification_uri_complete || `${device.verification_uri}?user_code=${encodeURIComponent(device.user_code)}`, relayUrl);
   notify?.({ verificationUri, userCode: device.user_code });
   if (options.openBrowser !== false) openVerificationUrl(verificationUri);

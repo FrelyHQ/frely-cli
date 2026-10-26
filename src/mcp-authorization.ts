@@ -312,3 +312,11 @@ async function throwMcpAuthorizationError(response: Response): Promise<never> {
   const message = typeof error.message === "string" ? error.message : `MCP authorization request failed (HTTP ${response.status}).`;
   throw new McpAuthorizationError(code, response.status, message);
 }
+/** After sign-in: the preapproval the browser signed together with the device-code approval, or null when there is none. */
+export async function takeDeviceCodeMcpPreapproval(userCode: string): Promise<string | null> {
+  const auth = await requireLogin();
+  const response = await relayFetch(auth.config.relayUrl, auth.credential, "/api/auth/device/mcp", { method: "POST", body: JSON.stringify({ action: "take", userCode }) });
+  if (!response.ok) return null;
+  const value = await response.json().catch(() => null) as { preapproval?: unknown } | null;
+  return typeof value?.preapproval === "string" ? value.preapproval : null;
+}
