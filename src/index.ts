@@ -24,6 +24,7 @@ import { startStdioMcp } from "./runtime/mcp.js";
 import { installDeviceRelayService, serviceStatus, trimServiceLog, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
 import { createLocalModelsHub } from "./provider/local-models.js";
 import { shareLocalProvider } from "./provider/share.js";
+import { runShareCommand, shareUsage } from "./share/run.js";
 import { listLocalProviders } from "./provider/state.js";
 import { API_USAGE, logoutCloud, runApi } from "./cloud.js";
 import { PiNodeSupervisor } from "./agent/pi-node-supervisor.js";
@@ -435,6 +436,17 @@ async function main(): Promise<void> {
       try { return await rl.question(question); } finally { rl.close(); }
     } : undefined;
     process.exitCode = await runUninstall(args.slice(1), { write: (text) => { stdout.write(text); }, interactive, ...(prompt ? { prompt } : {}) });
+    return;
+  }
+
+  if (command === "share") {
+    if (args[1] === undefined || args[1] === "help" || args[1] === "--help") { stdout.write(`Usage: ${shareUsage()}\n`); return; }
+    const interactive = Boolean(stdin.isTTY && stdout.isTTY);
+    const prompt = interactive ? async (question: string) => {
+      const rl = createInterface({ input: stdin, output: stdout });
+      try { return await rl.question(question); } finally { rl.close(); }
+    } : undefined;
+    process.exitCode = await runShareCommand(args.slice(1), { write: (text) => { stdout.write(text); }, interactive, ...(prompt ? { prompt } : {}) });
     return;
   }
 

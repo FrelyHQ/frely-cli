@@ -93,6 +93,7 @@ To check the connection, ask the client to list the top-level names in your work
 - **Frely-hosted Agents**: `frely item install <username/name> --host claude-code` installs an Agent as a local Skill; `frely agent run <username/name>` calls it. [More](https://cli.frely.cloud/docs/help/install-agents-and-items/)
 - **Marketplace Prompts and Skills**: `frely item install <username/name> --host claude-code` (the same command installs Agents too; add `@3` for version 3). Paid parts install only when your account holds a pass. `frely item update` lists installed items that have a newer version; it changes nothing until you run `frely item update <folder>`. [More](https://cli.frely.cloud/docs/help/install-agents-and-items/)
 - **Local model sharing**: `frely provider share ollama` publishes a loopback model server as your personal Frely Provider. [More](https://cli.frely.cloud/docs/help/share-local-model/)
+- **Share a local web page**: `frely share 3000` asks first, then prints a private link to `http://127.0.0.1:3000` through Frely's relay until you press Ctrl+C or it expires (at most 24 hours). Relay traffic is a plan allowance per UTC week; direct connections are not counted. Not the same as `frely provider share` (local models) or `frely tunnel` (inside the command sandbox).
 - **Your account from the terminal**: `frely api list|describe|call`. [More](https://cli.frely.cloud/docs/help/manage-account-from-cli/)
 
 ## Safety
