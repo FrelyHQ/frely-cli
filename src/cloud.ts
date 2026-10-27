@@ -221,17 +221,20 @@ async function connectCloud() {
     return fetch(input, { ...init, redirect: "error", signal: init?.signal
       ? AbortSignal.any([init.signal, AbortSignal.timeout(180000)]) : AbortSignal.timeout(180000) });
   };
-  const transport = new StreamableHTTPClientTransport(new URL(identity.resource), {
+  const makeTransport = () => new StreamableHTTPClientTransport(new URL(identity.resource), {
     authProvider: provider, fetch: cloudFetch, reconnectionOptions: { maxRetries: 0, initialReconnectionDelay: 1000, maxReconnectionDelay: 1000, reconnectionDelayGrowFactor: 1 },
   });
+  const transport = makeTransport();
   let client = new Client({ name: "frely-cli-cloud", version: VERSION });
   try {
     try { await client.connect(transport as unknown as Transport); }
     catch (error) {
       if (!(error instanceof UnauthorizedError) || !pendingCode) throw error;
       await transport.finishAuth(await pendingCode);
+      // A started transport refuses a second start(): the first connect already started it, so reconnect on a fresh one that reads the stored tokens.
+      await transport.close().catch(() => undefined);
       client = new Client({ name: "frely-cli-cloud", version: VERSION });
-      await client.connect(transport as unknown as Transport);
+      await client.connect(makeTransport() as unknown as Transport);
     }
     // No call is made before the server knows this authorization belongs to this computer: an unbound client is not limited by approved permissions.
     const device = await ensureDevice();
