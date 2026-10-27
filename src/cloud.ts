@@ -43,6 +43,47 @@ export function permissionHint(result: object): string | null {
   return null;
 }
 
+type CallResult = { isError?: boolean; content?: unknown; [key: string]: unknown };
+const WAIT_DEFAULT_MS = 5 * 60_000, WAIT_MAX_MS = 10 * 60_000;
+
+/** The error object of a failed tool result, or null when the result is not a JSON error. */
+function toolError(result: object): { code?: unknown; url?: unknown; confirmationId?: unknown; expiresAt?: unknown } | null {
+  const { isError, content } = result as { isError?: unknown; content?: unknown };
+  if (isError !== true || !Array.isArray(content)) return null;
+  for (const part of content) {
+    const text = (part as { type?: unknown; text?: unknown }).type === "text" ? (part as { text?: unknown }).text : undefined;
+    if (typeof text !== "string") continue;
+    try { const error = (JSON.parse(text) as { error?: object }).error; if (error && typeof error === "object") return error; } catch { /* Not JSON. */ }
+  }
+  return null;
+}
+
+/**
+ * After a `permission_required` or `confirmation_required` refusal, blocks until the owner decides and returns the call's real result, so the
+ * calling AI resumes by itself. Only calls the server refused before running are repeated: a pending approval answers `permission_required`
+ * again (a denial answers it without a link) or `confirmation_invalid`; the first call that is let through runs exactly once.
+ * Gives up at the request's expiry (at most 10 minutes) and returns the last refusal.
+ */
+export async function waitForApproval(first: CallResult, call: (input: Record<string, unknown>) => Promise<CallResult>, input: Record<string, unknown>,
+  options: { intervalMs?: number; now?: () => number; sleep?: (ms: number) => Promise<void> } = {}): Promise<CallResult> {
+  const { intervalMs = 3000, now = Date.now, sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)) } = options;
+  const start = toolError(first);
+  if (!start || typeof start.url !== "string" || (start.code !== "permission_required" && start.code !== "confirmation_required")) return first;
+  const confirmationId = start.code === "confirmation_required" && typeof start.confirmationId === "string" ? start.confirmationId : undefined;
+  if (start.code === "confirmation_required" && !confirmationId) return first;
+  const expires = typeof start.expiresAt === "string" || typeof start.expiresAt === "number" ? new Date(start.expiresAt).getTime() : NaN;
+  const deadline = Math.min(Number.isFinite(expires) ? expires : now() + WAIT_DEFAULT_MS, now() + WAIT_MAX_MS);
+  let last = first;
+  while (now() + intervalMs < deadline) {
+    await sleep(intervalMs);
+    last = await call(confirmationId ? { ...input, confirmationId } : input);
+    const error = toolError(last);
+    const pending = error?.code === "confirmation_invalid" || (error?.code === "permission_required" && typeof error.url === "string");
+    if (!pending) return last;
+  }
+  return last;
+}
+
 const SCOPE = "openid profile offline_access cloud:read cloud:write cloud:execute cloud:publish";
 /**
  * Registration metadata for the Cloud OAuth client. The callback is an http loopback URL, so the client must declare
@@ -55,7 +96,7 @@ export function cloudClientMetadata(redirectUrl: string, host = hostname()): OAu
 export const API_USAGE = `Frely API — call your Frely account's business operations (keys, credits, orders, Creator items…).
   frely api list [--group <name>] [--json]
   frely api describe <tool>
-  frely api call <tool> [--json '<object>' | --input <file>]
+  frely api call <tool> [--json '<object>' | --input <file>] [--wait]
 
 "list" prints the operations grouped by area with a one-line description each; add --json for the full tool list.
 Other results are JSON. The first command opens a browser for authorization;
@@ -63,6 +104,8 @@ frely logout also revokes it. This authorization is separate from device MCP.
 Calls may create resources or incur usage. Failed writes are never replayed automatically.
 A new device may only read non-sensitive data; for anything else the error links to the web
 console page where you grant it (passkey or authenticator code required).
+With --wait, a call that needs approval prints the link, then blocks until the owner decides and
+continues by itself: it returns the real result once approved, or the refusal when denied or expired.
 `;
 interface StoredCloud {
   version: 1;
@@ -300,9 +343,10 @@ export async function runApi(args: readonly string[]): Promise<{ value?: unknown
   const name = named ? args[2] : undefined;
   if (named && (!name || !/^[a-zA-Z0-9_.-]{1,128}$/.test(name))) throw new Error("A valid Cloud tool name is required.");
   const options = new Map<string, string>();
-  let fullJson = false;
+  let fullJson = false, wait = false;
   for (let i = named ? 3 : 2; i < args.length; i++) {
     if (action === "list" && args[i] === "--json") { fullJson = true; continue; }
+    if (action === "call" && args[i] === "--wait") { wait = true; continue; }
     const option = args[i]!, value = args[++i];
     const allowed = action === "list" ? ["--group"] : action === "call" ? ["--json", "--input"] : [];
     if (!allowed.includes(option) || options.has(option) || value === undefined) throw new Error(API_USAGE);
@@ -342,9 +386,14 @@ export async function runApi(args: readonly string[]): Promise<{ value?: unknown
     const tool = all.find(tool => tool.name === name);
     if (!tool) throw new Error("Cloud tool is unavailable or not authorized: " + name);
     if (action === "describe") return { value: tool };
-    const result = await session.client.callTool({ name: name!, arguments: input }, undefined, { timeout: 180000 });
+    const call = (arguments_: Record<string, unknown>) => session.client.callTool({ name: name!, arguments: arguments_ }, undefined, { timeout: 180000 }) as Promise<CallResult>;
+    let result = await call(input);
     const hint = permissionHint(result);
     if (hint) process.stderr.write(hint + "\n");
+    if (hint && wait) {
+      process.stderr.write("Waiting for approval; this command continues by itself once the owner decides (up to 10 minutes).\n");
+      result = await waitForApproval(result, call, input);
+    }
     return { value: result, failed: result.isError === true };
   } finally { await session.close(); }
 }
