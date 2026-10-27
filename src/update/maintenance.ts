@@ -29,6 +29,11 @@ export class MaintenanceGate {
   get idle(): boolean { return this.requests === 0 && [...this.processes].every((count) => count() === 0); }
 }
 
+/** The service could not be drained now (calls or child processes are running). Nothing was changed. */
+export class MaintenanceBusyError extends Error {
+  constructor() { super("The service is busy or cannot enter maintenance. Finish its tasks, then run frely update in a local terminal."); }
+}
+
 export function maintenancePath(pid: number): string {
   return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "frely", `upgrade-${pid}.sock`);
 }
@@ -84,7 +89,7 @@ export async function acquireMaintenance(pid: number, path = maintenancePath(pid
   }
   return new Promise((resolve, reject) => {
     const socket = createConnection(path);
-    const fail = () => { socket.destroy(); reject(new Error("The service is busy or cannot enter maintenance. Finish its tasks, then run frely update in a local terminal.")); };
+    const fail = () => { socket.destroy(); reject(new MaintenanceBusyError()); };
     socket.setTimeout(5000, fail);
     socket.once("error", fail);
     socket.once("connect", () => socket.write("drain\n"));
