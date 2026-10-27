@@ -10,7 +10,7 @@
   "nav.app": "Desktop app",
   "hero.openSource": "OPEN SOURCE",
   "hero.release": "FrelyMCP · Agent access to your device",
-  "hero.line1": "Let agents access ",
+  "hero.line1": "Frely CLI: let agents access ",
   "hero.line2": "your device from ",
   "hero.accent": "any location",
   "hero.description": "Frely CLI is an open-source command line that connects your computer to FrelyMCP. Browser agents, or Codex and Claude Code on another computer, then get MCP access to its files, commands and processes. You authorize access; tasks run on that computer.",
