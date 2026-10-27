@@ -34,6 +34,7 @@ export const COMMANDS = [
   { id: "agent.remove", usage: "frely agent remove <username/name> [--json]", auth: "none", effect: "local-write", purpose: "Remove an installed Agent Skill and its saved API key." },
   { id: "provider.share", usage: "frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]", auth: "account", effect: "remote-write", purpose: "Publish a local model Provider. If a prepared Provider on this device is not finished, resume it instead." },
   { id: "provider.list", usage: "frely provider list [--json]", auth: "account", effect: "read", purpose: "List configured local Providers." },
+  { id: "share", usage: "frely share <port> [--ttl <hours>] [--rewrite-host] [--yes] [--json]", auth: "account", effect: "remote-write", purpose: "Make a web service on this computer (http://127.0.0.1:<port>) reachable from the Internet by a private link through Frely's relay, until Ctrl+C or expiry (at most 24 hours). Asks first. The relay allowance is a plan limit per UTC week; --rewrite-host sends Host: localhost to dev servers that refuse other names. Not the same as `frely provider share` (local models) or `frely tunnel` (command sandbox)." },
   { id: "tunnel", usage: "frely tunnel <host>:<port> [--local-port N]", auth: "none", effect: "local-execution", purpose: "Run inside a sandboxed command (run_command): listen on 127.0.0.1:<local-port> (default: the same port) and forward each TCP connection to host:port through the command sandbox's proxy, so database and redis clients connect to 127.0.0.1 without turning the sandbox off. Start it in the same command as the client, for example `frely tunnel db.example.com:5432 & sleep 1; psql -h 127.0.0.1 ...`. Prints the local address and runs until killed." },
   { id: "sandbox.proxy", usage: "frely sandbox proxy [<http://host:port> [--no-proxy <list>] | --clear]", auth: "none", effect: "local-write", purpose: "Show, save or remove the HTTP(S) proxy that the command sandbox forwards its network traffic to (your own proxy, for example Clash). Without one saved it uses the HTTPS_PROXY / HTTP_PROXY / ALL_PROXY of the CLI process and, on macOS, the system proxy. Your proxy settings are never changed. Takes effect when the MCP service restarts." },
   { id: "api", usage: "frely api list|describe|call [--wait] [--help]", auth: "cloud-oauth", effect: "subcommand-dependent", purpose: "Discover and call your Frely account's business operations (the same tools FrelyMCP offers through frely_list/frely_call). The first call requests browser authorization. `list` is grouped and compact (add --json for the full tool list); use describe before call; parameters and results are JSON; --input reads a file up to 512 KiB. When a call needs the owner's approval the error links to it; run the call with --wait (in the foreground, tool timeout of at least 10 minutes) to show the user the link first and then block until they approve on their phone or the web, so the call finishes by itself and you need not be told. Never background or kill it." },
@@ -81,6 +82,7 @@ const GROUPS: readonly { title: string; ids: readonly string[] }[] = [
   { title: "Skills", ids: ["skill.install"] },
   { title: "Marketplace items", ids: ["item.install", "item.update", "item.run", "item.trust"] },
   { title: "Providers", ids: ["provider.share", "provider.list"] },
+  { title: "Share", ids: ["share"] },
   { title: "Command sandbox", ids: ["tunnel", "sandbox.proxy"] },
   { title: "API", ids: ["api", "remote.tools", "remote.call", "remote.config"] },
 ];
@@ -110,6 +112,7 @@ const SHORT_USAGE: Readonly<Record<string, string>> = {
   "agent.remove": "frely agent remove <username/name>",
   "provider.share": "frely provider share [ollama|openai-compatible] [--models <a,b>]",
   "provider.list": "frely provider list",
+  share: "frely share <port> [--ttl <hours>]",
   tunnel: "frely tunnel <host>:<port> [--local-port N]",
   "sandbox.proxy": "frely sandbox proxy [<url> [--no-proxy <list>] | --clear]",
   api: "frely api list|describe|call",
