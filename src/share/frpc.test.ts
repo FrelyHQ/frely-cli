@@ -21,8 +21,8 @@ test("every supported platform has a pinned archive; others are refused", () => 
   }
   assert.equal(frpcAsset("win32", "x64").binary, "frpc.exe");
   assert.throws(() => frpcAsset("freebsd", "x64"), /no frpc build/u);
-  assert.equal(frpcDirectory({ XDG_DATA_HOME: "/data" }, "linux", "/home/u"), "/data/frely/bin");
-  assert.equal(frpcDirectory({}, "linux", "/home/u"), "/home/u/.local/share/frely/bin");
+  assert.equal(frpcDirectory({ XDG_DATA_HOME: "/data" }, "linux", "/home/u"), join("/data", "frely", "bin"));
+  assert.equal(frpcDirectory({}, "linux", "/home/u"), join("/home/u", ".local", "share", "frely", "bin"));
 });
 
 test("a download is verified against its pinned checksum before it is unpacked, installed once and kept", async () => {
@@ -44,7 +44,7 @@ test("a download is verified against its pinned checksum before it is unpacked, 
     const path = await ensureFrpc(deps);
     assert.equal(path, join(directory, `frpc-${FRPC_VERSION}`));
     assert.equal(await readFile(path, "utf8"), "#!/bin/sh\n");
-    assert.equal((await stat(path)).mode & 0o111, 0o111);
+    if (process.platform !== "win32") assert.equal((await stat(path)).mode & 0o111, 0o111);
     await ensureFrpc(deps);
     assert.equal(downloads, 1);
   } finally { await rm(directory, { recursive: true, force: true }); }
