@@ -286,12 +286,25 @@ export async function loginDevice(
   await probeCredentialStore();
   const deviceId = localDeviceId((await readConfig().catch(() => null))?.deviceId);
   const device = await requestDeviceCode(relayUrl);
+  await savePendingDeviceLogin(relayUrl, device);
   await options.beforeNotify?.({ relayUrl, userCode: device.user_code });
   const verificationUri = validateVerificationUrl(device.verification_uri_complete || `${device.verification_uri}?user_code=${encodeURIComponent(device.user_code)}`, relayUrl);
   notify?.({ verificationUri, userCode: device.user_code });
   if (options.openBrowser !== false) openVerificationUrl(verificationUri);
   const { user, sessionBound } = await finishDeviceLogin(relayUrl, device, deviceId);
+  await deletePendingDeviceLogin();
   return { user, verificationUri, userCode: device.user_code, sessionBound };
+}
+
+/** Continues a browser login whose process ended before the owner approved (an agent shell can kill it): waits on the saved device code until it expires. */
+export async function resumeDeviceLogin(relayInput?: string): Promise<{ user: PublicUser; sessionBound: boolean } | null> {
+  const relayUrl = normalizeRelayUrl(relayInput);
+  const pending = await readPendingDeviceLogin(relayUrl);
+  if (!pending) return null;
+  const deviceId = localDeviceId((await readConfig().catch(() => null))?.deviceId);
+  const result = await finishDeviceLogin(relayUrl, { ...pending.device, expires_in: Math.max(1, pending.device.expires_in - Math.floor((Date.now() - pending.savedAt) / 1000)) }, deviceId);
+  await deletePendingDeviceLogin();
+  return result;
 }
 
 /** Poll the approved device code, then store the credentials and the signed-in user. */
@@ -743,6 +756,31 @@ function publicError(payload: unknown, status: number): string {
 function pendingEmailChallengePath(): string {
   const root = process.env.XDG_RUNTIME_DIR || join(homedir(), ".cache");
   return join(root, "frely", "pending-email-challenge.json");
+}
+
+function pendingDeviceLoginPath(): string {
+  const root = process.env.XDG_RUNTIME_DIR || join(homedir(), ".cache");
+  return join(root, "frely", "pending-device-login.json");
+}
+
+async function savePendingDeviceLogin(relayUrl: string, device: DeviceCodeResponse): Promise<void> {
+  const path = pendingDeviceLoginPath();
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify({ relayUrl, device, savedAt: Date.now() }), { mode: 0o600 });
+}
+
+async function readPendingDeviceLogin(relayUrl: string): Promise<{ device: DeviceCodeResponse; savedAt: number } | null> {
+  try {
+    const data = JSON.parse(await readFile(pendingDeviceLoginPath(), "utf8")) as { relayUrl?: string; device?: DeviceCodeResponse; savedAt?: number };
+    if (data.relayUrl !== relayUrl || !data.device || typeof data.savedAt !== "number") return null;
+    return Date.now() < data.savedAt + data.device.expires_in * 1000 ? { device: data.device, savedAt: data.savedAt } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function deletePendingDeviceLogin(): Promise<void> {
+  await unlink(pendingDeviceLoginPath()).catch(() => undefined);
 }
 
 export async function savePendingEmailChallenge(relayUrl: string, challenge: EmailDeviceChallenge): Promise<void> {

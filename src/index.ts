@@ -13,7 +13,7 @@ import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
 import { join, resolve } from "node:path";
 import { stdin, stdout } from "node:process";
-import { inspectAuth, loginDevice, logout, normalizeRelayUrl, requireLogin, initEmailDeviceLogin, completeEmailDeviceLogin, savePendingEmailChallenge, readPendingEmailChallenge, deletePendingEmailChallenge, localDeviceId, finishDeviceLogin, readConfig } from "./auth.js";
+import { inspectAuth, loginDevice, logout, normalizeRelayUrl, requireLogin, initEmailDeviceLogin, completeEmailDeviceLogin, savePendingEmailChallenge, readPendingEmailChallenge, deletePendingEmailChallenge, localDeviceId, finishDeviceLogin, readConfig, resumeDeviceLogin } from "./auth.js";
 import { basicCredentialStore as credentialStore } from "./credential-basic.js";
 import type { EmailDeviceChallenge } from "./auth.js";
 import { doctor, formatDoctor } from "./diagnostics.js";
@@ -312,6 +312,19 @@ async function main(): Promise<void> {
     const invite = option(args, "--invite");
     const json = args.includes("--json");
 
+    // Picks up a browser login whose process was killed before the owner approved; blocks until approval, so the calling agent continues when it returns.
+    if (args.includes("--wait")) {
+      stdout.write("Waiting for approval...\n");
+      const resumed = await resumeDeviceLogin(relay);
+      if (!resumed) {
+        stdout.write("No pending browser login, or it expired. Run `frely login --no-browser` for a new link.\n");
+        process.exitCode = 1;
+        return;
+      }
+      stdout.write(`Logged in as ${resumed.user.email}.\n`);
+      return;
+    }
+
     // Email-based device login (two steps): `--email` sends the code, `--code` finishes.
     if (email || code) {
       const relayUrl = normalizeRelayUrl(relay);
@@ -391,6 +404,7 @@ async function main(): Promise<void> {
         ? "Automatic browser opening is disabled. Open this new URL only in the browser signed in to the account you want to use.\n"
         : "Opening your default browser. To use another account or browser, press Ctrl+C and run `frely login --no-browser` for a new URL.\n");
       stdout.write("Waiting for approval...\n");
+      stdout.write("If this command is stopped before the user approves, run `frely login --wait` to keep waiting on the same link.\n");
     }, { openBrowser: !noBrowser });
     const user = result.user;
     stdout.write(`Logged in as ${user.email}.\n`);
