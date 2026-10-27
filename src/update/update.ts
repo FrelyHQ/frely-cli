@@ -10,7 +10,7 @@ import { connectionIsLive, readConnectionStatus } from "../device/connection-sta
 import { serviceCommand, serviceStatus, startMcpService, stopMcpService } from "../service.js";
 import { inspectInstallation, manualUpdateCommand, packageArguments, type Installation } from "./installation.js";
 import { compareVersions, latestRelease, NPM_REGISTRIES, standaloneAsset, type Release, type ReleaseSource } from "./release.js";
-import { acquireMaintenance } from "./maintenance.js";
+import { acquireMaintenance, MaintenanceBusyError } from "./maintenance.js";
 
 const execFile = promisify(execFileCallback);
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -137,7 +137,14 @@ export async function lockInstallation(installation: Installation): Promise<() =
   return async () => { await file.close(); await rm(path, { force: true }); };
 }
 
-const defaults = { inspectInstallation, latestRelease, installedVersion, serviceStatus, serviceCommand, stopMcpService, startMcpService,
+/** True when this service process reports that it watches its installation and restarts itself when idle after an update. */
+async function serviceWatchesInstallation(pid: number): Promise<boolean> {
+  const binding = await readDeviceBinding();
+  const observation = binding ? await readConnectionStatus(binding) : null;
+  return observation?.pid === pid && observation.autoRefresh === true;
+}
+
+const defaults = { serviceWatchesInstallation, inspectInstallation, latestRelease, installedVersion, serviceStatus, serviceCommand, stopMcpService, startMcpService,
   readDeviceBinding, readConnectionStatus, acquireMaintenance, prepareStandalone, installPackage, lockInstallation, pause };
 export type UpdateDependencies = typeof defaults;
 
@@ -157,15 +164,22 @@ export async function update(write: (message: string) => void, dependencies: Upd
   }
   const unlock = await d.lockInstallation(installation);
   let prepared: PreparedUpdate | undefined, releaseMaintenance: (() => void) | undefined;
-  let attempted = false, stopped = false, preserveRecovery = false;
+  let attempted = false, stopped = false, preserveRecovery = false, deferredSwitch = false;
   try {
     write(`Updating Frely ${VERSION} → ${release.version} (${installation.method}).\n`);
     prepared = installation.method === "standalone" ? await d.prepareStandalone(installation, release) : {
       apply: () => d.installPackage(installation, release.version), restore: () => d.installPackage(installation, VERSION), cleanup: async () => {},
     };
     // Prepare downloads before pausing admission. A command inside this MCP is itself busy and cannot stop its parent.
-    if (service.active) releaseMaintenance = await d.acquireMaintenance(service.pid!);
     if (service.active) {
+      try { releaseMaintenance = await d.acquireMaintenance(service.pid!); }
+      catch (error) {
+        // A busy service keeps its tasks: install now and let the service's own installation watcher switch to it once it is idle.
+        if (!(error instanceof MaintenanceBusyError) || !await d.serviceWatchesInstallation(service.pid!)) throw error;
+        deferredSwitch = true;
+      }
+    }
+    if (service.active && !deferredSwitch) {
       const current = await d.serviceStatus();
       if (!current.active || current.pid !== service.pid) throw new Error("The service changed during update preparation. Run frely doctor, then retry.");
       stopped = true;
@@ -177,6 +191,7 @@ export async function update(write: (message: string) => void, dependencies: Upd
     await prepared.apply();
     if (await d.installedVersion(installation) !== release.version) throw new Error("Installed executable did not report the target version.");
     attempted = false; // Installation verified. Service/network failures must not revert a working binary.
+    if (deferredSwitch) return { state: "updated", message: `Frely ${release.version} is installed. The service is busy, so it switches to the new version once its tasks finish.` };
     if (stopped) {
       await d.startMcpService();
       const binding = await d.readDeviceBinding();

@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 import { VERSION } from "../version.js";
 import { inspectInstallation, manualUpdateCommand } from "./installation.js";
 import { compareVersions, latestRelease, standaloneAsset } from "./release.js";
-import { acquireMaintenance, MaintenanceGate, serveMaintenance } from "./maintenance.js";
+import { acquireMaintenance, MaintenanceBusyError, MaintenanceGate, serveMaintenance } from "./maintenance.js";
 import { prepareStandalone, update, validateStandalone, type UpdateDependencies } from "./update.js";
 
 const execFile = promisify(execFileCallback);
@@ -121,6 +121,7 @@ function fixture(active = true) {
   let version = VERSION, running = active;
   const installation = { method: "standalone" as const, entry: "/synthetic/frely", platform: "linux" as const };
   const d: UpdateDependencies = {
+    serviceWatchesInstallation: async () => true,
     inspectInstallation: async () => installation,
     latestRelease: async () => ({ version: NEW }),
     installedVersion: async () => version,
@@ -157,6 +158,27 @@ test("busy or mismatched service cancels before replacement or stop", async () =
     await assert.rejects(update(() => {}, d), mismatch ? /does not match/ : /busy/);
     assert.equal(calls.includes("stop"), false); assert.equal(calls.includes("apply"), false);
   }
+});
+
+test("a busy service whose watcher is on gets the new version installed without a stop; otherwise the update is refused", async () => {
+  const busy = new MaintenanceBusyError();
+  const queued = fixture();
+  queued.d.acquireMaintenance = async () => { throw busy; };
+  const result = await update(() => {}, queued.d);
+  assert.equal(result.state, "updated"); assert.match(result.message, /switches to the new version once its tasks finish/);
+  assert.equal(queued.calls.includes("apply"), true);
+  assert.equal(queued.calls.includes("stop"), false); assert.equal(queued.calls.includes("start"), false);
+  assert.equal(queued.calls.at(-1), "unlock");
+  const unwatched = fixture();
+  unwatched.d.acquireMaintenance = async () => { throw busy; };
+  unwatched.d.serviceWatchesInstallation = async () => false;
+  await assert.rejects(update(() => {}, unwatched.d), /busy/);
+  assert.equal(unwatched.calls.includes("apply"), false); assert.equal(unwatched.calls.includes("stop"), false);
+  const failed = fixture();
+  failed.d.acquireMaintenance = async () => { throw busy; };
+  failed.d.prepareStandalone = async () => ({ apply: async () => { failed.calls.push("apply"); }, restore: async () => { failed.calls.push("restore"); }, cleanup: async () => {} });
+  await assert.rejects(update(() => {}, failed.d), /did not report the target version/);
+  assert.ok(failed.calls.includes("restore")); assert.equal(failed.calls.includes("stop"), false);
 });
 
 test("failed installation attempts recovery and restarts the original service", async () => {
