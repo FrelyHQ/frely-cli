@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bindCloudClient, cloudClientMetadata, cloudClientName, failureCause, formatApiList, isInteractiveTerminal, permissionHint } from "./cloud.js";
+import { bindCloudClient, cloudClientMetadata, cloudClientName, failureCause, formatApiList, isInteractiveTerminal, permissionHint, waitForApproval } from "./cloud.js";
 
 test("the Cloud client name carries a sanitized host so devices are told apart", () => {
   assert.equal(cloudClientName("mac-mini.local"), "Frely CLI Cloud (mac-mini.local)");
@@ -101,4 +101,39 @@ test("a Cloud client is bound to this computer's device once, and not again whil
 test("a refused binding stops the call with the server's message", async () => {
   await assert.rejects(bindCloudClient({ client: { client_id: "c1" } }, device, async () => Response.json({ error: { message: "This computer is unavailable." } }, { status: 404 })), /This computer is unavailable\./);
   await assert.rejects(bindCloudClient({ client: { client_id: "c1" } }, device, async () => new Response("", { status: 500 })), /HTTP 500/);
+});
+
+const refusal = (error: object) => ({ isError: true, content: [{ type: "text", text: JSON.stringify({ error }) }] });
+const waitOptions = (clock: { t: number }) => ({ intervalMs: 1000, now: () => clock.t, sleep: async (ms: number) => { clock.t += ms; } });
+
+test("waitForApproval repeats a pending permission request until the owner approves", async () => {
+  const clock = { t: 0 };
+  const pending = refusal({ code: "permission_required", url: "https://frely.cloud/r/ab", expiresAt: 60_000 });
+  const results = [pending, pending, { content: [{ type: "text", text: "{}" }] }];
+  let calls = 0;
+  const final = await waitForApproval(pending, async () => results[calls++]!, { a: 1 }, waitOptions(clock));
+  assert.equal(calls, 3);
+  assert.equal((final as { isError?: boolean }).isError, undefined);
+});
+
+test("waitForApproval stops when the request is denied (refusal without a link)", async () => {
+  const clock = { t: 0 };
+  const denied = refusal({ code: "permission_required", message: "The owner denied this a moment ago." });
+  const final = await waitForApproval(refusal({ code: "permission_required", url: "https://frely.cloud/r/ab", expiresAt: 60_000 }), async () => denied, {}, waitOptions(clock));
+  assert.equal(final, denied);
+});
+
+test("waitForApproval sends the confirmationId and gives up at expiry", async () => {
+  const clock = { t: 0 };
+  const inputs: Array<Record<string, unknown>> = [];
+  const first = refusal({ code: "confirmation_required", confirmationId: "c_1", url: "https://frely.cloud/c/c_1", expiresAt: 5000 });
+  const final = await waitForApproval(first, async input => { inputs.push(input); return refusal({ code: "confirmation_invalid" }); }, { a: 1 }, waitOptions(clock));
+  assert.deepEqual(inputs[0], { a: 1, confirmationId: "c_1" });
+  assert.ok(inputs.length >= 3 && inputs.length <= 5);
+  assert.equal((final as { isError?: boolean }).isError, true);
+});
+
+test("waitForApproval returns a non-approval failure untouched", async () => {
+  const other = refusal({ code: "operation_failed" });
+  assert.equal(await waitForApproval(other, async () => { throw new Error("must not call"); }, {}), other);
 });
