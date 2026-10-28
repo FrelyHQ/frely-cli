@@ -21,9 +21,11 @@ export interface SkillInvocationResult {
 
 export class SkillInvocationError extends Error {
   constructor(
-    readonly code: "payment_required" | "entitlement_required" | "remote_authorization_failed" | "capability_unavailable",
+    readonly code: "payment_required" | "entitlement_required" | "remote_authorization_failed" | "capability_unavailable" | "remote_call_failed",
     readonly details: Readonly<{
       readonly capabilityId?: string;
+      /** The remote `error.data.code` when this client does not know it. */
+      readonly remoteCode?: string;
       readonly registrationUrl?: string;
     }> = {},
   ) {
@@ -141,10 +143,9 @@ export const remoteAgentMcpInvoker: RemoteAgentMcpInvoker = {
     }
     if (isRecord(payload.error)) {
       const data = isRecord(payload.error.data) ? payload.error.data : {};
-      const code = data.code === "entitlement_required"
-        ? "entitlement_required"
-        : data.code === "capability_unavailable" ? "capability_unavailable" : "remote_authorization_failed";
-      throw new SkillInvocationError(code);
+      // Any other code is passed on as is; only a failed HTTP call or an empty result means the login was refused.
+      if (data.code === "payment_required" || data.code === "entitlement_required" || data.code === "capability_unavailable") throw new SkillInvocationError(data.code);
+      throw new SkillInvocationError("remote_call_failed", typeof data.code === "string" ? { remoteCode: data.code.slice(0, 64) } : {});
     }
     const result = isRecord(payload.result) ? payload.result : undefined;
     const content = result && Array.isArray(result.content) ? result.content : [];

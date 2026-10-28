@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { basicCredentialStore as credentialStore } from "../credential-basic.js";
-import { SkillInvocationError, invokeSkill } from "./router.js";
+import { SkillInvocationError, invokeSkill, remoteAgentMcpInvoker } from "./router.js";
 
 const relayUrl = "http://127.0.0.1:43127";
 const account = relayUrl;
@@ -121,3 +121,22 @@ function memoryStore(): () => void {
   });
   return () => Object.assign(credentialStore, previous);
 }
+
+test("remote MCP errors pass their error.data.code on and only unknown ones lose it", async () => {
+  const oldFetch = globalThis.fetch;
+  const invokeWith = async (data?: Record<string, unknown>) => {
+    globalThis.fetch = (async () => Response.json({ jsonrpc: "2.0", id: "skill-invoke", error: { code: -32000, message: "no", ...(data ? { data } : {}) } })) as typeof fetch;
+    return remoteAgentMcpInvoker.invoke({ relayUrl, modelId: "user/vm-agent/v1", token: "token", task: "task" }).then(() => assert.fail("must reject"), (error: unknown) => error as SkillInvocationError);
+  };
+  try {
+    for (const code of ["payment_required", "entitlement_required", "capability_unavailable"] as const) {
+      assert.equal((await invokeWith({ code })).code, code);
+    }
+    const unknown = await invokeWith({ code: "agent_unavailable" });
+    assert.equal(unknown.code, "remote_call_failed");
+    assert.equal(unknown.details.remoteCode, "agent_unavailable");
+    assert.equal((await invokeWith()).code, "remote_call_failed");
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
