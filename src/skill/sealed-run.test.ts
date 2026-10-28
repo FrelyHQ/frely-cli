@@ -104,6 +104,22 @@ test("renews a lease that is near its end", async () => {
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
+test("renews with the installed version, from the stored lease or else the install record", async () => {
+  const { home, env, remote, result, out } = await setup({ expiresIn: 60_000 });
+  try {
+    const run = () => runSealedScript({ target: join(result.path, "premium", "run.sh"), args: ["x", out], call: remote.call, env, home, sandbox: async (command) => command });
+    assert.equal(await run(), 0);
+    const renewals = () => remote.calls.filter((input) => input.leaseOnly === true);
+    assert.equal(renewals().length, 1);
+    assert.equal(renewals()[0]!.version, 2);
+    // No stored lease: the version comes from the install record.
+    await rm(join(result.path, SEALED_LEASE_FILE));
+    assert.equal(await run(), 0);
+    assert.equal(renewals().length, 2);
+    assert.equal(renewals()[1]!.version, 2);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
 test("keeps running on the old lease while renewal fails, and stops when it has ended", async () => {
   const live = await setup({ expiresIn: 60_000, renewFails: "network" });
   try {
