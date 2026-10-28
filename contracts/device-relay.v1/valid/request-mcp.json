@@ -1,0 +1,15 @@
+{
+  "description": "MCP request without optional fields",
+  "direction": "server_to_device",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "request",
+    "id": "abcdefghijklmnop",
+    "method": "mcp",
+    "payload": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "tools/list"
+    }
+  }
+}

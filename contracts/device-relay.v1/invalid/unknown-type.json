@@ -1,0 +1,9 @@
+{
+  "description": "Unknown frame type",
+  "error": "frame_invalid",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "ping",
+    "id": "abcdefghijklmnop"
+  }
+}

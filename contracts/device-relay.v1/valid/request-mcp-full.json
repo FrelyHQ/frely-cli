@@ -1,0 +1,28 @@
+{
+  "description": "MCP request with authorization, toolsets, local MCPs and autoUpdate",
+  "direction": "server_to_device",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "request",
+    "id": "abcdefghijklmnop",
+    "method": "mcp",
+    "authorizationId": "mca_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "toolsets": [
+      "workspace",
+      "frely-app"
+    ],
+    "localMcps": [
+      "notes"
+    ],
+    "autoUpdate": true,
+    "payload": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "tools/call",
+      "params": {
+        "name": "read",
+        "arguments": {}
+      }
+    }
+  }
+}

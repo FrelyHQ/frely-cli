@@ -1,0 +1,5 @@
+{
+  "description": "Not JSON",
+  "error": "frame_invalid",
+  "raw": "{not json"
+}

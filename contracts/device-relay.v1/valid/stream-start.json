@@ -1,0 +1,11 @@
+{
+  "description": "Provider stream start",
+  "direction": "device_to_server",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "stream_start",
+    "id": "abcdefghijklmnop",
+    "status": 200,
+    "contentType": "text/event-stream"
+  }
+}

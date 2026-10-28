@@ -1,0 +1,10 @@
+{
+  "description": "Empty chunk",
+  "error": "frame_invalid",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "stream_chunk",
+    "id": "abcdefghijklmnop",
+    "data": ""
+  }
+}

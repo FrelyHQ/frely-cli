@@ -1,0 +1,5 @@
+{
+  "description": "JSON array instead of object",
+  "error": "frame_invalid",
+  "raw": "[]"
+}

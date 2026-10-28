@@ -1,0 +1,9 @@
+{
+  "description": "Wrong protocol string",
+  "error": "frame_invalid",
+  "frame": {
+    "protocol": "frely.device-relay.v2",
+    "type": "cancel",
+    "id": "abcdefghijklmnop"
+  }
+}

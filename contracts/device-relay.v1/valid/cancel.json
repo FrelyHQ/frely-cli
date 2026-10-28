@@ -1,0 +1,9 @@
+{
+  "description": "Cancel an in-flight request",
+  "direction": "server_to_device",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "cancel",
+    "id": "abcdefghijklmnop"
+  }
+}

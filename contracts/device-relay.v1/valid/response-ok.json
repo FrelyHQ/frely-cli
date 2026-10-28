@@ -1,0 +1,13 @@
+{
+  "description": "Successful response",
+  "direction": "device_to_server",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "response",
+    "id": "abcdefghijklmnop",
+    "ok": true,
+    "payload": {
+      "content": []
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "description": "Capability report",
+  "direction": "device_to_server",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "device_capabilities",
+    "id": "abcdefghijklmnop",
+    "capabilities": {
+      "autoUpdate": true
+    }
+  }
+}

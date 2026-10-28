@@ -1,0 +1,14 @@
+{
+  "description": "Provider request",
+  "direction": "server_to_device",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "request",
+    "id": "abcdefghijklmnop",
+    "method": "provider",
+    "payload": {
+      "path": "/v1/chat/completions",
+      "body": "{}"
+    }
+  }
+}

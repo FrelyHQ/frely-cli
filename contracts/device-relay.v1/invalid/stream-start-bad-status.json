@@ -1,0 +1,11 @@
+{
+  "description": "HTTP status out of range",
+  "error": "frame_invalid",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "stream_start",
+    "id": "abcdefghijklmnop",
+    "status": 99,
+    "contentType": "text/event-stream"
+  }
+}
