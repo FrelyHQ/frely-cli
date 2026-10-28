@@ -24,7 +24,11 @@ import { startStdioMcp } from "./runtime/mcp.js";
 import { installDeviceRelayService, serviceStatus, trimServiceLog, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
 import { createLocalModelsHub } from "./provider/local-models.js";
 import { shareLocalProvider } from "./provider/share.js";
-import { runShareCommand, shareUsage } from "./share/run.js";
+import { probeLoopback, runShareCommand, shareUsage, spawnFrpcProcess } from "./share/run.js";
+import { runServiceCommand, superviseServices } from "./share/service-run.js";
+import { accountServiceControl } from "./share/service-control.js";
+import { ensureFrpc } from "./share/frpc.js";
+import { listLocalServices } from "./share/service-state.js";
 import { listLocalProviders } from "./provider/state.js";
 import { API_USAGE, logoutCloud, runApi } from "./cloud.js";
 import { CONTROLLER_COMMANDS, runControllerCommand } from "./controller/commands.js";
@@ -464,6 +468,20 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "service") {
+    const controller = new AbortController();
+    const onSignal = () => controller.abort();
+    process.once("SIGINT", onSignal);
+    process.once("SIGTERM", onSignal);
+    try {
+      process.exitCode = await runServiceCommand(args.slice(1), { write: (text) => { stdout.write(text); } }, {
+        control: accountServiceControl, probe: probeLoopback, ensureFrpc: () => ensureFrpc({ log: (text) => { stdout.write(text); } }), spawnFrpc: spawnFrpcProcess, signal: controller.signal,
+        installDaemon: async () => { await installDeviceRelayService(); },
+      });
+    } finally { process.off("SIGINT", onSignal); process.off("SIGTERM", onSignal); }
+    return;
+  }
+
   if (command === "doctor") {
     const value = await doctor({ verbose: args.includes("-v") || args.includes("--verbose"), mcp: args.includes("--mcp") });
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value, null, 2)}\n`);
@@ -568,6 +586,8 @@ async function main(): Promise<void> {
     }
     localMcp?.start();
     piNode?.start();
+    // Services saved with `frely service share --background` stay connected for as long as the daemon runs.
+    const services = superviseServices({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Services stopped: ${error instanceof Error ? error.message : String(error)}`));
     try {
       const capabilities = async () => {
         const install = await readAppInstall().then((value) => value, () => null);
@@ -585,6 +605,8 @@ async function main(): Promise<void> {
     } finally {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
+      controller.abort();
+      await services;
       await piNode?.stop(); // the node keeps running; a restarted service adopts it
       await localMcp?.close();
     }
@@ -645,9 +667,9 @@ async function main(): Promise<void> {
 
   if (command === "mcp" && args[1] === "remove") {
     await revokeMcpAuthorization((message) => { process.stderr.write(message); });
-    if ((await listLocalProviders()).length > 0) {
+    if ((await listLocalProviders()).length > 0 || (await listLocalServices().catch(() => [])).some((service) => service.background)) {
       await installDeviceRelayService();
-      stdout.write("Device MCP removed. The background service keeps running for local Providers.\n");
+      stdout.write("Device MCP removed. The background service keeps running for local Providers and services.\n");
     } else {
       await uninstallMcpService();
       stdout.write("Device MCP removed and background service uninstalled.\n");
