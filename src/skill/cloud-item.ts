@@ -44,7 +44,7 @@ export class CloudToolError extends Error {
 }
 
 export class CloudItemError extends Error {
-  constructor(readonly code: "input_invalid" | "item_invalid" | "unmanaged_item_exists" | "managed_item_modified", message: string) {
+  constructor(readonly code: "input_invalid" | "item_invalid" | "unmanaged_item_exists" | "managed_item_modified" | "remote_mcp_owner_changed", message: string) {
     super(message);
     this.name = "CloudItemError";
   }

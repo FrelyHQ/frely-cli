@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { CredentialStore } from "../credential-store.js";
 import { CloudToolError, type CloudToolCaller } from "./cloud-item.js";
-import { callRemoteTool, installRemoteMcpSkill, listRemoteTools, mcpClientConfig, parseMcpName, remoteMcpSkill } from "./remote-mcp.js";
+import { callRemoteTool, connectRemoteMcp, installRemoteMcpSkill, listRemoteTools, mcpClientConfig, parseMcpName, remoteMcpSkill } from "./remote-mcp.js";
 
 const id = "remote_mcp_0123456789abcdef01234567";
 const url = `https://api.test/mcp/remote/${id}`;
@@ -107,4 +107,15 @@ test("tool text with line breaks cannot add front matter lines", () => {
 
 test("client config carries the key only in the Authorization header", () => {
   assert.deepEqual(mcpClientConfig({ id, name: "alice/crm", url, apiKey: "k" }), { mcpServers: { crm: { type: "http", url, headers: { Authorization: "Bearer k" } } } });
+});
+
+test("a name that now points at another MCP is not connected silently, only with --replace", async () => {
+  const store = memoryStore(), call = connector();
+  await store.setPassword("frely-cli-remote-mcp-v1", "alice/crm", JSON.stringify({ id: "mcp_earlier", url, apiKey: "old" }));
+  const refusedKey = server(() => "key-1");
+  await assert.rejects(connectRemoteMcp("alice/crm", { call, store, fetchImpl: refusedKey }), /not the MCP you connected before/);
+  assert.equal(JSON.parse((await store.getPassword("frely-cli-remote-mcp-v1", "alice/crm"))!).id, "mcp_earlier");
+  const switched = await connectRemoteMcp("alice/crm", { call, store, fetchImpl: refusedKey, replace: true });
+  assert.equal(switched.id, id);
+  assert.equal(JSON.parse((await store.getPassword("frely-cli-remote-mcp-v1", "alice/crm"))!).id, id);
 });

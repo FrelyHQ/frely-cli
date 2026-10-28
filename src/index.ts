@@ -138,7 +138,7 @@ async function main(): Promise<void> {
     if (action !== "tools" && action !== "call" && action !== "config") { stdout.write(subcommandUsage("remote")); return; }
     if (!ref || ref.startsWith("-")) throw new Error(`Usage: frely remote ${action} <username/name>${action === "call" ? " <tool> [--json '<object>' | --input <file>]" : ""}`);
     parseMcpName(ref);
-    const deps = { call: callCloudTool };
+    const deps = { call: callCloudTool, replace: args.includes("--replace") };
     try {
       if (action === "tools") {
         const tools = await listRemoteTools(ref, deps);
@@ -301,7 +301,7 @@ async function main(): Promise<void> {
     const value = await installCloudItem({ ...parseItemRef(itemRef), call: callCloudTool, host, scope, ...(dir ? { dir } : {}) }).catch(async (error: unknown) => {
       // A name that is not a Skill may be a remote MCP: install the Skill that uses it through `frely remote`.
       if (!isNotASkill(error) || itemRef.includes("@") || !/^[^/@]+\/[^/@]+$/u.test(itemRef)) throw error;
-      return installRemoteMcpSkill({ ref: itemRef, call: callCloudTool, host, scope, ...(dir ? { dir } : {}) }).catch((mcpError: unknown) => { throw isNotASkill(mcpError) || (mcpError instanceof CloudToolError && mcpError.code === "remote_mcp_not_found") ? error : mcpError; });
+      return installRemoteMcpSkill({ ref: itemRef, call: callCloudTool, host, scope, ...(dir ? { dir } : {}), ...(args.includes("--replace") ? { replace: true } : {}) }).catch((mcpError: unknown) => { throw isNotASkill(mcpError) || (mcpError instanceof CloudToolError && mcpError.code === "remote_mcp_not_found") ? error : mcpError; });
     });
     if ("tools" in value) {
       if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }

@@ -24,6 +24,8 @@ export interface RemoteMcpDeps {
   readonly call: CloudToolCaller;
   readonly fetchImpl?: typeof fetch;
   readonly store?: CredentialStore;
+  /** Accept that the name now belongs to another MCP than the one connected before (`--replace`). */
+  readonly replace?: boolean;
 }
 
 /** A remote MCP failure that the key cannot fix: the server answered, the call was refused or failed. */
@@ -50,6 +52,12 @@ export async function connectRemoteMcp(ref: string, deps: RemoteMcpDeps): Promis
   const { id, url, apiKey } = value;
   if (typeof id !== "string" || typeof url !== "string" || typeof apiKey !== "string" || !url.startsWith("https://")) throw new CloudItemError("item_invalid", "Frely returned an invalid MCP connection.");
   const connection: RemoteMcpConnection = Object.freeze({ id, name, url, apiKey });
+  // Names are released when their owner renames, so a name can later point at someone else's MCP. The id is the MCP's identity:
+  // a saved connection to another id is never replaced silently.
+  const saved = await storedConnection(ref, deps);
+  if (saved && saved.id !== id && deps.replace !== true) {
+    throw new CloudItemError("remote_mcp_owner_changed", `${name} is not the MCP you connected before: it now belongs to someone else. Run the command again with --replace to switch to it.`);
+  }
   // No usable credential store (headless Linux without a keyring): the next call asks for a new key.
   await (deps.store ?? credentialStore).setPassword(SERVICE, name, JSON.stringify({ id, url, apiKey })).catch(() => undefined);
   return connection;
@@ -221,8 +229,9 @@ export async function installRemoteMcpSkill(input: {
   readonly home?: string;
   readonly fetchImpl?: typeof fetch;
   readonly store?: CredentialStore;
+  readonly replace?: boolean;
 }): Promise<RemoteMcpInstallResult> {
-  const deps: RemoteMcpDeps = { call: input.call, ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}), ...(input.store ? { store: input.store } : {}) };
+  const deps: RemoteMcpDeps = { call: input.call, ...(input.replace ? { replace: true } : {}), ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}), ...(input.store ? { store: input.store } : {}) };
   const connection = await connectRemoteMcp(input.ref, deps);
   const tools = await toolsOf(connection, deps.fetchImpl ?? fetch);
   const { skill, toolsDoc } = remoteMcpSkill(connection.name, tools);
