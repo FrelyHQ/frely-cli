@@ -76,7 +76,7 @@ async function put(workDir: string, path: string, content: Buffer): Promise<void
   await writeFile(target, content, { mode: 0o600 });
 }
 
-type Marker = Pick<InstallRecord, "itemId" | "files">;
+type Marker = Pick<InstallRecord, "itemId" | "files" | "itemVersion">;
 
 /** The item folder a script belongs to: the nearest parent that has an install record. */
 async function locateItem(target: string, home: string): Promise<{ root: string; relativePath: string; marker: Marker }> {
@@ -101,8 +101,9 @@ async function currentLease(input: { root: string; marker: Marker; device: Devic
   const remaining = stored ? Date.parse(stored.lease.expiresAt) - input.now().getTime() : -1;
   if (stored && remaining > RENEW_BELOW_MS) return stored;
   const skillId = stored?.skillId ?? input.marker.itemId;
+  const version = stored?.version ?? input.marker.itemVersion;
   try {
-    const renewed = await withTimeout(renew(input.call, skillId, input.device), stored && remaining > 0 ? RENEW_WAIT_MS : 180000);
+    const renewed = await withTimeout(renew(input.call, skillId, version, input.device), stored && remaining > 0 ? RENEW_WAIT_MS : 180000);
     await writeLease(input.root, renewed);
     return renewed;
   } catch (error) {
@@ -115,8 +116,9 @@ async function currentLease(input: { root: string; marker: Marker; device: Devic
   }
 }
 
-async function renew(call: CloudToolCaller, skillId: string, device: DeviceSealKey): Promise<SealedLeaseRecord> {
-  const value = await call("skills.install", { skillId, part: "premium", sealTo: device.publicKey, leaseOnly: true });
+/** Asks for a lease on the installed version, so a newer published version never hands out a lease the installed scripts cannot open. */
+async function renew(call: CloudToolCaller, skillId: string, version: number | undefined, device: DeviceSealKey): Promise<SealedLeaseRecord> {
+  const value = await call("skills.install", { skillId, ...(version === undefined ? {} : { version }), part: "premium", sealTo: device.publicKey, leaseOnly: true });
   const manifest = value.manifest as { version?: unknown; lease?: unknown } | undefined;
   const lease = parseLease(manifest?.lease);
   if (!lease || !Number.isSafeInteger(manifest?.version)) throw new CloudItemError("item_invalid", "Frely returned an invalid lease.");

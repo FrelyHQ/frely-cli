@@ -272,7 +272,7 @@ async function main(): Promise<void> {
       const value = await updateCloudItem({ folder, call: callCloudTool });
       if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
       stdout.write(`${value.kind === "prompt" ? "Prompt" : "Skill"}: ${value.name} (v${value.version})\nPath: ${value.path}\nFiles: ${value.files}\n`);
-      if (value.premium === "pass_required") stdout.write("Paid part: not updated. Your pass has ended; buy a new one, then run this command again.\n");
+      if (value.premium === "pass_required") stdout.write("Paid part: not updated. Your access has ended, or this version is newer than your buy-out. Subscribe or buy again, then run this command again.\n");
       if (value.needsReview) stdout.write(`Frely has not scanned this version. Read every file in it, including scripts, before you use it. If it is safe, run: frely item trust ${value.path}\n`);
       if (value.kind === "skill") stdout.write("Restart or reload the agent session so it rescans Skills.\n");
       return;
@@ -302,7 +302,7 @@ async function main(): Promise<void> {
     if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
     stdout.write(`${value.kind === "prompt" ? "Prompt" : "Skill"}: ${value.name} (v${value.version})\nPath: ${value.path}\nFiles: ${value.files}\n`);
     if (value.premium === "installed") stdout.write("Paid part: installed\n");
-    if (value.premium === "pass_required") stdout.write(`Paid part: not installed. Buy a pass in the marketplace or with frely api call passes.buy --json '{"productKind":"cloud_skill","productId":"${value.id}","duration":"30d"}', then run this command again.\n`);
+    if (value.premium === "pass_required") stdout.write(`Paid part: not installed. Buy a pass in the marketplace or with frely api call passes.buy --json '{"productKind":"cloud_skill","productId":"${value.id}","duration":"monthly"}', then run this command again.\n`);
     if (value.sealedScripts > 0) stdout.write(`${value.sealedScripts} paid script${value.sealedScripts === 1 ? " is" : "s are"} encrypted on this device. They run through frely item run (the placeholder files do that for you) inside the Frely command sandbox, and stop working when your pass ends. Frely cannot show you their source.\n`);
     if (value.hasScripts && value.sealedScripts === 0) stdout.write("This item contains scripts. Read them before you let an agent run them; they were saved without execute permission.\n");
     if (value.scanned) stdout.write("Passed Frely automated scan for this version. This is an automated check, not a guarantee.\n");
