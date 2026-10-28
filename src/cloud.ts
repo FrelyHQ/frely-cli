@@ -12,6 +12,8 @@ import { inspectAuth, normalizeRelayUrl, openVerificationUrl, requireLogin } fro
 import { VERSION } from "./version.js";
 import { CloudToolError } from "./skill/cloud-item.js";
 import { ensureDevice, relayFetch } from "./device/control.js";
+import { openController } from "./controller/client.js";
+import { readSession } from "./controller/session.js";
 
 const SERVICE = "frely-cli-cloud-v1";
 /** Names this installation on the web console ("Frely CLI Cloud (host)"). Display only: the server limits the client by its device binding (see bindCloudClient), not by this name. */
@@ -141,6 +143,12 @@ async function cloudIdentity() {
   const origin = normalizeRelayUrl(account.relayUrl);
   const resource = origin + "/mcp";
   return { origin, resource, userId: account.user?.id, key: resource + "|" + (account.user?.id ?? "cloud") };
+}
+
+/** True when this computer still holds the older Cloud MCP authorization that `frely api` used before it moved onto the controller connection. */
+export async function hasLegacyCloudAuthorization(): Promise<boolean> {
+  const identity = await cloudIdentity();
+  return Boolean(await credentialStore.getPassword(SERVICE, identity.key));
 }
 
 export async function logoutCloud(): Promise<void> {
@@ -366,6 +374,9 @@ export async function runApi(args: readonly string[]): Promise<{ value?: unknown
     if (!value || Array.isArray(value) || typeof value !== "object") throw new Error("Cloud input must be a JSON object.");
     input = value as Record<string, unknown>;
   }
+  // `frely api` runs on the controller connection. The older Cloud authorization is used only while it is all this computer has, for one more version.
+  if (await readSession().catch(() => null) !== null || !await hasLegacyCloudAuthorization()) return runApiViaController({ action, name, options, fullJson, wait, input });
+  process.stderr.write("This computer still uses the older Cloud authorization for frely api. It stops working in the next version: run frely controller login to move to the new one.\n");
   const session = await connectCloud();
   try {
     const all = [];
@@ -396,6 +407,29 @@ export async function runApi(args: readonly string[]): Promise<{ value?: unknown
     }
     return { value: result, failed: result.isError === true };
   } finally { await session.close(); }
+}
+
+/** `frely api` on the controller connection: the account tools are FrelyMCP's frely_list and frely_call, so the answers and approvals are the same as in an AI client. */
+async function runApiViaController(request: { action: string; name: string | undefined; options: Map<string, string>; fullJson: boolean; wait: boolean; input: Record<string, unknown> }): Promise<{ value?: unknown; text?: string; failed?: boolean }> {
+  const controller = await openController({ interactive: isInteractiveTerminal() });
+  try {
+    const textOf = (result: CallResult) => (Array.isArray(result.content) ? (result.content as Array<{ type?: unknown; text?: unknown }>).filter(part => part.type === "text" && typeof part.text === "string").map(part => part.text as string).join("\n") : "");
+    if (request.action === "list" || request.action === "describe") {
+      const group = request.action === "describe" ? request.name!.split(".")[0] : request.options.get("--group");
+      const result = await controller.call("frely_list", group ? { group } : {}) as CallResult;
+      if (result.isError === true || request.action === "describe" || request.fullJson) return { value: result, failed: result.isError === true };
+      return { text: textOf(result) + "\n" };
+    }
+    const call = (arguments_: Record<string, unknown>) => controller.call("frely_call", { tool: request.name, arguments: arguments_ }) as Promise<CallResult>;
+    let result = await call(request.input);
+    const hint = permissionHint(result);
+    if (hint) process.stderr.write(hint + "\n");
+    if (hint && request.wait) {
+      process.stderr.write("Waiting for approval; this command continues by itself once the owner decides (up to 10 minutes).\n");
+      result = await waitForApproval(result, call, request.input);
+    }
+    return { value: result, failed: result.isError === true };
+  } finally { await controller.close().catch(() => undefined); }
 }
 
 /**

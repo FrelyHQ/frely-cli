@@ -27,6 +27,8 @@ import { shareLocalProvider } from "./provider/share.js";
 import { runShareCommand, shareUsage } from "./share/run.js";
 import { listLocalProviders } from "./provider/state.js";
 import { API_USAGE, logoutCloud, runApi } from "./cloud.js";
+import { CONTROLLER_COMMANDS, runControllerCommand } from "./controller/commands.js";
+import { controllerLogout, ControllerError } from "./controller/session.js";
 import { PiNodeSupervisor } from "./agent/pi-node-supervisor.js";
 import { readAppInstall } from "./agent/app-install.js";
 import { appInstallStatus, installApp, openApp, uninstallApp, updateApp } from "./app-manager.js";
@@ -111,6 +113,11 @@ async function main(): Promise<void> {
     return;
   }
   if (!command || command === "help" || command === "--help" || command === "-h") return usage();
+
+  if (command !== undefined && CONTROLLER_COMMANDS.has(command)) {
+    process.exitCode = await runControllerCommand(args, { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); } });
+    return;
+  }
 
   if (command === "api") {
     if (args[1] === undefined) { stdout.write(API_USAGE); return; }
@@ -422,10 +429,12 @@ async function main(): Promise<void> {
     const mcpRevoked = await revokeMcpAuthorization().then(() => true, () => false);
     // Cloud credentials are keyed by the signed-in account, so revoke them before removing the login.
     const cloudRevoked = await logoutCloud().then(() => true, () => false);
+    const controllerRevoked = await controllerLogout().then(() => true, () => false);
     await logout();
     stdout.write("Frely login removed and MCP background service stopped.\n");
     if (!mcpRevoked) process.stderr.write("MCP authorization revocation was not confirmed; revoke it in Frely account settings if needed.\n");
     if (!cloudRevoked) process.stderr.write("Cloud authorization revocation was not confirmed; revoke it in Frely account settings if needed.\n");
+    if (!controllerRevoked) process.stderr.write("The controller authorization was not revoked; disconnect this computer under My Devices on the web.\n");
     return;
   }
 
@@ -722,5 +731,5 @@ main().catch((error) => {
   else if (jsonMode && command === "agent") process.stdout.write(`${JSON.stringify(error instanceof KeyBudgetError ? publicKeyBudgetError(error) : publicSkillAccessError(error))}\n`);
   // A managed service writes to a shared log, so startup failures there carry a time.
   else process.stderr.write(`${process.argv.includes("--service-config-home") ? `${new Date().toISOString()} ` : ""}${message}\n`);
-  process.exitCode = 1;
+  process.exitCode = error instanceof ControllerError ? error.exitCode : 1;
 });
