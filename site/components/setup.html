@@ -56,6 +56,17 @@
         </ol>
       </figcaption>
     </figure>
+    <!-- The one-line start script (install, sign in, enable Device MCP) lives here, with the other FrelyMCP steps. -->
+    <h3 class="install-subheading">{{relation.startTitle}}</h3>
+    <div class="terminal">
+      <div class="terminal-bar" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div class="terminal-body">
+        <p class="terminal-comment"># macOS / Linux</p>
+        <div class="terminal-line"><code data-prompt="$" id="start-unix-command">{{command.installMac}}</code><button class="copy-button" data-copy="start-unix-command" aria-label="{{copy.startCommand}}">{{copy.idle}}</button></div>
+        <p class="terminal-comment"># Windows (PowerShell)</p>
+        <div class="terminal-line"><code data-prompt="PS&gt;" id="start-windows-command">{{command.installWindows}}</code><button class="copy-button" data-copy="start-windows-command" aria-label="{{copy.startCommand}}">{{copy.idle}}</button></div>
+      </div>
+    </div>
     <div class="setup-diagnostics">
       <p class="fineprint">{{install.diagnostics}}</p>
       <div class="command">

@@ -10,5 +10,9 @@
   "mcpUrl": "https://mcp.frely.cloud/mcp",
   "mcpJson": "{\n  \"mcpServers\": {\n    \"frely\": {\n      \"url\": \"https://mcp.frely.cloud/mcp\",\n      \"headers\": {\n        \"Authorization\": \"Bearer <token from the devices page>\"\n      },\n      \"disabled\": false\n    }\n  }\n}",
   "claudeConnect": "claude mcp add --transport http frelymcp \"https://mcp.frely.cloud/mcp\"",
-  "codexConnect": "codex mcp add frelymcp --url \"https://mcp.frely.cloud/mcp\""
+  "codexConnect": "codex mcp add frelymcp --url \"https://mcp.frely.cloud/mcp\"",
+  "installOnlyUnix": "curl -fsSL https://frely.cloud/install.sh | sh",
+  "installOnlyWindows": "curl.exe -fsSLo \"$env:TEMP\\frely-install.ps1\" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:TEMP\\frely-install.ps1\"",
+  "login": "frely login --email <you@example.com>",
+  "skillInstall": "frely skill install --host <claude-code|codex|pi|generic>"
 }

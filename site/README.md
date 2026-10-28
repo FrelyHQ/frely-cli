@@ -17,11 +17,11 @@ the template or translation catalogs. Generated `_site/` files are ignored by Gi
 
 ## Content and entry paths
 
-The homepage leads with “让 Agent 从任何地方访问你的设备” / “Frely CLI: let agents access your device from any location” (the English H1 carries the brand name so searches for “frely cli” match the page). FrelyMCP lets external agents access the user's device: browser agents and command-line agents such as Codex and Claude Code are client examples. The computer running Frely CLI provides files, shell commands and processes through remote HTTP MCP with OAuth. Install Frely CLI on the target computer; the calling device uses its MCP client.
+The homepage leads with “Frely CLI: give your agent the Frely Skill” (the English H1 carries the brand name so searches for “frely cli” match the page). The Skill path is the main path: one prompt makes an agent with a shell (Claude Code, Codex, pi) install Frely CLI, sign in with an email code (`frely login --email`, then `--code`) and run `frely skill install --host <host>`. That prompt does not run `frely mcp start`, so it does not open the computer to remote clients. FrelyMCP is the second path, for clients with no shell such as web ChatGPT, and for working on another computer: the computer running Frely CLI provides files, shell commands and processes through remote HTTP MCP with OAuth.
 
-The page order is installation hero, a how-it-works diagram (your device running Frely CLI, reached by third-party chat apps through MCP via Frely; `frely doctor` below it), client connection choices, device-access use cases, optional CLI feature links, then open source. Client tabs are alternatives; local model sharing and hosted Agent invocation are independent optional features, not steps in device setup. Section and feature headings have no sequential numbers. The setup sequence is install → `frely mcp start` (signs in or registers on first run, then prints the MCP URL) → client OAuth → a real tool call. The page does not describe a separate login step. Diagnostics use `frely doctor` with `-v` for details.
+The page order is installation hero (agent prompt, then the install-it-yourself commands), the Skill walkthrough (`skill.html`, a CSS-only animation that reuses the `.demo-*` classes), a FrelyMCP section with a how-it-works diagram and the one-line `start.sh` command (`frely doctor` below it), client connection choices, device-access use cases, optional CLI feature links, then open source. Client tabs are alternatives; local model sharing and hosted Agent invocation are independent optional features, not steps in device setup. Section and feature headings have no sequential numbers. The Skill sequence is install → `frely login` → `frely skill install`. The FrelyMCP sequence is `start.sh` or `frely mcp start` (signs in or registers on first run, then prints the MCP URL) → client OAuth → a real tool call. Diagnostics use `frely doctor` with `-v` for details.
 
-Frely's main site can link to `/zh/#install` or `/en/#install`. `/#install` is English and sends Chinese browsers to `/zh/#install`, preserving the anchor. Copy targets for install, agent prompt, MCP setup, URL and diagnostics are independent. The agent prompt shows one line until clicked; Copy copies the full prompt. Codex and Claude Code examples label the URL placeholder. Codex command syntax was checked with the installed CLI's `mcp add --help` and `mcp login --help`; this is not a client OAuth acceptance test. The signed-in Frely Device MCP page provides a device-specific copy command.
+Frely's main site can link to `/zh/#install` or `/en/#install`. `/#install` is English and sends Chinese browsers to `/zh/#install`, preserving the anchor. Copy targets for install, agent prompt, login, Skill install, MCP setup, URL and diagnostics are independent. The agent prompt shows one line until clicked; Copy copies the full prompt. Codex and Claude Code examples label the URL placeholder. Codex command syntax was checked with the installed CLI's `mcp add --help` and `mcp login --help`; this is not a client OAuth acceptance test. The signed-in Frely Device MCP page provides a device-specific copy command.
 
 ## Copy style
 
@@ -61,7 +61,7 @@ language URLs also support GitHub Pages project paths.
 ## Source structure
 
 - `template.html`: metadata, asset references and section order.
-- `components/header.html`, `hero.html`, `device-mcp.html`, `setup.html`, `workflows.html`,
+- `components/header.html`, `hero.html`, `skill.html`, `device-mcp.html`, `setup.html`, `workflows.html`,
   `more.html`, `open-source.html`, `footer.html`: page sections.
 - `commands.json`: canonical CLI command strings; referenced as `{{command.name}}`.
 - `locales/*.json`: public copy, labels and status messages.

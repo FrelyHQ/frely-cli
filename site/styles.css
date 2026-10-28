@@ -473,7 +473,8 @@ pre { padding:1rem 1.2rem; margin:1.4rem 0; border:1px solid var(--line); border
 .install-more[open] summary::after { content:" −"; }
 
 /* Token walkthrough: three mini windows cycle every 12s (4s each); all three stack under reduced motion. */
-.token-demo { margin:0; }
+.token-demo, .skill-demo { margin:0; }
+.skill-can { margin:1rem 0; padding-left:1.1rem; color:var(--muted); }
 .demo-stage { display:grid; }
 .demo-window { grid-area:1/1; border:1px solid var(--line); border-radius:8px; background:var(--bg); overflow:hidden; font-size:.75rem; opacity:0; animation:demo-show 12s infinite; }
 .demo-s2 { animation-delay:4s; }

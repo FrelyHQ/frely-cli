@@ -1,0 +1,54 @@
+<section class="skill wrap section" id="skill" aria-labelledby="skill-title">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">{{skill.eyebrow}}</p>
+      <h2 id="skill-title">{{skill.line1}}<br>{{skill.line2}}</h2>
+    </div>
+    <p>{{skill.description}}</p>
+  </div>
+  <!-- Looping mini-window walkthrough (CSS only; static stack under reduced motion). Reuses the .demo-* classes of the WorkBuddy walkthrough. -->
+  <figure class="skill-demo" role="img" aria-label="{{skill.animLabel}}">
+    <div class="demo-stage" aria-hidden="true">
+      <div class="demo-window demo-s1">
+        <div class="demo-bar"><i></i><i></i><i></i><span>Claude Code</span></div>
+        <div class="demo-body">
+          <pre class="demo-code">&gt; {{skill.animUser1}}
+$ {{command.installOnlyUnix}}
+<em class="demo-pulse">{{skill.animInstalled}}</em></pre>
+        </div>
+      </div>
+      <div class="demo-window demo-s2">
+        <div class="demo-bar"><i></i><i></i><i></i><span>Claude Code</span></div>
+        <div class="demo-body">
+          <pre class="demo-code">{{skill.animAskEmail}}
+$ frely login --email you@example.com
+{{skill.animAskCode}}
+$ frely login --code ••••••
+<em class="demo-pulse">{{skill.animSignedIn}}</em></pre>
+        </div>
+      </div>
+      <div class="demo-window demo-s3">
+        <div class="demo-bar"><i></i><i></i><i></i><span>Claude Code</span></div>
+        <div class="demo-body">
+          <pre class="demo-code">$ frely skill install --host claude-code
+~/.claude/skills/frely
+&gt; {{skill.animUser3}}
+<em class="demo-pulse">$ frely item install &lt;username/skill-name&gt;</em></pre>
+        </div>
+      </div>
+    </div>
+    <figcaption class="demo-caps" aria-hidden="true"><span class="c1">{{skill.animCap1}}</span><span class="c2">{{skill.animCap2}}</span><span class="c3">{{skill.animCap3}}</span></figcaption>
+    <p class="fineprint">{{skill.animNote}}</p>
+  </figure>
+  <p class="fineprint">{{skill.hostsLabel}}</p>
+  <div class="command">
+    <code id="skill-hosts-command">{{command.skillInstall}}</code>
+    <button class="copy-button" data-copy="skill-hosts-command" aria-label="{{copy.skillInstall}}">{{copy.idle}}</button>
+  </div>
+  <ul class="skill-can">
+    <li>{{skill.can1}}</li>
+    <li>{{skill.can2}}</li>
+    <li>{{skill.can3}}</li>
+  </ul>
+  <a class="text-link" href="#get-started">{{skill.noShell}} <span aria-hidden="true">↓</span></a>
+</section>

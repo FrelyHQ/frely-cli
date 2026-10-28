@@ -4,48 +4,42 @@
 
 [官网](https://cli.frely.cloud/zh/) · [文档](https://cli.frely.cloud/docs/) · [Frely](https://frely.cloud/) · [English](README.md) · [简体中文](README.zh-CN.md)
 
-Frely CLI（`frely-cli`）把你指定的一台电脑连接到 **FrelyMCP**，让 ChatGPT、Claude、Codex 等 MCP 客户端可以在任何地方操作它，使用你授权的文件夹里的文件、Shell 命令和进程。电脑主动向 Frely 发起连接，不需要开放任何端口。
+Frely CLI gives agents with a shell, such as Claude Code, Codex and pi, the `frely` Skill: your agent uses your Frely account and the Store from the terminal. For web ChatGPT and Claude, and to work on another computer, it connects a computer you choose to **FrelyMCP**.
 
 它也是 Frely 账号的命令行工具：
 
+- **Agent、Prompt 与 Skill**：把已发布的 Frely Agent 安装为本地 Skill，或安装你购买的 Prompt 和 Skill。
 - **设备 MCP**：让远程 AI 客户端操作这台电脑。
 - **本机 MCP 服务**：把只在这台电脑上运行的 MCP 服务（例如监听 `127.0.0.1` 的）转给远程客户端使用。
-- **Agent、Prompt 与 Skill**：把已发布的 Frely Agent 安装为本地 Skill，或安装你购买的 Prompt 和 Skill。
 - **本地模型共享**：把本机 Ollama 或 OpenAI 兼容运行时发布为你自己的 Frely Provider。
 
 ## 安装
 
-### 服务器，已有 Frely 账号（无需浏览器）
+### 让 Agent 帮你安装
 
-在 Frely 网站 **My Devices → Add a computer → Create install command** 获取一次性安装命令，或让已连接 FrelyMCP 的 ChatGPT、Claude 添加一台电脑。粘贴到服务器上运行：
+让有 Shell 的 Agent（Claude Code、Codex、pi）安装 CLI、登录并安装 Skill：
 
-```sh
-curl -fsSL https://frely.cloud/start.sh | FRELY_INSTALL_TOKEN=fit_... sh
+```text
+Install Frely CLI and the frely Skill on this computer. On macOS or Linux run curl -fsSL https://frely.cloud/install.sh | sh; on Windows PowerShell run curl.exe -fsSLo "$env:TEMP\frely-install.ps1" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-install.ps1". Ask me for my email, run frely login --email <my email>, ask me for the 6-digit code from the email, then run frely login --code <code>. Then run frely skill install --host <your host: claude-code, codex, pi or generic> and read the Skill it installs. Do not run frely mcp start until I ask for it.
 ```
 
-它会安装 `frely`、登录你的账号、开启设备 MCP 并启动后台服务。令牌只能用一次，15 分钟内有效。Linux 上请运行 `sudo loginctl enable-linger $USER`，退出 SSH 后服务才能保持在线。[详情](https://cli.frely.cloud/docs/help/install-on-a-server/)
+安装的 `frely` Skill 会教 Agent 使用你的账号，只在需要时才建议 FrelyMCP。这种方式不会把这台电脑开放给远程客户端，`frely mcp start` 才会。[详情](https://cli.frely.cloud/zh/#skill)
 
-### 有浏览器的电脑
+### 自己安装
+
+`https://frely.cloud/install.sh` 和 `install.ps1` 只安装程序，供脚本和 Agent 使用。也可以用 npm（需要 Node.js 22 或更新版本）：
 
 ```sh
 # macOS / Linux
-curl -fsSL https://frely.cloud/start.sh | sh
+curl -fsSL https://frely.cloud/install.sh | sh
 ```
 
 ```powershell
 # Windows（PowerShell）
-curl.exe -fsSLo "$env:TEMP\frely-start.ps1" https://frely.cloud/start.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-start.ps1"
+curl.exe -fsSLo "$env:TEMP\frely-install.ps1" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-install.ps1"
 ```
 
-脚本安装最新版 `frely`，打开浏览器登录（新账号可在同一页面注册），请你批准这台设备，最后输出 MCP URL。随时可以再运行一次来升级。工作区默认是用户主目录，设置 `FRELY_WORKSPACE=/path` 可共享其他文件夹。[详情](https://cli.frely.cloud/docs/help/how-do-i-install/)
-
-### 让 Agent 帮你安装
-
-让有 Shell 的 Agent（Claude Code、Codex、pi）安装 CLI，用 `frely login --email` 登录，再运行 `frely skill install --host <host>`。安装的 `frely` Skill 会教 Agent 使用你的账号，只在需要时才建议 FrelyMCP。这种方式不会把这台电脑开放给远程客户端，`frely mcp start` 才会。
-
-### 只安装
-
-`https://frely.cloud/install.sh` 和 `install.ps1` 只安装程序，供脚本和 Agent 使用。也可以用 npm（需要 Node.js 22 或更新版本）：
+或用 npm：
 
 ```sh
 npm install --global --ignore-scripts frely-cli@latest
@@ -53,10 +47,18 @@ npm install --global --ignore-scripts frely-cli@latest
 
 安装器会校验 SHA-256，下载先走 GitHub Releases，再回退到 npmmirror 和 npmjs。[详情](https://cli.frely.cloud/docs/help/install-only/)
 
+然后登录并为你的 Agent 宿主安装 Skill：
+
+```sh
+frely login --email <you@example.com>   # 再运行：frely login --code <6 位验证码>
+frely skill install --host <claude-code|codex|pi|generic>
+```
+
 ## 常用命令
 
 | 命令 | 作用 |
 | --- | --- |
+| `frely skill install --host <host>` | 为 Agent 宿主（`claude-code`、`codex`、`pi` 或 `generic`）安装 `frely` Skill。 |
 | `frely mcp start` | 需要时登录，开启设备 MCP，启动服务并输出 MCP URL。可重复运行。 |
 | `frely mcp status` | 显示 MCP URL、工作区、授权到期时间和服务状态。 |
 | `frely mcp workspace add <path>` | 共享另一个文件夹。`frely mcp workspace list` 列出全部。 |
@@ -73,7 +75,33 @@ npm install --global --ignore-scripts frely-cli@latest
 
 ## 与 FrelyMCP 配合使用
 
+Use FrelyMCP from clients with no shell, such as web ChatGPT and Claude, or to work on another computer.
+
 FrelyMCP 是整个账号共用的一个 MCP 地址：`https://mcp.frely.cloud/mcp`。每台运行过 `frely mcp start` 的电脑都在它后面。
+
+### 连接有浏览器的电脑
+
+```sh
+# macOS / Linux
+curl -fsSL https://frely.cloud/start.sh | sh
+```
+
+```powershell
+# Windows（PowerShell）
+curl.exe -fsSLo "$env:TEMP\frely-start.ps1" https://frely.cloud/start.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-start.ps1"
+```
+
+脚本安装最新版 `frely`，打开浏览器登录（新账号可在同一页面注册），请你批准这台设备，最后输出 MCP URL。随时可以再运行一次来升级。工作区默认是用户主目录，设置 `FRELY_WORKSPACE=/path` 可共享其他文件夹。[详情](https://cli.frely.cloud/docs/help/how-do-i-install/)
+
+### 连接服务器（无需浏览器）
+
+在 Frely 网站 **My Devices → Add a computer → Create install command** 获取一次性安装命令，或让已连接 FrelyMCP 的 ChatGPT、Claude 添加一台电脑。粘贴到服务器上运行：
+
+```sh
+curl -fsSL https://frely.cloud/start.sh | FRELY_INSTALL_TOKEN=fit_... sh
+```
+
+它会安装 `frely`、登录你的账号、开启设备 MCP 并启动后台服务。令牌只能用一次，15 分钟内有效。Linux 上请运行 `sudo loginctl enable-linger $USER`，退出 SSH 后服务才能保持在线。[详情](https://cli.frely.cloud/docs/help/install-on-a-server/)
 
 1. 在要被控制的电脑上运行 `frely mcp start`（上面的安装脚本已经包含这一步）。
 2. 把 URL 作为使用 OAuth 的远程 MCP 服务加到客户端：

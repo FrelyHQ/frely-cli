@@ -4,28 +4,83 @@
 
 [Website](https://cli.frely.cloud/) · [Docs](https://cli.frely.cloud/docs/) · [Frely](https://frely.cloud/) · [English](README.md) · [简体中文](README.zh-CN.md)
 
-Frely CLI (`frely-cli`) connects a computer you choose to **FrelyMCP**, so ChatGPT, Claude, Codex and other MCP clients can work on it from anywhere. They use the files, shell commands and processes in the folders you allow. The computer connects out to Frely, so you open no ports.
+Frely CLI (`frely-cli`) gives agents with a shell, such as Claude Code, Codex and pi, the `frely` Skill: your agent uses your Frely account and the Store from the terminal. For web ChatGPT and Claude, and to work on another computer, it connects a computer you choose to **FrelyMCP**, so those clients can use the files, shell commands and processes in the folders you allow. The computer connects out to Frely, so you open no ports.
 
 It is also the command line for your Frely account:
 
+- **Agents, Prompts and Skills**: install a published Frely Agent as a local Skill, or install Prompts and Skills you bought.
 - **Device MCP**: let remote AI clients work on this computer.
 - **Local MCP servers**: pass MCP servers that only run on this computer (for example on `127.0.0.1`) through to remote clients.
-- **Agents, Prompts and Skills**: install a published Frely Agent as a local Skill, or install Prompts and Skills you bought.
 - **Local model sharing**: publish a local Ollama or OpenAI-compatible runtime as your own Frely Provider.
 
 ## Install
 
-### A server, with a Frely account (no browser)
+### Let your agent set it up
 
-Get a one-time install command on the Frely website (**My Devices → Add a computer → Create install command**), or ask ChatGPT or Claude connected to FrelyMCP to add a computer. Paste it on the server:
+Ask an agent that has a shell (Claude Code, Codex, pi) to install the CLI, sign in and install the Skill:
 
-```sh
-curl -fsSL https://frely.cloud/start.sh | FRELY_INSTALL_TOKEN=fit_... sh
+```text
+Install Frely CLI and the frely Skill on this computer. On macOS or Linux run curl -fsSL https://frely.cloud/install.sh | sh; on Windows PowerShell run curl.exe -fsSLo "$env:TEMP\frely-install.ps1" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-install.ps1". Ask me for my email, run frely login --email <my email>, ask me for the 6-digit code from the email, then run frely login --code <code>. Then run frely skill install --host <your host: claude-code, codex, pi or generic> and read the Skill it installs. Do not run frely mcp start until I ask for it.
 ```
 
-It installs `frely`, signs in to your account, enables Device MCP and starts the background service. The token works once and expires after 15 minutes. On Linux, run `sudo loginctl enable-linger $USER` so the service stays online after you log out of SSH. [More](https://cli.frely.cloud/docs/help/install-on-a-server/)
+The `frely` Skill teaches the agent to use your account and to offer FrelyMCP only when a request needs it. This path does not open this computer to remote clients; `frely mcp start` does. [More](https://cli.frely.cloud/#skill)
 
-### A computer with a browser
+### Install it yourself
+
+`https://frely.cloud/install.sh` and `install.ps1` only install the program, for scripts and agents that need the CLI. Node.js 22 or newer is needed only for npm.
+
+```sh
+# macOS / Linux
+curl -fsSL https://frely.cloud/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+curl.exe -fsSLo "$env:TEMP\frely-install.ps1" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-install.ps1"
+```
+
+Or with npm:
+
+```sh
+npm install --global --ignore-scripts frely-cli@latest
+```
+
+The installers check the SHA-256 and download from GitHub Releases first, then npmmirror and npmjs. [More](https://cli.frely.cloud/docs/help/install-only/)
+
+Then sign in and install the Skill for your agent host:
+
+```sh
+frely login --email <you@example.com>   # then: frely login --code <6-digit code>
+frely skill install --host <claude-code|codex|pi|generic>
+```
+
+## Common commands
+
+| Command | What it does |
+| --- | --- |
+| `frely skill install --host <host>` | Install the `frely` Skill for an agent host (`claude-code`, `codex`, `pi` or `generic`). |
+| `frely mcp start` | Sign in if needed, enable Device MCP, start the service and print the MCP URL. Safe to re-run. |
+| `frely mcp status` | Show the MCP URL, workspace, authorization expiry and service state. |
+| `frely mcp workspace add <path>` | Share another folder. `frely mcp workspace list` shows them all. |
+| `frely mcp stop` / `frely mcp start` | Pause or resume the background service. |
+| `frely mcp auto-update [on\|off]` | Let the background service update itself while idle (macOS/Linux, off by default). |
+| `frely mcp remove` | Revoke access for every client and uninstall the service. |
+| `frely doctor` | Check sign-in, installation, service and connection. `-v` for details. |
+| `frely update` | Update to the latest version in place. |
+| `frely login` / `frely logout` | Sign in or out of your Frely account. `frely login --email <you@example.com>` then `--code <code>` signs in without a browser. |
+| `frely sandbox proxy <url>` | Forward the command sandbox's network traffic to your own HTTP(S) proxy. Without it the CLI uses `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` and, on macOS, the system proxy. `--clear` removes it; restart the service to apply. |
+| `frely tunnel <host>:<port>` | Inside a sandboxed command: listen on `127.0.0.1` and forward TCP connections to `host:port` through the sandbox, for database and redis clients. `--local-port N` picks the local port. |
+| `frely uninstall` | Remove Frely from this computer (lists everything first). |
+
+All commands and options: [command reference](https://cli.frely.cloud/docs/help/commands/). `frely help --agent --json` prints the full machine-readable contract.
+
+## Use with FrelyMCP
+
+Use FrelyMCP from clients with no shell, such as web ChatGPT and Claude, or to work on another computer.
+
+FrelyMCP is one MCP address for your whole account: `https://mcp.frely.cloud/mcp`. Every computer where you ran `frely mcp start` appears behind it.
+
+### Connect a computer with a browser
 
 ```sh
 # macOS / Linux
@@ -39,42 +94,15 @@ curl.exe -fsSLo "$env:TEMP\frely-start.ps1" https://frely.cloud/start.ps1; power
 
 The script installs the latest `frely`, opens the browser to sign in (new accounts can register there), asks you to approve this device and prints your MCP URL. Run it again any time to update. The workspace is your home directory by default; set `FRELY_WORKSPACE=/path` to share another folder. [More](https://cli.frely.cloud/docs/help/how-do-i-install/)
 
-### Let your agent set it up
+### Connect a server (no browser)
 
-Ask an agent that has a shell (Claude Code, Codex, pi) to install the CLI, sign in with `frely login --email`, and run `frely skill install --host <host>`. The `frely` Skill teaches the agent to use your account and to offer FrelyMCP only when a request needs it. This path does not open this computer to remote clients; `frely mcp start` does.
-
-### Install only
-
-`https://frely.cloud/install.sh` and `install.ps1` only install the program, for scripts and agents that need the CLI. Or use npm (Node.js 22 or newer):
+Get a one-time install command on the Frely website (**My Devices → Add a computer → Create install command**), or ask ChatGPT or Claude connected to FrelyMCP to add a computer. Paste it on the server:
 
 ```sh
-npm install --global --ignore-scripts frely-cli@latest
+curl -fsSL https://frely.cloud/start.sh | FRELY_INSTALL_TOKEN=fit_... sh
 ```
 
-The installers check the SHA-256 and download from GitHub Releases first, then npmmirror and npmjs. [More](https://cli.frely.cloud/docs/help/install-only/)
-
-## Common commands
-
-| Command | What it does |
-| --- | --- |
-| `frely mcp start` | Sign in if needed, enable Device MCP, start the service and print the MCP URL. Safe to re-run. |
-| `frely mcp status` | Show the MCP URL, workspace, authorization expiry and service state. |
-| `frely mcp workspace add <path>` | Share another folder. `frely mcp workspace list` shows them all. |
-| `frely mcp stop` / `frely mcp start` | Pause or resume the background service. |
-| `frely mcp auto-update [on\|off]` | Let the background service update itself while idle (macOS/Linux, off by default). |
-| `frely mcp remove` | Revoke access for every client and uninstall the service. |
-| `frely doctor` | Check sign-in, installation, service and connection. `-v` for details. |
-| `frely update` | Update to the latest version in place. |
-| `frely login` / `frely logout` | Sign in or out of your Frely account. |
-| `frely sandbox proxy <url>` | Forward the command sandbox's network traffic to your own HTTP(S) proxy. Without it the CLI uses `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` and, on macOS, the system proxy. `--clear` removes it; restart the service to apply. |
-| `frely tunnel <host>:<port>` | Inside a sandboxed command: listen on `127.0.0.1` and forward TCP connections to `host:port` through the sandbox, for database and redis clients. `--local-port N` picks the local port. |
-| `frely uninstall` | Remove Frely from this computer (lists everything first). |
-
-All commands and options: [command reference](https://cli.frely.cloud/docs/help/commands/). `frely help --agent --json` prints the full machine-readable contract.
-
-## Use with FrelyMCP
-
-FrelyMCP is one MCP address for your whole account: `https://mcp.frely.cloud/mcp`. Every computer where you ran `frely mcp start` appears behind it.
+It installs `frely`, signs in to your account, enables Device MCP and starts the background service. The token works once and expires after 15 minutes. On Linux, run `sudo loginctl enable-linger $USER` so the service stays online after you log out of SSH. [More](https://cli.frely.cloud/docs/help/install-on-a-server/)
 
 1. On the computer to control, run `frely mcp start` (the install scripts above already do this).
 2. Add the URL to your client as a remote MCP server with OAuth:
