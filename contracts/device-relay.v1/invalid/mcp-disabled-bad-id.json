@@ -1,0 +1,9 @@
+{
+  "description": "mcp_disabled id must be an authorization id",
+  "error": "frame_invalid",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "mcp_disabled",
+    "id": "abcdefghijklmnop"
+  }
+}

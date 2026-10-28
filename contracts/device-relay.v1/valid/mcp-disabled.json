@@ -1,0 +1,9 @@
+{
+  "description": "MCP authorization revoked; id is the authorization id",
+  "direction": "server_to_device",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "mcp_disabled",
+    "id": "mca_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "description": "Method \"node\" is not part of v1",
+  "error": "frame_invalid",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "request",
+    "id": "abcdefghijklmnop",
+    "method": "node",
+    "payload": {}
+  }
+}

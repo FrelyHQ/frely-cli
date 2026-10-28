@@ -1,0 +1,12 @@
+{
+  "description": "authorizationId only allowed on mcp",
+  "error": "frame_invalid",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "request",
+    "id": "abcdefghijklmnop",
+    "method": "provider",
+    "authorizationId": "mca_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "payload": {}
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "description": "Provider stream chunk (base64url)",
+  "direction": "device_to_server",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "stream_chunk",
+    "id": "abcdefghijklmnop",
+    "data": "ZGF0YTogW0RPTkVdCgo"
+  }
+}

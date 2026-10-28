@@ -1,0 +1,12 @@
+{
+  "description": "autoUpdate is only ever true",
+  "error": "frame_invalid",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "request",
+    "id": "abcdefghijklmnop",
+    "method": "mcp",
+    "autoUpdate": false,
+    "payload": {}
+  }
+}

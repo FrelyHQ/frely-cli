@@ -69,6 +69,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
   // Off unless the owner switched it on; the swap happens while idle and the watcher above restarts the service.
   const closeAutoUpdate = maintenance && options.restartForUpdate ? watchAutoUpdate({ gate: maintenance, signal: options.signal, enabled: () => readEffectiveAutoUpdate(), log }) : () => {};
   let delayMs = 1000;
+  let restartSince: number | undefined;
   let preferredTransport: DeviceTransportKind | undefined;
   try {
     while (!options.signal.aborted) {
@@ -127,7 +128,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
           options.signal,
           log,
           (event) => {
-            if (event.type === "connected") delayMs = 1000;
+            if (event.type === "connected") { delayMs = 1000; restartSince = undefined; }
             reporter.report(event);
           },
           maintenance,
@@ -152,8 +153,10 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
         diagnostic(log, selectedTransport ? `relay.disconnected.${selectedTransport.kind}` : "relay.disconnected", {}, error);
         reporter.report({ type: "disconnected", error });
         if (!retryWithoutDelay) {
-          await wait(delayMs, options.signal);
-          delayMs = Math.min(delayMs * 2, 15_000);
+          const next = nextReconnectDelay({ backoffMs: delayMs, restartSince }, error, Date.now());
+          restartSince = next.restartSince;
+          delayMs = next.backoffMs;
+          await wait(next.delayMs, options.signal);
         }
       } finally {
         lease?.close();
@@ -166,7 +169,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
 }
 
 class DeviceTransportConnectionError extends Error {
-  constructor(message: string, readonly fallbackEligible: boolean) {
+  constructor(message: string, readonly fallbackEligible: boolean, readonly closeCode?: number) {
     super(message);
     this.name = "Error";
   }
@@ -181,8 +184,38 @@ function closedTransportError(code: number, reason: Buffer): DeviceTransportConn
   const noFallback = new Set(["hard_lifetime", "connection_replaced", "device_revoked", "revocation_check_failed", "frame_invalid"]);
   return new DeviceTransportConnectionError(
     `WebSocket closed (${code}${text ? `: ${text}` : ""})`,
-    !noFallback.has(text),
+    !noFallback.has(text) && !isRelayRestartCode(code),
+    code,
   );
+}
+
+/** 1012 (Service Restart) and 1001 (Going Away): the relay is restarting and will be back within seconds. */
+function isRelayRestartCode(code: number): boolean {
+  return code === 1012 || code === 1001;
+}
+
+export function isRelayRestartClose(error: unknown): boolean {
+  return error instanceof DeviceTransportConnectionError && error.closeCode !== undefined && isRelayRestartCode(error.closeCode);
+}
+
+export const RELAY_RESTART_RETRY_WINDOW_MS = 60_000;
+const MAX_BACKOFF_MS = 15_000;
+
+/**
+ * After the relay announced a restart, retry about once a second for a minute (also when attempts fail
+ * while the container is still starting), then fall back to the exponential backoff.
+ */
+export function nextReconnectDelay(
+  state: { backoffMs: number; restartSince?: number | undefined },
+  error: unknown,
+  now: number,
+  random: () => number = Math.random,
+): { delayMs: number; backoffMs: number; restartSince?: number | undefined } {
+  const restartSince = state.restartSince ?? (isRelayRestartClose(error) ? now : undefined);
+  if (restartSince !== undefined && now - restartSince < RELAY_RESTART_RETRY_WINDOW_MS) {
+    return { delayMs: Math.round(800 + random() * 400), backoffMs: state.backoffMs, restartSince };
+  }
+  return { delayMs: state.backoffMs, backoffMs: Math.min(state.backoffMs * 2, MAX_BACKOFF_MS) };
 }
 
 export async function serveConnection(
@@ -229,7 +262,7 @@ export async function serveConnection(
       for (const [id, item] of inflight) {
         cancelled.add(id);
         item.controller.abort();
-        if (item.request.method === "mcp" || item.request.method === "node") session?.cancel(id);
+        if (item.request.method === "mcp") session?.cancel(id);
       }
       signal.removeEventListener("abort", onAbort);
       lease?.controller.signal.removeEventListener("abort", onLeaseAbort);
@@ -300,7 +333,7 @@ async function handleFrame(
   inflight.set(envelope.id, { request: envelope, controller });
   const operation = envelope.method === "provider"
     ? executeProviderRequest(envelope, socket, controller.signal, cancelled, log)
-    : (envelope.method === "node" ? executeNodeRequest(envelope, session) : executeMcpRequest(envelope, session, lease)).then((payload) => {
+    : executeMcpRequest(envelope, session, lease).then((payload) => {
         if (!cancelled.has(envelope.id)) send(socket, { protocol: DEVICE_RELAY_PROTOCOL, type: "response", id: envelope.id, ok: true, payload }, log);
       });
   void operation.catch((error) => {
@@ -321,14 +354,8 @@ async function executeMcpRequest(request: DeviceRelayRequest, session: RelaySess
   return session.execute(request.payload, request.id, request.toolsets, request.localMcps);
 }
 
-async function executeNodeRequest(request: DeviceRelayRequest, session: RelaySession | null): Promise<unknown> {
-  if (!session) throw new Error("No node session available.");
-  return session.execute(request.payload, request.id);
-}
-
 function relayErrorCode(method: string): string {
   if (method === "mcp") return "mcp_execution_failed";
-  if (method === "node") return "node_execution_failed";
   return "provider_execution_failed";
 }
 

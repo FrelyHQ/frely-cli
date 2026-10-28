@@ -1,0 +1,14 @@
+{
+  "description": "ok response must not carry error",
+  "error": "frame_invalid",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "response",
+    "id": "abcdefghijklmnop",
+    "ok": true,
+    "error": {
+      "code": "x",
+      "message": "y"
+    }
+  }
+}

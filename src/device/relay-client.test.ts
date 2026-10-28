@@ -202,3 +202,34 @@ test("device reports capabilities once per connection", async () => {
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test("relay restart close codes retry about once a second for a minute, then back off", async () => {
+  const { nextReconnectDelay, RELAY_RESTART_RETRY_WINDOW_MS } = await import("./relay-client.js");
+  const closed = (code: number) => new Promise<unknown>((resolve) => {
+    const server = new WebSocketServer({ port: 0, handleProtocols: () => DEVICE_RELAY_PROTOCOL });
+    server.once("connection", (peer) => peer.close(code, "restart"));
+    server.once("listening", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("missing test address");
+      const abort = new AbortController();
+      serveConnection(`ws://127.0.0.1:${address.port}`, "t", `drd_${"a".repeat(32)}`, null, null, abort.signal, () => undefined)
+        .catch((error: unknown) => { server.close(); resolve(error); });
+    });
+  });
+  const restart = await closed(1012);
+  assert.equal(isTransportFallbackEligible(restart), false);
+  const first = nextReconnectDelay({ backoffMs: 8000 }, restart, 1_000, () => 0.5);
+  assert.equal(first.delayMs, 1000);
+  assert.equal(first.backoffMs, 8000);
+  // Plain connection failures inside the window keep the fast cadence.
+  const during = nextReconnectDelay({ backoffMs: 8000, restartSince: first.restartSince }, new Error("refused"), 1_000 + 30_000, () => 0);
+  assert.equal(during.delayMs, 800);
+  // After the window the exponential backoff resumes.
+  const after = nextReconnectDelay({ backoffMs: 8000, restartSince: first.restartSince }, new Error("refused"), 1_000 + RELAY_RESTART_RETRY_WINDOW_MS, () => 0);
+  assert.equal(after.delayMs, 8000);
+  assert.equal(after.backoffMs, 15_000);
+  assert.equal(after.restartSince, undefined);
+  // 1001 counts as restart too; other codes do not.
+  assert.equal(nextReconnectDelay({ backoffMs: 4000 }, await closed(1001), 0, () => 0).delayMs, 800);
+  assert.equal(nextReconnectDelay({ backoffMs: 4000 }, await closed(1011), 0, () => 0).delayMs, 4000);
+});

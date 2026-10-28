@@ -1,0 +1,11 @@
+{
+  "description": "Unknown method",
+  "error": "frame_invalid",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "request",
+    "id": "abcdefghijklmnop",
+    "method": "shell",
+    "payload": {}
+  }
+}
