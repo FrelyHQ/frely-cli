@@ -13,6 +13,8 @@ import { removeEntrySkill, untouchedEntrySkills } from "./skill/entry.js";
 import { inspectMcpMetadata, revokeMcpAuthorization } from "./mcp-authorization.js";
 import { runNetwork } from "./network.js";
 import { listLocalProviders } from "./provider/state.js";
+import { listLocalServices } from "./share/service-state.js";
+import { accountServiceControl } from "./share/service-control.js";
 import { serviceStatus, uninstallMcpService } from "./service.js";
 import { removeSkillAdapter } from "./skill/access.js";
 import { createNativeCredentialStore } from "./credential-native.js";
@@ -57,6 +59,10 @@ export interface UninstallDeps {
   logout: () => Promise<void>;
   uninstallService: () => Promise<void>;
   localProviderNames: () => Promise<string[]>;
+  /** Ids of services registered by `frely service share` on this computer. */
+  localServiceIds: () => Promise<string[]>;
+  /** Removes one registered service from the account; may throw. */
+  removeService: (serviceShareId: string) => Promise<void>;
   removeAgent: (distributionId: string, home: string) => Promise<void>;
   deleteVaultKey: (service: string, account: string) => Promise<void>;
   piNodePid: () => Promise<number | null>;
@@ -90,6 +96,8 @@ export const defaultDeps = (): UninstallDeps => ({
   logout,
   uninstallService: uninstallMcpService,
   localProviderNames: async () => (await listLocalProviders().catch(() => [])).map((provider) => provider.name),
+  localServiceIds: async () => (await listLocalServices().catch(() => [])).map((service) => service.serviceShareId),
+  removeService: async (serviceShareId) => { await (await accountServiceControl()).remove(serviceShareId); },
   removeAgent: async (distributionId, home) => { await removeSkillAdapter(distributionId, home); },
   deleteVaultKey: async (service, account) => { await createNativeCredentialStore().deletePassword(service, account); },
   piNodePid: async () => {
@@ -128,6 +136,13 @@ export async function buildPlan(deps: UninstallDeps = defaultDeps()): Promise<Un
 
   // A. Account side first: it needs the stored login.
   if (await deps.isLoggedIn()) {
+    // Best effort: a service that cannot be removed now never blocks the uninstall (it can be removed in the web console).
+    const serviceIds = await deps.localServiceIds().catch(() => [] as string[]);
+    if (serviceIds.length > 0) steps.push({ id: "remove-services", group: "remote", label: `Remove ${serviceIds.length} registered service(s) from your Frely account`, run: async () => {
+      let failed = 0;
+      for (const id of serviceIds) await deps.removeService(id).catch(() => { failed += 1; });
+      if (failed > 0) return `${failed} could not be removed; remove them in the web console`;
+    } });
     if (await deps.hasMcpAuthorization()) steps.push({ id: "revoke-mcp", group: "remote", label: "Revoke this device's Device MCP authorization", run: deps.revokeMcp });
     if (await deps.hasDeviceBinding()) steps.push({ id: "revoke-device", group: "remote", label: "Remove this device from your Frely account", run: async () => {
       await deps.revokeDevice();

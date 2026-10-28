@@ -15,14 +15,8 @@ export interface ShareControl {
 
 /** Calls Frely's share route as the signed-in user; the device is this computer's enrolled device. */
 export async function accountShareControl(): Promise<ShareControl> {
-  const auth = await requireLogin();
   const device = await ensureDevice();
-  const call = async (body: Record<string, unknown>): Promise<unknown> => {
-    const response = await relayFetch(auth.config.relayUrl, auth.credential, { method: "POST", body: JSON.stringify(body) });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(publicError(payload, response.status));
-    return payload;
-  };
+  const call = await accountRelayCaller(SHARES_PATH);
   return {
     async create(input) { return parseShareGrant(await call({ action: "create", deviceId: device.deviceId, ...(input.ttlSeconds !== undefined ? { ttlSeconds: input.ttlSeconds } : {}) })); },
     async heartbeat(sessionId) {
@@ -34,11 +28,22 @@ export async function accountShareControl(): Promise<ShareControl> {
   };
 }
 
-async function relayFetch(relayUrl: string, credential: AuthCredential, init: RequestInit): Promise<Response> {
+/** A POST helper for one of Frely's device-relay routes, signed in as the user. */
+export async function accountRelayCaller(path: string): Promise<(body: Record<string, unknown>) => Promise<unknown>> {
+  const auth = await requireLogin();
+  return async (body) => {
+    const response = await relayFetch(auth.config.relayUrl, auth.credential, path, { method: "POST", body: JSON.stringify(body) });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(publicError(payload, response.status));
+    return payload;
+  };
+}
+
+async function relayFetch(relayUrl: string, credential: AuthCredential, path: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS); timer.unref?.();
   try {
-    return await fetch(`${relayUrl}${SHARES_PATH}`, { ...init, signal: controller.signal, redirect: "error", headers: { accept: "application/json", origin: relayUrl, "content-type": "application/json", ...(credential.scheme === "bearer" ? { authorization: `Bearer ${credential.value}` } : { cookie: credential.value }) } });
+    return await fetch(`${relayUrl}${path}`, { ...init, signal: controller.signal, redirect: "error", headers: { accept: "application/json", origin: relayUrl, "content-type": "application/json", ...(credential.scheme === "bearer" ? { authorization: `Bearer ${credential.value}` } : { cookie: credential.value }) } });
   } catch (error) {
     if (controller.signal.aborted) throw new Error("Frely share request timed out.");
     throw error;

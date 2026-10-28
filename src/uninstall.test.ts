@@ -41,6 +41,8 @@ async function fixture(overrides: Partial<UninstallDeps> = {}, withApp = false) 
     logout: async () => { calls.push("logout"); },
     uninstallService: async () => { calls.push("uninstall-service"); },
     localProviderNames: async () => [],
+    localServiceIds: async () => [],
+    removeService: async () => undefined,
     removeAgent: async (id) => { calls.push(`agent:${id}`); },
     deleteVaultKey: async () => { calls.push("vault"); },
     piNodePid: async () => null,
@@ -202,6 +204,19 @@ test("local Providers are called out as going offline", async () => {
   const terminal = io();
   await runUninstall([], terminal.value, f.deps);
   assert.match(terminal.output.join(""), /Ollama: llama3.*go offline/);
+});
+
+test("registered services are removed from the account best effort and local-services.json is deleted", async () => {
+  const removed: string[] = [];
+  const f = await fixture({
+    localServiceIds: async () => ["svcs_a", "svcs_b"],
+    removeService: async (id) => { removed.push(id); if (id === "svcs_a") throw new Error("offline"); },
+  });
+  const file = join(f.config, "local-services.json");
+  await writeFile(file, "{}");
+  assert.equal(await runUninstall(["--yes"], io().value, f.deps), 0);
+  assert.deepEqual(removed, ["svcs_a", "svcs_b"]);
+  assert.equal(await exists(file), false);
 });
 
 test("unknown arguments are rejected before anything is read", async () => {
