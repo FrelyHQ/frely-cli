@@ -4,7 +4,7 @@
 
 [官网](https://cli.frely.cloud/zh/) · [文档](https://cli.frely.cloud/docs/) · [Frely](https://frely.cloud/) · [English](README.md) · [简体中文](README.zh-CN.md)
 
-Frely CLI gives agents with a shell, such as Claude Code, Codex and pi, the `frely` Skill: your agent uses your Frely account and the Store from the terminal. For web ChatGPT and Claude, and to work on another computer, it connects a computer you choose to **FrelyMCP**.
+Frely CLI 为 Claude Code、Codex、pi 等有 Shell 的 Agent 安装 `frely` Skill：你的 Agent 在终端使用你的 Frely 账号和 Store。对网页版 ChatGPT 和 Claude，或要操作另一台电脑时，它把你指定的一台电脑接入 **FrelyMCP**。
 
 它也是 Frely 账号的命令行工具：
 
@@ -20,7 +20,7 @@ Frely CLI gives agents with a shell, such as Claude Code, Codex and pi, the `fre
 让有 Shell 的 Agent（Claude Code、Codex、pi）安装 CLI、登录并安装 Skill：
 
 ```text
-Install Frely CLI and the frely Skill on this computer. On macOS or Linux run curl -fsSL https://frely.cloud/install.sh | sh; on Windows PowerShell run curl.exe -fsSLo "$env:TEMP\frely-install.ps1" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-install.ps1". Ask me for my email, run frely login --email <my email>, ask me for the 6-digit code from the email, then run frely login --code <code>. Then run frely skill install --host <your host: claude-code, codex, pi or generic> and read the Skill it installs. Do not run frely mcp start until I ask for it.
+在这台电脑上安装 Frely CLI 和 frely Skill。macOS 或 Linux 运行 curl -fsSL https://frely.cloud/install.sh | sh；Windows PowerShell 运行 curl.exe -fsSLo "$env:TEMP\frely-install.ps1" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-install.ps1"。向我询问我的邮箱，运行 frely login --email <my email>，再向我要邮件里的 6 位验证码，然后运行 frely login --code <code>。接着运行 frely skill install --host <your host: claude-code, codex, pi or generic>，并阅读它安装的 Skill。在我要求之前，不要运行 frely mcp start。
 ```
 
 安装的 `frely` Skill 会教 Agent 使用你的账号，只在需要时才建议 FrelyMCP。这种方式不会把这台电脑开放给远程客户端，`frely mcp start` 才会。[详情](https://cli.frely.cloud/zh/#skill)
@@ -75,7 +75,7 @@ frely skill install --host <claude-code|codex|pi|generic>
 
 ## 与 FrelyMCP 配合使用
 
-Use FrelyMCP from clients with no shell, such as web ChatGPT and Claude, or to work on another computer.
+通过 FrelyMCP，让网页版 ChatGPT、Claude 等没有 Shell 的客户端使用 Frely，或操作另一台电脑。
 
 FrelyMCP 是整个账号共用的一个 MCP 地址：`https://mcp.frely.cloud/mcp`。每台运行过 `frely mcp start` 的电脑都在它后面。
 
