@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import test from "node:test";
 import { approvedHosts, assertSlug, insideAgentsRoot, isRunning, listRecords, readRecord, removeRecordFiles, socketPath, writeRecord, workspaceOf, type LocalAgentRecord } from "./store.js";
 
@@ -44,5 +44,6 @@ test("removal is limited to folders inside the Agents folder", () => {
 test("a process id decides whether an Agent is running, and socket paths stay short", () => {
   assert.equal(isRunning({ pid: undefined }), false);
   assert.equal(isRunning({ pid: process.pid }), true);
-  assert.ok(socketPath("a-rather-long-agent-name-that-goes-on-and-on-and-on").length < 90 || process.env.XDG_RUNTIME_DIR !== undefined);
+  // The folder is the machine's; what the Agent name adds must not grow with it.
+  assert.ok(basename(socketPath("a-rather-long-agent-name-that-goes-on-and-on-and-on")).length <= 20);
 });

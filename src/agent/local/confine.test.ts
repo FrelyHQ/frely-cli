@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import test from "node:test";
 import type { CredentialStore } from "../../credential-store.js";
 import { agentEnv, gatewayOrigin, readApiKey } from "./confine.js";
@@ -11,7 +12,7 @@ test("the Agent's environment has the placeholder and the proxy name, and nothin
   assert.equal(env.OPENAI_API_KEY, "frely-local-placeholder");
   assert.equal(env.OPENAI_BASE_URL, `http://${MODEL_HOST}/v1`);
   assert.equal(env.ANTHROPIC_BASE_URL, `http://${MODEL_HOST}`);
-  assert.equal(env.UV_CACHE_DIR, "/home/u/frely-agents/helper/.cache/uv");
+  assert.equal(env.UV_CACHE_DIR, join("/home/u/frely-agents/helper", ".cache", "uv"));
   const text = JSON.stringify(env);
   for (const secret of ["real", "mine", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN"]) assert.ok(!text.includes(secret), secret);
 });
