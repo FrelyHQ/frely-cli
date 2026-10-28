@@ -29,6 +29,7 @@ import { listLocalProviders } from "./provider/state.js";
 import { API_USAGE, logoutCloud, runApi } from "./cloud.js";
 import { CONTROLLER_COMMANDS, runControllerCommand } from "./controller/commands.js";
 import { controllerLogout, ControllerError } from "./controller/session.js";
+import { runAgentLocal } from "./agent/local/command.js";
 import { PiNodeSupervisor } from "./agent/pi-node-supervisor.js";
 import { readAppInstall } from "./agent/app-install.js";
 import { appInstallStatus, installApp, openApp, uninstallApp, updateApp } from "./app-manager.js";
@@ -178,6 +179,10 @@ async function main(): Promise<void> {
   if (command === "agent") {
     const action = args[1];
     if (action === undefined) { stdout.write(subcommandUsage("agent")); return; }
+    if (action === "local") {
+      process.exitCode = await runAgentLocal(args.slice(2), { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY), readSecret: () => readStdinSecret(8192) });
+      return;
+    }
     if (action === "install") {
       const target = args[2];
       if (!target || target.startsWith("-")) throw new Error("Usage: frely agent install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <project>] [--api-key-stdin] [--json]");
