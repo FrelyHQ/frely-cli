@@ -2,7 +2,8 @@ import { requireLogin } from "../auth.js";
 import { ensureDevice } from "../device/control.js";
 import { createLocalProviderToken, loadOrCreateDeviceIdentity } from "../device/identity.js";
 import { installDeviceRelayService } from "../service.js";
-import { finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider, waitForLocalProviderRelay } from "./control.js";
+import { relayAllowanceLines } from "../share/allowance.js";
+import { fetchRelayUsage, finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider, waitForLocalProviderRelay } from "./control.js";
 import { discoverLocalModels } from "./local.js";
 import { isSupportedLocalModelName, listLocalProviders, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider, type LocalProviderBinding } from "./state.js";
 
@@ -87,5 +88,6 @@ async function activateLocalProvider(auth: Awaited<ReturnType<typeof requireLogi
   log(`Models: ${provider.models.join(", ")}\n`);
   log(`Device Relay: ${service ? (service.active ? "running" : "installed") : "running"}\n`);
   log("The Provider is ready for Access Point creation in Frely.\n");
+  for (const line of await relayAllowanceLines(async () => (await fetchRelayUsage()).remainingBytes)) log(`${line}\n`);
   return ready;
 }

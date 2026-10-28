@@ -19,6 +19,29 @@ export async function listPersonalProviderSlots(): Promise<PersonalProviderSlot[
   });
 }
 
+/** This week's relay usage as `GET /api/user/device-relay/usage` answers; only what the CLI prints is read. */
+export interface RelayUsage { readonly allowanceBytes: number; readonly remainingBytes: number }
+
+export function parseRelayUsage(payload: unknown): RelayUsage {
+  const root = object(payload);
+  const { allowanceBytes, remainingBytes } = root;
+  if (typeof allowanceBytes !== "number" || !Number.isFinite(allowanceBytes) || allowanceBytes < 0 || typeof remainingBytes !== "number" || !Number.isFinite(remainingBytes) || remainingBytes < 0) throw new Error("Frely returned an invalid relay usage.");
+  return { allowanceBytes, remainingBytes };
+}
+
+/** Reads this week's relay usage with the given credential (the CLI bearer is allowed on this route). */
+export async function fetchRelayUsageWith(relayUrl: string, credential: AuthCredential): Promise<RelayUsage> {
+  const response = await relayFetch(relayUrl, credential, "/api/user/device-relay/usage", { method: "GET" });
+  const payload = await responseJson(response);
+  if (!response.ok) throw new Error(publicError(payload, response.status));
+  return parseRelayUsage(payload);
+}
+
+export async function fetchRelayUsage(): Promise<RelayUsage> {
+  const auth = await requireLogin();
+  return fetchRelayUsageWith(auth.config.relayUrl, auth.credential);
+}
+
 export type PrepareLocalProviderInput =
   | { deviceId: string; slotId: string; name: string; models: string[] }
   | { deviceId: string; source: "creator"; name: string; models: string[] };

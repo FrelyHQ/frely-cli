@@ -5,16 +5,16 @@ import { serviceFrpcConfigToml, SERVICE_SHARE_ID, type ServiceGrant, type Servic
 import { accountServiceControl, type ServiceControl } from "./service-control.js";
 import { listLocalServices, removeLocalService, saveLocalService, type LocalService } from "./service-state.js";
 import { ensureFrpc } from "./frpc.js";
+import { ALLOWANCE_NOTE, remainingAllowanceLine } from "./allowance.js";
 import { probeLoopback, spawnFrpcProcess, type FrpcProcess } from "./run.js";
 
 const HEARTBEAT_MS = 30_000;
 const HEARTBEAT_FAILURES = 3;
-const MIB = 1024 * 1024;
 const POLL_MS = 10_000;
 const RETRY_MIN_MS = 30_000;
 const RETRY_MAX_MS = 10 * 60_000;
 
-export const ALLOWANCE_NOTE = "Relayed traffic counts against your weekly relay allowance.";
+export { ALLOWANCE_NOTE };
 
 export interface ServiceShareOptions { readonly type: ServiceType; readonly port: number; readonly label: string; readonly background: boolean; readonly json: boolean }
 
@@ -115,7 +115,7 @@ function describeEnd(reason: string | undefined): string {
 }
 
 export function allowanceLines(grant: ServiceGrant): string[] {
-  return [`${Math.floor(grant.remainingBytes / MIB)} MiB of relay allowance left this week (UTC).`, ALLOWANCE_NOTE];
+  return [remainingAllowanceLine(grant.remainingBytes), ALLOWANCE_NOTE];
 }
 
 /** Keeps one service connected until aborted: when a session ends for any reason but a stop, ask for a new one after a growing pause. */
