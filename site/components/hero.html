@@ -8,7 +8,7 @@
     <p class="hero-description">{{hero.description}}</p>
     <div class="hero-actions">
       <a class="button primary" href="#install">{{hero.install}} <span aria-hidden="true">↗</span></a>
-      <a class="text-link" href="#device-mcp">{{nav.workflows}} <span aria-hidden="true">↓</span></a>
+      <a class="text-link" href="#get-started">{{hero.mcpLink}} <span aria-hidden="true">↓</span></a>
     </div>
   </div>
   <section class="install-card" id="install" aria-labelledby="install-title">
@@ -30,16 +30,19 @@
       <div class="terminal-body">
         <div class="os-option" data-os="mac">
           <p class="terminal-comment"># macOS</p>
-          <div class="terminal-line"><code data-prompt="$" id="install-mac-command">{{command.installMac}}</code><button class="copy-button" data-copy="install-mac-command" aria-label="{{copy.installMac}}">{{copy.idle}}</button></div>
+          <div class="terminal-line"><code data-prompt="$" id="install-mac-command">{{command.installOnlyUnix}}</code><button class="copy-button" data-copy="install-mac-command" aria-label="{{copy.installMac}}">{{copy.idle}}</button></div>
         </div>
         <div class="os-option" data-os="linux">
           <p class="terminal-comment"># Linux</p>
-          <div class="terminal-line"><code data-prompt="$" id="install-linux-command">{{command.installLinux}}</code><button class="copy-button" data-copy="install-linux-command" aria-label="{{copy.installLinux}}">{{copy.idle}}</button></div>
+          <div class="terminal-line"><code data-prompt="$" id="install-linux-command">{{command.installOnlyUnix}}</code><button class="copy-button" data-copy="install-linux-command" aria-label="{{copy.installLinux}}">{{copy.idle}}</button></div>
         </div>
         <div class="os-option" data-os="windows">
           <p class="terminal-comment"># Windows (PowerShell)</p>
-          <div class="terminal-line"><code data-prompt="PS&gt;" id="install-windows-command">{{command.installWindows}}</code><button class="copy-button" data-copy="install-windows-command" aria-label="{{copy.installWindows}}">{{copy.idle}}</button></div>
+          <div class="terminal-line"><code data-prompt="PS&gt;" id="install-windows-command">{{command.installOnlyWindows}}</code><button class="copy-button" data-copy="install-windows-command" aria-label="{{copy.installWindows}}">{{copy.idle}}</button></div>
         </div>
+        <p class="terminal-comment"># {{install.sharedComment}}</p>
+        <div class="terminal-line"><code data-prompt="$" id="login-command">{{command.login}}</code><button class="copy-button" data-copy="login-command" aria-label="{{copy.login}}">{{copy.idle}}</button></div>
+        <div class="terminal-line"><code data-prompt="$" id="skill-install-command">{{command.skillInstall}}</code><button class="copy-button" data-copy="skill-install-command" aria-label="{{copy.skillInstall}}">{{copy.idle}}</button></div>
       </div>
     </div>
     <details class="install-more">

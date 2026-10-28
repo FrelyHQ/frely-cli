@@ -132,3 +132,25 @@ test('header has a no-JavaScript Products dropdown with the current product mark
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+test('the landing page leads with the Skill install and keeps frely mcp start in the FrelyMCP section', async () => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const temp = await mkdtemp(resolve(tmpdir(), 'frely-site-skill-'));
+  try {
+    await cp(resolve(root, 'site'), resolve(temp, 'site'), { recursive: true });
+    for (const name of ['LICENSE', 'NOTICE', 'TRADEMARKS.md', 'install.sh', 'install.ps1', 'start.sh', 'start.ps1']) await cp(resolve(root, name), resolve(temp, name));
+    execFileSync(process.execPath, [resolve(temp, 'site/build.mjs')]);
+    for (const route of ['en/', 'zh/']) {
+      const html = await readFile(resolve(temp, '_site', route, 'index.html'), 'utf8');
+      const card = html.slice(html.indexOf('id="install"'), html.indexOf('id="skill"'));
+      assert.ok(card.includes('frely skill install --host'), route + ': install card shows the Skill command');
+      assert.equal(card.includes('frely.cloud/start.'), false, route + ': install card does not run the start script that enables Device MCP');
+      assert.ok(html.indexOf('frely.cloud/start.sh') > html.indexOf('id="get-started"'), route + ': the start script sits in the FrelyMCP section');
+      assert.ok(html.indexOf('id="skill"') < html.indexOf('id="get-started"'), route + ': Skill section comes before FrelyMCP');
+      const figure = html.match(/<figure class="skill-demo"[^>]*>/);
+      assert.ok(figure && /role="img"/.test(figure[0]) && /aria-label="[^"]+"/.test(figure[0]), route + ': Skill walkthrough has an accessible label');
+    }
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
