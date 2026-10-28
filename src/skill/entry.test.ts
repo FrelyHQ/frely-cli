@@ -35,6 +35,14 @@ test("the entry Skill keeps device MCP opt-in", () => {
   assert.match(ENTRY_SKILL, /Do nothing until the user agrees/u);
 });
 
+test("the entry Skill tells how to get a payment link and installs an Agent by name", () => {
+  assert.match(ENTRY_SKILL, /payment_required/u);
+  assert.match(ENTRY_SKILL, /credit_products\.list/u);
+  assert.match(ENTRY_SKILL, /payment_checkout\.create/u);
+  assert.match(ENTRY_SKILL, /frely agent install <username\/name>/u);
+  assert.doesNotMatch(ENTRY_SKILL, /frely agent install <id>/u);
+});
+
 test("a project install goes under --dir and no marker file is left in the Skill folder", async () => {
   const home = await realpath(await mkdtemp(join(tmpdir(), "frely-entry-")));
   try {

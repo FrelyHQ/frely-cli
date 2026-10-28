@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { CredentialStore } from "../credential-store.js";
+import { SkillInvocationError } from "./router.js";
 import { agentManifestUrl, installSkillAdapter, invokeInstalledAgent, removeSkillAdapter, resolveAgentTarget, skillAdapterStatus } from "./access.js";
 import { LOGIN_REFRESH_UNAVAILABLE, loginDevice } from "../auth.js";
 import { basicCredentialStore } from "../credential-basic.js";
@@ -67,6 +68,9 @@ test("installs a managed trigger Skill without installing the remote Agent", asy
     const text = await readFile(result.skillPath, "utf8");
     assert.match(text, /frely agent run creator_distribution_/u);
     assert.doesNotMatch(text, /api\.frely\.cloud\/mcp/u);
+    assert.match(text, /carry out a plan\), do so with your own tools/u);
+    assert.match(text, /can take several minutes/u);
+    assert.doesNotMatch(text, /remote Agent's result/u);
     const status = await skillAdapterStatus(distributionId, root);
     assert.equal(status.state, "managed");
     assert.equal(status.installed, true);
@@ -285,4 +289,30 @@ test("a name no Agent has is reported as not found", async () => {
     installSkillAdapter({ manifestUrl: agentManifestUrl("ada/nothing", "https://app.frely.cloud"), host: "pi", scope: "global", fetchFn: missing }),
     (error: unknown) => (error as { code?: string }).code === "agent_not_found",
   );
+});
+
+test("a remote payment_required becomes a payment hint and an unknown remote code is not a login failure", async () => {
+  const root = await tempRoot();
+  const store = memoryCredentialStore();
+  const apiKey = "frely_demo_model_key_123456789";
+  try {
+    await installSkillAdapter({ manifestUrl, host: "chatgpt", scope: "global", home: root, apiKey, credentialStore: store, fetchFn: fetchManifestWithApiKey(apiKey) });
+    const invoke = (error: SkillInvocationError) => invokeInstalledAgent({ distributionId, task: "Plan.", home: root, credentialStore: store, remoteInvoker: { async invoke() { throw error; } } });
+    await assert.rejects(invoke(new SkillInvocationError("payment_required")), (error: Error) => {
+      assert.equal((error as { code?: string }).code, "payment_required");
+      assert.match(error.message, /credit_products\.list/u);
+      assert.match(error.message, /payment_checkout\.create/u);
+      assert.match(error.message, /useImmediately:true/u);
+      assert.doesNotMatch(error.message, /login/u);
+      return true;
+    });
+    await assert.rejects(invoke(new SkillInvocationError("remote_call_failed", { remoteCode: "agent_unavailable" })), (error: Error) => {
+      assert.equal((error as { code?: string }).code, "remote_call_failed");
+      assert.match(error.message, /agent_unavailable/u);
+      assert.doesNotMatch(error.message, /login/u);
+      return true;
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
