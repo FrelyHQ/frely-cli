@@ -56,7 +56,8 @@
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.77",
     "@modelcontextprotocol/sdk": "^1.18.1",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "yaml": "2.8.1"
   },
   "devDependencies": {
     "@types/node": "^22.18.1",

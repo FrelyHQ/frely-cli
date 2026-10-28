@@ -243,7 +243,18 @@ function gitWriteDenials(workspaceRoot: string, allowGitConfig: boolean): string
   return [...(isDirectory(join(dotGit, "hooks")) ? [join(dotGit, "hooks")] : []), ...(allowGitConfig ? [] : [join(dotGit, "config")])];
 }
 
+/**
+ * A narrower network than the open default, for a process that only ever runs one confined program (`frely agent local`).
+ * `mitmProxy` sends plain-HTTP requests for its domains to a Unix socket the CLI itself serves, so the program never holds the credential behind it.
+ */
+export interface SandboxNetworkPolicy {
+  allowedDomains: readonly string[];
+  mitmProxy?: { socketPath: string; domains: readonly string[] };
+}
+
 export interface SandboxConfigOptions {
+  /** Replaces the default open network. Takes effect only before the sandbox starts, see `restrictSandboxNetwork`. */
+  network?: SandboxNetworkPolicy;
   /** run_command only: the command may write the workspace `.git/config`; the caller then runs the guard in git-config-guard.ts. */
   allowGitConfig?: boolean;
   /** The user's own proxy that srt forwards to. Read once when the sandbox starts. */
@@ -252,6 +263,24 @@ export interface SandboxConfigOptions {
 
 export function buildSandboxConfig(workspaceRoot: string, allowedGroups: readonly string[] = [], options: SandboxConfigOptions = {}): SandboxRuntimeConfig {
   const allowGitConfig = options.allowGitConfig === true;
+  if (options.network) {
+    return {
+      network: {
+        allowedDomains: [...options.network.allowedDomains],
+        deniedDomains: [],
+        // A restricted program gets no loopback of its own: on macOS this switch also lets it reach every other port on this computer.
+        allowLocalBinding: false,
+        ...(options.network.mitmProxy ? { mitmProxy: { socketPath: options.network.mitmProxy.socketPath, domains: [...options.network.mitmProxy.domains] } } : {}),
+        ...(options.parentProxy ? { parentProxy: options.parentProxy } : {}),
+      },
+      filesystem: {
+        denyRead: sensitiveReadPaths(allowedGroups),
+        allowWrite: [workspaceRoot, tmpdir(), ...writablePaths(allowedGroups)],
+        denyWrite: [...protectedWriteDenials(allowedGroups), ...gitWriteDenials(workspaceRoot, allowGitConfig)],
+        ...(allowGitConfig ? { allowGitConfig: true } : {}),
+      },
+    };
+  }
   return {
     network: {
       // Left open by default: an empty allowlist would break ordinary
@@ -292,6 +321,17 @@ export function sandboxUnavailableMessage(reason: string): string {
 
 type Init = { ready: true } | { ready: false; reason: string };
 let initialized: Promise<Init> | undefined;
+/** Set by `restrictSandboxNetwork`; every command of this process then runs under it. */
+let networkPolicy: SandboxNetworkPolicy | undefined;
+
+/**
+ * Narrows the network of every sandboxed command in this process. srt reads the network settings once when it starts, so this must be
+ * called before the first command; the MCP runtime never calls it and keeps the open default.
+ */
+export function restrictSandboxNetwork(policy: SandboxNetworkPolicy): void {
+  if (initialized) throw new Error("The sandbox network can only be restricted before the first command runs.");
+  networkPolicy = policy;
+}
 /** The configuration srt was initialized with: what every command runs under, and what is put back after a git-config wrap. */
 let baseConfig: SandboxRuntimeConfig | undefined;
 
@@ -311,7 +351,7 @@ async function ensureInitialized(workspaceRoot: string): Promise<Init> {
     for (const warning of dependencies.warnings) warnOnce(warning);
     try {
       // The proxy servers keep the upstream proxy they start with, so a changed proxy needs a restart of the service.
-      baseConfig = buildSandboxConfig(workspaceRoot, [], { parentProxy: resolveUpstreamProxy() });
+      baseConfig = buildSandboxConfig(workspaceRoot, [], { parentProxy: resolveUpstreamProxy(), ...(networkPolicy ? { network: networkPolicy } : {}) });
       await SandboxManager.initialize(structuredClone(baseConfig));
       return { ready: true };
     } catch (error) {
@@ -554,10 +594,19 @@ export function sshConfigReadable(): boolean {
   }
 }
 
+/** Stops srt's proxies and bridges. A process that confined its own work (`frely agent local`) calls this when done, or it never exits. */
+export async function shutdownSandbox(): Promise<void> {
+  if (!initialized) return;
+  initialized = undefined;
+  baseConfig = undefined;
+  await SandboxManager.reset().catch(() => undefined);
+}
+
 /** Exposed for tests: resets the module-level init state and the underlying manager. */
 export async function resetSandboxForTests(): Promise<void> {
   initialized = undefined;
   baseConfig = undefined;
+  networkPolicy = undefined;
   wrapQueue = Promise.resolve();
   warned = false;
   await SandboxManager.reset().catch(() => undefined);

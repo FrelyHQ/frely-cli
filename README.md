@@ -90,6 +90,7 @@ To check the connection, ask the client to list the top-level names in your work
 
 ## More features
 
+- **Agents on this computer**: `frely agent local add <username/name>` downloads an Agent's repository into its own folder and `frely agent local start <name>` runs it inside the Frely sandbox. It can write only that folder, cannot read your SSH or cloud credentials, and never sees your Frely API key; its model calls go through a local proxy that adds the key. It can reach Frely's API and, after you approve each one once, the sites its `frely.yaml` lists. [Details](docs/agent-local.md)
 - **Frely-hosted Agents**: `frely item install <username/name> --host claude-code` installs an Agent as a local Skill; `frely agent run <username/name>` calls it. [More](https://cli.frely.cloud/docs/help/install-agents-and-items/)
 - **Marketplace Prompts and Skills**: `frely item install <username/name> --host claude-code` (the same command installs Agents too; add `@3` for version 3). Paid parts install only when your account holds a pass. `frely item update` lists installed items that have a newer version; it changes nothing until you run `frely item update <folder>`. [More](https://cli.frely.cloud/docs/help/install-agents-and-items/)
 - **Local model sharing**: `frely provider share ollama` publishes a loopback model server as your personal Frely Provider. [More](https://cli.frely.cloud/docs/help/share-local-model/)
