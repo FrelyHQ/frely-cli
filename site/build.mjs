@@ -3,7 +3,12 @@ import { readFile, writeFile, mkdir, rm, copyFile, readdir } from 'node:fs/promi
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
-import { categories, entries, entryUrl } from './docs-content.mjs';
+import { cliEntries, entryUrl, frelyLinks, markdownHtml, plainText, readPages, syncDocs } from './docs-source.mjs';
+
+// Docs pages come from the pinned FrelyHQ/docs commit (site/docs.pin.json); fetch it before anything is built.
+const docsPages = readPages(syncDocs());
+const { categories, entries } = cliEntries(docsPages);
+const frelyDocs = frelyLinks(docsPages);
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = resolve(root, '_site');
@@ -84,7 +89,7 @@ for (const locale of locales) {
 
 // Static, crawlable help pages (English only). The index lists every question; /docs/help/ holds all answers on one page.
 const origin = 'https://cli.frely.cloud';
-const docsStyle = `<style>*{box-sizing:border-box}body{margin:0;background:#101211;color:#eef2ee;font:16px/1.7 system-ui,-apple-system,sans-serif}header,main{max-width:860px;margin:auto;padding:1.5rem}header{display:flex;justify-content:space-between;gap:1rem}main{padding-bottom:5rem}a{color:#d3fa6a;text-underline-offset:.2rem}h1{font-size:clamp(1.8rem,5vw,2.4rem);line-height:1.2}h2{margin-top:2.5rem}h3{margin:0 0 .4rem}.muted{color:#9aa59d}.qa{border-top:1px solid #2a312d;padding:1.2rem 0}.qa p{margin:.3rem 0;color:#d6ddd8}.links{list-style:none;padding:0;margin:.6rem 0 0;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem;font-size:.9rem}</style>`;
+const docsStyle = `<style>*{box-sizing:border-box}body{margin:0;background:#101211;color:#eef2ee;font:16px/1.7 system-ui,-apple-system,sans-serif}header,main{max-width:860px;margin:auto;padding:1.5rem}header{display:flex;justify-content:space-between;gap:1rem}main{padding-bottom:5rem}a{color:#d3fa6a;text-underline-offset:.2rem}code{font:.9em ui-monospace,SFMono-Regular,Menlo,monospace;background:#1b211e;padding:.05rem .3rem;border-radius:4px}pre{overflow-x:auto;background:#1b211e;padding:.8rem 1rem;border-radius:6px}pre code{background:none;padding:0}h1{font-size:clamp(1.8rem,5vw,2.4rem);line-height:1.2}h2{margin-top:2.5rem}h3{margin:0 0 .4rem}.muted{color:#9aa59d}.qa{border-top:1px solid #2a312d;padding:1.2rem 0}.qa p{margin:.3rem 0;color:#d6ddd8}.links{list-style:none;padding:0;margin:.6rem 0 0;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem;font-size:.9rem}</style>`;
 const docsPage = (title, description, path, body) => `<!doctype html>
 <html lang="en">
 <head>
@@ -105,7 +110,7 @@ ${body}
 `;
 const qa = (entry, tag) => `    <article class="qa" id="${entry.slug}">
       <${tag}>${tag === 'h3' ? `<a href="${entryUrl(entry)}">${escapeHtml(entry.question)}</a>` : escapeHtml(entry.question)}</${tag}>
-      <p>${escapeHtml(entry.answer)}</p>
+${markdownHtml(entry.answer).split('\n').map((line) => '      ' + line).join('\n')}
       <ul class="links">${entry.links.map((l) => `<li><a href="${escapeHtml(l.href)}">${escapeHtml(l.label)}</a></li>`).join('')}</ul>
     </article>`;
 const byCategory = (render) => categories.map((category) => render(category, entries.filter((entry) => entry.category === category))).join('\n');
@@ -119,7 +124,11 @@ pages.push({ directory: resolve(output, 'docs'), html: docsPage('Docs', 'Frely C
 ${byCategory((category, list) => `    <section>
       <h2>${escapeHtml(category)}</h2>
       <ul>${list.map((entry) => `<li><a href="${entryUrl(entry)}">${escapeHtml(entry.question)}</a></li>`).join('')}</ul>
-    </section>`)}`) });
+    </section>`)}
+    <section>
+      <h2>On frely.cloud</h2>
+      <ul>${frelyDocs.map((page) => `<li><a href="${escapeHtml(page.href)}">${escapeHtml(page.title)}</a></li>`).join('')}</ul>
+    </section>`) });
 pages.push({ directory: resolve(output, 'docs/help'), html: docsPage('Help', 'All Frely CLI questions and short answers on one page.', '/docs/help/', `    <h1>Help</h1>
     <p class="muted">Question, short answer, related links. <a href="/docs/">Back to docs</a>.</p>
 ${byCategory((category, list) => `    <section>
@@ -127,7 +136,7 @@ ${byCategory((category, list) => `    <section>
 ${list.map((entry) => qa(entry, 'h3')).join('\n')}
     </section>`)}`) });
 for (const entry of entries) {
-  pages.push({ directory: resolve(output, 'docs/help', entry.slug), html: docsPage(entry.question, entry.answer, entryUrl(entry), `    <p class="muted"><a href="/docs/">Docs</a> / <a href="/docs/help/">Help</a> / ${escapeHtml(entry.category)}</p>
+  pages.push({ directory: resolve(output, 'docs/help', entry.slug), html: docsPage(entry.question, plainText(entry.answer), entryUrl(entry), `    <p class="muted"><a href="/docs/">Docs</a> / <a href="/docs/help/">Help</a> / ${escapeHtml(entry.category)}</p>
 ${qa(entry, 'h1')}`) });
 }
 

@@ -31,6 +31,24 @@ availability, permission boundaries and failure meanings when rewriting sentence
 Keep commands, flags, product names and URLs faithful to the implementation.
 The content decisions are recorded in the revision document linked below; the device MCP contract is in [`docs/device-mcp.md`](../docs/device-mcp.md).
 
+## Docs pages
+
+The pages under `/docs/` (the index, `/docs/help/` and `/docs/help/<slug>/`) come from the public
+[FrelyHQ/docs](https://github.com/FrelyHQ/docs) repository, the single source for this site and
+frely.cloud. A page there declares its home site with `site: frely | cli` in its frontmatter
+(missing means `frely`). `node site/build.mjs` renders the `site: cli` pages (`en/cli/<slug>.md`: the
+frontmatter `title`, `category` and `order`, the answer, and a `Related:` line of links). The `/docs/`
+index also lists the `site: frely` pages in an "On frely.cloud" group that links to their frely.cloud
+addresses; frely.cloud lists the `site: cli` pages the same way. Add or change a page in the docs
+repository, never here. Answers use paragraphs, lists, fenced code, `code`, **bold** and links; the
+renderer is `docs-source.mjs`.
+
+`docs.pin.json` holds the docs repository and the full commit SHA to build from. The build fetches
+that commit into `.docs/` (ignored by Git; it needs `git` and network access). To pick up a docs
+change, merge it in the docs repository, then set `sha` to the merged commit. Set `DOCS_DIR=/path/to/docs`
+to read a local checkout without fetching. The tests read `site/test-docs/`, a small fixture, and never
+fetch.
+
 ## Languages
 
 - `/en/`: English; `/zh/`: Simplified Chinese. Both are complete static pages,
@@ -68,6 +86,7 @@ language URLs also support GitHub Pages project paths.
 - `styles.css`: foundations, navigation, installation, setup, workflows, footer
   and responsive/accessibility rules, in that order.
 - `build.mjs`: compose sections, validate values, escape content and emit static pages.
+- `docs-source.mjs`, `docs.pin.json`: fetch the pinned docs commit and read its pages; `test-docs/`: fixture for the tests.
 
 The shell includes named sections with `{{> hero}}`. Includes have a flat structure;
 nested or malformed includes fail the build. Section placeholders use the same
