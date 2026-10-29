@@ -92,17 +92,30 @@ export async function writeRun(record: RunRecord): Promise<RunRecord> {
   const path = runPath(record.runId);
   const temp = `${path}.${process.pid}.tmp`;
   await writeFile(temp, `${JSON.stringify(next)}\n`, { mode: 0o600 });
-  await rename(temp, path);
-  return next;
+  // On Windows a rename onto a file another process is reading fails briefly (EPERM/EBUSY/EACCES): retry.
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rename(temp, path);
+      return next;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt >= 50 || (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES")) { await rm(temp, { force: true }); throw error; }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
 }
 
 export async function readRun(runId: string): Promise<RunRecord | null> {
-  let raw: string;
-  try {
-    raw = await readFile(runPath(runId), "utf8");
-  } catch {
-    return null;
+  let raw: string | undefined;
+  for (let attempt = 0; attempt < 5 && raw === undefined; attempt += 1) {
+    try {
+      raw = await readFile(runPath(runId), "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
   }
+  if (raw === undefined) return null;
   try {
     const value = JSON.parse(raw) as RunRecord;
     return value.version === 1 && value.runId === runId ? value : null;
