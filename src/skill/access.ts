@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { LOGIN_REFRESH_UNAVAILABLE, requireLogin } from "../auth.js";
 import { credentialStore as secureCredentialStore, type CredentialStore } from "../credential-store.js";
-import { remoteAgentMcpInvoker, SkillInvocationError, type AgentTurnResult, type CallerItem, type CallerToolDefinition, type RemoteAgentMcpInvoker } from "./router.js";
+import { remoteAgentMcpInvoker, remoteAgentTaskClient, SkillInvocationError, type AgentTurnResult, type CallerItem, type CallerToolDefinition, type RemoteAgentMcpInvoker, type RemoteAgentTaskClient, type SkillInvocationResult } from "./router.js";
 import {
   findManagedSkillByInstallName,
   ManagedSkillError,
@@ -214,22 +214,37 @@ function remoteCallError(error: unknown, authMode: "account" | "api-key"): Skill
 
 export async function invokeInstalledAgent(input: InstalledAgentInput & {
   readonly task: string;
+  /** Sent only when given; otherwise the Gateway uses the account's setting. */
+  readonly progressSummary?: boolean;
+  /** Called with the newest progress line of a long task. */
+  readonly onProgress?: (sentence: string) => void;
+  readonly taskClient?: RemoteAgentTaskClient;
   readonly signal?: AbortSignal;
 }) {
   assertDistributionId(input.distributionId);
   if (!input.task.trim() || Buffer.byteLength(input.task, "utf8") > MAX_TASK_BYTES) throw new SkillAccessError("input_invalid", "Agent input must be non-empty and at most 128 KiB.");
   const { record, token, credential } = await openInstalledAgent(input);
+  const target = { relayUrl: new URL(record.mcpUrl).origin, modelId: record.modelId, token, ...(credential ? { credential } : {}) };
+  const tasks = input.taskClient ?? remoteAgentTaskClient;
+  let taskId: string | undefined;
   try {
-    const result = await (input.remoteInvoker ?? remoteAgentMcpInvoker).invoke({
-      relayUrl: new URL(record.mcpUrl).origin,
-      modelId: record.modelId,
-      token,
-      ...(credential ? { credential } : {}),
+    let result: SkillInvocationResult = await (input.remoteInvoker ?? remoteAgentMcpInvoker).invoke({
+      ...target,
       task: input.task,
+      ...(input.progressSummary === undefined ? {} : { progressSummary: input.progressSummary }),
       ...(input.signal ? { signal: input.signal } : {}),
     });
+    // A long call returns `running` after about 50 seconds; the task goes on at Frely, so wait for it here (reading is free).
+    while (result.state === "running" && result.taskId !== undefined) {
+      taskId = result.taskId;
+      if (result.progressSummary) input.onProgress?.(result.progressSummary);
+      result = await tasks.status({ ...target, taskId, wait: true, ...(input.signal ? { signal: input.signal } : {}) });
+    }
+    if (result.state === "failed" || result.state === "canceled") throw new SkillInvocationError("remote_call_failed");
     return Object.freeze({ ok: true, distributionId: record.distributionId, modelId: record.modelId, text: result.text, ...(result.usage ? { usage: result.usage } : {}) });
   } catch (error) {
+    // The caller gave up (Ctrl-C, `frely agent cancel`): stop the task at Frely too, so it does not keep running and billing.
+    if (taskId !== undefined && input.signal?.aborted) await tasks.cancel({ ...target, taskId }).catch(() => undefined);
     throw remoteCallError(error, record.authMode);
   }
 }
@@ -389,7 +404,7 @@ function renderSkill(manifest: PublicVirtualModelManifest, slug: string): string
   const description = oneLine(manifest.clientTrigger?.description ?? manifest.description ?? `Use ${manifest.name} through Frely when the user's task matches this Agent.`).slice(0, 900);
   const capabilities = manifest.capabilities.length === 0 ? "- Use the published Agent for tasks described by this Skill." : manifest.capabilities.map((capability) => `- ${capability.id}${capability.description ? `: ${oneLine(capability.description)}` : ""}`).join("\n");
   const triggers = manifest.clientTrigger?.when.map((condition) => `- ${oneLine(condition)}`).join("\n") ?? `- The user explicitly asks for ${oneLine(manifest.name)} or their task matches its published capabilities.`;
-  return `---\nname: ${slug}\ndescription: ${JSON.stringify(description)}\ncompatibility: ${JSON.stringify("Requires frely-cli and network access to Frely.")}\nmetadata:\n  frely-distribution-id: ${JSON.stringify(manifest.id)}\n  frely-model-id: ${JSON.stringify(manifest.modelId)}\n---\n\n# ${oneLine(manifest.name)}\n\nThe Agent runs remotely on Frely; this Skill contains only trigger and invocation instructions.\n\n## When to use\n\n${triggers}\n\n## Public capabilities\n\n${capabilities}\n\n## Execute\n\nPass the user's complete relevant request to stdin of:\n\n\`frely agent run ${manifest.id} --input-stdin --json\`\n\nDo not put credentials in the command and do not replace the user's current model provider. Return the result to the user. If the user asked you to act on it (for example, carry out a plan), do so with your own tools, following your usual confirmation rules. A call can take several minutes. If your command is cut off, run \`frely agent result --last --wait\` instead of calling again. If the result starts with NEED_FILES, read those files yourself and call again with the original task plus them. If the remote call fails, surface the returned state instead of inventing current external facts.\n`;
+  return `---\nname: ${slug}\ndescription: ${JSON.stringify(description)}\ncompatibility: ${JSON.stringify("Requires frely-cli and network access to Frely.")}\nmetadata:\n  frely-distribution-id: ${JSON.stringify(manifest.id)}\n  frely-model-id: ${JSON.stringify(manifest.modelId)}\n---\n\n# ${oneLine(manifest.name)}\n\nThe Agent runs remotely on Frely; this Skill contains only trigger and invocation instructions.\n\n## When to use\n\n${triggers}\n\n## Public capabilities\n\n${capabilities}\n\n## Execute\n\nPass the user's complete relevant request to stdin of:\n\n\`frely agent run ${manifest.id} --input-stdin --json\`\n\nDo not put credentials in the command and do not replace the user's current model provider. Return the result to the user. If the user asked you to act on it (for example, carry out a plan), do so with your own tools, following your usual confirmation rules. A call can take several minutes. If your command is cut off, run \`frely agent result --last --wait\` instead of calling again. If the user asked not to see progress updates (for example in their AGENTS.md), add \`--no-progress-summary\` to the run command. If the result starts with NEED_FILES, read those files yourself and call again with the original task plus them. If the remote call fails, surface the returned state instead of inventing current external facts.\n`;
 }
 
 function hostAction(host: SkillHost): string {

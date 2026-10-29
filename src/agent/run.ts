@@ -27,7 +27,7 @@ const OVERVIEW_HEADER = "\n\n---\nLocal workspace (read-only file tools are avai
 
 export interface RunDeps {
   openSession(distributionId: string): Promise<InstalledAgentSession>;
-  invokePlain(distributionId: string, task: string, signal: AbortSignal): Promise<{ text: string; modelId: string; usage?: Readonly<Record<string, unknown>> }>;
+  invokePlain(distributionId: string, task: string, signal: AbortSignal, options?: { progressSummary?: boolean; onProgress?: (sentence: string) => void }): Promise<{ text: string; modelId: string; usage?: Readonly<Record<string, unknown>> }>;
   /** Start the detached worker for a run. */
   spawnWorker(runId: string): void;
   stderr(text: string): void;
@@ -36,8 +36,14 @@ export interface RunDeps {
 
 export const defaultRunDeps: RunDeps = {
   openSession: (distributionId) => openInstalledAgentSession({ distributionId }),
-  invokePlain: async (distributionId, task, signal) => {
-    const result = await invokeInstalledAgent({ distributionId, task, signal });
+  invokePlain: async (distributionId, task, signal, options) => {
+    const result = await invokeInstalledAgent({
+      distributionId,
+      task,
+      signal,
+      ...(options?.progressSummary === undefined ? {} : { progressSummary: options.progressSummary }),
+      ...(options?.onProgress === undefined ? {} : { onProgress: options.onProgress }),
+    });
     return { text: result.text, modelId: result.modelId, ...("usage" in result && result.usage ? { usage: result.usage } : {}) };
   },
   spawnWorker: (runId) => {
@@ -54,12 +60,14 @@ export async function startRun(input: {
   readonly distributionId: string;
   readonly task: string;
   readonly read?: { readonly root: string; readonly limits: ReadLimits };
+  readonly progressSummary?: boolean;
 }, deps: RunDeps = defaultRunDeps): Promise<RunRecord> {
   if (!input.task.trim() || Buffer.byteLength(input.task, "utf8") > MAX_TASK_BYTES) throw new SkillAccessError("input_invalid", "Agent input must be non-empty and at most 128 KiB.");
   const record = await createRun({
     distributionId: input.distributionId,
     task: input.task,
     ...(input.read === undefined ? {} : { readRoot: input.read.root, limits: input.read.limits }),
+    ...(input.progressSummary === undefined ? {} : { progressSummary: input.progressSummary }),
   });
   deps.stderr(`Run ${record.runId} started. If this command is cut off the run keeps going: frely agent result ${record.runId} --wait\n`);
   deps.spawnWorker(record.runId);
@@ -120,6 +128,7 @@ export function runSummary(record: RunRecord): Record<string, unknown> {
     filesRead: record.filesRead,
     usage: record.usage,
     ...(status === "completed" ? { text: record.text ?? "" } : {}),
+    ...(status === "running" && record.progress !== undefined ? { progress: record.progress } : {}),
     ...(status === "completed" || record.error === undefined ? {} : { error: record.error }),
     resumable: resumable(record),
     ...(status === "running" ? { note: "Still running. Progress so far is listed; run `frely agent result <runId> --wait` to wait for the answer." } : {}),
@@ -169,8 +178,20 @@ export async function executeRun(runId: string, deps: RunDeps = defaultRunDeps, 
   const save = async (patch: Partial<RunRecord>): Promise<void> => { record = await writeRun({ ...record, ...patch }); };
   try {
     if (record.readRoot === undefined) {
-      const result = await deps.invokePlain(record.distributionId, record.task, signal);
-      await save({ status: "completed", modelId: result.modelId, text: result.text });
+      let lastProgress: string | undefined;
+      let pending: Promise<void> = Promise.resolve();
+      const result = await deps.invokePlain(record.distributionId, record.task, signal, {
+        ...(record.progressSummary === undefined ? {} : { progressSummary: record.progressSummary }),
+        onProgress: (sentence) => {
+          if (sentence === lastProgress) return;
+          lastProgress = sentence;
+          // Saved one after another, and before the final write below, so a late line cannot undo the result.
+          pending = pending.then(() => save({ progress: sentence })).catch(() => undefined);
+        },
+      });
+      await pending;
+      const { progress: _progress, ...withoutProgress } = record;
+      record = await writeRun({ ...withoutProgress, status: "completed", modelId: result.modelId, text: result.text });
       return;
     }
     await runWithTools(record, save, () => record, deps, signal);

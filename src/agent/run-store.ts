@@ -41,6 +41,10 @@ export interface RunRecord {
   readonly usage: Readonly<{ input_tokens: number; output_tokens: number; total_tokens: number }>;
   readonly resumeCount: number;
   readonly text?: string;
+  /** `--progress-summary` / `--no-progress-summary`; absent means the account's setting. */
+  readonly progressSummary?: boolean;
+  /** Newest progress line of a running plain call. */
+  readonly progress?: string;
   /** The Agent could not take local tools, so the run was done as one plain call. */
   readonly toolsUnsupported?: boolean;
   readonly error?: Readonly<{ code: string; message: string }>;
@@ -61,7 +65,7 @@ function runPath(runId: string): string {
   return join(runsDirectory(), `${runId}.json`);
 }
 
-export async function createRun(input: { readonly distributionId: string; readonly task: string; readonly readRoot?: string; readonly limits?: { totalBytes: number; maxRounds: number } }): Promise<RunRecord> {
+export async function createRun(input: { readonly distributionId: string; readonly task: string; readonly readRoot?: string; readonly limits?: { totalBytes: number; maxRounds: number }; readonly progressSummary?: boolean }): Promise<RunRecord> {
   await mkdir(runsDirectory(), { recursive: true, mode: 0o700 });
   await chmod(runsDirectory(), 0o700).catch(() => undefined);
   await pruneRuns().catch(() => undefined);
@@ -76,6 +80,7 @@ export async function createRun(input: { readonly distributionId: string; readon
     task: input.task,
     ...(input.readRoot === undefined ? {} : { readRoot: input.readRoot }),
     ...(input.limits === undefined ? {} : { limits: input.limits }),
+    ...(input.progressSummary === undefined ? {} : { progressSummary: input.progressSummary }),
     items: [],
     rounds: [],
     filesRead: [],

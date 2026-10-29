@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { basicCredentialStore as credentialStore } from "../credential-basic.js";
-import { SkillInvocationError, invokeSkill, remoteAgentMcpInvoker } from "./router.js";
+import { SkillInvocationError, invokeSkill, remoteAgentMcpInvoker, remoteAgentTaskClient } from "./router.js";
 
 const relayUrl = "http://127.0.0.1:43127";
 const account = relayUrl;
@@ -178,6 +178,33 @@ test("remote invokeTurn passes client_tools_unsupported on as the remote code", 
       () => remoteAgentMcpInvoker.invokeTurn!({ relayUrl: "https://relay.test", modelId: "friday/x", token: "t", task: "t", tools: [], items: [] }),
       (error: unknown) => error instanceof SkillInvocationError && error.details.remoteCode === "client_tools_unsupported",
     );
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("sends progressSummary and reads task state, id and progress from invoke, task_status and task_cancel", async () => {
+  const oldFetch = globalThis.fetch;
+  const calls: { name: string; arguments: Record<string, unknown> }[] = [];
+  try {
+    globalThis.fetch = (async (_url: unknown, init: { body: string }) => {
+      const params = JSON.parse(init.body).params as { name: string; arguments: Record<string, unknown> };
+      calls.push(params);
+      const state = params.name === "task_cancel" ? "canceled" : "running";
+      return Response.json({ jsonrpc: "2.0", id: "skill-invoke", result: { content: [{ type: "text", text: state }], structuredContent: { state, taskId: "a2a_task_1", progressSummary: "Reading." } } });
+    }) as typeof fetch;
+    const base = { relayUrl, modelId: "user/vm-agent/v1", token: "token" };
+    const started = await remoteAgentMcpInvoker.invoke({ ...base, task: "task", progressSummary: false });
+    assert.deepEqual({ state: started.state, taskId: started.taskId, progress: started.progressSummary }, { state: "running", taskId: "a2a_task_1", progress: "Reading." });
+    const waited = await remoteAgentTaskClient.status({ ...base, taskId: "a2a_task_1", wait: true });
+    assert.equal(waited.state, "running");
+    const stopped = await remoteAgentTaskClient.cancel({ ...base, taskId: "a2a_task_1" });
+    assert.equal(stopped.state, "canceled");
+    assert.deepEqual(calls.map((call) => [call.name, call.arguments]), [
+      ["invoke", { input: "task", progressSummary: false }],
+      ["task_status", { taskId: "a2a_task_1", wait: true }],
+      ["task_cancel", { taskId: "a2a_task_1" }],
+    ]);
   } finally {
     globalThis.fetch = oldFetch;
   }
