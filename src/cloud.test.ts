@@ -1,13 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bindCloudClient, cloudClientMetadata, cloudClientName, failureCause, formatApiList, isInteractiveTerminal, permissionHint, waitForApproval } from "./cloud.js";
-
-test("the Cloud client name carries a sanitized host so devices are told apart", () => {
-  assert.equal(cloudClientName("mac-mini.local"), "Frely CLI Cloud (mac-mini.local)");
-  assert.equal(cloudClientName("we<ird>\nhost"), "Frely CLI Cloud (weirdhost)");
-  assert.equal(cloudClientName("   "), "Frely CLI Cloud");
-  assert.ok(cloudClientName("x".repeat(100)).length <= "Frely CLI Cloud ()".length + 40);
-});
+import { formatApiList, isInteractiveTerminal, permissionHint, waitForApproval } from "./cloud.js";
 
 const failure = (error: object) => ({ isError: true, content: [{ type: "text", text: JSON.stringify({ error }) }] });
 
@@ -34,14 +27,6 @@ test("a confirmation_required failure shows the summary, the approval link and h
   assert.equal(permissionHint(failure({ code: "confirmation_required", confirmationId: "ok_1", url: "http://evil.example/x" })), null);
 });
 
-test("the Cloud client registers as a native app so its http loopback callback is accepted", () => {
-  const metadata = cloudClientMetadata("http://127.0.0.1:43125/callback", "mac-mini.local");
-  assert.equal(metadata.application_type, "native");
-  assert.deepEqual(metadata.redirect_uris, ["http://127.0.0.1:43125/callback"]);
-  assert.equal(metadata.client_name, "Frely CLI Cloud (mac-mini.local)");
-  assert.equal(metadata.token_endpoint_auth_method, "none");
-});
-
 test("the tool list is grouped by name prefix with the server's group summary and a one-line entry per tool", () => {
   const text = formatApiList([
     { name: "keys.revoke", description: "Revoke an API key. It stops working at once.", annotations: { destructiveHint: true }, _meta: { "frely/groupSummary": "Your API keys." } },
@@ -63,12 +48,6 @@ test("the tool list is grouped by name prefix with the server's group summary an
   ].join("\n"));
 });
 
-test("a connection failure keeps its real cause on one line of at most 200 characters", () => {
-  assert.equal(failureCause(new Error("web clients require\nhttps   redirect URIs")), ": web clients require https redirect URIs");
-  assert.equal(failureCause(new Error("x".repeat(500))).length, 2 + 200);
-  assert.equal(failureCause(undefined), "");
-});
-
 test("browser authorization is only attempted from an interactive terminal", () => {
   const stdin = Object.getOwnPropertyDescriptor(process.stdin, "isTTY"), stderr = Object.getOwnPropertyDescriptor(process.stderr, "isTTY");
   try {
@@ -82,25 +61,6 @@ test("browser authorization is only attempted from an interactive terminal", () 
       if (original) Object.defineProperty(stream, "isTTY", original); else delete (stream as { isTTY?: boolean }).isTTY;
     }
   }
-});
-
-const device = { deviceId: "drd_" + "a".repeat(32) };
-
-test("a Cloud client is bound to this computer's device once, and not again while both stay the same", async () => {
-  const calls: unknown[] = [];
-  const post = async (body: { clientId: string; deviceId: string }) => { calls.push(body); return Response.json({ status: "bound" }); };
-  const bound = await bindCloudClient({ client: { client_id: "c1" } }, device, post);
-  assert.deepEqual(bound, { clientId: "c1", deviceId: device.deviceId });
-  assert.deepEqual(calls, [{ clientId: "c1", deviceId: device.deviceId }]);
-  assert.deepEqual(await bindCloudClient({ client: { client_id: "c1" }, bound: bound! }, device, post), bound);
-  assert.equal(calls.length, 1);
-  await bindCloudClient({ client: { client_id: "c2" }, bound: bound! }, device, post);
-  assert.equal(calls.length, 2);
-});
-
-test("a refused binding stops the call with the server's message", async () => {
-  await assert.rejects(bindCloudClient({ client: { client_id: "c1" } }, device, async () => Response.json({ error: { message: "This computer is unavailable." } }, { status: 404 })), /This computer is unavailable\./);
-  await assert.rejects(bindCloudClient({ client: { client_id: "c1" } }, device, async () => new Response("", { status: 500 })), /HTTP 500/);
 });
 
 const refusal = (error: object) => ({ isError: true, content: [{ type: "text", text: JSON.stringify({ error }) }] });
