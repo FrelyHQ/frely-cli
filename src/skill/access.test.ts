@@ -70,6 +70,8 @@ test("installs a managed trigger Skill without installing the remote Agent", asy
     assert.doesNotMatch(text, /api\.frely\.cloud\/mcp/u);
     assert.match(text, /carry out a plan\), do so with your own tools/u);
     assert.match(text, /can take several minutes/u);
+    assert.match(text, /frely agent result --last --wait/u);
+    assert.match(text, /result starts with NEED_FILES/u);
     assert.doesNotMatch(text, /remote Agent's result/u);
     const status = await skillAdapterStatus(distributionId, root);
     assert.equal(status.state, "managed");
