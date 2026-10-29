@@ -7,6 +7,9 @@ import { execFileSync } from 'node:child_process';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+// The build reads the docs pages from a fixture checkout instead of fetching the pinned commit.
+const buildSite = (temp, options = {}) => execFileSync(process.execPath, [resolve(temp, 'site/build.mjs')], { ...options, env: { ...process.env, DOCS_DIR: resolve(temp, 'site/test-docs') } });
+
 test('new HTML requests changed assets under new URLs, consistently across all language routes', async () => {
   const root = fileURLToPath(new URL('../', import.meta.url));
   const temp = await mkdtemp(resolve(tmpdir(), 'frely-site-assets-'));
@@ -15,7 +18,7 @@ test('new HTML requests changed assets under new URLs, consistently across all l
     for (const name of ['LICENSE', 'NOTICE', 'TRADEMARKS.md', 'install.sh', 'install.ps1', 'start.sh', 'start.ps1']) await cp(resolve(root, name), resolve(temp, name));
     const assets = ['app.js', 'locale.js', 'styles.css'];
     async function build() {
-      execFileSync(process.execPath, [resolve(temp, 'site/build.mjs')]);
+      buildSite(temp);
       const versions = {};
       for (const route of ['', 'en/', 'zh/']) {
         const html = await readFile(resolve(temp, '_site', route, 'index.html'), 'utf8');
@@ -48,7 +51,7 @@ test('component, command and translation errors preserve the last valid site out
   try {
     await cp(resolve(root, 'site'), resolve(temp, 'site'), { recursive: true });
     for (const name of ['LICENSE', 'NOTICE', 'TRADEMARKS.md', 'install.sh', 'install.ps1', 'start.sh', 'start.ps1']) await cp(resolve(root, name), resolve(temp, name));
-    const build = () => execFileSync(process.execPath, [resolve(temp, 'site/build.mjs')], { stdio: 'pipe' });
+    const build = () => buildSite(temp, { stdio: 'pipe' });
     build();
     const output = resolve(temp, '_site/zh/index.html');
     const before = await readFile(output, 'utf8');
@@ -81,8 +84,7 @@ test('docs pages are static, crawlable and listed in the sitemap', async () => {
   try {
     await cp(resolve(root, 'site'), resolve(temp, 'site'), { recursive: true });
     for (const name of ['LICENSE', 'NOTICE', 'TRADEMARKS.md', 'install.sh', 'install.ps1', 'start.sh', 'start.ps1']) await cp(resolve(root, name), resolve(temp, name));
-    execFileSync(process.execPath, [resolve(temp, 'site/build.mjs')]);
-    const { entries } = await import(new URL('./docs-content.mjs', import.meta.url));
+    buildSite(temp);
     const sitemap = await readFile(resolve(temp, '_site/sitemap.xml'), 'utf8');
     const index = await readFile(resolve(temp, '_site/docs/index.html'), 'utf8');
     const help = await readFile(resolve(temp, '_site/docs/help/index.html'), 'utf8');
@@ -99,13 +101,30 @@ test('docs pages are static, crawlable and listed in the sitemap', async () => {
     const notFound = await readFile(resolve(temp, '_site/404.html'), 'utf8');
     assert.ok(notFound.includes('noindex'), '404 page is not indexed');
     for (const path of ['/', '/zh/', '/docs/', '/#install']) assert.ok(notFound.includes(`href="${path}"`), `404 page links to ${path}`);
-    for (const entry of entries) {
+    const slugs = ['first-question', 'second-question', 'third-question'];
+    // Categories appear in the order of their first page; pages sort by `order`.
+    assert.ok(index.indexOf('<h2>Getting started</h2>') < index.indexOf('<h2>Maintenance</h2>'), 'categories follow page order');
+    assert.ok(index.indexOf('/docs/help/first-question/') < index.indexOf('/docs/help/third-question/'), 'pages follow order');
+    for (const slug of slugs) {
+      const entry = { slug };
       const page = await readFile(resolve(temp, '_site/docs/help', entry.slug, 'index.html'), 'utf8');
       assert.ok(page.includes('<h1>'), entry.slug + ': page has a heading');
       assert.ok(index.includes(`/docs/help/${entry.slug}/`), entry.slug + ': linked from index');
       assert.ok(help.includes(`id="${entry.slug}"`), entry.slug + ': listed on help page');
       assert.ok(sitemap.includes(`/docs/help/${entry.slug}/`), entry.slug + ': in sitemap');
     }
+    const first = await readFile(resolve(temp, '_site/docs/help/first-question/index.html'), 'utf8');
+    assert.ok(first.includes('Run <code>frely doctor</code> first.'), 'inline code renders');
+    assert.ok(first.includes('<a href="https://example.test/guide?a=1&amp;b=2">guide</a> for &lt;details&gt; &amp; more.'), 'links render and text is escaped');
+    assert.ok(first.includes('<ul><li>First item with <code>code</code></li><li>Second item</li></ul>'), 'lists render');
+    assert.ok(first.includes('<ul class="links"><li><a href="https://cli.frely.cloud/#install">Install page</a></li><li><a href="https://example.test/README.md">README</a></li></ul>'), 'related links render in order');
+    assert.ok(first.includes('content="Run frely doctor first. See the guide for &lt;details&gt; &amp; more.'), 'description is plain text');
+    // Pages that belong to frely.cloud are not rendered here; the index links to them.
+    assert.ok(index.includes('<h2>On frely.cloud</h2>'), 'index has the frely.cloud group');
+    for (const href of ['https://frely.cloud/docs/frely-guide/', 'https://frely.cloud/docs/faq/frely-faq/']) assert.ok(index.includes(`href="${href}"`), 'index links ' + href);
+    assert.ok(index.indexOf('frely-guide') < index.indexOf('frely-faq'), 'guides come before FAQ pages');
+    assert.ok(!sitemap.includes('frely-guide') && !sitemap.includes('frely-faq'), 'sitemap lists only pages of this site');
+    await assert.rejects(readFile(resolve(temp, '_site/docs/help/frely-guide/index.html')), 'frely pages have no page here');
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
@@ -117,7 +136,7 @@ test('header has a no-JavaScript Products dropdown with the current product mark
   try {
     await cp(resolve(root, 'site'), resolve(temp, 'site'), { recursive: true });
     for (const name of ['LICENSE', 'NOTICE', 'TRADEMARKS.md', 'install.sh', 'install.ps1', 'start.sh', 'start.ps1']) await cp(resolve(root, name), resolve(temp, name));
-    execFileSync(process.execPath, [resolve(temp, 'site/build.mjs')]);
+    buildSite(temp);
     for (const route of ['en', 'zh']) {
       const html = await readFile(resolve(temp, '_site', route, 'index.html'), 'utf8');
       const header = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
@@ -139,7 +158,7 @@ test('the landing page leads with the Skill install and keeps frely mcp start in
   try {
     await cp(resolve(root, 'site'), resolve(temp, 'site'), { recursive: true });
     for (const name of ['LICENSE', 'NOTICE', 'TRADEMARKS.md', 'install.sh', 'install.ps1', 'start.sh', 'start.ps1']) await cp(resolve(root, name), resolve(temp, name));
-    execFileSync(process.execPath, [resolve(temp, 'site/build.mjs')]);
+    buildSite(temp);
     for (const route of ['en/', 'zh/']) {
       const html = await readFile(resolve(temp, '_site', route, 'index.html'), 'utf8');
       const card = html.slice(html.indexOf('id="install"'), html.indexOf('id="skill"'));
@@ -149,6 +168,26 @@ test('the landing page leads with the Skill install and keeps frely mcp start in
       assert.ok(html.indexOf('id="skill"') < html.indexOf('id="get-started"'), route + ': Skill section comes before FrelyMCP');
       const figure = html.match(/<figure class="skill-demo"[^>]*>/);
       assert.ok(figure && /role="img"/.test(figure[0]) && /aria-label="[^"]+"/.test(figure[0]), route + ': Skill walkthrough has an accessible label');
+    }
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test('a docs page with an unknown site or no category stops the build', async () => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const temp = await mkdtemp(resolve(tmpdir(), 'frely-site-docs-invalid-'));
+  try {
+    await cp(resolve(root, 'site'), resolve(temp, 'site'), { recursive: true });
+    for (const name of ['LICENSE', 'NOTICE', 'TRADEMARKS.md', 'install.sh', 'install.ps1', 'start.sh', 'start.ps1']) await cp(resolve(root, name), resolve(temp, name));
+    const page = resolve(temp, 'site/test-docs/en/cli/second-question.md');
+    const original = await readFile(page, 'utf8');
+    for (const [mutate, message] of [
+      [(text) => text.replace('site: cli', 'site: web'), /site must be frely or cli/],
+      [(text) => text.replace('category: Maintenance\n', ''), /needs category/],
+    ]) {
+      await writeFile(page, mutate(original));
+      assert.throws(() => buildSite(temp, { stdio: 'pipe' }), (error) => message.test(error.stderr.toString()));
     }
   } finally {
     await rm(temp, { recursive: true, force: true });

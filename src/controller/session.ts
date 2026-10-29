@@ -100,6 +100,7 @@ async function writeSession(session: ControllerSession, store = sessionStore()):
 
 export async function deleteSession(store = sessionStore()): Promise<boolean> {
   const { relayUrl, userId } = await ownerOf();
+  await store.deletePassword(PENDING_SERVICE, accountOf(relayUrl, userId)).catch(() => false);
   return store.deletePassword(SERVICE, accountOf(relayUrl, userId));
 }
 
@@ -130,14 +131,42 @@ const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
 export interface LoginOptions { notify?: (text: string) => void; openBrowser?: boolean }
 
-/**
- * Signs this computer in as a controller: a device-code authorization the owner approves in a browser (with a passkey or authenticator code),
- * which issues tokens bound to a new key kept here. Before the code is shown the CLI tells the server which computer is asking, and the
- * approval page repeats that beside the address the request came from.
- */
-export async function controllerLogin(options: LoginOptions = {}): Promise<ControllerSession> {
-  const notify = options.notify ?? ((text: string) => { process.stderr.write(text); });
-  const { relayUrl } = await ownerOf();
+/** A device-code request that was shown to the owner and not yet approved; kept so a later command can pick it up when the process that started it is gone. */
+interface PendingLogin {
+  version: 1;
+  relayUrl: string;
+  mcpUrl: string;
+  deviceId: string;
+  /** The key the tokens will be bound to: the approval is only usable with the key that asked for it. */
+  privateKeyPem: string;
+  deviceCode: string;
+  userCode: string;
+  link: string;
+  /** Epoch milliseconds the code stops working. */
+  expiresAt: number;
+  intervalMs: number;
+}
+
+const PENDING_SERVICE = "frely-cli-controller-pending-v1";
+
+async function readPending(relayUrl: string, store = sessionStore()): Promise<PendingLogin | null> {
+  const { userId } = await ownerOf();
+  const raw = await store.getPassword(PENDING_SERVICE, accountOf(relayUrl, userId)).catch(() => null);
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as PendingLogin;
+    return value.version === 1 && value.relayUrl === relayUrl && value.expiresAt - 5_000 > Date.now() ? value : null;
+  } catch { return null; }
+}
+
+async function writePending(pending: PendingLogin | null, relayUrl: string, store = sessionStore()): Promise<void> {
+  const { userId } = await ownerOf();
+  if (pending) await store.setPassword(PENDING_SERVICE, accountOf(relayUrl, userId), JSON.stringify(pending));
+  else await store.deletePassword(PENDING_SERVICE, accountOf(relayUrl, userId)).catch(() => false);
+}
+
+/** Asks Frely for a device code, tells it which computer is asking (the approval page repeats that beside the address the request came from) and keeps the request. */
+async function startLogin(relayUrl: string): Promise<PendingLogin> {
   const device = await ensureDevice();
   const mcpUrl = controllerMcpUrl(relayUrl);
   const key = generateDpopKey();
@@ -156,28 +185,73 @@ export async function controllerLogin(options: LoginOptions = {}): Promise<Contr
   if (!claim.ok) throw new ControllerError(`Frely would not take this computer's details (HTTP ${claim.status}). Update Frely CLI and try again.`, EXIT.auth);
   const link = new URL(code.verification_uri_complete);
   if (link.origin !== relayUrl) throw new ControllerError("Frely returned an unexpected approval link.", EXIT.auth);
-  notify(`Approve this computer to control your Frely devices.\nCode: ${code.user_code}\nOpen: ${link.toString()}\n(You will be asked to type the code and confirm with a passkey or authenticator code.)\n`);
-  if (options.openBrowser !== false && process.env.FRELY_NO_BROWSER !== "1") openVerificationUrl(link.toString());
-  const deadline = Date.now() + (typeof code.expires_in === "number" ? code.expires_in : 900) * 1000;
-  let interval = (typeof code.interval === "number" ? code.interval : 5) * 1000;
-  while (Date.now() < deadline) {
-    await delay(interval);
-    const response = await tokenRequest(relayUrl, key, new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: code.device_code, client_id: CONTROLLER_CLIENT_ID, resource: mcpUrl, controller_device_id: device.deviceId,
+  const pending: PendingLogin = {
+    version: 1, relayUrl, mcpUrl, deviceId: device.deviceId, privateKeyPem: key.privateKeyPem, deviceCode: code.device_code, userCode: code.user_code, link: link.toString(),
+    expiresAt: Date.now() + (typeof code.expires_in === "number" ? code.expires_in : 900) * 1000, intervalMs: (typeof code.interval === "number" ? code.interval : 5) * 1000,
+  };
+  await writePending(pending, relayUrl);
+  return pending;
+}
+
+const approvalNotice = (pending: PendingLogin) => `Approve this computer to control your Frely devices.\nCode: ${pending.userCode}\nOpen: ${pending.link}\n(You will be asked to type the code and confirm with a passkey or authenticator code.)\n`;
+
+/**
+ * Trades the approved device code for tokens, once or until the code expires. Returns null when `wait` is false and the owner has not
+ * decided yet; an expired or denied request is forgotten and throws.
+ */
+async function pollLogin(pending: PendingLogin, wait: boolean): Promise<ControllerSession | null> {
+  const key = dpopKeyFromPem(pending.privateKeyPem);
+  let interval = pending.intervalMs;
+  while (Date.now() < pending.expiresAt) {
+    if (wait) await delay(interval);
+    const response = await tokenRequest(pending.relayUrl, key, new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: pending.deviceCode, client_id: CONTROLLER_CLIENT_ID, resource: pending.mcpUrl, controller_device_id: pending.deviceId,
     }));
     const payload = await response.json().catch(() => ({})) as TokenPayload;
     if (response.ok) {
-      const session: ControllerSession = { version: 1, relayUrl, mcpUrl, deviceId: device.deviceId, privateKeyPem: key.privateKeyPem, ...parseTokens(payload) };
+      const session: ControllerSession = { version: 1, relayUrl: pending.relayUrl, mcpUrl: pending.mcpUrl, deviceId: pending.deviceId, privateKeyPem: pending.privateKeyPem, ...parseTokens(payload) };
       await writeSession(session);
+      await writePending(null, pending.relayUrl);
       return session;
     }
-    if (payload.error === "authorization_pending") continue;
-    if (payload.error === "slow_down") { interval += 5000; continue; }
+    if (payload.error === "authorization_pending" || payload.error === "slow_down") {
+      if (payload.error === "slow_down") interval += 5000;
+      if (!wait) return null;
+      continue;
+    }
+    await writePending(null, pending.relayUrl);
     if (payload.error === "expired_token") throw new ControllerError("The approval request expired. Run the command again.", EXIT.auth);
     if (payload.error === "access_denied" && response.status !== 403) throw new ControllerError("The request was denied.", EXIT.auth);
     throw tokenFailure(response, payload);
   }
+  await writePending(null, pending.relayUrl);
   throw new ControllerError("The approval request expired. Run the command again.", EXIT.auth);
+}
+
+/**
+ * Signs this computer in as a controller: a device-code authorization the owner approves in a browser (with a passkey or authenticator code),
+ * which issues tokens bound to a new key kept here. Waits for the approval and takes it by itself; a request an earlier command left
+ * unapproved is continued instead of asking for a new code.
+ */
+export async function controllerLogin(options: LoginOptions = {}): Promise<ControllerSession> {
+  const notify = options.notify ?? ((text: string) => { process.stderr.write(text); });
+  const { relayUrl } = await ownerOf();
+  const pending = await readPending(relayUrl) ?? await startLogin(relayUrl);
+  notify(approvalNotice(pending));
+  if (options.openBrowser !== false && process.env.FRELY_NO_BROWSER !== "1") openVerificationUrl(pending.link);
+  return (await pollLogin(pending, true))!;
+}
+
+/**
+ * The sign-in for a command nobody can type into (a script, an AI tool): never waits. It picks up an approval the owner has given since the last
+ * run; otherwise it shows the approval link and ends with the "approval needed" exit code, and the same command run again continues from the same request.
+ */
+export async function requestControllerLogin(): Promise<ControllerSession> {
+  const { relayUrl } = await ownerOf();
+  const pending = await readPending(relayUrl) ?? await startLogin(relayUrl);
+  const session = await pollLogin(pending, false);
+  if (session) return session;
+  throw new ControllerError(`${approvalNotice(pending)}After approving, run the same command again. To wait for the approval instead: frely controller login\n`, EXIT.approval);
 }
 
 /** Exchanges the refresh token; a session that another process already renewed is taken from the store instead of spent twice. */

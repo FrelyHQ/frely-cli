@@ -3,6 +3,8 @@
 `frely-cli` is the open-source local client and MCP runtime for Frely. The
 hosted Friday Relay control plane remains a separate service dependency.
 
+Before adding code for something the CLI may already do (sign-in, controller or approval flows, credential storage, relay calls), check [docs/capability-owners.md](docs/capability-owners.md) and reuse the owner.
+
 ## Development setup
 
 Requirements:
