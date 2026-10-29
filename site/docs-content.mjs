@@ -15,6 +15,7 @@ const credDoc = link('Credential and installation boundaries', `${REPO}/docs/cre
 const apiDoc = link('frely api doc', `${REPO}/docs/api.md`);
 const updateDoc = link('Self-update doc', `${REPO}/docs/self-update.md`);
 const serviceDoc = link('Service maintenance doc', `${REPO}/docs/service-maintenance.md`);
+const sandboxPage = link('How the sandbox protects your data', 'https://frely.cloud/connect/sandbox/');
 const security = link('Security policy', `${REPO}/SECURITY.md`);
 
 export const categories = ['Getting started', 'Connecting AI clients', 'Using your computer', 'Account and API', 'Security and limits', 'Maintenance'];
@@ -154,7 +155,7 @@ export const entries = [
     question: 'Is it safe to let an AI use my computer?',
     answer:
       'Access is limited to the folders you share. File tools reject symlink escapes and cap reads and writes at 1 MiB. Commands run as your OS user inside an OS sandbox: credential folders are unreadable, writes are limited to the workspace and the temp directory, and network goes through a proxy. If the computer cannot sandbox, commands are refused rather than run unsandboxed. The MCP URL contains no secret, and the CLI keeps its execution key encrypted in the OS credential store. You can revoke access any time with `frely mcp remove`.',
-    links: [credDoc, security, readme],
+    links: [sandboxPage, credDoc, security, readme],
   },
   {
     slug: 'sandbox-and-permissions',
@@ -162,7 +163,7 @@ export const entries = [
     question: 'A command failed because of the sandbox. What can I do?',
     answer:
       'On the Frely connections page you can open more for a connection: credential folders to read, extra folders to write, or a time-limited run without the sandbox. On Windows, or on Linux without bubblewrap, socat and ripgrep, commands are refused because the computer cannot sandbox; install those tools on Linux. FRELY_SANDBOX=off turns the sandbox off on the device only; use it only when you accept the risk.',
-    links: [connections, readme],
+    links: [sandboxPage, connections, readme],
   },
   {
     slug: 'doctor',
