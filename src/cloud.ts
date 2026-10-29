@@ -1,26 +1,10 @@
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { randomUUID } from "node:crypto";
-import { hostname } from "node:os";
-import { createServer, type Server as HttpServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { UnauthorizedError, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
-import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { credentialStore } from "./credential-store.js";
-import { inspectAuth, normalizeRelayUrl, openVerificationUrl, requireLogin } from "./auth.js";
-import { VERSION } from "./version.js";
+import { inspectAuth, normalizeRelayUrl } from "./auth.js";
 import { CloudToolError } from "./skill/cloud-item.js";
-import { ensureDevice, relayFetch } from "./device/control.js";
 import { openController } from "./controller/client.js";
-import { readSession } from "./controller/session.js";
 
 const SERVICE = "frely-cli-cloud-v1";
-/** Names this installation on the web console ("Frely CLI Cloud (host)"). Display only: the server limits the client by its device binding (see bindCloudClient), not by this name. */
-export function cloudClientName(host = hostname()): string {
-  const safe = host.replace(/[^A-Za-z0-9._ -]/g, "").trim().slice(0, 40);
-  return safe ? `Frely CLI Cloud (${safe})` : "Frely CLI Cloud";
-}
 
 /** The server's `permission_required` or `confirmation_required` tool failure as a one-line hint, or null for any other result. */
 export function permissionHint(result: object): string | null {
@@ -86,56 +70,26 @@ export async function waitForApproval(first: CallResult, call: (input: Record<st
   return last;
 }
 
-const SCOPE = "openid profile offline_access cloud:read cloud:write cloud:execute cloud:publish";
-/**
- * Registration metadata for the Cloud OAuth client. The callback is an http loopback URL, so the client must declare
- * itself `native`: the server treats an unspecified type as `web` and rejects every http redirect URI of a web client.
- */
-export function cloudClientMetadata(redirectUrl: string, host = hostname()): OAuthClientMetadata & { application_type: "native" } {
-  return { client_name: cloudClientName(host), application_type: "native", redirect_uris: [redirectUrl],
-    grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], token_endpoint_auth_method: "none", scope: SCOPE };
-}
 export const API_USAGE = `Frely API — call your Frely account's business operations (keys, credits, orders, Creator items…).
   frely api list [--group <name>] [--json]
   frely api describe <tool>
   frely api call <tool> [--json '<object>' | --input <file>] [--wait]
 
 "list" prints the operations grouped by area with a one-line description each; add --json for the full tool list.
-Other results are JSON. The first command opens a browser for authorization;
-frely logout also revokes it. This authorization is separate from device MCP.
+Other results are JSON. The first command asks you to approve this computer in your browser (the same approval as frely controller login);
+frely logout also revokes it. Without a terminal it prints the approval link and exits; run it again after approving.
 Calls may create resources or incur usage. Failed writes are never replayed automatically.
 A new device may only read non-sensitive data; for anything else the error links to the web
 console page where you grant it (passkey or authenticator code required).
 With --wait, a call that needs approval prints the link, then blocks until the owner decides and
 continues by itself: it returns the real result once approved, or the refusal when denied or expired.
 `;
+/** What an older CLI kept for its separate Cloud authorization; only read to revoke it on logout. */
 interface StoredCloud {
   version: 1;
   resource: string;
-  redirectUrl: string;
-  client?: OAuthClientInformationMixed;
-  /** The device this client was last bound to on the server; the binding is what makes the client this computer's CLI. */
-  bound?: { clientId: string; deviceId: string };
-  tokens?: OAuthTokens;
-  expiresAt?: number;
-}
-
-/**
- * Tells the server which enrolled device this Cloud client belongs to, so it is limited and shown as this computer's CLI. The server decides by
- * this binding, not by the client's name. Skipped when the same client was already bound to the same device; throws when the server refuses.
- */
-export async function bindCloudClient(stored: Pick<StoredCloud, "client" | "bound">, device: { deviceId: string },
-  post: (body: { clientId: string; deviceId: string }) => Promise<Response>): Promise<{ clientId: string; deviceId: string } | null> {
-  const clientId = stored.client?.client_id;
-  if (!clientId) return null;
-  if (stored.bound?.clientId === clientId && stored.bound.deviceId === device.deviceId) return stored.bound;
-  const response = await post({ clientId, deviceId: device.deviceId });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { error?: { message?: unknown }; message?: unknown } | null;
-    const message = payload?.error?.message ?? payload?.message;
-    throw new Error(typeof message === "string" ? message : `The server refused to link this Cloud authorization to this computer (HTTP ${response.status}).`);
-  }
-  return { clientId, deviceId: device.deviceId };
+  client?: { client_id: string };
+  tokens?: { access_token: string; refresh_token?: string };
 }
 
 async function cloudIdentity() {
@@ -145,12 +99,7 @@ async function cloudIdentity() {
   return { origin, resource, userId: account.user?.id, key: resource + "|" + (account.user?.id ?? "cloud") };
 }
 
-/** True when this computer still holds the older Cloud MCP authorization that `frely api` used before it moved onto the controller connection. */
-export async function hasLegacyCloudAuthorization(): Promise<boolean> {
-  const identity = await cloudIdentity();
-  return Boolean(await credentialStore.getPassword(SERVICE, identity.key));
-}
-
+/** Revokes and forgets the Cloud authorization an older CLI left behind; there is nothing to do on a computer that never had one. */
 export async function logoutCloud(): Promise<void> {
   const identity = await cloudIdentity();
   const raw = await credentialStore.getPassword(SERVICE, identity.key);
@@ -170,144 +119,9 @@ export async function logoutCloud(): Promise<void> {
   await credentialStore.deletePassword(SERVICE, identity.key);
 }
 
-export const NON_INTERACTIVE_AUTHORIZATION = "Cloud authorization is required, but this is not an interactive terminal. Run frely api list in a terminal you can type in to authorize in the browser once, then run this command again.";
-
 /** True when a person can finish a browser authorization: both stdin and stderr (where the link is printed) are terminals. */
 export function isInteractiveTerminal(): boolean {
   return process.stdin.isTTY === true && process.stderr.isTTY === true;
-}
-
-async function connectCloud() {
-  const identity = await cloudIdentity();
-  const raw = await credentialStore.getPassword(SERVICE, identity.key);
-  let stored: StoredCloud = raw ? JSON.parse(raw) as StoredCloud : { version: 1, resource: identity.resource, redirectUrl: "" };
-  if (stored.version !== 1 || stored.resource !== identity.resource) throw new Error("Cloud credentials are invalid. Run frely logout, then frely login.");
-  const state = randomUUID();
-  let verifier = "";
-  let listener: HttpServer | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let resolveCode: ((code: string) => void) | undefined;
-  let rejectCode: ((error: Error) => void) | undefined;
-  let pendingCode: Promise<string> | undefined;
-  const closeListener = async () => {
-    if (timer) clearTimeout(timer);
-    if (listener?.listening) await new Promise<void>(resolve => listener!.close(() => resolve()));
-  };
-  const listen = async (port: number) => {
-    listener = createServer((request, response) => {
-      const url = new URL(request.url ?? "/", stored.redirectUrl || "http://127.0.0.1");
-      if (url.pathname !== "/callback" || url.searchParams.get("state") !== state) {
-        response.writeHead(400); response.end("Invalid authorization callback."); return;
-      }
-      const code = url.searchParams.get("code");
-      response.setHeader("content-type", "text/plain; charset=utf-8");
-      response.setHeader("cache-control", "no-store");
-      if (!code || url.searchParams.has("error")) {
-        response.writeHead(400); response.end("Authorization was not completed.");
-        rejectCode?.(new Error("Cloud authorization was declined.")); return;
-      }
-      response.end("Frely Cloud is authorized. You can close this window.");
-      resolveCode?.(code);
-    });
-    await new Promise<void>((resolve, reject) => {
-      listener!.once("error", reject);
-      listener!.listen(port, "127.0.0.1", resolve);
-    });
-    const address = listener.address();
-    if (!address || typeof address === "string") throw new Error("Cloud callback could not start.");
-    return "http://127.0.0.1:" + address.port + "/callback";
-  };
-  if (!stored.redirectUrl) stored.redirectUrl = await listen(0);
-  const callback = new URL(stored.redirectUrl);
-  if (callback.protocol !== "http:" || callback.hostname !== "127.0.0.1" || callback.pathname !== "/callback" || !callback.port || callback.username || callback.password || callback.search || callback.hash) {
-    await closeListener(); throw new Error("Stored Cloud callback is invalid.");
-  }
-  const save = () => credentialStore.setPassword(SERVICE, identity.key, JSON.stringify(stored));
-  const provider: OAuthClientProvider = {
-    redirectUrl: stored.redirectUrl,
-    clientMetadata: cloudClientMetadata(stored.redirectUrl),
-    state: () => state,
-    clientInformation: () => stored.client,
-    saveClientInformation: async client => { stored.client = client; await save(); },
-    tokens: () => stored.tokens,
-    saveTokens: async tokens => {
-      // This checks account selection; signature/audience verification remains on the server.
-      if (identity.userId) {
-        let subject: unknown;
-        try { subject = (JSON.parse(Buffer.from(tokens.access_token.split(".")[1] ?? "", "base64url").toString()) as { sub?: unknown }).sub; } catch { /* Rejected below. */ }
-        if (subject !== identity.userId) throw new Error("Cloud authorization used another account. Use the account shown by frely doctor.");
-      }
-      stored.tokens = tokens;
-      stored.expiresAt = Date.now() + (tokens.expires_in ?? 600) * 1000;
-      await save();
-    },
-    saveCodeVerifier: value => { verifier = value; },
-    codeVerifier: () => { if (!verifier) throw new Error("Cloud PKCE verifier is missing."); return verifier; },
-    redirectToAuthorization: async url => {
-      if (url.origin !== identity.origin) throw new Error("Unexpected Cloud authorization server.");
-      if (!listener) await listen(Number(callback.port));
-      // Scripts and AI tools cannot complete a browser authorization: fail now instead of waiting out the timeout.
-      if (!isInteractiveTerminal()) throw new Error(NON_INTERACTIVE_AUTHORIZATION);
-      pendingCode = new Promise<string>((resolve, reject) => { resolveCode = resolve; rejectCode = reject; });
-      // Attach immediately so a callback rejection never becomes an unhandled promise.
-      pendingCode.catch(() => undefined);
-      timer = setTimeout(() => rejectCode?.(new Error("Cloud authorization timed out.")), 300000);
-      process.stderr.write("Authorize Frely Cloud in your browser (waiting up to 5 minutes):\n" + url.toString() + "\n");
-      openVerificationUrl(url.toString());
-    },
-    validateResourceURL: async (_serverUrl, resource) => {
-      if (resource !== undefined && resource !== identity.resource) throw new Error("Cloud resource mismatch.");
-      return new URL(identity.resource);
-    },
-    invalidateCredentials: async scope => {
-      if (scope === "all" || scope === "client") { delete stored.client; delete stored.bound; }
-      if (scope === "all" || scope === "tokens") { delete stored.tokens; delete stored.expiresAt; }
-      if (scope === "all" || scope === "verifier") verifier = "";
-      await save();
-    },
-  };
-  const cloudFetch: typeof fetch = async (input, init) => {
-    const url = new URL(input instanceof Request ? input.url : input.toString());
-    if (url.origin !== identity.origin) throw new Error("Cloud discovery cannot send credentials to another origin.");
-    return fetch(input, { ...init, redirect: "error", signal: init?.signal
-      ? AbortSignal.any([init.signal, AbortSignal.timeout(180000)]) : AbortSignal.timeout(180000) });
-  };
-  const makeTransport = () => new StreamableHTTPClientTransport(new URL(identity.resource), {
-    authProvider: provider, fetch: cloudFetch, reconnectionOptions: { maxRetries: 0, initialReconnectionDelay: 1000, maxReconnectionDelay: 1000, reconnectionDelayGrowFactor: 1 },
-  });
-  const transport = makeTransport();
-  let client = new Client({ name: "frely-cli-cloud", version: VERSION });
-  try {
-    try { await client.connect(transport as unknown as Transport); }
-    catch (error) {
-      if (!(error instanceof UnauthorizedError) || !pendingCode) throw error;
-      await transport.finishAuth(await pendingCode);
-      // A started transport refuses a second start(): the first connect already started it, so reconnect on a fresh one that reads the stored tokens.
-      await transport.close().catch(() => undefined);
-      client = new Client({ name: "frely-cli-cloud", version: VERSION });
-      await client.connect(makeTransport() as unknown as Transport);
-    }
-    // No call is made before the server knows this authorization belongs to this computer: an unbound client is not limited by approved permissions.
-    const device = await ensureDevice();
-    const account = await requireLogin();
-    const bound = await bindCloudClient(stored, device, body => relayFetch(account.config.relayUrl, account.credential, "/api/user/device-relay/cloud-client",
-      { method: "POST", body: JSON.stringify(body) }));
-    if (bound && bound !== stored.bound) { stored.bound = bound; await save(); }
-    await closeListener();
-    return { client, close: () => client.close() };
-  } catch (error) {
-    await closeListener();
-    await client.close().catch(() => undefined);
-    if (error instanceof Error && error.message === NON_INTERACTIVE_AUTHORIZATION) throw error;
-    throw new Error(`Cloud connection or authorization failed${failureCause(error)}. Confirm app availability and account selection, then run the command again. No business call was replayed.`);
-  }
-}
-
-/** The underlying failure as ": <one line, at most 200 characters>", or "" when there is none. */
-export function failureCause(error: unknown): string {
-  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
-  const line = message.replace(/\s+/g, " ").trim();
-  return line ? ": " + (line.length > 200 ? line.slice(0, 199) + "…" : line) : "";
 }
 
 interface ListedTool { name: string; description?: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean }; _meta?: Record<string, unknown> }
@@ -374,39 +188,7 @@ export async function runApi(args: readonly string[]): Promise<{ value?: unknown
     if (!value || Array.isArray(value) || typeof value !== "object") throw new Error("Cloud input must be a JSON object.");
     input = value as Record<string, unknown>;
   }
-  // `frely api` runs on the controller connection. The older Cloud authorization is used only while it is all this computer has, for one more version.
-  if (await readSession().catch(() => null) !== null || !await hasLegacyCloudAuthorization()) return runApiViaController({ action, name, options, fullJson, wait, input });
-  process.stderr.write("This computer still uses the older Cloud authorization for frely api. It stops working in the next version: run frely controller login to move to the new one.\n");
-  const session = await connectCloud();
-  try {
-    const all = [];
-    const cursors = new Set<string>();
-    let cursor: string | undefined;
-    do {
-      const page = await session.client.listTools(cursor === undefined ? {} : { cursor });
-      all.push(...page.tools);
-      cursor = page.nextCursor;
-      if (cursor && (cursors.has(cursor) || cursors.size >= 100)) throw new Error("Invalid Cloud tool pagination.");
-      if (cursor) cursors.add(cursor);
-    } while (cursor);
-    if (action === "list") {
-      const group = options.get("--group");
-      const tools = all.filter(tool => !group || tool.name.startsWith(group + "."));
-      return fullJson ? { value: { tools } } : { text: formatApiList(tools as ListedTool[]) };
-    }
-    const tool = all.find(tool => tool.name === name);
-    if (!tool) throw new Error("Cloud tool is unavailable or not authorized: " + name);
-    if (action === "describe") return { value: tool };
-    const call = (arguments_: Record<string, unknown>) => session.client.callTool({ name: name!, arguments: arguments_ }, undefined, { timeout: 180000 }) as Promise<CallResult>;
-    let result = await call(input);
-    const hint = permissionHint(result);
-    if (hint) process.stderr.write(hint + "\n");
-    if (hint && wait) {
-      process.stderr.write("Waiting for approval; this command continues by itself once the owner decides (up to 10 minutes).\n");
-      result = await waitForApproval(result, call, input);
-    }
-    return { value: result, failed: result.isError === true };
-  } finally { await session.close(); }
+  return runApiViaController({ action, name, options, fullJson, wait, input });
 }
 
 /** `frely api` on the controller connection: the account tools are FrelyMCP's frely_list and frely_call, so the answers and approvals are the same as in an AI client. */
@@ -438,9 +220,9 @@ async function runApiViaController(request: { action: string; name: string | und
  * server's error code. Writes are never retried.
  */
 export async function callCloudTool(name: string, input: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const session = await connectCloud();
+  const controller = await openController({ interactive: isInteractiveTerminal() });
   try {
-    const result = await session.client.callTool({ name, arguments: input }, undefined, { timeout: 180000 });
+    const result = await controller.call("frely_call", { tool: name, arguments: input });
     const hint = permissionHint(result);
     if (hint) process.stderr.write(hint + "\n");
     const text = Array.isArray(result.content) ? (result.content as Array<{ type?: unknown; text?: unknown }>).find(part => part.type === "text")?.text : undefined;
@@ -452,6 +234,5 @@ export async function callCloudTool(name: string, input: Record<string, unknown>
     const value: unknown = result.structuredContent ?? (typeof text === "string" ? JSON.parse(text) : null);
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new CloudToolError("invalid_operation_output");
     return value as Record<string, unknown>;
-  } finally { await session.close(); }
+  } finally { await controller.close().catch(() => undefined); }
 }
-

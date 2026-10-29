@@ -3,7 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { VERSION } from "../version.js";
 import { createDpopProof, dpopKeyFromPem } from "./dpop.js";
-import { controllerLogin, ControllerError, EXIT, readSession, refreshSession, type ControllerSession } from "./session.js";
+import { controllerLogin, requestControllerLogin, ControllerError, EXIT, readSession, refreshSession, type ControllerSession } from "./session.js";
 
 export type ToolResult = { isError?: boolean; content?: unknown; structuredContent?: unknown; [key: string]: unknown };
 
@@ -40,8 +40,6 @@ export function dpopFetch(initial: ControllerSession, options: { refresh?: (sess
   };
 }
 
-export const NOT_AUTHORIZED = "This computer is not authorized to control your devices yet. Run frely controller login in a terminal, approve the request in your browser, then run this command again.";
-
 export interface Controller {
   /** The server's own instructions (how to use the tools), printed first by `frely tools`. */
   instructions(): string | undefined;
@@ -50,13 +48,13 @@ export interface Controller {
   close(): Promise<void>;
 }
 
-/** Opens a controller connection, signing the computer in first when there is no session and a person can approve it. */
-export async function openController(options: { interactive: boolean; login?: typeof controllerLogin } = { interactive: false }): Promise<Controller> {
+/**
+ * Opens a controller connection, signing the computer in first when there is no session. A terminal waits for the owner's approval; any other
+ * caller is shown the approval link and ends with the "approval needed" exit code, and running the command again continues from that request.
+ */
+export async function openController(options: { interactive: boolean; login?: typeof controllerLogin; request?: typeof requestControllerLogin } = { interactive: false }): Promise<Controller> {
   let session = await readSession();
-  if (!session) {
-    if (!options.interactive) throw new ControllerError(NOT_AUTHORIZED, EXIT.auth);
-    session = await (options.login ?? controllerLogin)();
-  }
+  if (!session) session = await (options.interactive ? (options.login ?? controllerLogin)() : (options.request ?? requestControllerLogin)());
   const signed = dpopFetch(session);
   const transport = new StreamableHTTPClientTransport(new URL(session.mcpUrl), {
     fetch: signed.fetch, reconnectionOptions: { maxRetries: 0, initialReconnectionDelay: 1000, maxReconnectionDelay: 1000, reconnectionDelayGrowFactor: 1 },
