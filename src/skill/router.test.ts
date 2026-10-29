@@ -140,3 +140,45 @@ test("remote MCP errors pass their error.data.code on and only unknown ones lose
     globalThis.fetch = oldFetch;
   }
 });
+
+test("remote invokeTurn sends tools and items and reads a tool_calls result and a final answer", async () => {
+  const oldFetch = globalThis.fetch;
+  const bodies: Record<string, unknown>[] = [];
+  let step = 0;
+  try {
+    globalThis.fetch = (async (_url: unknown, init: { body: string }) => {
+      bodies.push(JSON.parse(init.body));
+      step += 1;
+      return Response.json({ jsonrpc: "2.0", id: "skill-invoke", result: step === 1
+        ? { content: [{ type: "text", text: "tools" }], structuredContent: { request_id: "req_1", status: "tool_calls", calls: [{ callId: "c1", name: "read_file", arguments: "{}" }], items: [{ type: "function_call", call_id: "c1", name: "read_file", arguments: "{}" }], usage: { input_tokens: 4, output_tokens: 1, total_tokens: 5 } } }
+        : { content: [{ type: "text", text: "answer" }], structuredContent: { request_id: "req_2", status: "completed", usage: { input_tokens: 6, output_tokens: 2, total_tokens: 8 } } } });
+    }) as typeof fetch;
+    const tools = [{ type: "function" as const, name: "read_file", description: "d", parameters: { type: "object" } }];
+    const base = { relayUrl: "https://relay.test", modelId: "friday/x", token: "t" };
+    const first = await remoteAgentMcpInvoker.invokeTurn!({ ...base, task: "task", tools, items: [] });
+    assert.deepEqual(first, { status: "tool_calls", calls: [{ callId: "c1", name: "read_file", arguments: "{}" }], items: [{ type: "function_call", call_id: "c1", name: "read_file", arguments: "{}" }], requestId: "req_1", usage: { input_tokens: 4, output_tokens: 1, total_tokens: 5 } });
+    assert.equal(first.status === "tool_calls" && first.items.length, 1);
+    const second = await remoteAgentMcpInvoker.invokeTurn!({ ...base, task: "task", tools, items: [...(first.status === "tool_calls" ? first.items : []), { type: "function_call_output", call_id: "c1", output: "ok" }] });
+    assert.deepEqual(second, { status: "completed", text: "answer", requestId: "req_2", usage: { input_tokens: 6, output_tokens: 2, total_tokens: 8 } });
+    const args = (index: number) => ((bodies[index]!.params as Record<string, unknown>).arguments as Record<string, unknown>);
+    assert.equal(args(0).input, "task");
+    assert.equal((args(0).tools as unknown[]).length, 1);
+    assert.equal("items" in args(0), false);
+    assert.equal((args(1).items as unknown[]).length, 2);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("remote invokeTurn passes client_tools_unsupported on as the remote code", async () => {
+  const oldFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = (async () => Response.json({ jsonrpc: "2.0", id: "skill-invoke", error: { code: -32000, message: "no", data: { code: "client_tools_unsupported" } } })) as typeof fetch;
+    await assert.rejects(
+      () => remoteAgentMcpInvoker.invokeTurn!({ relayUrl: "https://relay.test", modelId: "friday/x", token: "t", task: "t", tools: [], items: [] }),
+      (error: unknown) => error instanceof SkillInvocationError && error.details.remoteCode === "client_tools_unsupported",
+    );
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});

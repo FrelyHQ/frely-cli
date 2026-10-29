@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { LOGIN_REFRESH_UNAVAILABLE, requireLogin } from "../auth.js";
 import { credentialStore as secureCredentialStore, type CredentialStore } from "../credential-store.js";
-import { remoteAgentMcpInvoker, SkillInvocationError, type RemoteAgentMcpInvoker } from "./router.js";
+import { remoteAgentMcpInvoker, SkillInvocationError, type AgentTurnResult, type CallerItem, type CallerToolDefinition, type RemoteAgentMcpInvoker } from "./router.js";
 import {
   findManagedSkillByInstallName,
   ManagedSkillError,
@@ -175,16 +175,16 @@ export async function removeSkillAdapter(distributionId: string, home = homedir(
   return Object.freeze({ ok: true, removed: true, distributionId });
 }
 
-export async function invokeInstalledAgent(input: {
+export interface InstalledAgentInput {
   readonly distributionId: string;
-  readonly task: string;
   readonly home?: string;
-  readonly signal?: AbortSignal;
   readonly credentialStore?: CredentialStore;
   readonly remoteInvoker?: RemoteAgentMcpInvoker;
-}) {
+}
+
+/** The installed record plus the credential that calls it. Shared by the single-shot call and the tool round trips. */
+async function openInstalledAgent(input: InstalledAgentInput) {
   assertDistributionId(input.distributionId);
-  if (!input.task.trim() || Buffer.byteLength(input.task, "utf8") > MAX_TASK_BYTES) throw new SkillAccessError("input_invalid", "Agent input must be non-empty and at most 128 KiB.");
   const record = await readManagedSkill(input.distributionId, input.home ?? homedir());
   if (!record) throw new SkillAccessError("target_not_installed", "The Frely Skill target is not installed.");
   let token: string;
@@ -202,6 +202,23 @@ export async function invokeInstalledAgent(input: {
     token = login.credential.value;
     credential = login.credential;
   }
+  return { record, token, credential };
+}
+
+function remoteCallError(error: unknown, authMode: "account" | "api-key"): SkillAccessError {
+  if (error instanceof SkillInvocationError && error.code === "entitlement_required") return new SkillAccessError("entitlement_required", "This Frely Agent is not available to the configured credential.");
+  if (error instanceof SkillInvocationError && error.code === "payment_required") return new SkillAccessError("payment_required", "Not enough Frely Credit. Run `frely api call credit_products.list` and `frely api call payment_checkout.create` (pass useImmediately:true) to get a payment link for the user, then retry once they have paid.");
+  if (error instanceof SkillInvocationError && error.code === "remote_authorization_failed") return new SkillAccessError("remote_authorization_failed", authMode === "api-key" ? "The model-scoped API key was rejected. Reinstall with frely item install <username/name> --api-key-stdin." : "Frely authorization failed. Run `frely login` again.");
+  return new SkillAccessError("remote_call_failed", error instanceof SkillInvocationError && error.details.remoteCode ? `The remote Frely Agent call failed (${error.details.remoteCode}).` : "The remote Frely Agent call failed.");
+}
+
+export async function invokeInstalledAgent(input: InstalledAgentInput & {
+  readonly task: string;
+  readonly signal?: AbortSignal;
+}) {
+  assertDistributionId(input.distributionId);
+  if (!input.task.trim() || Buffer.byteLength(input.task, "utf8") > MAX_TASK_BYTES) throw new SkillAccessError("input_invalid", "Agent input must be non-empty and at most 128 KiB.");
+  const { record, token, credential } = await openInstalledAgent(input);
   try {
     const result = await (input.remoteInvoker ?? remoteAgentMcpInvoker).invoke({
       relayUrl: new URL(record.mcpUrl).origin,
@@ -213,11 +230,52 @@ export async function invokeInstalledAgent(input: {
     });
     return Object.freeze({ ok: true, distributionId: record.distributionId, modelId: record.modelId, text: result.text, ...(result.usage ? { usage: result.usage } : {}) });
   } catch (error) {
-    if (error instanceof SkillInvocationError && error.code === "entitlement_required") throw new SkillAccessError("entitlement_required", "This Frely Agent is not available to the configured credential.");
-    if (error instanceof SkillInvocationError && error.code === "payment_required") throw new SkillAccessError("payment_required", "Not enough Frely Credit. Run `frely api call credit_products.list` and `frely api call payment_checkout.create` (pass useImmediately:true) to get a payment link for the user, then retry once they have paid.");
-    if (error instanceof SkillInvocationError && error.code === "remote_authorization_failed") throw new SkillAccessError("remote_authorization_failed", record.authMode === "api-key" ? "The model-scoped API key was rejected. Reinstall with frely item install <username/name> --api-key-stdin." : "Frely authorization failed. Run `frely login` again.");
-    throw new SkillAccessError("remote_call_failed", error instanceof SkillInvocationError && error.details.remoteCode ? `The remote Frely Agent call failed (${error.details.remoteCode}).` : "The remote Frely Agent call failed.");
+    throw remoteCallError(error, record.authMode);
   }
+}
+
+/** The Agent cannot take caller tools (`client_tools_unsupported`); the run then falls back to one plain call. */
+export class ClientToolsUnsupportedError extends Error {
+  constructor() {
+    super("This Agent does not support local file tools.");
+    this.name = "ClientToolsUnsupportedError";
+  }
+}
+
+export interface InstalledAgentSession {
+  readonly distributionId: string;
+  readonly modelId: string;
+  /** One `invoke` round with caller tools. Errors are the same typed `SkillAccessError`s as `invokeInstalledAgent`. */
+  turn(input: { readonly task: string; readonly tools: readonly CallerToolDefinition[]; readonly items: readonly CallerItem[]; readonly signal?: AbortSignal }): Promise<AgentTurnResult>;
+}
+
+/** Resolve the credential once and return a handle for several tool rounds; each round is billed on its own. */
+export async function openInstalledAgentSession(input: InstalledAgentInput): Promise<InstalledAgentSession> {
+  const { record, token, credential } = await openInstalledAgent(input);
+  const invoker = input.remoteInvoker ?? remoteAgentMcpInvoker;
+  return {
+    distributionId: record.distributionId,
+    modelId: record.modelId,
+    async turn(turn) {
+      if (!turn.task.trim() || Buffer.byteLength(turn.task, "utf8") > MAX_TASK_BYTES) throw new SkillAccessError("input_invalid", "Agent input must be non-empty and at most 128 KiB.");
+      if (invoker.invokeTurn === undefined) throw new ClientToolsUnsupportedError();
+      try {
+        return await invoker.invokeTurn({
+          relayUrl: new URL(record.mcpUrl).origin,
+          modelId: record.modelId,
+          token,
+          ...(credential ? { credential } : {}),
+          task: turn.task,
+          tools: turn.tools,
+          items: turn.items,
+          ...(turn.signal ? { signal: turn.signal } : {}),
+        });
+      } catch (error) {
+        if (error instanceof SkillInvocationError && error.details.remoteCode === "client_tools_unsupported") throw new ClientToolsUnsupportedError();
+        throw remoteCallError(error, record.authMode);
+      }
+    },
+  };
 }
 
 function assertApiKey(value: string): void {
@@ -331,7 +389,7 @@ function renderSkill(manifest: PublicVirtualModelManifest, slug: string): string
   const description = oneLine(manifest.clientTrigger?.description ?? manifest.description ?? `Use ${manifest.name} through Frely when the user's task matches this Agent.`).slice(0, 900);
   const capabilities = manifest.capabilities.length === 0 ? "- Use the published Agent for tasks described by this Skill." : manifest.capabilities.map((capability) => `- ${capability.id}${capability.description ? `: ${oneLine(capability.description)}` : ""}`).join("\n");
   const triggers = manifest.clientTrigger?.when.map((condition) => `- ${oneLine(condition)}`).join("\n") ?? `- The user explicitly asks for ${oneLine(manifest.name)} or their task matches its published capabilities.`;
-  return `---\nname: ${slug}\ndescription: ${JSON.stringify(description)}\ncompatibility: ${JSON.stringify("Requires frely-cli and network access to Frely.")}\nmetadata:\n  frely-distribution-id: ${JSON.stringify(manifest.id)}\n  frely-model-id: ${JSON.stringify(manifest.modelId)}\n---\n\n# ${oneLine(manifest.name)}\n\nThe Agent runs remotely on Frely; this Skill contains only trigger and invocation instructions.\n\n## When to use\n\n${triggers}\n\n## Public capabilities\n\n${capabilities}\n\n## Execute\n\nPass the user's complete relevant request to stdin of:\n\n\`frely agent run ${manifest.id} --input-stdin --json\`\n\nDo not put credentials in the command and do not replace the user's current model provider. Return the result to the user. If the user asked you to act on it (for example, carry out a plan), do so with your own tools, following your usual confirmation rules. A call can take several minutes; run it with a long command timeout or in the background instead of cutting it off. If the remote call fails, surface the returned state instead of inventing current external facts.\n`;
+  return `---\nname: ${slug}\ndescription: ${JSON.stringify(description)}\ncompatibility: ${JSON.stringify("Requires frely-cli and network access to Frely.")}\nmetadata:\n  frely-distribution-id: ${JSON.stringify(manifest.id)}\n  frely-model-id: ${JSON.stringify(manifest.modelId)}\n---\n\n# ${oneLine(manifest.name)}\n\nThe Agent runs remotely on Frely; this Skill contains only trigger and invocation instructions.\n\n## When to use\n\n${triggers}\n\n## Public capabilities\n\n${capabilities}\n\n## Execute\n\nPass the user's complete relevant request to stdin of:\n\n\`frely agent run ${manifest.id} --input-stdin --json\`\n\nDo not put credentials in the command and do not replace the user's current model provider. Return the result to the user. If the user asked you to act on it (for example, carry out a plan), do so with your own tools, following your usual confirmation rules. A call can take several minutes. If your command is cut off, run \`frely agent result --last --wait\` instead of calling again. If the result starts with NEED_FILES, read those files yourself and call again with the original task plus them. If the remote call fails, surface the returned state instead of inventing current external facts.\n`;
 }
 
 function hostAction(host: SkillHost): string {

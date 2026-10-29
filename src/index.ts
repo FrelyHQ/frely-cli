@@ -34,6 +34,9 @@ import { API_USAGE, logoutCloud, runApi } from "./cloud.js";
 import { CONTROLLER_COMMANDS, runControllerCommand } from "./controller/commands.js";
 import { controllerLogout, ControllerError } from "./controller/session.js";
 import { runAgentLocal } from "./agent/local/command.js";
+import { cancelRun, listRunSummaries, resumeRun, runOutcome, runSummary, startRun, waitForRun, workerMain } from "./agent/run.js";
+import { effectiveStatus, isRunId, readRun, resolveRun } from "./agent/run-store.js";
+import { DEFAULT_READ_LIMITS, defaultReadRoot } from "./agent/workspace-read.js";
 import { PiNodeSupervisor } from "./agent/pi-node-supervisor.js";
 import { readAppInstall } from "./agent/app-install.js";
 import { appInstallStatus, installApp, openApp, uninstallApp, updateApp } from "./app-manager.js";
@@ -47,7 +50,7 @@ import { getKeyBudget, KeyBudgetError, publicKeyBudgetError } from "./key-budget
 import { runNetwork, publicNetworkError } from "./network.js";
 import { runComputerCommand } from "./computer/command.js";
 import { runComputerMcpServer } from "./computer/server.js";
-import { agentManifestUrl, installSkillAdapter, invokeInstalledAgent, publicSkillAccessError, removeSkillAdapter, resolveAgentTarget, SkillAccessError, skillAdapterStatus } from "./skill/access.js";
+import { agentManifestUrl, installSkillAdapter, publicSkillAccessError, removeSkillAdapter, resolveAgentTarget, SkillAccessError, skillAdapterStatus } from "./skill/access.js";
 import type { SkillHost, SkillScope } from "./skill/managed.js";
 import { CloudToolError, installCloudItem, parseItemRef, trustCloudItem } from "./skill/cloud-item.js";
 import { checkItemUpdates, updateCloudItem } from "./skill/item-update.js";
@@ -195,13 +198,54 @@ async function main(): Promise<void> {
     }
     if (action === "run") {
       const target = args[2];
-      if (!target || target.startsWith("-")) throw new Error("Usage: frely agent run <username/name> (--input <text>|--input-stdin) [--json]");
+      if (!target || target.startsWith("-")) throw new Error(RUN_USAGE);
       const distributionId = await resolveAgentTarget(target, normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl));
       const task = args.includes("--input-stdin") ? await readStdinText(128 * 1024) : option(args, "--input");
       if (!task) throw new Error("Agent input is required. Use --input or --input-stdin.");
-      const value = await invokeInstalledAgent({ distributionId, task });
+      const read = await readOptions(args);
+      // The call runs in a detached worker so a cut-off command does not lose it; this process only waits and prints.
+      const onInterrupt = () => { process.stderr.write("Interrupted. The run keeps going; fetch it with `frely agent result --last --wait`.\n"); process.exit(130); };
+      process.once("SIGINT", onInterrupt);
+      const finished = await startRun({ distributionId, task, ...(read === undefined ? {} : { read }) });
+      process.off("SIGINT", onInterrupt);
+      const value = runOutcome(finished);
       if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
-      else stdout.write(`${value.text}\n`);
+      else {
+        stdout.write(`${value.text as string}\n`);
+        if (read !== undefined) process.stderr.write(`Read ${(finished.filesRead).length} file(s), ${finished.rounds.length} round(s), ${finished.usage.total_tokens} tokens. Run ${finished.runId}.\n`);
+      }
+      return;
+    }
+    if (action === "result" || action === "cancel") {
+      const json = args.includes("--json");
+      const runArg = args.slice(2).find((arg) => !arg.startsWith("--"));
+      const last = args.includes("--last");
+      if (runArg === undefined && !last) throw new Error(`Usage: frely agent ${action} (<runId>|--last)${action === "result" ? " [--wait] [--resume] [--json]" : " [--json]"}`);
+      let record = action === "cancel" ? await cancelRun(runArg) : await resolveRun(runArg);
+      if (action === "result") {
+        if (args.includes("--resume")) {
+          const status = effectiveStatus(record);
+          if (status !== "running") { await resumeRun(record.runId); record = (await readRun(record.runId))!; }
+        }
+        if (args.includes("--wait")) record = await waitForRun(record.runId);
+        else if (args.includes("--resume")) record = (await readRun(record.runId)) ?? record;
+      }
+      const summary = runSummary(record);
+      if (json) stdout.write(`${JSON.stringify(summary)}\n`);
+      else stdout.write(summary.status === "completed" ? `${summary.text as string}\n` : `${JSON.stringify(summary, null, 2)}\n`);
+      if (action === "result" && summary.ok === false) process.exitCode = 1;
+      return;
+    }
+    if (action === "runs") {
+      const runs = await listRunSummaries();
+      if (args.includes("--json")) stdout.write(`${JSON.stringify({ ok: true, runs })}\n`);
+      else stdout.write(runs.length === 0 ? "No agent runs on this computer.\n" : runs.map((run) => `${run.runId}  ${run.status}  ${run.distributionId}  ${run.createdAt}\n`).join(""));
+      return;
+    }
+    if (action === "__worker") {
+      const runId = args[2];
+      if (!runId || !isRunId(runId)) throw new Error("Internal command.");
+      await workerMain(runId);
       return;
     }
     if (action === "status") {
@@ -691,6 +735,24 @@ async function main(): Promise<void> {
   if (command === "provider" || command === "app") throw new Error(`Unknown ${command} command.\n${subcommandUsage(command)}`);
   usage();
   process.exitCode = 2;
+}
+
+const RUN_USAGE = "Usage: frely agent run <username/name> (--input <text>|--input-stdin) [--read [<dir>] [--read-max-bytes <n>] [--read-max-rounds <n>]] [--json]";
+
+/** `--read [<dir>]`: let the Agent read files of a directory (default: the git root of the current directory) through read-only tools that run here. */
+async function readOptions(args: string[]): Promise<{ root: string; limits: { totalBytes: number; maxRounds: number } } | undefined> {
+  const index = args.indexOf("--read");
+  if (index < 0) return undefined;
+  const next = args[index + 1];
+  const dir = next !== undefined && !next.startsWith("-") ? resolve(next) : await defaultReadRoot(process.cwd());
+  const limit = (name: string, max: number): number => {
+    const raw = option(args, name);
+    if (raw === undefined) return max;
+    const value = Number(raw);
+    if (!Number.isSafeInteger(value) || value < 1 || value > max) throw new Error(`${name} must be an integer from 1 to ${max}.`);
+    return value;
+  };
+  return { root: dir, limits: { totalBytes: limit("--read-max-bytes", DEFAULT_READ_LIMITS.totalBytes), maxRounds: limit("--read-max-rounds", DEFAULT_READ_LIMITS.maxRounds) } };
 }
 
 function option(args: string[], name: string): string | undefined {
