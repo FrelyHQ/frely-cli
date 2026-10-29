@@ -3,6 +3,7 @@ import { credentialStore } from "./credential-store.js";
 import { inspectAuth, normalizeRelayUrl } from "./auth.js";
 import { CloudToolError } from "./skill/cloud-item.js";
 import { openController } from "./controller/client.js";
+import { waitForApproval, type ApprovalOutcome, type ApprovalRef } from "./controller/approval-wait.js";
 
 const SERVICE = "frely-cli-cloud-v1";
 
@@ -14,16 +15,17 @@ export function permissionHint(result: object): string | null {
     const text = (part as { type?: unknown; text?: unknown }).type === "text" ? (part as { text?: unknown }).text : undefined;
     if (typeof text !== "string") continue;
     try {
-      const error = (JSON.parse(text) as { error?: { code?: unknown; need?: unknown; group?: unknown; url?: unknown; confirmationId?: unknown; summary?: unknown } }).error;
+      const error = (JSON.parse(text) as { error?: { code?: unknown; need?: unknown; group?: unknown; url?: unknown; confirmationId?: unknown; shortCode?: unknown; summary?: unknown } }).error;
       if (typeof error?.url !== "string" || (error.code !== "permission_required" && error.code !== "confirmation_required")) continue;
       const need = error.need === "write" ? "write access" : error.need === "sensitive" ? "sensitive read access" : "read access";
       const url = new URL(error.url);
       if (url.protocol !== "https:" && url.hostname !== "127.0.0.1" && url.hostname !== "localhost") continue;
       if (error.code === "confirmation_required") {
         if (typeof error.confirmationId !== "string" || !/^[A-Za-z0-9_-]{1,80}$/.test(error.confirmationId)) continue;
-        return `${typeof error.summary === "string" ? error.summary + "\n" : ""}Approve this in your browser (passkey or authenticator code required): ${url.toString()}\nThen run the same call again with "confirmationId":"${error.confirmationId}" added to the input.`;
+        return `${typeof error.summary === "string" ? error.summary + "\n" : ""}Approve this in your browser (passkey or authenticator code required): ${url.toString()}\nThen run the same call again with "confirmationId":"${error.confirmationId}" added to the input, or add --wait to let the CLI wait and run it once. To wait in the background: frely permission wait ${error.confirmationId}`;
       }
-      return `This device needs ${need}${typeof error.group === "string" ? " to " + error.group : ""}. Grant it in your browser (passkey or authenticator code required): ${url.toString()}`;
+      const waiting = typeof error.shortCode === "string" && /^[A-Za-z]{6}$/.test(error.shortCode) ? `\nTo wait in the background: frely permission wait ${error.shortCode}, then run the call again (or use --wait).` : "";
+      return `This device needs ${need}${typeof error.group === "string" ? " to " + error.group : ""}. Grant it in your browser (passkey or authenticator code required): ${url.toString()}${waiting}`;
     } catch { /* Not a permission failure. */ }
   }
   return null;
@@ -33,7 +35,7 @@ type CallResult = { isError?: boolean; content?: unknown; [key: string]: unknown
 const WAIT_DEFAULT_MS = 5 * 60_000, WAIT_MAX_MS = 10 * 60_000;
 
 /** The error object of a failed tool result, or null when the result is not a JSON error. */
-function toolError(result: object): { code?: unknown; url?: unknown; confirmationId?: unknown; expiresAt?: unknown } | null {
+function toolError(result: object): { code?: unknown; url?: unknown; confirmationId?: unknown; shortCode?: unknown; expiresAt?: unknown } | null {
   const { isError, content } = result as { isError?: unknown; content?: unknown };
   if (isError !== true || !Array.isArray(content)) return null;
   for (const part of content) {
@@ -45,29 +47,28 @@ function toolError(result: object): { code?: unknown; url?: unknown; confirmatio
 }
 
 /**
- * After a `permission_required` or `confirmation_required` refusal, blocks until the owner decides and returns the call's real result, so the
- * calling AI resumes by itself. Only calls the server refused before running are repeated: a pending approval answers `permission_required`
- * again (a denial answers it without a link) or `confirmation_invalid`; the first call that is let through runs exactly once.
- * Gives up at the request's expiry (at most 10 minutes) and returns the last refusal.
+ * After a `permission_required` or `confirmation_required` refusal: waits for the owner's decision with the one shared wait, then runs the call
+ * again exactly once, and only when the approval is `approved`. A denied, expired or already-used approval, or a time-out, gives back the refusal
+ * without running anything. A confirmation is repeated with the same confirmationId; the server lets it through once. The repeat is never retried,
+ * so a write whose outcome was lost is not replayed (it is reported as it came back).
  */
-export async function waitForApproval(first: CallResult, call: (input: Record<string, unknown>) => Promise<CallResult>, input: Record<string, unknown>,
-  options: { intervalMs?: number; now?: () => number; sleep?: (ms: number) => Promise<void> } = {}): Promise<CallResult> {
-  const { intervalMs = 3000, now = Date.now, sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)) } = options;
+export async function rerunAfterApproval(first: CallResult, call: (input: Record<string, unknown>) => Promise<CallResult>, input: Record<string, unknown>,
+  wait: (ref: ApprovalRef, timeoutMs: number) => Promise<ApprovalOutcome>, now: () => number = Date.now): Promise<CallResult> {
   const start = toolError(first);
-  if (!start || typeof start.url !== "string" || (start.code !== "permission_required" && start.code !== "confirmation_required")) return first;
+  if (!start || (start.code !== "permission_required" && start.code !== "confirmation_required")) return first;
   const confirmationId = start.code === "confirmation_required" && typeof start.confirmationId === "string" ? start.confirmationId : undefined;
-  if (start.code === "confirmation_required" && !confirmationId) return first;
+  const shortCode = start.code === "permission_required" && typeof start.shortCode === "string" ? start.shortCode : undefined;
+  if (!confirmationId && !shortCode) return first;
   const expires = typeof start.expiresAt === "string" || typeof start.expiresAt === "number" ? new Date(start.expiresAt).getTime() : NaN;
-  const deadline = Math.min(Number.isFinite(expires) ? expires : now() + WAIT_DEFAULT_MS, now() + WAIT_MAX_MS);
-  let last = first;
-  while (now() + intervalMs < deadline) {
-    await sleep(intervalMs);
-    last = await call(confirmationId ? { ...input, confirmationId } : input);
-    const error = toolError(last);
-    const pending = error?.code === "confirmation_invalid" || (error?.code === "permission_required" && typeof error.url === "string");
-    if (!pending) return last;
+  const budget = Math.min(Number.isFinite(expires) ? expires - now() : WAIT_DEFAULT_MS, WAIT_MAX_MS);
+  const outcome = await wait(confirmationId ? { confirmationId } : { code: shortCode! }, Math.max(budget, 0));
+  if (outcome.status !== "approved") {
+    process.stderr.write(outcome.status === "used" ? "This approval was already used for a call; not repeating it. Check that call's result.\n"
+      : outcome.status === "pending" ? "Still waiting for the owner. Run the same command with --wait to keep waiting.\n"
+      : outcome.status === "error" ? outcome.message + "\n" : `The request was ${outcome.status}.\n`);
+    return first;
   }
-  return last;
+  return call(confirmationId ? { ...input, confirmationId } : input);
 }
 
 export const API_USAGE = `Frely API — call your Frely account's business operations (keys, credits, orders, Creator items…).
@@ -207,8 +208,8 @@ async function runApiViaController(request: { action: string; name: string | und
     const hint = permissionHint(result);
     if (hint) process.stderr.write(hint + "\n");
     if (hint && request.wait) {
-      process.stderr.write("Waiting for approval; this command continues by itself once the owner decides (up to 10 minutes).\n");
-      result = await waitForApproval(result, call, request.input);
+      process.stderr.write("Waiting for approval; this command runs the call once, by itself, as soon as the owner approves (up to 10 minutes).\n");
+      result = await rerunAfterApproval(result, call, request.input, (ref, timeoutMs) => waitForApproval(controller, ref, timeoutMs));
     }
     return { value: result, failed: result.isError === true };
   } finally { await controller.close().catch(() => undefined); }

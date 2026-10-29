@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { intOption, parseArgs, requireRemote, type ParsedArgs } from "./args.js";
+import { waitForApproval, type ApprovalRef, type ApprovalWaitOptions } from "./approval-wait.js";
 import { openController, outcomeOf, resultData, resultText, type Controller, type Outcome, type ToolResult } from "./client.js";
 import { controllerLogin, controllerLogout, ControllerError, EXIT, readSession } from "./session.js";
 
@@ -315,7 +316,7 @@ async function permissionCommand(args: string[], io: Output): Promise<number> {
       if (outcome.exitCode !== EXIT.approval || typeof code !== "string" || !isInteractive() || parsed.flags.has("--no-wait") || parsed.flags.has("--json")) return emit(shownOf(result), outcome, parsed, io);
       io.out(resultText(result) + "\n");
       io.err("Waiting for the owner to decide…\n");
-      return waitForPermission(controller, code, 10 * 60_000, io);
+      return waitForPermission(controller, { code }, 10 * 60_000, io);
     });
   }
   if (action === "confirm") {
@@ -326,10 +327,11 @@ async function permissionCommand(args: string[], io: Output): Promise<number> {
   }
   if (action === "wait") {
     const parsed = parseArgs(rest, { values: ["--then", "--timeout"] });
-    const [code] = parsed.positionals;
-    if (!code || parsed.positionals.length !== 1 || !/^[A-Za-z]{6}$/u.test(code)) throw new ControllerError("Usage: frely permission wait <six-letter short code> [--then '<command>'] [--timeout <s>]", EXIT.cli);
+    const [reference] = parsed.positionals;
+    if (!reference || parsed.positionals.length !== 1 || !/^[A-Za-z0-9_-]{1,128}$/u.test(reference)) throw new ControllerError("Usage: frely permission wait <six-letter short code | confirmationId> [--then '<command>'] [--timeout <s>]", EXIT.cli);
+    const ref: ApprovalRef = /^[A-Za-z]{6}$/u.test(reference) ? { code: reference.toUpperCase() } : { confirmationId: reference };
     const timeout = intOption(parsed, "--timeout", 1, 3600) ?? 600;
-    const status = await withController(io, (controller) => waitForPermission(controller, code.toUpperCase(), timeout * 1000, io));
+    const status = await withController(io, (controller) => waitForPermission(controller, ref, timeout * 1000, io));
     const then = parsed.values.get("--then");
     if (status !== EXIT.ok || then === undefined) return status;
     // The approval of one command is bound to its exact text, so the command is run as given.
@@ -342,21 +344,20 @@ async function permissionCommand(args: string[], io: Output): Promise<number> {
   throw new ControllerError("Usage: frely permission request|confirm|wait. See frely permission --help.", EXIT.cli);
 }
 
-/** Polls the request until the owner decides: approved is 0, denied 2, and a request that ran out (or was revoked) or the time limit is 3, because approval is still needed. */
-export async function waitForPermission(controller: Pick<Controller, "call">, code: string, timeoutMs: number, io: Output, options: { intervalMs?: number; now?: () => number; sleep?: (ms: number) => Promise<void> } = {}): Promise<number> {
-  const { intervalMs = 3000, now = Date.now, sleep: wait = sleep } = options;
-  const deadline = now() + timeoutMs;
-  for (;;) {
-    const result = await controller.call("permission_status", { code });
-    const data = resultData(result);
-    if (result.isError === true || !data) { io.err((resultText(result) || "The approval could not be checked.") + "\n"); return EXIT.tool; }
-    switch (data.status) {
-      case "approved": io.out(`Approved${typeof data.mode === "string" ? ` (${data.mode})` : ""}${typeof data.expiresAt === "string" ? ` until ${data.expiresAt}` : ""}. Run the command again unchanged.\n`); return EXIT.ok;
-      case "denied": io.err("The owner denied this request.\n"); return EXIT.tool;
-      case "expired": case "revoked": io.err(`The request is ${String(data.status)}. Ask for it again.\n`); return EXIT.approval;
-      default: break;
+/** Waits until the owner decides: approved is 0, denied 2, and a request that ran out (or was revoked) or the time limit is 3, because approval is still needed. */
+export async function waitForPermission(controller: Pick<Controller, "call">, ref: ApprovalRef, timeoutMs: number, io: Output, options: ApprovalWaitOptions = {}): Promise<number> {
+  const outcome = await waitForApproval(controller, ref, timeoutMs, options);
+  const { data } = outcome;
+  switch (outcome.status) {
+    case "approved": {
+      const again = "confirmationId" in ref ? "Run the call again once, with the same confirmationId." : "Run the command again unchanged.";
+      io.out(`Approved${typeof data?.mode === "string" ? ` (${data.mode})` : ""}${typeof data?.expiresAt === "string" ? ` until ${data.expiresAt}` : ""}. ${again}\n`);
+      return EXIT.ok;
     }
-    if (now() + intervalMs >= deadline) { io.err("Still waiting for the owner. Run frely permission wait again to keep waiting.\n"); return EXIT.approval; }
-    await wait(intervalMs);
+    case "denied": io.err("The owner denied this request.\n"); return EXIT.tool;
+    case "used": io.err("This approval was already used for a call. Check that call's result before repeating it.\n"); return EXIT.tool;
+    case "expired": case "revoked": io.err(`The request is ${outcome.status}. Ask for it again.\n`); return EXIT.approval;
+    case "pending": io.err("Still waiting for the owner. Run frely permission wait again to keep waiting.\n"); return EXIT.approval;
+    default: io.err(outcome.message + "\n"); return EXIT.tool;
   }
 }

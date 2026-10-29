@@ -1,5 +1,6 @@
 import { ensureDevice } from "../../device/control.js";
 import { openController, resultData, resultText, type Controller } from "../../controller/client.js";
+import { waitForApproval } from "../../controller/approval-wait.js";
 import { ControllerError, EXIT } from "../../controller/session.js";
 import { approvedHosts, type LocalAgentRecord } from "./store.js";
 
@@ -19,7 +20,6 @@ export interface ApprovalDeps {
   waitMs?: number;
 }
 
-const sleepFor = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 /** When the relay does not say, an approval is taken to last as long as its default window. */
 const DEFAULT_WINDOW_MS = 12 * 3_600_000;
 
@@ -52,7 +52,6 @@ export async function approveSites(record: LocalAgentRecord, io: ApprovalIo, dep
 
 async function approveSite(controller: Controller, device: string, record: LocalAgentRecord, host: string, io: ApprovalIo, deps: ApprovalDeps): Promise<string | undefined> {
   const now = deps.now ?? Date.now;
-  const sleep = deps.sleep ?? sleepFor;
   const result = await controller.call("request_permission", {
     device, resource: siteResource(host), mode: "window",
     reason: `The local Agent ${record.slug} lists ${host} in its frely.yaml.`.slice(0, 300),
@@ -71,13 +70,10 @@ async function approveSite(controller: Controller, device: string, record: Local
     throw new ControllerError(`Approval needed for ${host}. Open the link above, approve it, then run the same command again.`, EXIT.approval);
   }
   io.err("Waiting for your decision…\n");
-  const deadline = now() + (deps.waitMs ?? 10 * 60_000);
-  for (;;) {
-    const answer = resultData(await controller.call("permission_status", { code }));
-    if (answer?.status === "approved") return typeof answer.expiresAt === "string" ? answer.expiresAt : new Date(now() + DEFAULT_WINDOW_MS).toISOString();
-    if (answer?.status === "denied") { io.err(`${host} was declined; ${record.slug} will run without it.\n`); return undefined; }
-    if (answer?.status === "expired" || answer?.status === "revoked") { io.err(`The request for ${host} ended without an answer; ${record.slug} will run without it.\n`); return undefined; }
-    if (now() + (deps.pollMs ?? 3000) >= deadline) throw new ControllerError(`Still waiting for approval of ${host}. Run the same command again to keep waiting.`, EXIT.approval);
-    await sleep(deps.pollMs ?? 3000);
-  }
+  const outcome = await waitForApproval(controller, { code }, deps.waitMs ?? 10 * 60_000, { now, ...(deps.sleep ? { sleep: deps.sleep } : {}), ...(deps.pollMs !== undefined ? { intervalMs: deps.pollMs } : {}) });
+  if (outcome.status === "approved") return typeof outcome.data?.expiresAt === "string" ? outcome.data.expiresAt : new Date(now() + DEFAULT_WINDOW_MS).toISOString();
+  if (outcome.status === "denied") { io.err(`${host} was declined; ${record.slug} will run without it.\n`); return undefined; }
+  if (outcome.status === "expired" || outcome.status === "revoked") { io.err(`The request for ${host} ended without an answer; ${record.slug} will run without it.\n`); return undefined; }
+  if (outcome.status === "error") throw new ControllerError(`Could not check the approval of ${host}: ${outcome.message}`, EXIT.tool);
+  throw new ControllerError(`Still waiting for approval of ${host}. Run the same command again to keep waiting.`, EXIT.approval);
 }
