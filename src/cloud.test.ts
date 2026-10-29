@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatApiList, isInteractiveTerminal, permissionHint, waitForApproval } from "./cloud.js";
+import { formatApiList, isInteractiveTerminal, permissionHint, rerunAfterApproval } from "./cloud.js";
+import type { ApprovalOutcome, ApprovalRef } from "./controller/approval-wait.js";
 
 const failure = (error: object) => ({ isError: true, content: [{ type: "text", text: JSON.stringify({ error }) }] });
 
@@ -8,6 +9,11 @@ test("a permission_required failure becomes a one-line hint with the console lin
   const hint = permissionHint(failure({ code: "permission_required", need: "write", group: "agents", url: "https://frely.cloud/user/account/connections?cloudClient=c1" }));
   assert.match(hint ?? "", /write access to agents/);
   assert.match(hint ?? "", /https:\/\/frely\.cloud\/user\/account\/connections\?cloudClient=c1/);
+});
+
+test("a permission_required hint with a short code says how to wait in the background", () => {
+  const hint = permissionHint(failure({ code: "permission_required", need: "write", group: "agents", shortCode: "ABCDEF", url: "https://frely.cloud/device?g=ABCDEF" }));
+  assert.match(hint ?? "", /frely permission wait ABCDEF/);
 });
 
 test("other failures, successes and non-https links give no hint", () => {
@@ -64,36 +70,49 @@ test("browser authorization is only attempted from an interactive terminal", () 
 });
 
 const refusal = (error: object) => ({ isError: true, content: [{ type: "text", text: JSON.stringify({ error }) }] });
-const waitOptions = (clock: { t: number }) => ({ intervalMs: 1000, now: () => clock.t, sleep: async (ms: number) => { clock.t += ms; } });
+const outcome = (status: ApprovalOutcome["status"]): ApprovalOutcome => ({ status, data: {}, message: "" });
+const waiter = (status: ApprovalOutcome["status"]) => { const refs: Array<{ ref: ApprovalRef; timeoutMs: number }> = []; return { refs, wait: async (ref: ApprovalRef, timeoutMs: number) => { refs.push({ ref, timeoutMs }); return outcome(status); } }; };
+const ok = { content: [{ type: "text", text: "{}" }] };
 
-test("waitForApproval repeats a pending permission request until the owner approves", async () => {
-  const clock = { t: 0 };
-  const pending = refusal({ code: "permission_required", url: "https://frely.cloud/r/ab", expiresAt: 60_000 });
-  const results = [pending, pending, { content: [{ type: "text", text: "{}" }] }];
-  let calls = 0;
-  const final = await waitForApproval(pending, async () => results[calls++]!, { a: 1 }, waitOptions(clock));
-  assert.equal(calls, 3);
-  assert.equal((final as { isError?: boolean }).isError, undefined);
-});
-
-test("waitForApproval stops when the request is denied (refusal without a link)", async () => {
-  const clock = { t: 0 };
-  const denied = refusal({ code: "permission_required", message: "The owner denied this a moment ago." });
-  const final = await waitForApproval(refusal({ code: "permission_required", url: "https://frely.cloud/r/ab", expiresAt: 60_000 }), async () => denied, {}, waitOptions(clock));
-  assert.equal(final, denied);
-});
-
-test("waitForApproval sends the confirmationId and gives up at expiry", async () => {
-  const clock = { t: 0 };
+test("an approved permission_required is waited for by its short code, then the call runs exactly once", async () => {
+  const first = refusal({ code: "permission_required", shortCode: "ABCDEF", url: "https://frely.cloud/r/ab", expiresAt: 60_000 });
+  const { refs, wait } = waiter("approved");
   const inputs: Array<Record<string, unknown>> = [];
-  const first = refusal({ code: "confirmation_required", confirmationId: "c_1", url: "https://frely.cloud/c/c_1", expiresAt: 5000 });
-  const final = await waitForApproval(first, async input => { inputs.push(input); return refusal({ code: "confirmation_invalid" }); }, { a: 1 }, waitOptions(clock));
-  assert.deepEqual(inputs[0], { a: 1, confirmationId: "c_1" });
-  assert.ok(inputs.length >= 3 && inputs.length <= 5);
-  assert.equal((final as { isError?: boolean }).isError, true);
+  const final = await rerunAfterApproval(first, async input => { inputs.push(input); return ok; }, { a: 1 }, wait, () => 0);
+  assert.deepEqual(refs, [{ ref: { code: "ABCDEF" }, timeoutMs: 60_000 }]);
+  assert.deepEqual(inputs, [{ a: 1 }]);
+  assert.equal(final, ok);
 });
 
-test("waitForApproval returns a non-approval failure untouched", async () => {
+test("an approved confirmation is repeated once with the same confirmationId, within the 10 minute cap", async () => {
+  const first = refusal({ code: "confirmation_required", confirmationId: "c_1", url: "https://frely.cloud/c/c_1", expiresAt: 3_600_000 });
+  const { refs, wait } = waiter("approved");
+  const inputs: Array<Record<string, unknown>> = [];
+  await rerunAfterApproval(first, async input => { inputs.push(input); return ok; }, { a: 1 }, wait, () => 0);
+  assert.deepEqual(refs, [{ ref: { confirmationId: "c_1" }, timeoutMs: 600_000 }]);
+  assert.deepEqual(inputs, [{ a: 1, confirmationId: "c_1" }]);
+});
+
+test("nothing runs when the approval is denied, expired, used, still pending or unreadable", async () => {
+  const first = refusal({ code: "confirmation_required", confirmationId: "c_1", url: "https://frely.cloud/c/c_1", expiresAt: 5000 });
+  for (const status of ["denied", "expired", "revoked", "used", "pending", "error"] as const) {
+    const final = await rerunAfterApproval(first, async () => { throw new Error("must not call"); }, {}, waiter(status).wait, () => 0);
+    assert.equal(final, first, status);
+  }
+});
+
+test("a repeat that fails is returned as it came back and not tried again", async () => {
+  const first = refusal({ code: "permission_required", shortCode: "ABCDEF", url: "https://frely.cloud/r/ab", expiresAt: 60_000 });
+  const lost = refusal({ code: "operation_cancelled_outcome_unknown" });
+  let calls = 0;
+  assert.equal(await rerunAfterApproval(first, async () => { calls++; return lost; }, {}, waiter("approved").wait, () => 0), lost);
+  assert.equal(calls, 1);
+});
+
+test("a failure that is not an approval, or has no reference to wait on, is returned untouched", async () => {
+  const never = async () => { throw new Error("must not wait"); };
   const other = refusal({ code: "operation_failed" });
-  assert.equal(await waitForApproval(other, async () => { throw new Error("must not call"); }, {}), other);
+  assert.equal(await rerunAfterApproval(other, never, {}, never), other);
+  const noCode = refusal({ code: "permission_required", message: "The owner denied this a moment ago." });
+  assert.equal(await rerunAfterApproval(noCode, never, {}, never), noCode);
 });
