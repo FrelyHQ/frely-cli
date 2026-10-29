@@ -70,6 +70,7 @@ test("installs a managed trigger Skill without installing the remote Agent", asy
     assert.doesNotMatch(text, /api\.frely\.cloud\/mcp/u);
     assert.match(text, /carry out a plan\), do so with your own tools/u);
     assert.match(text, /can take several minutes/u);
+    assert.match(text, /--no-progress-summary/u);
     assert.match(text, /frely agent result --last --wait/u);
     assert.match(text, /result starts with NEED_FILES/u);
     assert.doesNotMatch(text, /remote Agent's result/u);
@@ -171,6 +172,55 @@ test("stores a model-scoped API key outside the Skill and uses it for invocation
     });
     assert.equal(invokedToken, apiKey);
     assert.equal(result.text, "ready");
+
+    // A long call returns running + taskId; the call keeps reading the task until it ends.
+    const statusCalls: string[] = [];
+    const progress: string[] = [];
+    let sentProgressSummary: boolean | undefined;
+    const longResult = await invokeInstalledAgent({
+      distributionId,
+      task: "Long job.",
+      progressSummary: false,
+      onProgress: (sentence) => progress.push(sentence),
+      home: root,
+      credentialStore: store,
+      remoteInvoker: {
+        async invoke(input) {
+          sentProgressSummary = input.progressSummary;
+          return { text: "running", state: "running", taskId: "a2a_task_1", progressSummary: "Reading." };
+        },
+      },
+      taskClient: {
+        async status(input) {
+          statusCalls.push(`${input.taskId}:${input.wait}:${input.token === apiKey}`);
+          return statusCalls.length < 2
+            ? { text: "running", state: "running", taskId: input.taskId, progressSummary: "Writing." }
+            : { text: "all done", state: "completed", taskId: input.taskId };
+        },
+        async cancel() { throw new Error("not canceled"); },
+      },
+    });
+    assert.equal(longResult.text, "all done");
+    assert.equal(sentProgressSummary, false);
+    assert.deepEqual(statusCalls, ["a2a_task_1:true:true", "a2a_task_1:true:true"]);
+    assert.deepEqual(progress, ["Reading.", "Writing."]);
+
+    // Aborting the wait cancels the task at Frely.
+    const controller = new AbortController();
+    const canceled: string[] = [];
+    await assert.rejects(() => invokeInstalledAgent({
+      distributionId,
+      task: "Long job.",
+      signal: controller.signal,
+      home: root,
+      credentialStore: store,
+      remoteInvoker: { async invoke() { return { text: "running", state: "running", taskId: "a2a_task_2" }; } },
+      taskClient: {
+        async status() { controller.abort(); throw new Error("aborted"); },
+        async cancel(input) { canceled.push(input.taskId); return { text: "stopped", state: "canceled", taskId: input.taskId }; },
+      },
+    }));
+    assert.deepEqual(canceled, ["a2a_task_2"]);
 
     const removed = await removeSkillAdapter(distributionId, root, store);
     assert.equal(removed.removed, true);

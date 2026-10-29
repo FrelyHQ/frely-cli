@@ -206,7 +206,8 @@ async function main(): Promise<void> {
       // The call runs in a detached worker so a cut-off command does not lose it; this process only waits and prints.
       const onInterrupt = () => { process.stderr.write("Interrupted. The run keeps going; fetch it with `frely agent result --last --wait`.\n"); process.exit(130); };
       process.once("SIGINT", onInterrupt);
-      const finished = await startRun({ distributionId, task, ...(read === undefined ? {} : { read }) });
+      const progressSummary = args.includes("--no-progress-summary") ? false : args.includes("--progress-summary") ? true : undefined;
+      const finished = await startRun({ distributionId, task, ...(read === undefined ? {} : { read }), ...(progressSummary === undefined ? {} : { progressSummary }) });
       process.off("SIGINT", onInterrupt);
       const value = runOutcome(finished);
       if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
@@ -737,7 +738,7 @@ async function main(): Promise<void> {
   process.exitCode = 2;
 }
 
-const RUN_USAGE = "Usage: frely agent run <username/name> (--input <text>|--input-stdin) [--read [<dir>] [--read-max-bytes <n>] [--read-max-rounds <n>]] [--json]";
+const RUN_USAGE = "Usage: frely agent run <username/name> (--input <text>|--input-stdin) [--read [<dir>] [--read-max-bytes <n>] [--read-max-rounds <n>]] [--progress-summary|--no-progress-summary] [--json]";
 
 /** `--read [<dir>]`: let the Agent read files of a directory (default: the git root of the current directory) through read-only tools that run here. */
 async function readOptions(args: string[]): Promise<{ root: string; limits: { totalBytes: number; maxRounds: number } } | undefined> {

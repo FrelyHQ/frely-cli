@@ -14,9 +14,16 @@ export interface SkillCapability {
   readonly entrypoints: readonly SkillEntrypoint[];
 }
 
+export type AgentTaskState = "running" | "completed" | "failed" | "canceled";
+
 export interface SkillInvocationResult {
   readonly text: string;
   readonly usage?: Readonly<Record<string, unknown>>;
+  /** Set by the Gateway for an Agent call: `running` means the task goes on and `taskId` reads it later. */
+  readonly state?: AgentTaskState;
+  readonly taskId?: string;
+  /** The running Agent's newest one-line progress; absent when progress is off or nothing was reported yet. */
+  readonly progressSummary?: string;
 }
 
 export class SkillInvocationError extends Error {
@@ -77,8 +84,26 @@ export interface RemoteAgentMcpInvoker {
     readonly credential?: AuthCredential;
     readonly task: string;
     readonly capabilityId?: string;
+    /** Sent only when given; otherwise the Gateway uses the account's setting. */
+    readonly progressSummary?: boolean;
     readonly signal?: AbortSignal;
   }): Promise<SkillInvocationResult>;
+}
+
+export interface RemoteAgentTaskInput {
+  readonly relayUrl: string;
+  readonly modelId: string;
+  readonly token: string;
+  readonly credential?: AuthCredential;
+  readonly taskId: string;
+  readonly signal?: AbortSignal;
+}
+
+export interface RemoteAgentTaskClient {
+  /** Reads a task (task_status); with `wait` the Gateway holds the request up to 50 seconds. Free. */
+  status(input: RemoteAgentTaskInput & { readonly wait: boolean }): Promise<SkillInvocationResult>;
+  /** Cancels a running task (task_cancel); what ran so far is billed. */
+  cancel(input: RemoteAgentTaskInput): Promise<SkillInvocationResult>;
 }
 
 export interface SkillRouterOptions {
@@ -148,15 +173,11 @@ export async function invokeSkill(options: SkillRouterOptions): Promise<SkillInv
 /** Minimal stateless MCP client used by the router's remote path. */
 export const remoteAgentMcpInvoker: RemoteAgentMcpInvoker = {
   async invoke(input) {
-    const result = await postInvoke(input, {
+    return taskResult(await postInvoke(input, {
       input: input.task,
       ...(input.capabilityId === undefined ? {} : { capabilityId: input.capabilityId }),
-    });
-    const text = resultText(result);
-    if (result === undefined || result.isError === true || text.length === 0) {
-      throw new SkillInvocationError("remote_authorization_failed");
-    }
-    return Object.freeze({ text });
+      ...(input.progressSummary === undefined ? {} : { progressSummary: input.progressSummary }),
+    }));
   },
 
   async invokeTurn(input) {
@@ -184,10 +205,38 @@ export const remoteAgentMcpInvoker: RemoteAgentMcpInvoker = {
   },
 };
 
-/** POST one `invoke` tools/call and return its JSON-RPC result, or throw the typed error the router callers expect. */
+export const remoteAgentTaskClient: RemoteAgentTaskClient = {
+  async status(input) {
+    return taskResult(await postInvoke(input, { taskId: input.taskId, ...(input.wait ? { wait: true } : {}) }, "task_status"));
+  },
+  async cancel(input) {
+    return taskResult(await postInvoke(input, { taskId: input.taskId }, "task_cancel"));
+  },
+};
+
+/** The text and, for an Agent task, its state, task id and newest progress line. */
+function taskResult(result: Record<string, unknown> | undefined): SkillInvocationResult {
+  const text = resultText(result);
+  if (result === undefined || result.isError === true || text.length === 0) {
+    throw new SkillInvocationError("remote_authorization_failed");
+  }
+  const structured = isRecord(result.structuredContent) ? result.structuredContent : {};
+  const state = structured.state === "running" || structured.state === "completed" || structured.state === "failed" || structured.state === "canceled" ? structured.state : undefined;
+  const taskId = typeof structured.taskId === "string" && /^[A-Za-z0-9_-]{1,128}$/u.test(structured.taskId) ? structured.taskId : undefined;
+  const progressSummary = typeof structured.progressSummary === "string" && structured.progressSummary.length > 0 ? structured.progressSummary.slice(0, 200) : undefined;
+  return Object.freeze({
+    text,
+    ...(state === undefined ? {} : { state }),
+    ...(taskId === undefined ? {} : { taskId }),
+    ...(progressSummary === undefined ? {} : { progressSummary }),
+  });
+}
+
+/** POST one tools/call (`invoke` unless told otherwise) and return its JSON-RPC result, or throw the typed error the router callers expect. */
 async function postInvoke(
   input: { readonly relayUrl: string; readonly modelId: string; readonly token: string; readonly credential?: AuthCredential; readonly signal?: AbortSignal },
   args: Record<string, unknown>,
+  tool: "invoke" | "task_status" | "task_cancel" = "invoke",
 ): Promise<Record<string, unknown> | undefined> {
   const endpoint = new URL(`/mcp/${encodeURIComponent(input.modelId)}`, input.relayUrl);
   const response = await fetch(endpoint, {
@@ -203,7 +252,7 @@ async function postInvoke(
       jsonrpc: "2.0",
       id: "skill-invoke",
       method: "tools/call",
-      params: { name: "invoke", arguments: args },
+      params: { name: tool, arguments: args },
     }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
