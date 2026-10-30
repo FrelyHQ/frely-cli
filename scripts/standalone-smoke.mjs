@@ -17,7 +17,7 @@ try {
   await writeFile(join(directory, "bunfig.toml"), 'preload = ["./must-not-load.js"]\n');
   const version = JSON.parse(await readFile("package.json", "utf8")).version;
   assert.equal((await run(executable, ["--version"], { env, cwd: directory, timeout: 10000 })).stdout.trim(), version);
-  assert.match((await run(executable, ["--help"], { env, cwd: directory, timeout: 10000 })).stdout, /frely mcp/);
+  assert.match((await run(executable, ["--help"], { env, cwd: directory, timeout: 10000 })).stdout, /frely link/);
   const diagnostic = JSON.parse((await run(executable, ["doctor", "--json"], { env, cwd: directory, timeout: 10000 })).stdout);
   assert.equal(diagnostic.ok, true);
   assert.ok(diagnostic.checks.some((check) => check.name === "mcp" && check.ok && /not enabled/i.test(check.detail)));
