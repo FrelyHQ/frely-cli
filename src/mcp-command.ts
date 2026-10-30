@@ -73,7 +73,7 @@ const valueOptions: Record<string, readonly string[]> = {
 const flagOptions: Record<string, readonly string[]> = {
   on: ["--json", "--resume", "--no-browser"],
   status: ["--json"],
-  serve: ["--provider-only"],
+  serve: ["--provider-only", "--standby"],
 };
 
 function checkOptions(args: string[], action: string): string[] {

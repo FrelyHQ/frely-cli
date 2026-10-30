@@ -99,3 +99,11 @@ test("without a systemd user manager the relay starts as a detached process and 
     await assert.rejects(startDetachedRelay(command, { ...deps, spawn: (() => ({ pid: 7, on() {}, unref() {} })) as unknown as typeof spawnFake, alive }), /exited right away/);
   } finally { process.stderr.write = write; }
 });
+
+test("a service without a workspace starts in standby mode, not provider-only", () => {
+  const withoutWorkspace = serviceLaunchArguments("/src/index.js");
+  assert.ok(withoutWorkspace.includes("--standby"));
+  assert.ok(!withoutWorkspace.includes("--provider-only"));
+  const withWorkspace = serviceLaunchArguments("/src/index.js", "/w");
+  assert.ok(withWorkspace.includes("--workspace") && !withWorkspace.includes("--standby"));
+});

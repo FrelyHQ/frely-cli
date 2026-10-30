@@ -29,6 +29,7 @@ test("link accepts the documented short entry and explicit subcommands", () => {
     ["link", "off"],
     ["mcp", "stdio", "--workspace", "/project"],
     ["mcp", "serve", "--workspace", "/project", "--service-config-home", "/config", "--service-credential-store", "native"],
+    ["mcp", "serve", "--standby", "--service-config-home", "/config", "--service-credential-store", "native"],
   ]) assert.deepEqual(normalizeLinkArgs(args), args);
 });
 
