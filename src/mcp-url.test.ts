@@ -337,15 +337,15 @@ test("frely mcp enables a preapproved device with its pregenerated key and no br
 });
 
 test("frely mcp prints the short approval link the relay offers and falls back to the long link otherwise", async (t) => {
-  const short = await fixture(t, false, () => "https://test.invalid/device?m=ABCDEF");
+  const short = await fixture(t, false, () => "https://test.invalid/device?m=ABCDEFGH");
   const project = join(short.directory, "project");
   await mkdir(project);
   await ensureMcpAuthorization({ workspace: project, notify: short.notify }, short.install);
-  assert.match(short.state.messages.join(""), /Approve: https:\/\/test\.invalid\/device\?m=ABCDEF\n/);
+  assert.match(short.state.messages.join(""), /Approve: https:\/\/test\.invalid\/device\?m=ABCDEFGH\n/);
   // Other origins, other pages, another request's id and extra parameters are not trusted.
   const id = `mca_${"1".repeat(32)}`;
   const long = `https://test.invalid/device?mcp_request=${id}`;
-  for (const offered of ["https://attacker.invalid/device?m=ABCDEF", "https://test.invalid/login?m=ABCDEF", "https://test.invalid/device?m=ABC", "https://test.invalid/device?m=ABCDEF&next=x",
+  for (const offered of ["https://attacker.invalid/device?m=ABCDEFGH", "https://test.invalid/login?m=ABCDEFGH", "https://test.invalid/device?m=ABC", "https://test.invalid/device?m=ABCDEFGH&next=x",
     `https://test.invalid/device?mcp_request=mca_${"2".repeat(32)}`, "javascript:alert(1)", 42, undefined]) {
     assert.equal(mcpVerificationUri("https://test.invalid", id, offered), long);
   }

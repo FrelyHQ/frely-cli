@@ -12,8 +12,8 @@ test("a permission_required failure becomes a one-line hint with the console lin
 });
 
 test("a permission_required hint with a short code says how to wait in the background", () => {
-  const hint = permissionHint(failure({ code: "permission_required", need: "write", group: "agents", shortCode: "ABCDEF", url: "https://frely.cloud/device?g=ABCDEF" }));
-  assert.match(hint ?? "", /frely permission wait ABCDEF/);
+  const hint = permissionHint(failure({ code: "permission_required", need: "write", group: "agents", shortCode: "ABCDEFGH", url: "https://frely.cloud/device?g=ABCDEFGH" }));
+  assert.match(hint ?? "", /frely permission wait ABCDEFGH/);
 });
 
 test("other failures, successes and non-https links give no hint", () => {
@@ -75,11 +75,11 @@ const waiter = (status: ApprovalOutcome["status"]) => { const refs: Array<{ ref:
 const ok = { content: [{ type: "text", text: "{}" }] };
 
 test("an approved permission_required is waited for by its short code, then the call runs exactly once", async () => {
-  const first = refusal({ code: "permission_required", shortCode: "ABCDEF", url: "https://frely.cloud/r/ab", expiresAt: 60_000 });
+  const first = refusal({ code: "permission_required", shortCode: "ABCDEFGH", url: "https://frely.cloud/r/ab", expiresAt: 60_000 });
   const { refs, wait } = waiter("approved");
   const inputs: Array<Record<string, unknown>> = [];
   const final = await rerunAfterApproval(first, async input => { inputs.push(input); return ok; }, { a: 1 }, wait, () => 0);
-  assert.deepEqual(refs, [{ ref: { code: "ABCDEF" }, timeoutMs: 60_000 }]);
+  assert.deepEqual(refs, [{ ref: { code: "ABCDEFGH" }, timeoutMs: 60_000 }]);
   assert.deepEqual(inputs, [{ a: 1 }]);
   assert.equal(final, ok);
 });
@@ -102,7 +102,7 @@ test("nothing runs when the approval is denied, expired, used, still pending or 
 });
 
 test("a repeat that fails is returned as it came back and not tried again", async () => {
-  const first = refusal({ code: "permission_required", shortCode: "ABCDEF", url: "https://frely.cloud/r/ab", expiresAt: 60_000 });
+  const first = refusal({ code: "permission_required", shortCode: "ABCDEFGH", url: "https://frely.cloud/r/ab", expiresAt: 60_000 });
   const lost = refusal({ code: "operation_cancelled_outcome_unknown" });
   let calls = 0;
   assert.equal(await rerunAfterApproval(first, async () => { calls++; return lost; }, {}, waiter("approved").wait, () => 0), lost);
