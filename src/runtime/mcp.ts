@@ -160,7 +160,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
         const providerName = optionalTextArg(args, "name");
         return { content: [{ type: "text" as const, text: JSON.stringify(await options.localModels.share({ url, ...(models?.length ? { models } : {}), ...(providerName ? { name: providerName.slice(0, 128) } : {}) }, signal)) }] };
       }
-      // `frely mcp workspace add|remove` edits the registry while this runtime keeps running; pick the change up per call.
+      // `frely link workspace add|remove` edits the registry while this runtime keeps running; pick the change up per call.
       await syncWorkspaces(workspaces, primaryRoot);
       const result = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]), pathGrantsFromMeta(request.params._meta), networkAllowFromMeta(request.params._meta), transferAllowedFromMeta(request.params._meta), p2p);
       if (result instanceof ImageResult) {

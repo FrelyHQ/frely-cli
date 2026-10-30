@@ -45,8 +45,9 @@ import { detectSandboxBackend } from "./runtime/sandbox.js";
 import { LocalMcpHub, loadManualEntries } from "./runtime/local-mcp.js";
 import { reportedWorkspaces } from "./runtime/workspace-registry.js";
 import { VERSION } from "./version.js";
-import { agentHelp, cliUsage, mcpUsage, subcommandUsage } from "./agent-help.js";
-import { ensureMcpAuthorization, grantInactive, mcpStartLogin, normalizeMcpArgs, startMcp, takeInstallToken } from "./mcp-command.js";
+import { agentHelp, cliUsage, linkUsage, subcommandUsage } from "./agent-help.js";
+import { ensureMcpAuthorization, grantInactive, mcpStartLogin, normalizeLinkArgs, startMcp, takeInstallToken } from "./mcp-command.js";
+import { remoteLocked, remoteState, setRemoteLock } from "./remote-lock.js";
 import { getKeyBudget, KeyBudgetError, publicKeyBudgetError } from "./key-budget.js";
 import { runNetwork, publicNetworkError } from "./network.js";
 import { runComputerCommand } from "./computer/command.js";
@@ -78,7 +79,7 @@ async function installAgent(target: string, args: string[]): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const args = normalizeMcpArgs(applyDataDir(process.argv.slice(2)));
+  const args = normalizeLinkArgs(applyDataDir(process.argv.slice(2)));
   const command = args[0];
   if (command === "update") {
     if (args.length !== 1) throw new Error("Usage: frely update. Version checks are available in frely doctor.");
@@ -86,7 +87,7 @@ async function main(): Promise<void> {
     stdout.write(result.message + "\n");
     return;
   }
-  if (command === "mcp" && args[1] === "help") { stdout.write(mcpUsage()); return; }
+  if (command === "link" && args[1] === "help") { stdout.write(linkUsage()); return; }
   // Internal: ssh's ProxyCommand inside the macOS command sandbox (see sshProxyPrefix in runtime/sandbox.ts). Not listed in help.
   if (command === "ssh-proxy") {
     const port = Number(args[2]);
@@ -412,10 +413,10 @@ async function main(): Promise<void> {
               notify: (message) => { process.stderr.write(message); },
               preset: { privateKeyPem: mcp.privateKeyPem, preapproval: result.mcpPreapproval },
             });
-            stdout.write(`Device MCP enabled for ${authorization.grant.workspace} until ${authorization.grant.expiresAt}. Remove it any time with \`frely mcp remove\`.\n`);
+            stdout.write(`Device MCP enabled for ${authorization.grant.workspace} until ${authorization.grant.expiresAt}. Remove it any time with \`frely link off\`.\n`);
             stdout.write(`MCP address: ${authorization.mcpUrl}\n`);
           } else {
-            stdout.write("Run `frely mcp start` on the computer you want to control, then connect your MCP client with OAuth.\n");
+            stdout.write("Run `frely link on` on the computer you want to control, then connect your MCP client with OAuth.\n");
           }
         } catch (error) {
           stdout.write(`Verification failed: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -448,7 +449,7 @@ async function main(): Promise<void> {
           if (challenge.reference) stdout.write(`Mail reference: ${challenge.reference} (use the newest mail with this reference; enter only the 6 digits)\n`);
           stdout.write(`Expires in: ${challenge.expiresIn} seconds\n`);
           if (mcp) {
-            stdout.write(`Entering the code also lets remote agents read and write files and run commands in ${mcp.workspace} for ${mcp.days} days. Remove it later with \`frely mcp remove\`.\n`);
+            stdout.write(`Entering the code also lets remote agents read and write files and run commands in ${mcp.workspace} for ${mcp.days} days. Remove it later with \`frely link off\`.\n`);
           }
           stdout.write(`Run: frely login --code <code>\n`);
         }
@@ -474,7 +475,7 @@ async function main(): Promise<void> {
     if (!("sessionBound" in result) || !result.sessionBound) {
       stdout.write("Your server version is older and does not support logging out per device yet.\n");
     }
-    stdout.write("Run `frely mcp start --workspace <path>` on the computer you want to control, then connect your MCP client with OAuth.\n");
+    stdout.write("Run `frely link on --workspace <path>` on the computer you want to control, then connect your MCP client with OAuth.\n");
     return;
   }
 
@@ -653,26 +654,29 @@ async function main(): Promise<void> {
     }
     return;
   }
-  if (command === "mcp" && args[1] === "auto-update") {
+  if (command === "link" && args[1] === "auto-update") {
     if (args[2]) await writeAutoUpdate(args[2] === "on");
     const on = await readAutoUpdate();
-    stdout.write(`Automatic updates are ${on ? "on" : "off"}. ${on ? "While idle, the background service installs new stable versions of this installation and restarts itself." : "Run frely mcp auto-update on to let the background service update itself while idle."} Windows still updates manually.\n`);
+    stdout.write(`Automatic updates are ${on ? "on" : "off"}. ${on ? "While idle, the background service installs new stable versions of this installation and restarts itself." : "Run frely link auto-update on to let the background service update itself while idle."} Windows still updates manually.\n`);
     return;
   }
-  if (command === "mcp" && args[1] === "local") {
-    if (args[2] === undefined) { stdout.write(subcommandUsage("mcp.local")); return; }
+  if (command === "link" && args[1] === "local") {
+    if (args[2] === undefined) { stdout.write(subcommandUsage("link.local")); return; }
     await runLocalMcpCommand({ args, write: (text) => { stdout.write(text); } });
     return;
   }
-  if (command === "mcp" && args[1] === "workspace") {
-    if (args[2] === undefined) { stdout.write(subcommandUsage("mcp.workspace")); return; }
+  if (command === "link" && args[1] === "workspace") {
+    if (args[2] === undefined) { stdout.write(subcommandUsage("link.workspace")); return; }
     const metadata = await inspectMcpMetadataOrQuarantine((message) => { process.stderr.write(message); });
     await runWorkspaceCommand({ args, primary: metadata?.grant.workspace ?? null, write: (text) => { stdout.write(text); } });
     return;
   }
 
-  if (command === "mcp" && args[1] === "start") {
-    if (process.argv[3] === "url") process.stderr.write("`frely mcp url` is deprecated; use `frely mcp start`.\n");
+  if (command === "link" && args[1] === "on") {
+    // Turning remote control back on is the one way out of `false`: it has to happen here, on this computer.
+    if (!args.includes("--resume")) await setRemoteLock(false);
+    else if (await remoteLocked()) { stdout.write("Remote control is turned off on this computer; run `frely link on` to allow it again.\n"); return; }
+    if (process.argv[3] === "url") process.stderr.write("`frely link on` is deprecated; use `frely link on`.\n");
     // Internal: update scripts only resume the installed service, never prompt for approval.
     if (args.includes("--resume")) { const service = await startMcpService(); stdout.write(`Frely MCP service ${service.active ? "started" : "not active"}.\n`); return; }
     // Pre-login install command (start.sh / start.ps1): never inherited by the service, logged or stored.
@@ -693,27 +697,34 @@ async function main(): Promise<void> {
     else stdout.write(`${authorization.mcpUrl}\n`);
     return;
   }
-  if (command === "mcp" && args[1] === "status") {
+  if (command === "link" && args[1] === "status") {
     const metadata = await inspectMcpMetadataOrQuarantine((message) => { process.stderr.write(message); });
     const service = await serviceStatus();
     const expired = metadata ? grantInactive(metadata) : false;
+    const state = remoteState({ locked: await remoteLocked(), authorized: Boolean(metadata) && !expired });
     const running = service.detached ? "running (background process, not restarted after reboot)" : "running";
-    const value = { configured: Boolean(metadata), service: { installed: service.installed, running: service.active }, ...(metadata ? { mcpUrl: metadata.mcpResource, workspace: metadata.grant.workspace, expiresAt: metadata.grant.expiresAt, expired } : {}) };
+    const value = { state, configured: Boolean(metadata), service: { installed: service.installed, running: service.active }, ...(metadata ? { mcpUrl: metadata.mcpResource, workspace: metadata.grant.workspace, expiresAt: metadata.grant.expiresAt, expired } : {}) };
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
-    else if (!metadata) stdout.write(`Device MCP is not configured. Run frely mcp start.\nService: ${service.active ? running : service.installed ? "stopped" : "not installed"}\n`);
-    else stdout.write(`MCP URL: ${metadata.mcpResource}\nWorkspace: ${metadata.grant.workspace}\nAuthorization: ${expired ? "expired or inactive (run frely mcp start to renew)" : `active until ${metadata.grant.expiresAt}`}\nService: ${service.active ? running : service.installed ? "stopped (run frely mcp start)" : "not installed (run frely mcp start)"}\n`);
+    else {
+      const serviceLine = `Service: ${service.active ? running : service.installed ? "stopped (run frely link on)" : "not installed"}\n`;
+      if (state === "false") stdout.write(`Remote control: off (locked on this computer). Only \`frely link on\` here can turn it on again; the web page cannot.\n${serviceLine}`);
+      else if (!metadata) stdout.write(`Remote control: not enabled (default). Turn it on from the Frely web page after two-step verification, or run frely link on.\n${serviceLine}`);
+      else stdout.write(`Remote control: ${expired ? "expired or inactive (run frely link on to renew)" : `on until ${metadata.grant.expiresAt}`}\nMCP URL: ${metadata.mcpResource}\nWorkspace: ${metadata.grant.workspace}\n${serviceLine}`);
+    }
     return;
   }
-  if (command === "mcp" && args[1] === "stop") { const service = await stopMcpService(); stdout.write(`Frely MCP service ${service.active ? "still active" : "stopped"}.\n`); return; }
+  if (command === "link" && args[1] === "stop") { const service = await stopMcpService(); stdout.write(`Frely MCP service ${service.active ? "still active" : "stopped"}.\n`); return; }
 
-  if (command === "mcp" && args[1] === "remove") {
+  if (command === "link" && args[1] === "off") {
+    // The local lock comes first: even if the revoke below cannot reach Frely, this computer already refuses remote control.
+    await setRemoteLock(true);
     await revokeMcpAuthorization((message) => { process.stderr.write(message); });
     if ((await listLocalProviders()).length > 0 || (await listLocalServices().catch(() => [])).some((service) => service.background)) {
       await installDeviceRelayService();
-      stdout.write("Device MCP removed. The background service keeps running for local Providers and services.\n");
+      stdout.write("Remote control is off and locked on this computer; only `frely link on` here can turn it on again. The background service keeps running for local Providers and services.\n");
     } else {
       await uninstallMcpService();
-      stdout.write("Device MCP removed and background service uninstalled.\n");
+      stdout.write("Remote control is off and locked on this computer; only `frely link on` here can turn it on again. The background service is uninstalled.\n");
     }
     return;
   }

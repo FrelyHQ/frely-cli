@@ -105,7 +105,7 @@ test("a stopped record beside an active service is stale, not a final stop", asy
   const check = report.checks.find((check) => check.name === "connection")!;
   assert.equal(check.status, "info");
   assert.match(check.detail, /Stale status record/);
-  assert.doesNotMatch(check.detail, /Run frely mcp start\./);
+  assert.doesNotMatch(check.detail, /Run frely link on\./);
   assert.match(report.summary.connection, /stale record; service running/);
   assert.equal(report.details?.connection.state, "stopped");
 });
@@ -130,8 +130,8 @@ test("invalid MCP metadata is a failure, not silently treated as optional", asyn
   assert.match(report.summary.mcp, /Configuration unreadable/);
 });
 
-test("doctor names invalid MCP configuration and points to frely mcp start", async () => {
-  for (const [reason, expected] of [["legacy_url", /older CLI\. Run frely mcp start to repair/], ["malformed", /invalid\. Run frely mcp start to repair/]] as const) {
+test("doctor names invalid MCP configuration and points to frely link on", async () => {
+  for (const [reason, expected] of [["legacy_url", /older CLI\. Run frely link on to repair/], ["malformed", /invalid\. Run frely link on to repair/]] as const) {
     const f = fixture();
     f.dependencies.inspectMcpMetadata = async () => { throw new McpConfigInvalidError(reason); };
     const report = await doctor({}, f.dependencies);

@@ -6,7 +6,7 @@ export interface LocalMcpCommandInput {
   write: (text: string) => void;
 }
 
-/** `frely mcp local list|add|remove`. Turning a server on for remote clients happens on the web connections page. */
+/** `frely link local list|add|remove`. Turning a server on for remote clients happens on the web connections page. */
 export async function runLocalMcpCommand({ args, write }: LocalMcpCommandInput): Promise<void> {
   const action = args[2];
   if (action === "list") {
@@ -14,7 +14,7 @@ export async function runLocalMcpCommand({ args, write }: LocalMcpCommandInput):
     await hub.refresh();
     const entries = hub.snapshot();
     if (args.includes("--json")) { write(`${JSON.stringify({ servers: entries.map(describe) })}\n`); return; }
-    if (entries.length === 0) { write("No local MCP servers found. Servers listening only on 127.0.0.1 are discovered automatically; add others with frely mcp local add.\n"); return; }
+    if (entries.length === 0) { write("No local MCP servers found. Servers listening only on 127.0.0.1 are discovered automatically; add others with frely link local add.\n"); return; }
     write(entries.map((entry) => `${entry.name}  ${entry.transport}  ${entry.source}  ${target(entry)}\n`).join(""));
     write("Turn a server on for remote clients on the Frely connections page; every server is off until then.\n");
     return;
@@ -27,18 +27,18 @@ export async function runLocalMcpCommand({ args, write }: LocalMcpCommandInput):
     return;
   }
   if (action === "remove") {
-    if (!args[3] || args.length > 4) throw new Error("Usage: frely mcp local remove <name>");
+    if (!args[3] || args.length > 4) throw new Error("Usage: frely link local remove <name>");
     await removeManualEntry(args[3]);
     write(`Removed local MCP ${args[3]}. Discovered servers cannot be removed; stop the program or leave it off.\n`);
     return;
   }
-  throw new Error("Unknown local MCP command. Run frely mcp local.");
+  throw new Error("Unknown local MCP command. Run frely link local.");
 }
 
 /** `add <name> --url <url> [--header K=V]...` or `add <name> [--env K=V]... -- <command> [args...]`. */
 export async function parseAdd(args: readonly string[]): Promise<ManualLocalMcpEntry> {
   const name = args[0];
-  if (!name || name.startsWith("-")) throw new Error("Usage: frely mcp local add <name> --url <http://127.0.0.1:port/path> | -- <command> [args...]");
+  if (!name || name.startsWith("-")) throw new Error("Usage: frely link local add <name> --url <http://127.0.0.1:port/path> | -- <command> [args...]");
   const separator = args.indexOf("--");
   const options = separator === -1 ? args.slice(1) : args.slice(1, separator);
   const rest = separator === -1 ? [] : args.slice(separator + 1);
@@ -56,7 +56,7 @@ export async function parseAdd(args: readonly string[]): Promise<ManualLocalMcpE
   const urlAt = options.indexOf("--url");
   const known = new Set(["--url", "--header", "--env"]);
   for (let i = 0; i < options.length; i++) {
-    if (!known.has(options[i]!)) throw new Error(`Unsupported local MCP option ${options[i]}. Run frely mcp local.`);
+    if (!known.has(options[i]!)) throw new Error(`Unsupported local MCP option ${options[i]}. Run frely link local.`);
     i++;
   }
   if (urlAt !== -1) {

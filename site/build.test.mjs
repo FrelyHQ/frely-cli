@@ -152,7 +152,7 @@ test('header has a no-JavaScript Products dropdown with the current product mark
   }
 });
 
-test('the landing page leads with the Skill install and keeps frely mcp start in the FrelyMCP section', async () => {
+test('the landing page leads with the Skill install and keeps frely link on in the FrelyMCP section', async () => {
   const root = fileURLToPath(new URL('../', import.meta.url));
   const temp = await mkdtemp(resolve(tmpdir(), 'frely-site-skill-'));
   try {

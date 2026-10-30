@@ -8,9 +8,9 @@ export interface WorkspaceCommandInput {
   write: (text: string) => void;
 }
 
-/** `frely mcp workspace list|add <path>|remove <path>`. `args` is the normalized argv, e.g. ["mcp", "workspace", "add", "/path"]. */
+/** `frely link workspace list|add <path>|remove <path>`. `args` is the normalized argv, e.g. ["mcp", "workspace", "add", "/path"]. */
 export async function runWorkspaceCommand({ args, primary: primaryInput, write }: WorkspaceCommandInput): Promise<void> {
-  if (!primaryInput) throw new Error("MCP is not enabled. Run frely mcp start.");
+  if (!primaryInput) throw new Error("MCP is not enabled. Run frely link on.");
   const primary = await realpath(primaryInput);
   // The primary workspace is always registered, so it is listed and routed like any other root.
   await ensureWorkspaceRegistered(primary);
@@ -32,7 +32,7 @@ export async function runWorkspaceCommand({ args, primary: primaryInput, write }
       : format(primary, roots));
     return;
   }
-  throw new Error("Unknown workspace command. Run frely mcp workspace.");
+  throw new Error("Unknown workspace command. Run frely link workspace.");
 }
 
 function ordered(primary: string, roots: string[]): string[] {

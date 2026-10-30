@@ -11,12 +11,12 @@ async function dir(prefix: string): Promise<string> {
 
 async function run(primary: string | null, ...args: string[]): Promise<string> {
   let out = "";
-  await runWorkspaceCommand({ args: ["mcp", "workspace", ...args], primary, write: (text) => { out += text; } });
+  await runWorkspaceCommand({ args: ["link", "workspace", ...args], primary, write: (text) => { out += text; } });
   return out;
 }
 
 test("workspace commands require MCP to be enabled", async () => {
-  await assert.rejects(() => run(null, "list"), /MCP is not enabled\. Run frely mcp start\./);
+  await assert.rejects(() => run(null, "list"), /MCP is not enabled\. Run frely link on\./);
 });
 
 test("workspace add registers a directory and list reports primary plus additions", async () => {
@@ -53,7 +53,7 @@ test("workspace remove refuses the primary and removes other workspaces", async 
   const primary = await dir("frely-ws-rm-primary-");
   const extra = await dir("frely-ws-rm-extra-");
   await run(primary, "add", extra);
-  await assert.rejects(() => run(primary, "remove", primary), /Cannot remove the primary workspace .*frely mcp remove/);
+  await assert.rejects(() => run(primary, "remove", primary), /Cannot remove the primary workspace .*frely link off/);
   await run(primary, "remove", extra);
   assert.deepEqual(JSON.parse(await run(primary, "list", "--json")).workspaces, [primary]);
   await assert.rejects(() => run(primary, "remove", extra), /Workspace not registered/);

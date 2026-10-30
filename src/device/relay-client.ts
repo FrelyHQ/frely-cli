@@ -1,3 +1,4 @@
+import { remoteLocked } from "../remote-lock.js";
 import { watchServiceInstallation } from "../update/service-refresh.js";
 import { readEffectiveAutoUpdate, setRemoteAutoUpdate, watchAutoUpdate } from "../update/auto-update.js";
 import { MaintenanceGate, serveMaintenance } from "../update/maintenance.js";
@@ -349,6 +350,8 @@ async function handleFrame(
 async function executeMcpRequest(request: DeviceRelayRequest, session: RelaySession | null, lease: McpLease | null): Promise<unknown> {
   if (!session || !lease || request.authorizationId !== lease.authorizationId) throw new Error("MCP execution authorization is missing or mismatched.");
   lease.assert();
+  // The local lock of the three-state remote link is checked on every request, so `frely link off` takes effect at once.
+  if (await remoteLocked()) throw new Error("Remote control is turned off on this computer. Run `frely link on` on it to allow it again.");
   // The owner's Web switch rides on every authorized MCP frame; absent means off.
   await setRemoteAutoUpdate(request.autoUpdate === true);
   return session.execute(request.payload, request.id, request.toolsets, request.localMcps);

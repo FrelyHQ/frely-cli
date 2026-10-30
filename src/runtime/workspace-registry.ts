@@ -89,7 +89,7 @@ export async function removeWorkspace(input: string, primary: string): Promise<s
   // The guard must not depend on the caller having normalized `primary`.
   const primaryPath = await realpath(resolve(primary)).catch(() => resolve(primary));
   if (path === primaryPath) {
-    throw new Error(`Cannot remove the primary workspace (${path}). It is tied to the device's MCP authorization; run frely mcp remove instead.`);
+    throw new Error(`Cannot remove the primary workspace (${path}). It is tied to the device's MCP authorization; run frely link off instead.`);
   }
 
   const registry = await readRegistry();

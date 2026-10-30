@@ -50,14 +50,14 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
       : auth.credentialStored ? `${auth.user ? `${auth.user.email} (${auth.user.id})` : "configured"}; stored, not checked online`
       : "Not logged in (optional). Run frely login to use account features.");
 
-  // Doctor only reports; repair needs browser approval, so it is left to frely mcp start.
+  // Doctor only reports; repair needs browser approval, so it is left to frely link on.
   let metadataIssue: string | null = null;
   const metadata = await dependencies.inspectMcpMetadata().catch((error: unknown) => {
     metadataIssue = !(error instanceof McpConfigInvalidError)
       ? process.platform === "win32" ? `Configuration unreadable: ${mcpMetadataPath()}`
         : `Configuration unreadable. Use owner-only permissions: chmod 700 ${dirname(mcpMetadataPath())} && chmod 600 ${mcpMetadataPath()}`
-      : error.reason === "legacy_url" ? "Configuration from an older CLI. Run frely mcp start to repair."
-      : "Configuration invalid. Run frely mcp start to repair.";
+      : error.reason === "legacy_url" ? "Configuration from an older CLI. Run frely link on to repair."
+      : "Configuration invalid. Run frely link on to repair.";
     return null;
   });
   const metadataError = metadataIssue !== null;
@@ -70,8 +70,8 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
     && metadata.relayUrl === binding?.relayUrl && metadata.userId === binding?.userId);
   add("mcp", metadataError || expired || (metadata && !mcpMatches) || (!metadata && options.mcp) ? "fail" : metadata ? "pass" : "info",
     metadataIssue ?? (!metadata ? "Not enabled (optional)."
-      : expired ? "Authorization expired or inactive. Run frely mcp start to renew."
-      : !mcpMatches ? "Authorization does not match this account/device. Run frely mcp start."
+      : expired ? "Authorization expired or inactive. Run frely link on to renew."
+      : !mcpMatches ? "Authorization does not match this account/device. Run frely link on."
       : `Configured; expires ${metadata.grant.expiresAt} (local authorization).`));
 
   const service = metadata || binding ? await dependencies.serviceStatus().catch(() => null) : null;
@@ -97,9 +97,9 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
     connectionState === "not_configured" ? "Not configured."
       : live && metadata && !mcpReady ? "Device transport connected, but this MCP authorization/workspace is not active in the running service."
       : live ? "Device transport connected; recent heartbeat received."
-      : staleStopped ? "Stale status record: a transport reported stopped, but the background service is running. Re-run frely doctor; restart with frely mcp start only if this persists."
+      : staleStopped ? "Stale status record: a transport reported stopped, but the background service is running. Re-run frely doctor; restart with frely link on only if this persists."
       : connectionState === "disconnected" ? "Disconnected; the device transport is retrying."
-      : connectionState === "stopped" ? "Device transport stopped. Run frely mcp start."
+      : connectionState === "stopped" ? "Device transport stopped. Run frely link on."
       : "Unknown: no recent heartbeat for this account/device. Run frely doctor -v.");
 
   const update = await updatePromise;
@@ -136,7 +136,7 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
         if (metadata && error instanceof McpAuthorizationError && ["mcp_authorization_not_found", "mcp_authorization_invalid", "device_not_found", "device_revoked"].includes(error.code)) {
           try {
             await dependencies.reconcileMcpAuthorization?.(metadata, error.code);
-            add("mcp_authorization", "info", `Local MCP state repaired after server response: ${error.code}. Run frely mcp start to request approval.`);
+            add("mcp_authorization", "info", `Local MCP state repaired after server response: ${error.code}. Run frely link on to request approval.`);
           } catch { add("mcp_authorization", "fail", "MCP authorization is invalid and local state could not be repaired."); }
         } else add("mcp_authorization", "fail", "Secure key or server authorization could not be verified. Check connectivity, login and MCP renewal.");
       }

@@ -6,7 +6,7 @@
   "installBun": "bun add --global frely-cli@latest",
   "installPnpm": "pnpm add --global frely-cli@latest",
   "doctor": "frely doctor",
-  "mcpSetup": "frely mcp start",
+  "mcpSetup": "frely link on",
   "mcpUrl": "https://mcp.frely.cloud/mcp",
   "mcpJson": "{\n  \"mcpServers\": {\n    \"frely\": {\n      \"url\": \"https://mcp.frely.cloud/mcp\",\n      \"headers\": {\n        \"Authorization\": \"Bearer <token from the devices page>\"\n      },\n      \"disabled\": false\n    }\n  }\n}",
   "claudeConnect": "claude mcp add --transport http frelymcp \"https://mcp.frely.cloud/mcp\"",

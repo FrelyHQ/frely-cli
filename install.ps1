@@ -112,5 +112,5 @@ try {
     Write-Output "  `$env:PATH = `"$directory;`$env:PATH`""
     if (-not $pathPersisted) { Write-Output "(The user PATH was not updated, so new terminals will need the full path $target, or add $directory to PATH manually.)" }
   }
-  Write-Output 'Basic commands require no keyring setup. MCP authorization begins with frely mcp start.'
+  Write-Output 'Basic commands require no keyring setup. MCP authorization begins with frely link on.'
 } finally { Remove-Item -LiteralPath $stage -Recurse -Force }

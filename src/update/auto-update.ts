@@ -13,7 +13,7 @@ export type AutoUpdateOutcome = "disabled" | "unsupported" | "current" | "busy" 
 const defaults = { inspectInstallation, latestRelease, installedVersion, prepareStandalone, installPackage, lockInstallation };
 export type AutoUpdateDependencies = typeof defaults;
 
-/** The device-local switch: a file, so the service and `frely mcp auto-update` need no shared process. Off when missing. */
+/** The device-local switch: a file, so the service and `frely link auto-update` need no shared process. Off when missing. */
 export function autoUpdatePath(): string {
   return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "frely", "auto-update");
 }
