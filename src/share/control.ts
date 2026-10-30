@@ -1,4 +1,7 @@
 import { requireLogin, type AuthCredential } from "../auth.js";
+import { isInteractiveTerminal, permissionHint, rerunAfterApproval } from "../cloud.js";
+import { openController, type Controller } from "../controller/client.js";
+import { waitForApproval } from "../controller/approval-wait.js";
 import { ensureDevice } from "../device/control.js";
 import { parseShareGrant, type ShareGrant } from "./frpc-config.js";
 
@@ -13,12 +16,47 @@ export interface ShareControl {
   revoke(sessionId: string): Promise<void>;
 }
 
-/** Calls Frely's share route as the signed-in user; the device is this computer's enrolled device. */
+type CallResult = { isError?: boolean; content?: unknown; structuredContent?: unknown; [key: string]: unknown };
+
+/**
+ * Opens the public link through the account operation `shares.create`: like every confirm-level operation it needs the owner's one-time
+ * approval, so the first call answers with an approval code and link, and this waits for the decision with the shared approval wait and then
+ * repeats the call once. Heartbeat and revoke of the running session use Frely's share route as the signed-in user.
+ */
+export async function createShareViaApproval(controller: Pick<Controller, "call">, input: { deviceId: string; ttlSeconds?: number }, write: (text: string) => void = (text) => { process.stderr.write(text); }): Promise<ShareGrant> {
+  const args: Record<string, unknown> = { deviceId: input.deviceId, ...(input.ttlSeconds !== undefined ? { ttlSeconds: input.ttlSeconds } : {}) };
+  const call = (arguments_: Record<string, unknown>) => controller.call("frely_call", { tool: "shares.create", arguments: arguments_ }) as Promise<CallResult>;
+  let result = await call(args);
+  const hint = permissionHint(result);
+  if (hint) {
+    write(hint + "\nWaiting for your approval (up to 10 minutes); the share starts by itself once you approve.\n");
+    result = await rerunAfterApproval(result, call, args, (ref, timeoutMs) => waitForApproval(controller, ref, timeoutMs));
+  }
+  if (result.isError === true) throw new Error(shareFailure(result));
+  const text = Array.isArray(result.content) ? (result.content as Array<{ type?: unknown; text?: unknown }>).find((part) => part.type === "text")?.text : undefined;
+  return parseShareGrant(result.structuredContent ?? (typeof text === "string" ? JSON.parse(text) : null));
+}
+
+function shareFailure(result: CallResult): string {
+  const text = Array.isArray(result.content) ? (result.content as Array<{ type?: unknown; text?: unknown }>).find((part) => part.type === "text")?.text : undefined;
+  try {
+    const error = (JSON.parse(String(text)) as { error?: { code?: unknown; message?: unknown } }).error;
+    if (error?.code === "confirmation_required") return "The share was not approved. Run frely share again and approve it in your browser.";
+    if (typeof error?.message === "string") return error.message;
+    if (typeof error?.code === "string") return `Frely could not open the share (${error.code}).`;
+  } catch { /* Not a JSON failure. */ }
+  return "Frely could not open the share.";
+}
+
 export async function accountShareControl(): Promise<ShareControl> {
   const device = await ensureDevice();
   const call = await accountRelayCaller(SHARES_PATH);
   return {
-    async create(input) { return parseShareGrant(await call({ action: "create", deviceId: device.deviceId, ...(input.ttlSeconds !== undefined ? { ttlSeconds: input.ttlSeconds } : {}) })); },
+    async create(input) {
+      const controller = await openController({ interactive: isInteractiveTerminal() });
+      try { return await createShareViaApproval(controller, { deviceId: device.deviceId, ...(input.ttlSeconds !== undefined ? { ttlSeconds: input.ttlSeconds } : {}) }); }
+      finally { await controller.close().catch(() => undefined); }
+    },
     async heartbeat(sessionId) {
       const value = await call({ action: "heartbeat", sessionId });
       if (!value || typeof value !== "object" || typeof (value as { active?: unknown }).active !== "boolean") throw new Error("Frely returned an invalid share status.");

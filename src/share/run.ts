@@ -13,8 +13,6 @@ export interface ShareOptions {
   /** Lifetime of the link in hours; the relay caps it at 24. */
   readonly ttlHours?: number;
   readonly rewriteHost?: boolean;
-  /** Skip the confirmation question. */
-  readonly yes?: boolean;
   readonly json?: boolean;
 }
 
@@ -26,8 +24,6 @@ export interface ShareDeps {
   readonly startGateway: typeof startGateway;
   readonly spawnFrpc: (binary: string, configPath: string) => FrpcProcess;
   readonly probe: (port: number) => Promise<boolean>;
-  /** Asks the human; null when there is no terminal to ask on. */
-  readonly confirm: ((question: string) => Promise<boolean>) | null;
   readonly write: (text: string) => void;
   readonly signal: AbortSignal;
   readonly heartbeatMs?: number;
@@ -41,7 +37,7 @@ const MIB = 1024 * 1024;
 
 export function parseShareArguments(args: readonly string[]): ShareOptions {
   let port: number | undefined, ttlHours: number | undefined;
-  let rewriteHost = false, yes = false, json = false;
+  let rewriteHost = false, json = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (arg === "--ttl" || arg.startsWith("--ttl=")) {
@@ -49,7 +45,6 @@ export function parseShareArguments(args: readonly string[]): ShareOptions {
       ttlHours = Number(value);
       if (!value || !Number.isFinite(ttlHours) || ttlHours <= 0 || ttlHours > 24) throw new Error("--ttl must be a number of hours from 0.02 to 24.");
     } else if (arg === "--rewrite-host") rewriteHost = true;
-    else if (arg === "--yes" || arg === "-y") yes = true;
     else if (arg === "--json") json = true;
     else if (arg.startsWith("-")) throw new Error(`Unknown option ${arg}.\n${shareUsage()}`);
     else if (port === undefined) {
@@ -58,21 +53,17 @@ export function parseShareArguments(args: readonly string[]): ShareOptions {
     } else throw new Error(`Usage: ${shareUsage()}`);
   }
   if (port === undefined) throw new Error(`Usage: ${shareUsage()}`);
-  return { port, ...(ttlHours !== undefined ? { ttlHours } : {}), rewriteHost, yes, json };
+  return { port, ...(ttlHours !== undefined ? { ttlHours } : {}), rewriteHost, json };
 }
 
 export function shareUsage(): string {
-  return "frely share <port> [--ttl <hours>] [--rewrite-host] [--yes] [--json]";
+  return "frely share <port> [--ttl <hours>] [--rewrite-host] [--json]";
 }
 
 /** Shares http://127.0.0.1:<port> through Frely's relay until Ctrl+C, the link expires, the allowance is used up or Frely revokes it. Returns the exit code. */
 export async function runShare(options: ShareOptions, deps: ShareDeps): Promise<number> {
   const say = (text: string) => { if (!options.json) deps.write(text); };
   if (!(await deps.probe(options.port))) throw new Error(`Nothing is listening on 127.0.0.1:${options.port}. Start your service first.`);
-  if (!options.yes) {
-    if (!deps.confirm) throw new Error("frely share makes a local service public, so it asks you first. Run it in a terminal, or pass --yes if you intend this.");
-    if (!(await deps.confirm(`Make http://127.0.0.1:${options.port} reachable from the Internet by link through Frely? [y/N] `))) { say("Cancelled.\n"); return 1; }
-  }
   const binary = await deps.ensureFrpc();
   const control = await deps.control();
   const grant = await control.create({ ...(options.ttlHours !== undefined ? { ttlSeconds: Math.round(options.ttlHours * 3600) } : {}) });
@@ -149,7 +140,7 @@ export function spawnFrpcProcess(binary: string, configPath: string): FrpcProces
   return { done, kill: () => { child.kill(); } };
 }
 
-export async function runShareCommand(args: readonly string[], io: { write: (text: string) => void; interactive: boolean; prompt?: (question: string) => Promise<string> }): Promise<number> {
+export async function runShareCommand(args: readonly string[], io: { write: (text: string) => void; interactive: boolean }): Promise<number> {
   const options = parseShareArguments(args);
   const controller = new AbortController();
   const onSignal = () => controller.abort();
@@ -160,7 +151,6 @@ export async function runShareCommand(args: readonly string[], io: { write: (tex
       control: accountShareControl,
       ensureFrpc: () => ensureFrpc({ log: io.write }),
       startGateway, spawnFrpc: spawnFrpcProcess, probe: probeLoopback,
-      confirm: io.interactive && io.prompt ? async (question) => /^y(es)?$/iu.test((await io.prompt!(question)).trim()) : null,
       write: io.write, signal: controller.signal,
     });
   } finally {
