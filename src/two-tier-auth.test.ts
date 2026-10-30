@@ -73,7 +73,7 @@ test("MCP activation and renewal keep basic credentials and Provider identity se
       sequence++; approved = false;
       current = { id: `mca_${sequence.toString(16).padStart(32, "0")}`, deviceId, workspace: body.workspace, keyThumbprint: body.keyThumbprint,
         days: body.days, approvalDeadline: new Date(Date.now() + 900000).toISOString(), approvedAt: null, expiresAt: null, status: "pending" };
-      return Response.json({ ...current, mcpResource }, { status: 201 });
+      return Response.json({ ...current, mcpResource, verificationUri: "https://test.invalid/device?g=ABCDEFGH" }, { status: 201 });
     }
     assert.ok(current);
     if (approved && current.status === "pending") {

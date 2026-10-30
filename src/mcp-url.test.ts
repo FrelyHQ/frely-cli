@@ -12,7 +12,7 @@ import { generateMcpKey, inspectMcpMetadata, McpConfigInvalidError, mcpMetadataP
 import { ensureMcpAuthorization, startMcp } from "./mcp-command.js";
 import { useMemoryCredentialStore } from "./test-support.js";
 
-async function fixture(t: TestContext, denied = false, offeredLink?: (id: string) => unknown) {
+async function fixture(t: TestContext, denied = false, offeredLink: (id: string) => unknown = () => "https://test.invalid/device?g=ABCDEFGH") {
   const directory = await mkdtemp(join(tmpdir(), "frely-mcp-url-"));
   const restore = useMemoryCredentialStore();
   const previous = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, FRELY_NO_BROWSER: process.env.FRELY_NO_BROWSER };
@@ -87,7 +87,7 @@ test("frely mcp sets up an unconfigured device once, then returns the same autho
   assert.equal(authorization.mcpUrl, f.mcpResource);
   assert.deepEqual(f.state.installations, [workspace]);
   assert.match(f.state.messages.join(""), /Enabling device MCP for .*\nDevice MCP execution authorization: 90 days/);
-  assert.match(f.state.messages.join(""), /Approve: https:\/\/test.invalid\/device\?mcp_request=/);
+  assert.match(f.state.messages.join(""), /Approve: https:\/\/test.invalid\/device\?g=ABCDEFGH\nCode: ABCD-EFGH\n/);
   assert.match(f.state.messages.join(""), /Background service: running/);
   const metadata = await readFile(mcpMetadataPath(), "utf8");
   f.state.messages.length = 0;
@@ -337,17 +337,10 @@ test("frely mcp enables a preapproved device with its pregenerated key and no br
 });
 
 test("frely mcp prints the short approval link the relay offers and falls back to the long link otherwise", async (t) => {
-  const short = await fixture(t, false, () => "https://test.invalid/device?m=ABCDEFGH");
-  const project = join(short.directory, "project");
-  await mkdir(project);
-  await ensureMcpAuthorization({ workspace: project, notify: short.notify }, short.install);
-  assert.match(short.state.messages.join(""), /Approve: https:\/\/test\.invalid\/device\?m=ABCDEFGH\n/);
-  // Other origins, other pages, another request's id and extra parameters are not trusted.
-  const id = `mca_${"1".repeat(32)}`;
-  const long = `https://test.invalid/device?mcp_request=${id}`;
-  for (const offered of ["https://attacker.invalid/device?m=ABCDEFGH", "https://test.invalid/login?m=ABCDEFGH", "https://test.invalid/device?m=ABC", "https://test.invalid/device?m=ABCDEFGH&next=x",
-    `https://test.invalid/device?mcp_request=mca_${"2".repeat(32)}`, "javascript:alert(1)", 42, undefined]) {
-    assert.equal(mcpVerificationUri("https://test.invalid", id, offered), long);
+  // Other origins, other pages, other parameters and a malformed code are not trusted: the relay is not one this CLI works with.
+  for (const offered of ["https://attacker.invalid/device?g=ABCDEFGH", "https://test.invalid/login?g=ABCDEFGH", "https://test.invalid/device?g=ABC", "https://test.invalid/device?g=ABCDEFGH&next=x",
+    "https://test.invalid/device?m=ABCDEFGH", `https://test.invalid/device?mcp_request=mca_${"2".repeat(32)}`, "javascript:alert(1)", 42, undefined]) {
+    assert.throws(() => mcpVerificationUri("https://test.invalid", offered), /usable approval link/);
   }
-  assert.equal(mcpVerificationUri("https://test.invalid", id, long), long);
+  assert.equal(mcpVerificationUri("https://test.invalid", "https://test.invalid/device?g=ABCDEFGH"), "https://test.invalid/device?g=ABCDEFGH");
 });

@@ -1,7 +1,7 @@
 import { resultData, resultText, type Controller } from "./client.js";
 
-/** What an approval is known by: the eight-letter code of a permission request, or the confirmationId of a one-time Cloud confirmation. */
-export type ApprovalRef = { code: string } | { confirmationId: string };
+/** What an approval is known by: its eight-letter code (a permission request, a browser site, or a one-time Cloud confirmation). */
+export type ApprovalRef = { code: string };
 
 export interface ApprovalOutcome {
   /** `pending` means the time ran out; `error` means the status could not be read (see `message`). */

@@ -1,3 +1,4 @@
+import { approvalCodeOfLink, formatApprovalCode } from "./approval-code.js";
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -108,7 +109,7 @@ export async function setupMcp(
   const workspace = metadata?.grant.workspace ?? input.workspace ?? homedir();
   input.notify(metadata ? `Renewing device MCP authorization for ${workspace}\n` : `Enabling device MCP for ${workspace}\n`);
   const authorization = await setupMcpAuthorization(workspace, input.days, Boolean(metadata), ({ verificationUri, keyThumbprint, days }) => {
-    input.notify(`Device MCP execution authorization: ${days} days\nMCP key: ${keyThumbprint}\nApprove: ${verificationUri}\n`);
+    input.notify(`Device MCP execution authorization: ${days} days\nMCP key: ${keyThumbprint}\nApprove: ${verificationUri}\n${approvalCodeOfLink(verificationUri) ? `Code: ${approvalCodeOfLink(verificationUri)}\n` : ""}`);
   }, input.preset);
   const service = await installService(authorization.grant.workspace);
   input.notify(`Background service: ${service.active ? "running" : "installed"}\n`);
@@ -204,7 +205,7 @@ export async function mcpStartLogin(
     // to the device code, so approving the code on that page also enables device MCP and no second approval link is needed.
     let attached = false;
     const { user, userCode } = await deps.loginDevice(undefined, ({ verificationUri, userCode }) => {
-      input.notify(`Sign in to Frely (new accounts can register on the same page):\n${verificationUri}\nDevice code: ${userCode}\n`
+      input.notify(`Sign in to Frely (new accounts can register on the same page):\n${verificationUri}\nDevice code: ${formatApprovalCode(userCode)}\n`
         + (attached ? `Approving also enables device MCP for ${workspace} (${days} days, key ${mcp.keyThumbprint}).\n` : "") + "Waiting for approval...\n");
     }, deps.attachDeviceCodeMcp ? {
       beforeNotify: async ({ relayUrl, userCode }) => { attached = await deps.attachDeviceCodeMcp!(relayUrl, userCode, { keyThumbprint: mcp.keyThumbprint, workspace, days }); },

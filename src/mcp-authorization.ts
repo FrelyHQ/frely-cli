@@ -204,7 +204,7 @@ export async function setupMcpAuthorization(workspaceInput: string, daysInput?: 
     if (!enabled) throw new Error("MCP authorization could not be loaded.");
     return enabled;
   }
-  const verificationUri = mcpVerificationUri(auth.config.relayUrl, pending.id, requested.verificationUri);
+  const verificationUri = mcpVerificationUri(auth.config.relayUrl, requested.verificationUri);
   await notify?.({ verificationUri, keyThumbprint: identity.keyThumbprint, days });
   openVerificationUrl(verificationUri);
   while (Date.now() < Date.parse(pending.approvalDeadline)) {
@@ -270,18 +270,18 @@ function validateMcpResource(input: unknown): string {
   return url.toString();
 }
 /**
- * The approval link the relay chose (a short `?m=` link), kept only when it is this relay's `/device` page and names this
- * request; anything else, or an older relay that sends none, falls back to the long link built from the request id.
+ * The approval link the relay chose (`/device?g=<code>`), kept only when it is this relay's `/device` page with exactly an eight-letter code.
+ * Anything else means the relay is not one this CLI can work with.
  */
-export function mcpVerificationUri(relayUrl: string, requestId: string, offered: unknown): string {
-  const long = new URL(`/device?mcp_request=${requestId}`, relayUrl).toString();
-  if (typeof offered !== "string") return long;
-  try {
-    const url = new URL(offered), relay = new URL(relayUrl);
-    const keys = [...url.searchParams.keys()];
-    const named = keys.length === 1 && ((keys[0] === "m" && /^[A-HJ-NP-Z]{8}$/u.test(url.searchParams.get("m") ?? "")) || (keys[0] === "mcp_request" && url.searchParams.get("mcp_request") === requestId));
-    return url.origin === relay.origin && url.pathname === "/device" && !url.hash && !url.username && !url.password && named ? url.toString() : long;
-  } catch { return long; }
+export function mcpVerificationUri(relayUrl: string, offered: unknown): string {
+  if (typeof offered === "string") {
+    try {
+      const url = new URL(offered), relay = new URL(relayUrl);
+      const keys = [...url.searchParams.keys()];
+      if (url.origin === relay.origin && url.pathname === "/device" && !url.hash && !url.username && !url.password && keys.length === 1 && keys[0] === "g" && /^[A-HJ-NP-Z]{8}$/u.test(url.searchParams.get("g") ?? "")) return url.toString();
+    } catch { /* Falls through to the error. */ }
+  }
+  throw new Error("Frely did not return a usable approval link. Update frely-cli and try again.");
 }
 async function readRequest(response: Response): Promise<{ grant: McpAuthorizationView; mcpResource: string; verificationUri?: unknown }> {
   if (!response.ok) await throwMcpAuthorizationError(response);

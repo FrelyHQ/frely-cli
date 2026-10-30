@@ -109,18 +109,17 @@ test("waiting for a permission: approved is 0, denied 2, expired or out of time 
   assert.equal(await waitForPermission(statuses("denied"), { code: "ABCDEFGH" }, 60_000, io().io, fast), EXIT.tool);
   assert.equal(await waitForPermission(statuses("expired"), { code: "ABCDEFGH" }, 60_000, io().io, fast), EXIT.approval);
   const used = io();
-  assert.equal(await waitForPermission(statuses("used"), { confirmationId: "c_1" }, 60_000, used.io, fast), EXIT.tool);
+  assert.equal(await waitForPermission(statuses("used"), { code: "CDEFGHJK" }, 60_000, used.io, fast), EXIT.tool);
   assert.match(used.output.err, /already used/u);
   let now = 0;
   assert.equal(await waitForPermission(statuses("pending"), { code: "ABCDEFGH" }, 10, io().io, { intervalMs: 5, now: () => (now += 6), sleep: async () => undefined }), EXIT.approval);
 });
 
-test("permission wait asks the server to hold the call, and takes a confirmationId as well as a code", async () => {
+test("permission wait asks the server to hold the call and takes only an approval code", async () => {
   const byCode = await run(["permission", "wait", "abcd-efgh"], () => text("", { structuredContent: { status: "approved" } }));
   assert.deepEqual(byCode.calls[0]!.input, { code: "ABCDEFGH", wait: true });
-  const byId = await run(["permission", "wait", "cloud_confirm_0123"], () => text("", { structuredContent: { status: "approved" } }));
-  assert.deepEqual(byId.calls[0]!.input, { confirmationId: "cloud_confirm_0123", wait: true });
-  assert.equal(byId.code, EXIT.ok);
+  assert.equal(byCode.code, EXIT.ok);
+  assert.equal((await run(["permission", "wait", "cloud_confirm_0123"], () => text({}))).code, EXIT.cli);
 });
 
 test("permission wait --then runs the original command once approved", async () => {
