@@ -24,13 +24,13 @@ test("other failures, successes and non-https links give no hint", () => {
 });
 
 test("a confirmation_required failure shows the summary, the approval link and how to retry", () => {
-  const hint = permissionHint(failure({ code: "confirmation_required", confirmationId: "cloud_confirm_0123456789abcdef01234567", summary: 'Revoke API key "ci".',
+  const hint = permissionHint(failure({ code: "confirmation_required", approvalCode: "CDEFGHJK", summary: 'Revoke API key "ci".',
     url: "https://frely.cloud/user/account/connections?confirmation=cloud_confirm_0123456789abcdef01234567" }));
   assert.match(hint ?? "", /Revoke API key "ci"\./);
   assert.match(hint ?? "", /confirmation=cloud_confirm_0123456789abcdef01234567/);
-  assert.match(hint ?? "", /"confirmationId":"cloud_confirm_0123456789abcdef01234567"/);
-  assert.equal(permissionHint(failure({ code: "confirmation_required", confirmationId: "bad id\n", url: "https://frely.cloud/x" })), null);
-  assert.equal(permissionHint(failure({ code: "confirmation_required", confirmationId: "ok_1", url: "http://evil.example/x" })), null);
+  assert.match(hint ?? "", /"approvalCode":"CDEFGHJK"/);
+  assert.equal(permissionHint(failure({ code: "confirmation_required", approvalCode: "bad id\n", url: "https://frely.cloud/x" })), null);
+  assert.equal(permissionHint(failure({ code: "confirmation_required", approvalCode: "CDEFGHJK", url: "http://evil.example/x" })), null);
 });
 
 test("the tool list is grouped by name prefix with the server's group summary and a one-line entry per tool", () => {
@@ -84,17 +84,17 @@ test("an approved permission_required is waited for by its short code, then the 
   assert.equal(final, ok);
 });
 
-test("an approved confirmation is repeated once with the same confirmationId, within the 10 minute cap", async () => {
-  const first = refusal({ code: "confirmation_required", confirmationId: "c_1", url: "https://frely.cloud/c/c_1", expiresAt: 3_600_000 });
+test("an approved confirmation is repeated once with the same approvalCode, within the 10 minute cap", async () => {
+  const first = refusal({ code: "confirmation_required", approvalCode: "CDEFGHJK", url: "https://frely.cloud/c/c_1", expiresAt: 3_600_000 });
   const { refs, wait } = waiter("approved");
   const inputs: Array<Record<string, unknown>> = [];
   await rerunAfterApproval(first, async input => { inputs.push(input); return ok; }, { a: 1 }, wait, () => 0);
-  assert.deepEqual(refs, [{ ref: { confirmationId: "c_1" }, timeoutMs: 600_000 }]);
-  assert.deepEqual(inputs, [{ a: 1, confirmationId: "c_1" }]);
+  assert.deepEqual(refs, [{ ref: { code: "CDEFGHJK" }, timeoutMs: 600_000 }]);
+  assert.deepEqual(inputs, [{ a: 1, approvalCode: "CDEFGHJK" }]);
 });
 
 test("nothing runs when the approval is denied, expired, used, still pending or unreadable", async () => {
-  const first = refusal({ code: "confirmation_required", confirmationId: "c_1", url: "https://frely.cloud/c/c_1", expiresAt: 5000 });
+  const first = refusal({ code: "confirmation_required", approvalCode: "CDEFGHJK", url: "https://frely.cloud/c/c_1", expiresAt: 5000 });
   for (const status of ["denied", "expired", "revoked", "used", "pending", "error"] as const) {
     const final = await rerunAfterApproval(first, async () => { throw new Error("must not call"); }, {}, waiter(status).wait, () => 0);
     assert.equal(final, first, status);

@@ -15,14 +15,14 @@ export function permissionHint(result: object): string | null {
     const text = (part as { type?: unknown; text?: unknown }).type === "text" ? (part as { text?: unknown }).text : undefined;
     if (typeof text !== "string") continue;
     try {
-      const error = (JSON.parse(text) as { error?: { code?: unknown; need?: unknown; group?: unknown; url?: unknown; confirmationId?: unknown; shortCode?: unknown; summary?: unknown } }).error;
+      const error = (JSON.parse(text) as { error?: { code?: unknown; need?: unknown; group?: unknown; url?: unknown; approvalCode?: unknown; shortCode?: unknown; summary?: unknown } }).error;
       if (typeof error?.url !== "string" || (error.code !== "permission_required" && error.code !== "confirmation_required")) continue;
       const need = error.need === "write" ? "write access" : error.need === "sensitive" ? "sensitive read access" : "read access";
       const url = new URL(error.url);
       if (url.protocol !== "https:" && url.hostname !== "127.0.0.1" && url.hostname !== "localhost") continue;
       if (error.code === "confirmation_required") {
-        if (typeof error.confirmationId !== "string" || !/^[A-Za-z0-9_-]{1,80}$/.test(error.confirmationId)) continue;
-        return `${typeof error.summary === "string" ? error.summary + "\n" : ""}Approve this in your browser (passkey or authenticator code required): ${url.toString()}\nThen run the same call again with "confirmationId":"${error.confirmationId}" added to the input, or add --wait to let the CLI wait and run it once. To wait in the background: frely permission wait ${error.confirmationId}`;
+        if (typeof error.approvalCode !== "string" || !/^[A-HJ-NP-Z]{8}$/.test(error.approvalCode)) continue;
+        return `${typeof error.summary === "string" ? error.summary + "\n" : ""}Approve this in your browser: ${url.toString()}\nCode: ${error.approvalCode.slice(0, 4)}-${error.approvalCode.slice(4)}\nThen run the same call again with "approvalCode":"${error.approvalCode}" added to the input, or add --wait to let the CLI wait and run it once. To wait in the background: frely permission wait ${error.approvalCode}`;
       }
       const waiting = typeof error.shortCode === "string" && /^[A-Za-z]{8}$/.test(error.shortCode) ? `\nTo wait in the background: frely permission wait ${error.shortCode}, then run the call again (or use --wait).` : "";
       return `This device needs ${need}${typeof error.group === "string" ? " to " + error.group : ""}. Grant it in your browser (passkey or authenticator code required): ${url.toString()}${waiting}`;
@@ -35,7 +35,7 @@ type CallResult = { isError?: boolean; content?: unknown; [key: string]: unknown
 const WAIT_DEFAULT_MS = 5 * 60_000, WAIT_MAX_MS = 10 * 60_000;
 
 /** The error object of a failed tool result, or null when the result is not a JSON error. */
-function toolError(result: object): { code?: unknown; url?: unknown; confirmationId?: unknown; shortCode?: unknown; expiresAt?: unknown } | null {
+function toolError(result: object): { code?: unknown; url?: unknown; approvalCode?: unknown; shortCode?: unknown; expiresAt?: unknown } | null {
   const { isError, content } = result as { isError?: unknown; content?: unknown };
   if (isError !== true || !Array.isArray(content)) return null;
   for (const part of content) {
@@ -49,26 +49,27 @@ function toolError(result: object): { code?: unknown; url?: unknown; confirmatio
 /**
  * After a `permission_required` or `confirmation_required` refusal: waits for the owner's decision with the one shared wait, then runs the call
  * again exactly once, and only when the approval is `approved`. A denied, expired or already-used approval, or a time-out, gives back the refusal
- * without running anything. A confirmation is repeated with the same confirmationId; the server lets it through once. The repeat is never retried,
+ * without running anything. A confirmation is repeated with the same approvalCode; the server lets it through once. The repeat is never retried,
  * so a write whose outcome was lost is not replayed (it is reported as it came back).
  */
 export async function rerunAfterApproval(first: CallResult, call: (input: Record<string, unknown>) => Promise<CallResult>, input: Record<string, unknown>,
   wait: (ref: ApprovalRef, timeoutMs: number) => Promise<ApprovalOutcome>, now: () => number = Date.now): Promise<CallResult> {
   const start = toolError(first);
   if (!start || (start.code !== "permission_required" && start.code !== "confirmation_required")) return first;
-  const confirmationId = start.code === "confirmation_required" && typeof start.confirmationId === "string" ? start.confirmationId : undefined;
+  const approvalCode = start.code === "confirmation_required" && typeof start.approvalCode === "string" ? start.approvalCode : undefined;
   const shortCode = start.code === "permission_required" && typeof start.shortCode === "string" ? start.shortCode : undefined;
-  if (!confirmationId && !shortCode) return first;
+  const code = approvalCode ?? shortCode;
+  if (!code) return first;
   const expires = typeof start.expiresAt === "string" || typeof start.expiresAt === "number" ? new Date(start.expiresAt).getTime() : NaN;
   const budget = Math.min(Number.isFinite(expires) ? expires - now() : WAIT_DEFAULT_MS, WAIT_MAX_MS);
-  const outcome = await wait(confirmationId ? { confirmationId } : { code: shortCode! }, Math.max(budget, 0));
+  const outcome = await wait({ code }, Math.max(budget, 0));
   if (outcome.status !== "approved") {
     process.stderr.write(outcome.status === "used" ? "This approval was already used for a call; not repeating it. Check that call's result.\n"
       : outcome.status === "pending" ? "Still waiting for the owner. Run the same command with --wait to keep waiting.\n"
       : outcome.status === "error" ? outcome.message + "\n" : `The request was ${outcome.status}.\n`);
     return first;
   }
-  return call(confirmationId ? { ...input, confirmationId } : input);
+  return call(approvalCode ? { ...input, approvalCode } : input);
 }
 
 export const API_USAGE = `Frely API — call your Frely account's business operations (keys, credits, orders, Creator items…).

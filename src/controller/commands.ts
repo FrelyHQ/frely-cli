@@ -328,8 +328,8 @@ async function permissionCommand(args: string[], io: Output): Promise<number> {
   if (action === "wait") {
     const parsed = parseArgs(rest, { values: ["--then", "--timeout"] });
     const [reference] = parsed.positionals;
-    if (!reference || parsed.positionals.length !== 1 || !/^[A-Za-z0-9_-]{1,128}$/u.test(reference)) throw new ControllerError("Usage: frely permission wait <eight-letter short code (ABCD-EFGH) | confirmationId> [--then '<command>'] [--timeout <s>]", EXIT.cli);
-    const ref: ApprovalRef = /^[A-Za-z]{4}-?[A-Za-z]{4}$/u.test(reference) ? { code: reference.replace("-", "").toUpperCase() } : { confirmationId: reference };
+    if (!reference || parsed.positionals.length !== 1 || !/^[A-Za-z]{4}-?[A-Za-z]{4}$/u.test(reference)) throw new ControllerError("Usage: frely permission wait <approval code (ABCD-EFGH)> [--then '<command>'] [--timeout <s>]", EXIT.cli);
+    const ref: ApprovalRef = { code: reference.replace("-", "").toUpperCase() };
     const timeout = intOption(parsed, "--timeout", 1, 3600) ?? 600;
     const status = await withController(io, (controller) => waitForPermission(controller, ref, timeout * 1000, io));
     const then = parsed.values.get("--then");
@@ -350,7 +350,7 @@ export async function waitForPermission(controller: Pick<Controller, "call">, re
   const { data } = outcome;
   switch (outcome.status) {
     case "approved": {
-      const again = "confirmationId" in ref ? "Run the call again once, with the same confirmationId." : "Run the command again unchanged.";
+      const again = data?.kind === "cloud_confirmation" ? `Run the call again once, with approvalCode ${ref.code} added.` : "Run the command again unchanged.";
       io.out(`Approved${typeof data?.mode === "string" ? ` (${data.mode})` : ""}${typeof data?.expiresAt === "string" ? ` until ${data.expiresAt}` : ""}. ${again}\n`);
       return EXIT.ok;
     }

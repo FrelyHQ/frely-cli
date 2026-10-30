@@ -10,7 +10,7 @@ Each capability below has one implementation. Before adding code that does somet
 | Storing credentials | `src/credential-store.ts` and its `credential-*.ts` backends | Documented in `docs/credential-storage.md`. Callers choose a service name and never touch files or the keychain directly. |
 | Device registration and calls to the relay | `src/device/control.ts` (`ensureDevice`, `relayFetch`) | |
 | Opening a verification link in the browser | `src/auth.ts` (`openVerificationUrl`) | Honors `--no-browser` and `FRELY_NO_BROWSER`. |
-| Waiting for an owner approval and then continuing | `src/controller/client.ts` (approval outcome, exit code 3) and `frely permission wait` | The one wait is `waitForApproval` in `src/controller/approval-wait.ts` (`permission_status` with wait=true, by short code or confirmationId); `frely permission wait`, `frely api call --wait` and local Agent site approvals all use it. Do not add another loop. |
+| Waiting for an owner approval and then continuing | `src/controller/client.ts` (approval outcome, exit code 3) and `frely permission wait` | The one wait is `waitForApproval` in `src/controller/approval-wait.ts` (`permission_status` with wait=true, by short code or approvalCode); `frely permission wait`, `frely api call --wait` and local Agent site approvals all use it. Do not add another loop. |
 | Running commands in the sandbox | `src/runtime/sandbox.ts`, `src/runtime/process-manager.ts` | |
 | File transfer between devices | `src/runtime/transfer.ts`, `src/runtime/p2p.ts` | |
 | Public link to a local web page | `src/share/` | |

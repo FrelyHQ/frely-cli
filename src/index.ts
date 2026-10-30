@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { formatApprovalCode } from "./approval-code.js";
 import { applyDataDir, activeDataDir } from "./data-dir.js";
 import { update } from "./update/update.js";
 import { requireMcpAuthorization, inspectMcpMetadata, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, generateMcpKey, parseMcpDays, MCP_DEFAULT_DAYS } from "./mcp-authorization.js";
@@ -461,7 +462,7 @@ async function main(): Promise<void> {
     // Browser-based device login (traditional)
     const result = await loginDevice(relay, ({ verificationUri, userCode }) => {
       stdout.write(`Open this URL to authorize Frely CLI:\n${verificationUri}\n`);
-      stdout.write(`Device code: ${userCode}\n`);
+      stdout.write(`Device code: ${formatApprovalCode(userCode)}\n`);
       stdout.write(noBrowser
         ? "Automatic browser opening is disabled. Open this new URL only in the browser signed in to the account you want to use.\n"
         : "Opening your default browser. To use another account or browser, press Ctrl+C and run `frely login --no-browser` for a new URL.\n");
