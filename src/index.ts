@@ -505,12 +505,7 @@ async function main(): Promise<void> {
 
   if (command === "share") {
     if (args[1] === undefined || args[1] === "help" || args[1] === "--help") { stdout.write(`Usage: ${shareUsage()}\n`); return; }
-    const interactive = Boolean(stdin.isTTY && stdout.isTTY);
-    const prompt = interactive ? async (question: string) => {
-      const rl = createInterface({ input: stdin, output: stdout });
-      try { return await rl.question(question); } finally { rl.close(); }
-    } : undefined;
-    process.exitCode = await runShareCommand(args.slice(1), { write: (text) => { stdout.write(text); }, interactive, ...(prompt ? { prompt } : {}) });
+    process.exitCode = await runShareCommand(args.slice(1), { write: (text) => { stdout.write(text); }, interactive: Boolean(stdin.isTTY && stdout.isTTY) });
     return;
   }
 

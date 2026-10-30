@@ -10,7 +10,7 @@ const grant = (expiresAt = new Date(Date.now() + 3600_000).toISOString()): Share
   frpc: { serverAddr: "203.0.113.7", serverPort: 7000, user: "frps_" + "ab".repeat(12), token: "frs_" + "T".repeat(43), proxyName: "share", subdomain: "s" + "0a".repeat(7) },
 });
 
-function fixture(options: { heartbeat?: () => Promise<ShareHeartbeat>; expiresAt?: string; confirm?: ShareDeps["confirm"]; probe?: boolean } = {}) {
+function fixture(options: { heartbeat?: () => Promise<ShareHeartbeat>; expiresAt?: string; probe?: boolean } = {}) {
   const log: string[] = [];
   const calls = { create: 0, revoke: [] as string[], killed: 0, configs: [] as string[], configAtStart: "" };
   const controller = new AbortController();
@@ -31,7 +31,6 @@ function fixture(options: { heartbeat?: () => Promise<ShareHeartbeat>; expiresAt
       return { done, kill: () => { calls.killed += 1; finishFrpc({ code: 0, stderr: "" }); } } satisfies FrpcProcess;
     },
     probe: async () => options.probe ?? true,
-    confirm: options.confirm === undefined ? async () => true : options.confirm,
     write: (text) => { log.push(text); },
     signal: controller.signal,
     heartbeatMs: 20,
@@ -41,19 +40,14 @@ function fixture(options: { heartbeat?: () => Promise<ShareHeartbeat>; expiresAt
 }
 
 test("arguments: a port, hours up to 24, and the flags", () => {
-  assert.deepEqual(parseShareArguments(["3000"]), { port: 3000, rewriteHost: false, yes: false, json: false });
-  assert.deepEqual(parseShareArguments(["8080", "--ttl", "2", "--rewrite-host", "--yes", "--json"]), { port: 8080, ttlHours: 2, rewriteHost: true, yes: true, json: true });
-  for (const bad of [[], ["0"], ["70000"], ["abc"], ["3000", "4000"], ["3000", "--ttl", "25"], ["3000", "--unknown"]]) assert.throws(() => parseShareArguments(bad));
+  assert.deepEqual(parseShareArguments(["3000"]), { port: 3000, rewriteHost: false, json: false });
+  assert.deepEqual(parseShareArguments(["8080", "--ttl", "2", "--rewrite-host", "--json"]), { port: 8080, ttlHours: 2, rewriteHost: true, json: true });
+  for (const bad of [[], ["0"], ["70000"], ["abc"], ["3000", "4000"], ["3000", "--ttl", "25"], ["3000", "--unknown"], ["3000", "--yes"]]) assert.throws(() => parseShareArguments(bad));
 });
 
-test("it asks first; without a terminal it needs --yes; nothing listening is an error before anything is created", async () => {
-  const declined = fixture({ confirm: async () => false });
-  assert.equal(await runShare({ port: 3000 }, declined.deps), 1);
-  assert.equal(declined.calls.create, 0);
-  const noTerminal = fixture({ confirm: null });
-  await assert.rejects(runShare({ port: 3000 }, noTerminal.deps), /pass --yes/u);
+test("nothing listening is an error before anything is created", async () => {
   const closed = fixture({ probe: false });
-  await assert.rejects(runShare({ port: 3000, yes: true }, closed.deps), /Nothing is listening on 127\.0\.0\.1:3000/u);
+  await assert.rejects(runShare({ port: 3000 }, closed.deps), /Nothing is listening on 127\.0\.0\.1:3000/u);
   assert.equal(closed.calls.create, 0);
 });
 
@@ -95,7 +89,7 @@ test("frpc exiting, the link expiring and Frely being unreachable all end the sh
 
 test("--json prints one line with the link and no token", async () => {
   const f = fixture();
-  const run = runShare({ port: 3000, yes: true, json: true }, f.deps);
+  const run = runShare({ port: 3000, json: true }, f.deps);
   await new Promise((resolve) => setTimeout(resolve, 60));
   f.controller.abort();
   await run;
