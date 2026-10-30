@@ -15,10 +15,11 @@ install_dir="${FRELY_INSTALL_DIR:-$HOME/.local/bin}"
 # A failed stop (no service) is ignored; only a successful stop is remembered for resuming.
 old="$install_dir/frely"
 stopped=0
-if [ -x "$old" ] && "$old" mcp stop </dev/null >/dev/null 2>&1; then stopped=1; fi
+# The installed binary may predate the rename of `frely mcp` to `frely link`, so both are tried.
+if [ -x "$old" ] && { "$old" link stop </dev/null >/dev/null 2>&1 || "$old" mcp stop </dev/null >/dev/null 2>&1; }; then stopped=1; fi
 
 # Put the service we stopped back, so a failed update does not leave it stopped.
-resume() { if [ "$stopped" = 1 ]; then "$old" mcp start --resume </dev/null >/dev/null 2>&1 || :; stopped=0; fi; }
+resume() { if [ "$stopped" = 1 ]; then "$old" link on --resume </dev/null >/dev/null 2>&1 || "$old" mcp start --resume </dev/null >/dev/null 2>&1 || :; stopped=0; fi; }
 fail() { resume; printf '%s\n' "frely start failed: $*" >&2; exit 1; }
 
 # install.sh next to this file (a checkout, tests); otherwise the copy served beside start.sh.
@@ -40,5 +41,5 @@ frely="$install_dir/frely"
 
 if [ -n "$install_token" ]; then FRELY_INSTALL_TOKEN="$install_token"; export FRELY_INSTALL_TOKEN; fi
 # Default workspace: the home directory (credential and start-up files stay protected); FRELY_WORKSPACE picks another.
-if [ -n "${FRELY_WORKSPACE:-}" ]; then exec "$frely" mcp start --workspace "$FRELY_WORKSPACE" </dev/null
-else exec "$frely" mcp start </dev/null; fi
+if [ -n "${FRELY_WORKSPACE:-}" ]; then exec "$frely" link on --workspace "$FRELY_WORKSPACE" </dev/null
+else exec "$frely" link on </dev/null; fi
