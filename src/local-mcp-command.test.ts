@@ -3,22 +3,22 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { normalizeMcpArgs } from "./mcp-command.js";
+import { normalizeLinkArgs } from "./mcp-command.js";
 import { parseAdd, runLocalMcpCommand } from "./local-mcp-command.js";
 
 async function run(...args: string[]): Promise<string> {
   let out = "";
-  await runLocalMcpCommand({ args: normalizeMcpArgs(["mcp", "local", ...args]), write: (text) => { out += text; } });
+  await runLocalMcpCommand({ args: normalizeLinkArgs(["link", "local", ...args]), write: (text) => { out += text; } });
   return out;
 }
 
 test("local MCP arguments normalize and validate", () => {
-  assert.deepEqual(normalizeMcpArgs(["mcp", "local"]), ["mcp", "local"]);
-  assert.deepEqual(normalizeMcpArgs(["mcp", "local", "list", "--json"]), ["mcp", "local", "list", "--json"]);
-  assert.deepEqual(normalizeMcpArgs(["mcp", "local", "add", "n", "--", "node", "--flag", "x"]), ["mcp", "local", "add", "n", "--", "node", "--flag", "x"]);
-  assert.throws(() => normalizeMcpArgs(["mcp", "local", "enable", "n"]), /Unknown local MCP command/);
-  assert.throws(() => normalizeMcpArgs(["mcp", "local", "remove"]), /requires a name/);
-  assert.throws(() => normalizeMcpArgs(["mcp", "local", "list", "extra"]), /Unsupported local list option/);
+  assert.deepEqual(normalizeLinkArgs(["link", "local"]), ["link", "local"]);
+  assert.deepEqual(normalizeLinkArgs(["link", "local", "list", "--json"]), ["link", "local", "list", "--json"]);
+  assert.deepEqual(normalizeLinkArgs(["link", "local", "add", "n", "--", "node", "--flag", "x"]), ["link", "local", "add", "n", "--", "node", "--flag", "x"]);
+  assert.throws(() => normalizeLinkArgs(["link", "local", "enable", "n"]), /Unknown local MCP command/);
+  assert.throws(() => normalizeLinkArgs(["link", "local", "remove"]), /requires a name/);
+  assert.throws(() => normalizeLinkArgs(["link", "local", "list", "extra"]), /Unsupported local list option/);
 });
 
 test("add parses loopback URLs with headers and stdio commands with environment", async () => {

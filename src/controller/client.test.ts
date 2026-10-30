@@ -55,7 +55,7 @@ test("tool results map to the exit codes", () => {
   assert.match(pending.note!, /frely permission wait ABCDEF/u);
   assert.match(pending.note!, /g=ABCDEF/u);
   assert.equal(outcomeOf({ ...text({ error: { code: "permission_required", url: "https://frely.test/p" } }), isError: true }).exitCode, EXIT.approval);
-  assert.equal(outcomeOf({ ...text("Frely device is offline. On that computer, run `frely mcp start`, then try again."), isError: true }).exitCode, EXIT.offline);
+  assert.equal(outcomeOf({ ...text("Frely device is offline. On that computer, run `frely link on`, then try again."), isError: true }).exitCode, EXIT.offline);
   assert.equal(outcomeOf({ ...text({ error: { code: "credit_limit" } }), isError: true }).exitCode, EXIT.limit);
   assert.equal(outcomeOf({ ...text("No device matches"), isError: true }).exitCode, EXIT.tool);
 });

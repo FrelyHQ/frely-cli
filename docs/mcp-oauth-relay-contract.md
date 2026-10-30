@@ -264,7 +264,7 @@ FRELY_MCP_AUTHORIZATION_EXPIRED
 用户恢复路径：
 
 ```sh
-frely mcp url
+frely link on
 ```
 
 完成批准后，客户端保留原 MCP URL 和 OAuth connection。
@@ -273,7 +273,7 @@ OAuth token 无效、过期、撤销、scope 错误或 resource 错误使用 HTT
 
 ## 10. Revocation semantics
 
-`frely mcp remove`：
+`frely link off`：
 
 - 撤销 MCP execution authorization，并卸载后台服务（本机有本地 Provider 时改为仅 Provider 模式继续运行）；
 - 不撤销 Provider device；

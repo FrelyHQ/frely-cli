@@ -5,14 +5,14 @@ Normal updates on supported macOS/Linux installations preserve device identity, 
 ## Manual pause and resume
 
 ```sh
-frely mcp stop
-frely mcp start
+frely link stop
+frely link on
 frely doctor
 ```
 
 Use stop to pause the device's shared remote service and start to resume it. This service also carries any configured local Provider traffic. These commands do not revoke server authorization. Stop is an explicit service operation and can interrupt work; finish tasks before using it. A stopped service is not revived by installation refresh.
 
-`frely mcp remove` revokes device MCP execution authorization and uninstalls the background service; when local Providers exist, the service keeps running in provider-only mode. Update commands printed by 0.7.x still run `frely mcp service stop|start`, which newer versions accept as a hidden alias.
+`frely link off` revokes device MCP execution authorization and uninstalls the background service; when local Providers exist, the service keeps running in provider-only mode. Update commands printed by 0.7.x still run `frely mcp service stop|start`, which newer versions accept as a hidden alias.
 
 ## One-time transition from older runtimes
 

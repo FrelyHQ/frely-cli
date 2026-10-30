@@ -103,7 +103,7 @@ test("frely mcp sets up an unconfigured device once, then returns the same autho
   assert.equal(await readFile(mcpMetadataPath(), "utf8"), metadata);
 });
 
-test("frely mcp start clears an authorization saved for another account and sets up again", async (t) => {
+test("frely link on clears an authorization saved for another account and sets up again", async (t) => {
   const f = await fixture(t);
   const project = join(f.directory, "project");
   await mkdir(project);
@@ -118,7 +118,7 @@ test("frely mcp start clears an authorization saved for another account and sets
   assert.match(f.state.messages.join(""), /belongs to a different account\. Cleared it/);
 });
 
-test("frely mcp remove clears an authorization saved for another account without calling the relay", async (t) => {
+test("frely link off clears an authorization saved for another account without calling the relay", async (t) => {
   const f = await fixture(t);
   const project = join(f.directory, "project");
   await mkdir(project);
@@ -131,7 +131,7 @@ test("frely mcp remove clears an authorization saved for another account without
   assert.match(f.state.messages.join(""), /belongs to a different account\. Cleared it/);
 });
 
-test("frely mcp start configures once, then only starts the service", async (t) => {
+test("frely link on configures once, then only starts the service", async (t) => {
   const f = await fixture(t);
   const project = join(f.directory, "project");
   await mkdir(project);
@@ -168,7 +168,7 @@ test("frely mcp refuses to switch the primary workspace and points to workspace 
   const original = await setupMcpAuthorization(f.directory, 30);
   const other = join(f.directory, "other");
   await mkdir(other);
-  await assert.rejects(ensureMcpAuthorization({ workspace: other, notify: f.notify }, f.install), /frely mcp workspace add/);
+  await assert.rejects(ensureMcpAuthorization({ workspace: other, notify: f.notify }, f.install), /frely link workspace add/);
   assert.equal((await inspectMcpMetadata())?.grant.id, original.grant.id);
   assert.equal(f.state.requests, 1);
   assert.deepEqual(f.state.installations, []);
@@ -285,11 +285,11 @@ test("frely mcp propagates service installation failure instead of returning a s
   assert.doesNotMatch(f.state.messages.join(""), /Background service/);
 });
 
-test("frely mcp start without a login signs in first and keeps prompts off stdout, including JSON mode", async (t) => {
+test("frely link on without a login signs in first and keeps prompts off stdout, including JSON mode", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "frely-mcp-url-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const entry = fileURLToPath(new URL("./index.js", import.meta.url));
-  for (const args of [["mcp", "start"], ["mcp", "start", "--json"]]) {
+  for (const args of [["link", "on"], ["link", "on", "--json"]]) {
     await assert.rejects(promisify(execFile)(process.execPath, [entry, ...args], {
       cwd: directory,
       // An unreachable loopback relay: the sign-in request fails at once instead of waiting for a browser approval.

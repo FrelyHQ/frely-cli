@@ -20,10 +20,10 @@ Frely CLI 为 Claude Code、Codex、pi 等有 Shell 的 Agent 安装 `frely` Ski
 让有 Shell 的 Agent（Claude Code、Codex、pi）安装 CLI、登录并安装 Skill：
 
 ```text
-在这台电脑上安装 Frely CLI 和 frely Skill。macOS 或 Linux 运行 curl -fsSL https://frely.cloud/install.sh | sh；Windows PowerShell 运行 curl.exe -fsSLo "$env:TEMP\frely-install.ps1" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-install.ps1"。向我询问我的邮箱，运行 frely login --email <my email>，再向我要邮件里的 6 位验证码，然后运行 frely login --code <code>。接着运行 frely skill install --host <your host: claude-code, codex, pi or generic>，并阅读它安装的 Skill。在我要求之前，不要运行 frely mcp start。
+在这台电脑上安装 Frely CLI 和 frely Skill。macOS 或 Linux 运行 curl -fsSL https://frely.cloud/install.sh | sh；Windows PowerShell 运行 curl.exe -fsSLo "$env:TEMP\frely-install.ps1" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-install.ps1"。向我询问我的邮箱，运行 frely login --email <my email>，再向我要邮件里的 6 位验证码，然后运行 frely login --code <code>。接着运行 frely skill install --host <your host: claude-code, codex, pi or generic>，并阅读它安装的 Skill。在我要求之前，不要运行 frely link on。
 ```
 
-安装的 `frely` Skill 会教 Agent 使用你的账号，只在需要时才建议 FrelyMCP。这种方式不会把这台电脑开放给远程客户端，`frely mcp start` 才会。[详情](https://cli.frely.cloud/zh/#skill)
+安装的 `frely` Skill 会教 Agent 使用你的账号，只在需要时才建议 FrelyMCP。这种方式不会把这台电脑开放给远程客户端，`frely link on` 才会。[详情](https://cli.frely.cloud/zh/#skill)
 
 ### 自己安装
 
@@ -59,11 +59,11 @@ frely skill install --host <claude-code|codex|pi|generic>
 | 命令 | 作用 |
 | --- | --- |
 | `frely skill install --host <host>` | 为 Agent 宿主（`claude-code`、`codex`、`pi` 或 `generic`）安装 `frely` Skill。 |
-| `frely mcp start` | 需要时登录，开启设备 MCP，启动服务并输出 MCP URL。可重复运行。 |
-| `frely mcp status` | 显示 MCP URL、工作区、授权到期时间和服务状态。 |
-| `frely mcp workspace add <path>` | 共享另一个文件夹。`frely mcp workspace list` 列出全部。 |
-| `frely mcp stop` / `frely mcp start` | 暂停或恢复后台服务。 |
-| `frely mcp remove` | 撤销所有客户端的访问并卸载服务。 |
+| `frely link on` | 需要时登录，开启设备 MCP，启动服务并输出 MCP URL。可重复运行。 |
+| `frely link status` | 显示 MCP URL、工作区、授权到期时间和服务状态。 |
+| `frely link workspace add <path>` | 共享另一个文件夹。`frely link workspace list` 列出全部。 |
+| `frely link stop` / `frely link on` | 暂停或恢复后台服务。 |
+| `frely link off` | 撤销所有客户端的访问并卸载服务。 |
 | `frely doctor` | 检查登录、安装、服务和连接。`-v` 显示详情。 |
 | `frely update` | 原地升级到最新版本。 |
 | `frely login` / `frely logout` | 登录或退出 Frely 账号。 |
@@ -77,7 +77,7 @@ frely skill install --host <claude-code|codex|pi|generic>
 
 通过 FrelyMCP，让网页版 ChatGPT、Claude 等没有 Shell 的客户端使用 Frely，或操作另一台电脑。
 
-FrelyMCP 是整个账号共用的一个 MCP 地址：`https://mcp.frely.cloud/mcp`。每台运行过 `frely mcp start` 的电脑都在它后面。
+FrelyMCP 是整个账号共用的一个 MCP 地址：`https://mcp.frely.cloud/mcp`。每台运行过 `frely link on` 的电脑都在它后面。
 
 ### 连接有浏览器的电脑
 
@@ -103,7 +103,7 @@ curl -fsSL https://frely.cloud/start.sh | FRELY_INSTALL_TOKEN=fit_... sh
 
 它会安装 `frely`、登录你的账号、开启设备 MCP 并启动后台服务。令牌只能用一次，15 分钟内有效。Linux 上请运行 `sudo loginctl enable-linger $USER`，退出 SSH 后服务才能保持在线。[详情](https://cli.frely.cloud/docs/help/install-on-a-server/)
 
-1. 在要被控制的电脑上运行 `frely mcp start`（上面的安装脚本已经包含这一步）。
+1. 在要被控制的电脑上运行 `frely link on`（上面的安装脚本已经包含这一步）。
 2. 把 URL 作为使用 OAuth 的远程 MCP 服务加到客户端：
    - ChatGPT 或 Claude：用这个 URL 添加自定义连接器。
    - 另一台电脑上的 Claude Code：`claude mcp add --transport http frely "https://mcp.frely.cloud/mcp"`，然后打开 `/mcp` 完成授权。
@@ -112,8 +112,8 @@ curl -fsSL https://frely.cloud/start.sh | FRELY_INSTALL_TOKEN=fit_... sh
 验证连接：让客户端列出工作区的顶层文件名。
 
 - **AI 能做什么**：先 `list_devices`，再在选定的电脑上用 `read`、`edit_file`、`process`、`web_fetch`，账号操作用 `frely_list` 和 `frely_call`。[详情](https://cli.frely.cloud/docs/help/what-can-the-ai-do/)
-- **本机 MCP 服务**：只监听回环地址的服务会被自动发现（`frely mcp local list`），每个都要在 Frely 上逐个开启才对远程可见。[详情](https://cli.frely.cloud/docs/help/local-mcp-servers/)
-- **授权**：默认 90 天，`frely mcp start --days 1..365` 可提前续期，URL 永远不变。[详情](https://cli.frely.cloud/docs/help/authorization-expiry/)
+- **本机 MCP 服务**：只监听回环地址的服务会被自动发现（`frely link local list`），每个都要在 Frely 上逐个开启才对远程可见。[详情](https://cli.frely.cloud/docs/help/local-mcp-servers/)
+- **授权**：默认 90 天，`frely link on --days 1..365` 可提前续期，URL 永远不变。[详情](https://cli.frely.cloud/docs/help/authorization-expiry/)
 
 ## 更多功能
 

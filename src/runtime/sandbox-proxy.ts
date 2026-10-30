@@ -114,7 +114,7 @@ export async function runSandboxProxyCommand(args: readonly string[], write: (te
   const rest = noProxyIndex === -1 ? [...args] : args.filter((_, index) => index !== noProxyIndex && index !== noProxyIndex + 1);
   if (rest.includes("--clear")) {
     await saveProxy(undefined);
-    write("Saved sandbox proxy removed. Restart the MCP service (frely mcp stop, then frely mcp start) for it to take effect.\n");
+    write("Saved sandbox proxy removed. Restart the MCP service (frely link stop, then frely link on) for it to take effect.\n");
     return;
   }
   if (rest.length === 0) {
@@ -126,7 +126,7 @@ export async function runSandboxProxyCommand(args: readonly string[], write: (te
   }
   if (rest.length !== 1) throw new Error("Usage: frely sandbox proxy [<http://host:port> [--no-proxy <list>] | --clear]");
   await saveProxy({ url: rest[0]!, ...(noProxy ? { noProxy } : {}) });
-  write(`Sandbox proxy saved: ${redact(rest[0])}. Restart the MCP service (frely mcp stop, then frely mcp start) for it to take effect.\n`);
+  write(`Sandbox proxy saved: ${redact(rest[0])}. Restart the MCP service (frely link stop, then frely link on) for it to take effect.\n`);
 }
 
 /** The proxy URL without its password, for display. */

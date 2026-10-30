@@ -7,42 +7,47 @@ import { discardForeignMcpAuthorization, generateMcpKey, inspectMcpMetadata, ins
 import { installMcpService, serviceStatus, startMcpService } from "./service.js";
 
 /**
- * Keep the public device-MCP entry client-neutral. `frely mcp start` is the
- * idempotent enable/start/print-URL action (`mcp url` is its deprecated alias); a bare `frely mcp` has no action of its
- * own and prints the usage, and every other action must be named.
+ * The controlled-side group is `frely link`: whether this computer accepts remote control, whatever the channel (an MCP client, `frely run`
+ * from another computer, a hosted Agent). `link on` is the idempotent enable/start/print-URL action; a bare `frely link` prints the usage.
+ * `mcp serve` and `mcp stdio` stay: installed system services and local MCP clients launch them by that name. The Windows update bridge
+ * (`mcp service start|stop`, `mcp start --resume`, `mcp stop`) only maps onto the new names so a service stopped by an older CLI's
+ * update command still comes back; every other `frely mcp …` command is gone.
  */
-export function normalizeMcpArgs(input: readonly string[]): string[] {
+export function normalizeLinkArgs(input: readonly string[]): string[] {
   const args = [...input];
-  if (args[0] !== "mcp") return args;
-  if (args.slice(1).some((arg) => arg === "--help" || arg === "-h") || args[1] === "help") return ["mcp", "help"];
-  // Update bridge: Windows update commands printed by 0.7.x run `mcp service stop|start`.
-  if (args[1] === "service" && args.length === 3 && (args[2] === "start" || args[2] === "stop")) return args[2] === "start" ? ["mcp", "start", "--resume"] : ["mcp", "stop"];
-  if (!args[1]) return ["mcp", "help"];
-  // Deprecated alias: `mcp url` is `mcp start`.
-  if (args[1] === "url") args[1] = "start";
-  if (!["workspace", "local", "auto-update", "stop", "start", "status", "remove", "serve", "stdio"].includes(args[1])) throw new Error("Unknown device MCP command. Run frely mcp --help.");
+  if (args[0] === "mcp") {
+    if (args[1] === "service" && args.length === 3 && (args[2] === "start" || args[2] === "stop")) return args[2] === "start" ? ["link", "on", "--resume"] : ["link", "stop"];
+    if (args.length === 3 && args[1] === "start" && args[2] === "--resume") return ["link", "on", "--resume"];
+    if (args.length === 2 && args[1] === "stop") return ["link", "stop"];
+    if (args[1] !== "serve" && args[1] !== "stdio") throw new Error("Unknown command. Controlled-side commands are under frely link; run frely link --help.");
+    return checkOptions(args, args[1]);
+  }
+  if (args[0] !== "link") return args;
+  if (args.slice(1).some((arg) => arg === "--help" || arg === "-h") || args[1] === "help") return ["link", "help"];
+  if (!args[1]) return ["link", "help"];
+  if (!["workspace", "local", "auto-update", "stop", "on", "off", "status"].includes(args[1])) throw new Error("Unknown link command. Run frely link --help.");
   const action = args[1]!;
-  if (action === "stop" || action === "remove") {
-    if (args.length > 2) throw new Error("Unsupported MCP option. Run frely mcp --help.");
+  if (action === "stop" || action === "off") {
+    if (args.length > 2) throw new Error("Unsupported link option. Run frely link --help.");
     return args;
   }
   if (action === "auto-update") {
-    if (args.length > 3 || (args[2] !== undefined && args[2] !== "on" && args[2] !== "off")) throw new Error("Usage: frely mcp auto-update [on|off]");
+    if (args.length > 3 || (args[2] !== undefined && args[2] !== "on" && args[2] !== "off")) throw new Error("Usage: frely link auto-update [on|off]");
     return args;
   }
   if (action === "workspace") {
-    // A bare `mcp workspace` has no action of its own; the CLI prints its subcommands.
+    // A bare `link workspace` has no action of its own; the CLI prints its subcommands.
     const subaction = args[2];
     if (subaction === undefined) return args;
     if (subaction === "list") {
-      if (args.length > 4 || (args[3] !== undefined && args[3] !== "--json")) throw new Error("Unsupported workspace list option. Run frely mcp workspace.");
+      if (args.length > 4 || (args[3] !== undefined && args[3] !== "--json")) throw new Error("Unsupported workspace list option. Run frely link workspace.");
       return args;
     }
-    if (subaction !== "add" && subaction !== "remove") throw new Error("Unknown workspace command. Run frely mcp workspace.");
+    if (subaction !== "add" && subaction !== "remove") throw new Error("Unknown workspace command. Run frely link workspace.");
     // A bare `workspace add` means the current directory.
     if (subaction === "add" && args.length === 3) return [...args, "."];
-    if (!args[3]) throw new Error(`frely mcp workspace ${subaction} requires a path argument.`);
-    if (args.length > 4) throw new Error(`Unsupported workspace ${subaction} option. Run frely mcp workspace.`);
+    if (!args[3]) throw new Error(`frely link workspace ${subaction} requires a path argument.`);
+    if (args.length > 4) throw new Error(`Unsupported workspace ${subaction} option. Run frely link workspace.`);
     return args;
   }
   if (action === "local") {
@@ -50,33 +55,38 @@ export function normalizeMcpArgs(input: readonly string[]): string[] {
     const subaction = args[2];
     if (subaction === undefined) return args;
     if (subaction === "list") {
-      if (args.length > 4 || (args[3] !== undefined && args[3] !== "--json")) throw new Error("Unsupported local list option. Run frely mcp local.");
+      if (args.length > 4 || (args[3] !== undefined && args[3] !== "--json")) throw new Error("Unsupported local list option. Run frely link local.");
       return args;
     }
-    if (subaction !== "add" && subaction !== "remove") throw new Error("Unknown local MCP command. Run frely mcp local.");
-    if (!args[3]) throw new Error(`frely mcp local ${subaction} requires a name argument.`);
+    if (subaction !== "add" && subaction !== "remove") throw new Error("Unknown local MCP command. Run frely link local.");
+    if (!args[3]) throw new Error(`frely link local ${subaction} requires a name argument.`);
     return args;
   }
-  const valueOptions: Record<string, readonly string[]> = {
-    start: ["--workspace", "--days"],
-    serve: ["--workspace", "--service-config-home", "--service-credential-store"],
-    stdio: ["--workspace"],
-  };
-  const flags: Record<string, readonly string[]> = {
-    start: ["--json", "--resume", "--no-browser"],
-    status: ["--json"],
-    serve: ["--provider-only"],
-  };
+  return checkOptions(args, action);
+}
+
+const valueOptions: Record<string, readonly string[]> = {
+  on: ["--workspace", "--days"],
+  serve: ["--workspace", "--service-config-home", "--service-credential-store"],
+  stdio: ["--workspace"],
+};
+const flagOptions: Record<string, readonly string[]> = {
+  on: ["--json", "--resume", "--no-browser"],
+  status: ["--json"],
+  serve: ["--provider-only"],
+};
+
+function checkOptions(args: string[], action: string): string[] {
   const seen = new Set<string>();
   for (let i = 2; i < args.length; i++) {
     const arg = args[i]!;
-    if (seen.has(arg)) throw new Error("Duplicate MCP option. Run frely mcp --help.");
+    if (seen.has(arg)) throw new Error("Duplicate option. Run frely link --help.");
     seen.add(arg);
     if ((valueOptions[action] ?? []).includes(arg)) {
       const value = args[++i];
-      if (!value || value.startsWith("-")) throw new Error("An MCP option is missing its value. Run frely mcp --help.");
-    } else if (!(flags[action] ?? []).includes(arg)) {
-      throw new Error("Unsupported MCP option. Run frely mcp --help.");
+      if (!value || value.startsWith("-")) throw new Error("An option is missing its value. Run frely link --help.");
+    } else if (!(flagOptions[action] ?? []).includes(arg)) {
+      throw new Error("Unsupported option. Run frely link --help.");
     }
   }
   return args;
@@ -93,7 +103,7 @@ async function checkWorkspace(metadata: McpMetadata | null, workspace: string | 
   if (!metadata || workspace === undefined) return;
   const requested = await realpath(resolve(workspace));
   if (requested !== metadata.grant.workspace) {
-    throw new Error(`Device MCP is already enabled for ${metadata.grant.workspace}. Add another directory with frely mcp workspace add <path>, or run frely mcp remove first to change the primary workspace.`);
+    throw new Error(`Device MCP is already enabled for ${metadata.grant.workspace}. Add another directory with frely link workspace add <path>, or run frely link off first to change the primary workspace.`);
   }
 }
 
@@ -137,7 +147,7 @@ export interface McpStartDeps {
 }
 
 /**
- * `frely mcp start`: configure when unconfigured or expired (or when `--days` is given);
+ * `frely link on`: configure when unconfigured or expired (or when `--days` is given);
  * otherwise make sure the already-authorized service is running.
  */
 export async function startMcp(
@@ -181,7 +191,7 @@ export interface McpStartLoginDeps {
 type McpStartLoginInput = { installToken?: string; workspace?: string; days?: string; notify: (message: string) => void };
 
 /**
- * Sign in for `frely mcp start` when needed. With an install token the server approves this CLI's own
+ * Sign in for `frely link on` when needed. With an install token the server approves this CLI's own
  * device code and preapproves device MCP: no browser and no prompt. The token is the user's explicit choice
  * of account, so it replaces any existing login; without a token a valid login is kept.
  * Returns the MCP setup overrides that go with a preapproval.

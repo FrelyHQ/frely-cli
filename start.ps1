@@ -1,8 +1,8 @@
-# Install Frely, then `frely mcp start`: sign in through the browser when needed (the page also registers
+# Install Frely, then `frely link on`: sign in through the browser when needed (the page also registers
 # new accounts), approve device MCP and print the MCP URL. install.ps1 stays the install-only script.
 # Safe to re-run: it updates to the latest version and restarts the MCP background service on the new binary.
 $ErrorActionPreference = 'Stop'
-# A pre-login install command sets FRELY_INSTALL_TOKEN (one-time). Only `frely mcp start` gets it;
+# A pre-login install command sets FRELY_INSTALL_TOKEN (one-time). Only `frely link on` gets it;
 # it is removed for the old binary and the installer.
 $installToken = $env:FRELY_INSTALL_TOKEN
 Remove-Item Env:FRELY_INSTALL_TOKEN -ErrorAction SilentlyContinue
@@ -36,6 +36,6 @@ $frely = Join-Path $directory 'frely.exe'
 if (!(Test-Path -LiteralPath $frely)) { throw "Frely was not installed at $frely." }
 if ($installToken) { $env:FRELY_INSTALL_TOKEN = $installToken; Remove-Variable installToken }
 # Default workspace: the home directory (credential and start-up files stay protected); FRELY_WORKSPACE picks another.
-if ($env:FRELY_WORKSPACE) { & $frely mcp start --workspace $env:FRELY_WORKSPACE } else { & $frely mcp start }
+if ($env:FRELY_WORKSPACE) { & $frely link on --workspace $env:FRELY_WORKSPACE } else { & $frely link on }
 # Run through `irm https://frely.cloud/w | iex` there is no script file; `exit` would close the user's PowerShell window.
 if ($PSCommandPath) { exit $LASTEXITCODE }

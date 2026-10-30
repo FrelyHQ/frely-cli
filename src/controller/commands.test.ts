@@ -47,9 +47,9 @@ test("a device that needs approval ends with 3 and the wait command", async () =
 });
 
 test("an offline device ends with 5", async () => {
-  const result = await run(["read", "laptop:notes.txt"], () => text("Frely device is offline. On that computer, run `frely mcp start`, then try again.", { isError: true }));
+  const result = await run(["read", "laptop:notes.txt"], () => text("Frely device is offline. On that computer, run `frely link on`, then try again.", { isError: true }));
   assert.equal(result.code, EXIT.offline);
-  assert.match(result.out, /frely mcp start/u);
+  assert.match(result.out, /frely link on/u);
 });
 
 test("read, ls and grep address the device by device:path and refuse local paths", async () => {

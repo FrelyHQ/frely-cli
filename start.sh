@@ -1,10 +1,10 @@
 #!/bin/sh
-# Install Frely, then `frely mcp start`: sign in through the browser when needed (the page also registers
+# Install Frely, then `frely link on`: sign in through the browser when needed (the page also registers
 # new accounts), approve device MCP and print the MCP URL. install.sh stays the install-only script.
 # Safe to re-run: it updates to the latest version and restarts the MCP background service on the new binary.
 set -eu
 
-# A pre-login install command passes FRELY_INSTALL_TOKEN (one-time). Only `frely mcp start` gets it;
+# A pre-login install command passes FRELY_INSTALL_TOKEN (one-time). Only `frely link on` gets it;
 # it is unset for the old binary and the installer.
 install_token="${FRELY_INSTALL_TOKEN:-}"
 unset FRELY_INSTALL_TOKEN

@@ -119,7 +119,7 @@ export function outcomeOf(result: ToolResult): Outcome {
     return { exitCode: EXIT.approval, note: `Approval needed. Approve here: ${error.url}` };
   }
   const text = resultText(result);
-  if (/frely mcp start|device is offline|Offline:/u.test(text)) return { exitCode: EXIT.offline };
+  if (/frely link on|device is offline|Offline:/u.test(text)) return { exitCode: EXIT.offline };
   if (error && typeof error.code === "string" && /limit|quota|insufficient/u.test(error.code)) return { exitCode: EXIT.limit };
   return { exitCode: EXIT.tool };
 }

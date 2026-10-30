@@ -34,7 +34,7 @@ Check whether you already have it: your tool list has Frely tools such as \`list
 
 If the user's request needs FrelyMCP and you do not have it, say so once in this conversation, in your own words: this needs Frely's remote connection, everything else already works, and setting it up takes one browser approval. Do nothing until the user agrees, and do not raise it again if they decline or when the request does not need it. If they agree:
 
-1. Run \`frely mcp start\`. When it prints a sign-in or approval link, send the link and keep the command running while the user approves. It prints the MCP URL.
+1. Run \`frely link on\`. When it prints a sign-in or approval link, send the link and keep the command running while the user approves. It prints the MCP URL.
 2. Add it to your client: \`claude mcp add --transport http frely "https://mcp.frely.cloud/mcp"\` or \`codex mcp add frely --url "https://mcp.frely.cloud/mcp"\`. For any other client, give the user the URL and ask them to add it as a remote MCP server with OAuth.
 3. Tell the user to finish the OAuth authorization in their browser, then check with "list my Frely devices".
 

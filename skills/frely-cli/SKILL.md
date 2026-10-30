@@ -13,6 +13,6 @@ When `frely api call` is refused because the owner must approve it, rerun it wit
 
 `frely devices` lists the user's computers (online state, workspaces). Then use `frely run <device> -- <command>`, `frely read|ls|grep <device>:<path>`, `frely edit <device>:<path> --from <local file>`, and `frely tools` / `frely call <tool>` for anything else. The first of these commands asks the user to approve this computer once (a short code and a link; they type the code and confirm with a passkey or authenticator code).
 
-Use `--out <file>` for large output instead of printing it. Exit codes: 0 done, 1 the CLI itself, 2 the tool or remote command failed, 3 approval needed, 4 not authorized (`frely controller login`), 5 device offline (the output says to run `frely mcp start` there), 6 limit reached.
+Use `--out <file>` for large output instead of printing it. Exit codes: 0 done, 1 the CLI itself, 2 the tool or remote command failed, 3 approval needed, 4 not authorized (`frely controller login`), 5 device offline (the output says to run `frely link on` there), 6 limit reached.
 
 On exit code 3 the output has an approval link and a `frely permission wait <approval code>` command. Give the user the link, then run `frely permission wait <short code> --then '<the original command>'` in the background: it runs the original command by itself once they approve, so they do not need to tell you. Do not read `~/.config/frely`.

@@ -18,7 +18,7 @@ test("relative data dir names resolve below ~/.config/frely/accounts, absolute p
 test("applyDataDir strips the flag and points every XDG location at the directory", () => {
   const env: NodeJS.ProcessEnv = {};
   const dir = resolve("/srv/a");
-  assert.deepEqual(applyDataDir(["--data-dir", dir, "mcp", "status"], env, home), ["mcp", "status"]);
+  assert.deepEqual(applyDataDir(["--data-dir", dir, "link", "status"], env, home), ["link", "status"]);
   assert.equal(env.FRELY_DATA_DIR, dir);
   assert.equal(env.XDG_CONFIG_HOME, dir);
   assert.equal(env.XDG_STATE_HOME, join(dir, "state"));

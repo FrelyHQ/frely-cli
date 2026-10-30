@@ -20,10 +20,10 @@ It is also the command line for your Frely account:
 Ask an agent that has a shell (Claude Code, Codex, pi) to install the CLI, sign in and install the Skill:
 
 ```text
-Install Frely CLI and the frely Skill on this computer. On macOS or Linux run curl -fsSL https://frely.cloud/install.sh | sh; on Windows PowerShell run curl.exe -fsSLo "$env:TEMP\frely-install.ps1" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-install.ps1". Ask me for my email, run frely login --email <my email>, ask me for the 6-digit code from the email, then run frely login --code <code>. Then run frely skill install --host <your host: claude-code, codex, pi or generic> and read the Skill it installs. Do not run frely mcp start until I ask for it.
+Install Frely CLI and the frely Skill on this computer. On macOS or Linux run curl -fsSL https://frely.cloud/install.sh | sh; on Windows PowerShell run curl.exe -fsSLo "$env:TEMP\frely-install.ps1" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-install.ps1". Ask me for my email, run frely login --email <my email>, ask me for the 6-digit code from the email, then run frely login --code <code>. Then run frely skill install --host <your host: claude-code, codex, pi or generic> and read the Skill it installs. Do not run frely link on until I ask for it.
 ```
 
-The `frely` Skill teaches the agent to use your account and to offer FrelyMCP only when a request needs it. This path does not open this computer to remote clients; `frely mcp start` does. [More](https://cli.frely.cloud/#skill)
+The `frely` Skill teaches the agent to use your account and to offer FrelyMCP only when a request needs it. This path does not open this computer to remote clients; `frely link on` does. [More](https://cli.frely.cloud/#skill)
 
 ### Install it yourself
 
@@ -59,12 +59,12 @@ frely skill install --host <claude-code|codex|pi|generic>
 | Command | What it does |
 | --- | --- |
 | `frely skill install --host <host>` | Install the `frely` Skill for an agent host (`claude-code`, `codex`, `pi` or `generic`). |
-| `frely mcp start` | Sign in if needed, enable Device MCP, start the service and print the MCP URL. Safe to re-run. |
-| `frely mcp status` | Show the MCP URL, workspace, authorization expiry and service state. |
-| `frely mcp workspace add <path>` | Share another folder. `frely mcp workspace list` shows them all. |
-| `frely mcp stop` / `frely mcp start` | Pause or resume the background service. |
-| `frely mcp auto-update [on\|off]` | Let the background service update itself while idle (macOS/Linux, off by default). |
-| `frely mcp remove` | Revoke access for every client and uninstall the service. |
+| `frely link on` | Sign in if needed, enable Device MCP, start the service and print the MCP URL. Safe to re-run. |
+| `frely link status` | Show the MCP URL, workspace, authorization expiry and service state. |
+| `frely link workspace add <path>` | Share another folder. `frely link workspace list` shows them all. |
+| `frely link stop` / `frely link on` | Pause or resume the background service. |
+| `frely link auto-update [on\|off]` | Let the background service update itself while idle (macOS/Linux, off by default). |
+| `frely link off` | Revoke access for every client and uninstall the service. |
 | `frely doctor` | Check sign-in, installation, service and connection. `-v` for details. |
 | `frely update` | Update to the latest version in place. |
 | `frely login` / `frely logout` | Sign in or out of your Frely account. `frely login --email <you@example.com>` then `--code <code>` signs in without a browser. |
@@ -78,7 +78,7 @@ All commands and options: [command reference](https://cli.frely.cloud/docs/help/
 
 Use FrelyMCP from clients with no shell, such as web ChatGPT and Claude, or to work on another computer.
 
-FrelyMCP is one MCP address for your whole account: `https://mcp.frely.cloud/mcp`. Every computer where you ran `frely mcp start` appears behind it.
+FrelyMCP is one MCP address for your whole account: `https://mcp.frely.cloud/mcp`. Every computer where you ran `frely link on` appears behind it.
 
 ### Connect a computer with a browser
 
@@ -104,7 +104,7 @@ curl -fsSL https://frely.cloud/start.sh | FRELY_INSTALL_TOKEN=fit_... sh
 
 It installs `frely`, signs in to your account, enables Device MCP and starts the background service. The token works once and expires after 15 minutes. On Linux, run `sudo loginctl enable-linger $USER` so the service stays online after you log out of SSH. [More](https://cli.frely.cloud/docs/help/install-on-a-server/)
 
-1. On the computer to control, run `frely mcp start` (the install scripts above already do this).
+1. On the computer to control, run `frely link on` (the install scripts above already do this).
 2. Add the URL to your client as a remote MCP server with OAuth:
    - ChatGPT or Claude: add a custom connector with the URL.
    - Claude Code on another computer: `claude mcp add --transport http frely "https://mcp.frely.cloud/mcp"`, then open `/mcp` to authorize.
@@ -113,8 +113,8 @@ It installs `frely`, signs in to your account, enables Device MCP and starts the
 To check the connection, ask the client to list the top-level names in your workspace.
 
 - **What the AI can do**: `list_devices`, then `read`, `edit_file`, `process` and `web_fetch` on the computer you pick, plus your account through `frely_list` and `frely_call`. [More](https://cli.frely.cloud/docs/help/what-can-the-ai-do/)
-- **Local MCP servers**: loopback servers are found automatically (`frely mcp local list`); each stays hidden until you turn it on in Frely. [More](https://cli.frely.cloud/docs/help/local-mcp-servers/)
-- **Authorization**: access lasts 90 days by default; `frely mcp start --days 1..365` renews early. The URL never changes. [More](https://cli.frely.cloud/docs/help/authorization-expiry/)
+- **Local MCP servers**: loopback servers are found automatically (`frely link local list`); each stays hidden until you turn it on in Frely. [More](https://cli.frely.cloud/docs/help/local-mcp-servers/)
+- **Authorization**: access lasts 90 days by default; `frely link on --days 1..365` renews early. The URL never changes. [More](https://cli.frely.cloud/docs/help/authorization-expiry/)
 
 ## More features
 
