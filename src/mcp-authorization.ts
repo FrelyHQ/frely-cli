@@ -279,7 +279,7 @@ export function mcpVerificationUri(relayUrl: string, requestId: string, offered:
   try {
     const url = new URL(offered), relay = new URL(relayUrl);
     const keys = [...url.searchParams.keys()];
-    const named = keys.length === 1 && ((keys[0] === "m" && /^[A-HJ-NP-Z]{6}$/u.test(url.searchParams.get("m") ?? "")) || (keys[0] === "mcp_request" && url.searchParams.get("mcp_request") === requestId));
+    const named = keys.length === 1 && ((keys[0] === "m" && /^[A-HJ-NP-Z]{8}$/u.test(url.searchParams.get("m") ?? "")) || (keys[0] === "mcp_request" && url.searchParams.get("mcp_request") === requestId));
     return url.origin === relay.origin && url.pathname === "/device" && !url.hash && !url.username && !url.password && named ? url.toString() : long;
   } catch { return long; }
 }

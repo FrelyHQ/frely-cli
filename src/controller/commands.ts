@@ -328,8 +328,8 @@ async function permissionCommand(args: string[], io: Output): Promise<number> {
   if (action === "wait") {
     const parsed = parseArgs(rest, { values: ["--then", "--timeout"] });
     const [reference] = parsed.positionals;
-    if (!reference || parsed.positionals.length !== 1 || !/^[A-Za-z0-9_-]{1,128}$/u.test(reference)) throw new ControllerError("Usage: frely permission wait <six-letter short code | confirmationId> [--then '<command>'] [--timeout <s>]", EXIT.cli);
-    const ref: ApprovalRef = /^[A-Za-z]{6}$/u.test(reference) ? { code: reference.toUpperCase() } : { confirmationId: reference };
+    if (!reference || parsed.positionals.length !== 1 || !/^[A-Za-z0-9_-]{1,128}$/u.test(reference)) throw new ControllerError("Usage: frely permission wait <eight-letter short code (ABCD-EFGH) | confirmationId> [--then '<command>'] [--timeout <s>]", EXIT.cli);
+    const ref: ApprovalRef = /^[A-Za-z]{4}-?[A-Za-z]{4}$/u.test(reference) ? { code: reference.replace("-", "").toUpperCase() } : { confirmationId: reference };
     const timeout = intOption(parsed, "--timeout", 1, 3600) ?? 600;
     const status = await withController(io, (controller) => waitForPermission(controller, ref, timeout * 1000, io));
     const then = parsed.values.get("--then");

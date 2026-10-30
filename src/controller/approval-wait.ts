@@ -1,6 +1,6 @@
 import { resultData, resultText, type Controller } from "./client.js";
 
-/** What an approval is known by: the six-letter code of a permission request, or the confirmationId of a one-time Cloud confirmation. */
+/** What an approval is known by: the eight-letter code of a permission request, or the confirmationId of a one-time Cloud confirmation. */
 export type ApprovalRef = { code: string } | { confirmationId: string };
 
 export interface ApprovalOutcome {

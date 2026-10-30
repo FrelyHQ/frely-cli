@@ -24,7 +24,7 @@ export function permissionHint(result: object): string | null {
         if (typeof error.confirmationId !== "string" || !/^[A-Za-z0-9_-]{1,80}$/.test(error.confirmationId)) continue;
         return `${typeof error.summary === "string" ? error.summary + "\n" : ""}Approve this in your browser (passkey or authenticator code required): ${url.toString()}\nThen run the same call again with "confirmationId":"${error.confirmationId}" added to the input, or add --wait to let the CLI wait and run it once. To wait in the background: frely permission wait ${error.confirmationId}`;
       }
-      const waiting = typeof error.shortCode === "string" && /^[A-Za-z]{6}$/.test(error.shortCode) ? `\nTo wait in the background: frely permission wait ${error.shortCode}, then run the call again (or use --wait).` : "";
+      const waiting = typeof error.shortCode === "string" && /^[A-Za-z]{8}$/.test(error.shortCode) ? `\nTo wait in the background: frely permission wait ${error.shortCode}, then run the call again (or use --wait).` : "";
       return `This device needs ${need}${typeof error.group === "string" ? " to " + error.group : ""}. Grant it in your browser (passkey or authenticator code required): ${url.toString()}${waiting}`;
     } catch { /* Not a permission failure. */ }
   }
