@@ -16,11 +16,12 @@ const noService = (): McpServiceInfo | null => process.env.FRELY_DATA_DIR ? { in
 export async function installMcpService(workspaceInput: string): Promise<McpServiceInfo> {
   return installDeviceRelayService(workspaceInput);
 }
-export async function installDeviceRelayService(workspaceInput?: string): Promise<McpServiceInfo> {
+/** `standby`: the computer is not controlled (never enabled, or turned off); the service only serves local Providers and waits for the web to turn remote control on. */
+export async function installDeviceRelayService(workspaceInput?: string, options: { standby?: boolean } = {}): Promise<McpServiceInfo> {
   const skipped = noService();
   if (skipped) return skipped;
   const existing = await readServiceConfig();
-  const workspace = workspaceInput ? await realpath(resolve(workspaceInput)) : existing?.workspace;
+  const workspace = options.standby ? undefined : workspaceInput ? await realpath(resolve(workspaceInput)) : existing?.workspace;
   const entry = IS_STANDALONE ? process.execPath : await realpath(process.argv[1] ?? "");
   const stateDir = frelyStateDir();
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
@@ -179,7 +180,7 @@ function currentUser(): string | undefined {
 export function serviceLaunchArguments(entry: string, workspace?: string): string[] {
   const mode = process.env.FRELY_CREDENTIAL_KEY !== undefined ? "encrypted-file" : process.env.FRELY_CREDENTIAL_STORE ?? "auto";
   return cliLaunchArguments(entry, ["mcp", "serve", "--service-config-home", resolve(process.env.XDG_CONFIG_HOME || join(homedir(), ".config")),
-    "--service-credential-store", mode, ...(workspace ? ["--workspace", workspace] : ["--provider-only"])]);
+    "--service-credential-store", mode, ...(workspace ? ["--workspace", workspace] : ["--standby"])]);
 }
 /** launchd appends to this file for the life of the service, so it is trimmed in place at startup rather than rotated. */
 export function serviceLogPath(): string { return join(frelyStateDir(), "mcp.log"); }
