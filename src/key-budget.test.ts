@@ -43,7 +43,7 @@ test("stored Agent Key uses its manifest's Relay origin and cannot be sent to a 
   };
   try {
     await writeManagedSkill({ home, content: "managed test Skill", record: {
-      version: 1, distributionId, manifestUrl: "https://app.frely.cloud/api/public/virtual-models/" + distributionId,
+      version: 1, distributionId, manifestUrl: "https://app.frely.cloud/api/public/agents/" + distributionId,
       modelId: "GPT-800", mcpUrl: "https://api.frely.cloud/mcp/GPT-800", name: "GPT-800", slug: "gpt-800",
       host: "generic", scope: "global", authMode: "api-key", skillPath: join(home, "skills", "gpt-800", "SKILL.md"),
     } });
