@@ -11,12 +11,12 @@ import { basicCredentialStore } from "../credential-basic.js";
 import { useMemoryCredentialStore } from "../test-support.js";
 
 const distributionId = "creator_distribution_0123456789abcdef01234567";
-const manifestUrl = `https://app.frely.cloud/api/public/virtual-models/${distributionId}`;
+const manifestUrl = `https://app.frely.cloud/api/public/agents/${distributionId}`;
 const modelId = "user/vm-0123456789abcdef0123456789abcdef/v1";
 
 function manifest() {
   return {
-    schemaVersion: "frely.virtual-model.public.v1",
+    schemaVersion: "frely.agent.public.v1",
     id: distributionId,
     modelId,
     version: "v1",
@@ -319,12 +319,12 @@ test("account-mode invocation tells a refresh outage apart from a missing login"
 test("an Agent is installed and found by username/name, and an id keeps working", async () => {
   const root = await tempRoot();
   try {
-    assert.equal(agentManifestUrl("ada/tripready", "https://app.frely.cloud"), "https://app.frely.cloud/api/public/virtual-models/ada%2Ftripready");
-    assert.equal(agentManifestUrl("ada/tripready@2", "https://app.frely.cloud"), "https://app.frely.cloud/api/public/virtual-models/ada%2Ftripready%402");
+    assert.equal(agentManifestUrl("ada/tripready", "https://app.frely.cloud"), "https://app.frely.cloud/api/public/agents/ada/tripready");
+    assert.equal(agentManifestUrl("ada/tripready@2", "https://app.frely.cloud"), "https://app.frely.cloud/api/public/agents/ada/tripready%402");
     assert.equal(agentManifestUrl(distributionId, "https://app.frely.cloud"), manifestUrl);
     assert.throws(() => agentManifestUrl("https://example.com/manifest.json", "https://app.frely.cloud"), /Use the Agent's name/u);
 
-    const named = { ...manifest(), installName: "ada/tripready", urls: { ...manifest().urls, manifest: "https://app.frely.cloud/api/public/virtual-models/ada%2Ftripready" } };
+    const named = { ...manifest(), installName: "ada/tripready", urls: { ...manifest().urls, manifest: "https://app.frely.cloud/api/public/agents/ada/tripready" } };
     await installSkillAdapter({ manifestUrl: agentManifestUrl("ada/tripready", "https://app.frely.cloud"), host: "pi", scope: "global", home: root, fetchFn: fetchManifest(named) });
     const never = (async () => { throw new Error("must not fetch"); }) as unknown as typeof fetch;
     assert.equal(await resolveAgentTarget("ada/tripready", "https://app.frely.cloud", root, never), distributionId);

@@ -16,7 +16,7 @@ import {
   type SkillScope,
 } from "./managed.js";
 
-const MANIFEST_SCHEMA = "frely.virtual-model.public.v1";
+const MANIFEST_SCHEMA = "frely.agent.public.v1";
 const DISTRIBUTION_ID = /^creator_distribution_[a-f0-9]{24}$/u;
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_TASK_BYTES = 128 * 1024;
@@ -60,7 +60,7 @@ const AGENT_NAME = /^([^/@\s]{1,64})\/([^/@\s]{1,64})(?:@([1-9][0-9]{0,8}))?$/u;
 /** `frely agent install` takes `username/name[@version]` (or the distribution id older scripts use) and reads its public manifest on the account's Frely origin. */
 export function agentManifestUrl(target: string, relayUrl: string): string {
   if (!DISTRIBUTION_ID.test(target) && !AGENT_NAME.test(target)) throw new SkillAccessError("input_invalid", "Use the Agent's name, for example username/name, or username/name@3 for a version.");
-  return `${relayUrl}/api/public/virtual-models/${encodeURIComponent(target)}`;
+  return `${relayUrl}/api/public/agents/${target.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 /** An installed Agent's distribution id from the id or `username/name` a user typed; a version written after the name is ignored. */
@@ -364,7 +364,7 @@ function parseManifest(value: unknown, sourceUrl: URL): PublicVirtualModelManife
   }
   const canonical = normalizedFrelyUrl(urls.manifest, "manifest_invalid");
   // The manifest answers under its install name however it was asked for (id, name or a former username), so only the origin is compared.
-  if (canonical.origin !== sourceUrl.origin || !canonical.pathname.startsWith("/api/public/virtual-models/")) throw new SkillAccessError("manifest_invalid", "Frely manifest canonical URL does not match the requested URL.");
+  if (canonical.origin !== sourceUrl.origin || !canonical.pathname.startsWith("/api/public/agents/")) throw new SkillAccessError("manifest_invalid", "Frely manifest canonical URL does not match the requested URL.");
   const mcp = normalizedFrelyUrl(urls.mcp, "manifest_invalid");
   const expectedMcpPath = `/mcp/${encodeURIComponent(root.modelId)}`;
   if (mcp.pathname !== expectedMcpPath || mcp.search) throw new SkillAccessError("manifest_invalid", "Frely MCP URL does not match the published model identity.");
