@@ -24,7 +24,7 @@ function useSyntheticRelay(t: test.TestContext, redeem: (body: Record<string, un
   globalThis.fetch = async (url, options) => {
     const path = new URL(String(url)).pathname;
     calls.push(path);
-    if (path === "/api/auth/device/code") return Response.json({ device_code: "synthetic-code", user_code: "SYNTH-CODE", verification_uri: "https://test.invalid/device", verification_uri_complete: "https://test.invalid/device?user_code=SYNTH-CODE", expires_in: 300, interval: 1 });
+    if (path === "/api/auth/device/code") return Response.json({ device_code: "synthetic-code", user_code: "SYNTH-CODE", verification_uri: "https://test.invalid/device", verification_uri_complete: "https://test.invalid/device?g=SYNTH-CODE", expires_in: 300, interval: 1 });
     if (path === "/api/auth/device/install/redeem") return redeem(JSON.parse(String(options?.body)) as Record<string, unknown>);
     if (path === "/api/auth/oauth2/token") return Response.json({ access_token: "synthetic-basic", refresh_token: "synthetic-refresh", token_type: "bearer", expires_in: 3600 });
     if (path === "/api/auth/me") return Response.json({ user: { id: "user_test", email: "user@example.com" } });
@@ -137,7 +137,7 @@ test("without an install token one browser approval signs in and preapproves dev
   let attached: { userCode: string; mcp: { keyThumbprint: string; workspace: string; days: number } } | undefined;
   const loginDevice: McpStartLoginDeps["loginDevice"] = async (_relay, notify, options) => {
     await options?.beforeNotify?.({ relayUrl: "https://test.invalid", userCode: "SYNTH-CODE" });
-    notify?.({ verificationUri: "https://test.invalid/device?user_code=SYNTH-CODE", userCode: "SYNTH-CODE" });
+    notify?.({ verificationUri: "https://test.invalid/device?g=SYNTH-CODE", userCode: "SYNTH-CODE" });
     return { user: { id: "user_test", email: "user@example.com" } as never, verificationUri: "", userCode: "SYNTH-CODE", sessionBound: false };
   };
   const result = await mcpStartLogin({ workspace, days: "30", notify: (message) => { messages.push(message); } }, {

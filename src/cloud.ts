@@ -79,7 +79,7 @@ export const API_USAGE = `Frely API — call your Frely account's business opera
   frely api call <tool> [--json '<object>' | --input <file>] [--wait]
 
 "list" prints the operations grouped by area with a one-line description each; add --json for the full tool list.
-Other results are JSON. The first command asks you to approve this computer in your browser (the same approval as frely controller login);
+Other results are JSON. The first write call asks you to approve this computer in your browser (the controller authorization);
 frely logout also revokes it. Without a terminal it prints the approval link and exits; run it again after approving.
 Calls may create resources or incur usage. Failed writes are never replayed automatically.
 A new device may only read non-sensitive data; for anything else the error links to the web

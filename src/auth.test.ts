@@ -28,7 +28,7 @@ test("basic OAuth login and refresh do not require the MCP secure store", async 
     if (path === "/api/auth/device/code") {
       const form = new URLSearchParams(String(options?.body));
       requestedScope = form.get("scope") ?? ""; requestedClient = form.get("client_id") ?? "";
-      return Response.json({ device_code: "synthetic-code", user_code: "SYNTH", verification_uri: "https://test.invalid/device", verification_uri_complete: "https://test.invalid/device?user_code=SYNTH", expires_in: 300, interval: 1 });
+      return Response.json({ device_code: "synthetic-code", user_code: "SYNTH", verification_uri: "https://test.invalid/device", verification_uri_complete: "https://test.invalid/device?g=SYNTH", expires_in: 300, interval: 1 });
     }
     if (path === "/api/auth/oauth2/token") return Response.json({ access_token: "synthetic-basic", refresh_token: "synthetic-refresh", token_type: "bearer", expires_in: 3600 });
     if (path === "/api/auth/me") return Response.json({ user: { id: "user_test", email: "user@example.com" } });
@@ -67,7 +67,7 @@ test("login binds the session to the local device id when the Relay returns a se
   globalThis.fetch = async (url, options) => {
     const path = new URL(String(url)).pathname;
     if (path === "/api/auth/device/code") {
-      return Response.json({ device_code: "synthetic-code", user_code: "SYNTH", verification_uri: "https://test.invalid/device", verification_uri_complete: "https://test.invalid/device?user_code=SYNTH", expires_in: 300, interval: 1 });
+      return Response.json({ device_code: "synthetic-code", user_code: "SYNTH", verification_uri: "https://test.invalid/device", verification_uri_complete: "https://test.invalid/device?g=SYNTH", expires_in: 300, interval: 1 });
     }
     if (path === "/api/auth/oauth2/token") {
       tokenBody = String(options?.body);
@@ -101,7 +101,7 @@ test("login without a session id from an older Relay stays backward compatible",
   globalThis.fetch = async (url, options) => {
     const path = new URL(String(url)).pathname;
     if (path === "/api/auth/device/code") {
-      return Response.json({ device_code: "synthetic-code", user_code: "SYNTH", verification_uri: "https://test.invalid/device", verification_uri_complete: "https://test.invalid/device?user_code=SYNTH", expires_in: 300, interval: 1 });
+      return Response.json({ device_code: "synthetic-code", user_code: "SYNTH", verification_uri: "https://test.invalid/device", verification_uri_complete: "https://test.invalid/device?g=SYNTH", expires_in: 300, interval: 1 });
     }
     if (path === "/api/auth/oauth2/token") return Response.json({ access_token: "synthetic-basic", token_type: "bearer", expires_in: 3600 });
     if (path === "/api/auth/me") return Response.json({ user: { id: "user_test", email: "user@example.com" } });
@@ -172,7 +172,7 @@ async function withExpiredLogin(t: import("node:test").TestContext, refresh: () 
   globalThis.fetch = async (url, options) => {
     const path = new URL(String(url)).pathname;
     if (path === "/api/auth/device/code") {
-      return Response.json({ device_code: "synthetic-code", user_code: "SYNTH", verification_uri: "https://test.invalid/device", verification_uri_complete: "https://test.invalid/device?user_code=SYNTH", expires_in: 300, interval: 1 });
+      return Response.json({ device_code: "synthetic-code", user_code: "SYNTH", verification_uri: "https://test.invalid/device", verification_uri_complete: "https://test.invalid/device?g=SYNTH", expires_in: 300, interval: 1 });
     }
     if (path === "/api/auth/oauth2/token") {
       if (!loggedIn) return Response.json({ access_token: "synthetic-basic", refresh_token: "synthetic-refresh", token_type: "bearer", expires_in: 3600 });

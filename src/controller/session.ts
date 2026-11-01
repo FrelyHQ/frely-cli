@@ -165,17 +165,17 @@ async function writePending(pending: PendingLogin | null, relayUrl: string, stor
   else await store.deletePassword(PENDING_SERVICE, accountOf(relayUrl, userId)).catch(() => false);
 }
 
-/** Asks Frely for a device code, tells it which computer is asking (the approval page repeats that beside the address the request came from) and keeps the request. */
-async function startLogin(relayUrl: string): Promise<PendingLogin> {
+/** Asks Frely for a device code bound to the signed-in account (the approval is one of the owner's unified approval codes) and keeps the request. */
+async function startLogin(relayUrl: string, userId: string): Promise<PendingLogin> {
   const device = await ensureDevice();
   const mcpUrl = controllerMcpUrl(relayUrl);
   const key = generateDpopKey();
   const codeResponse = await fetch(`${relayUrl}/api/auth/device/code`, {
     method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: relayUrl, accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(TIMEOUT_MS),
-    body: new URLSearchParams({ client_id: CONTROLLER_CLIENT_ID, scope: SCOPE, resource: mcpUrl }).toString(),
+    body: new URLSearchParams({ client_id: CONTROLLER_CLIENT_ID, scope: SCOPE, resource: mcpUrl, user_id: userId, controller_device_id: device.deviceId }).toString(),
   });
-  const code = await codeResponse.json().catch(() => ({})) as { device_code?: unknown; user_code?: unknown; verification_uri_complete?: unknown; expires_in?: unknown; interval?: unknown; error_description?: unknown };
-  if (!codeResponse.ok || typeof code.device_code !== "string" || typeof code.user_code !== "string" || typeof code.verification_uri_complete !== "string") {
+  const code = await codeResponse.json().catch(() => ({})) as { device_code?: unknown; user_code?: unknown; verification_uri?: unknown; expires_in?: unknown; interval?: unknown; error_description?: unknown };
+  if (!codeResponse.ok || typeof code.device_code !== "string" || typeof code.user_code !== "string" || typeof code.verification_uri !== "string") {
     throw new ControllerError(typeof code.error_description === "string" ? code.error_description : `Frely refused the controller request (HTTP ${codeResponse.status}).`, EXIT.auth);
   }
   const claim = await fetch(`${relayUrl}/api/auth/device/controller`, {
@@ -183,8 +183,10 @@ async function startLogin(relayUrl: string): Promise<PendingLogin> {
     body: JSON.stringify({ action: "put", userCode: code.user_code, controller: { deviceId: device.deviceId, hostname: hostname(), platform: platform(), cliVersion: VERSION } }),
   });
   if (!claim.ok) throw new ControllerError(`Frely would not take this computer's details (HTTP ${claim.status}). Update Frely CLI and try again.`, EXIT.auth);
-  const link = new URL(code.verification_uri_complete);
+  // One approval link format everywhere (`/device?g=<eight letters>`), built from the relay's own verification page.
+  const link = new URL(code.verification_uri);
   if (link.origin !== relayUrl) throw new ControllerError("Frely returned an unexpected approval link.", EXIT.auth);
+  link.searchParams.set("g", code.user_code);
   const pending: PendingLogin = {
     version: 1, relayUrl, mcpUrl, deviceId: device.deviceId, privateKeyPem: key.privateKeyPem, deviceCode: code.device_code, userCode: code.user_code, link: link.toString(),
     expiresAt: Date.now() + (typeof code.expires_in === "number" ? code.expires_in : 900) * 1000, intervalMs: (typeof code.interval === "number" ? code.interval : 5) * 1000,
@@ -193,7 +195,7 @@ async function startLogin(relayUrl: string): Promise<PendingLogin> {
   return pending;
 }
 
-const approvalNotice = (pending: PendingLogin) => `Approve this computer to control your Frely devices.\nCode: ${pending.userCode}\nOpen: ${pending.link}\n(You will be asked to type the code and confirm with a passkey or authenticator code.)\n`;
+const approvalNotice = (pending: PendingLogin) => `Approve this computer to control your Frely devices.\nCode: ${pending.userCode}\nOpen: ${pending.link}\n(Confirm with a passkey or authenticator code.)\n`;
 
 /**
  * Trades the approved device code for tokens, once or until the code expires. Returns null when `wait` is false and the owner has not
@@ -235,8 +237,8 @@ async function pollLogin(pending: PendingLogin, wait: boolean): Promise<Controll
  */
 export async function controllerLogin(options: LoginOptions = {}): Promise<ControllerSession> {
   const notify = options.notify ?? ((text: string) => { process.stderr.write(text); });
-  const { relayUrl } = await ownerOf();
-  const pending = await readPending(relayUrl) ?? await startLogin(relayUrl);
+  const { relayUrl, userId } = await ownerOf();
+  const pending = await readPending(relayUrl) ?? await startLogin(relayUrl, userId);
   notify(approvalNotice(pending));
   if (options.openBrowser !== false && process.env.FRELY_NO_BROWSER !== "1") openVerificationUrl(pending.link);
   return (await pollLogin(pending, true))!;
@@ -247,11 +249,11 @@ export async function controllerLogin(options: LoginOptions = {}): Promise<Contr
  * run; otherwise it shows the approval link and ends with the "approval needed" exit code, and the same command run again continues from the same request.
  */
 export async function requestControllerLogin(): Promise<ControllerSession> {
-  const { relayUrl } = await ownerOf();
-  const pending = await readPending(relayUrl) ?? await startLogin(relayUrl);
+  const { relayUrl, userId } = await ownerOf();
+  const pending = await readPending(relayUrl) ?? await startLogin(relayUrl, userId);
   const session = await pollLogin(pending, false);
   if (session) return session;
-  throw new ControllerError(`${approvalNotice(pending)}After approving, run the same command again. To wait for the approval instead: frely controller login\n`, EXIT.approval);
+  throw new ControllerError(`${approvalNotice(pending)}After approving, run the same command again.\n`, EXIT.approval);
 }
 
 /** Exchanges the refresh token; a session that another process already renewed is taken from the store instead of spent twice. */

@@ -295,7 +295,11 @@ export async function loginDevice(
   const device = await requestDeviceCode(relayUrl);
   await savePendingDeviceLogin(relayUrl, device);
   await options.beforeNotify?.({ relayUrl, userCode: device.user_code });
-  const verificationUri = validateVerificationUrl(device.verification_uri_complete || `${device.verification_uri}?user_code=${encodeURIComponent(device.user_code)}`, relayUrl);
+  // One approval link format everywhere (`/device?g=<eight letters>`), built from the relay's own verification page so a stale
+  // server response cannot reintroduce another format.
+  const approvalLink = new URL(device.verification_uri);
+  approvalLink.searchParams.set("g", device.user_code);
+  const verificationUri = validateVerificationUrl(approvalLink.toString(), relayUrl);
   notify?.({ verificationUri, userCode: device.user_code });
   if (options.openBrowser !== false) openVerificationUrl(verificationUri);
   const { user, sessionBound } = await finishDeviceLogin(relayUrl, device, deviceId);

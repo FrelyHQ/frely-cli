@@ -301,7 +301,7 @@ test("account-mode invocation tells a refresh outage apart from a missing login"
 
   globalThis.fetch = (async (url: string | URL | Request, options?: RequestInit) => {
     const path = new URL(String(url)).pathname;
-    if (path === "/api/auth/device/code") return Response.json({ device_code: "synthetic-code", user_code: "SYNTH", verification_uri: "https://test.invalid/device", verification_uri_complete: "https://test.invalid/device?user_code=SYNTH", expires_in: 300, interval: 1 });
+    if (path === "/api/auth/device/code") return Response.json({ device_code: "synthetic-code", user_code: "SYNTH", verification_uri: "https://test.invalid/device", verification_uri_complete: "https://test.invalid/device?g=SYNTH", expires_in: 300, interval: 1 });
     if (path === "/api/auth/oauth2/token" && new URLSearchParams(String(options?.body)).get("grant_type") !== "refresh_token") return Response.json({ access_token: "synthetic-basic", refresh_token: "synthetic-refresh", token_type: "bearer", expires_in: 3600 });
     if (path === "/api/auth/me") return Response.json({ user: { id: "user_test", email: "user@example.com" } });
     throw new TypeError("fetch failed");

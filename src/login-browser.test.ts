@@ -34,7 +34,7 @@ test("device login honors browser selection without changing account authorizati
     if (path === "/api/auth/device/code") return Response.json({
       device_code: "synthetic-code", user_code: "SYNTH",
       verification_uri: "https://test.invalid/device",
-      verification_uri_complete: "https://test.invalid/device?user_code=SYNTH",
+      verification_uri_complete: "https://test.invalid/device?g=SYNTH",
       expires_in: 300, interval: 1,
     });
     if (path === "/api/auth/oauth2/token") return Response.json({ access_token: "synthetic-basic", expires_in: 3600 });
@@ -52,7 +52,7 @@ test("device login honors browser selection without changing account authorizati
     let notified = false;
     const result = await loginDevice("https://test.invalid", ({ verificationUri }) => {
       notified = true;
-      assert.equal(verificationUri, "https://test.invalid/device?user_code=SYNTH");
+      assert.equal(verificationUri, "https://test.invalid/device?g=SYNTH");
     }, scenario.options);
     assert.equal(launches, scenario.launches);
     assert.equal(notified, true);
