@@ -40,8 +40,9 @@ async function atomicWrite(path: string, value: string): Promise<void> {
   const file = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   try { await file.writeFile(value, "utf8"); await file.sync(); }
   finally { await file.close(); }
-  try { await assertSafePath(path); await rename(temporary, path); }
-  finally { await unlink(temporary).catch(() => undefined); }
+  let renamed = false;
+  try { await assertSafePath(path); await rename(temporary, path); renamed = true; }
+  finally { if (!renamed) await unlink(temporary).catch(() => undefined); }
 }
 export class NetworkFiles {
   readonly directory: string;
