@@ -11,7 +11,7 @@
 | Network 服务及镜像内的 Landing | `./scripts/release` | 开发机 | `deploy/frely-network/vX.Y.Z` |
 | Network frely-mcp 包 | `./scripts/release-mcp` | Actions | `mcp/vX.Y.Z` |
 | Swarm | `./scripts/release` | 开发机 | `deploy/frely-swarm/vX.Y.Z` |
-| CLI npm、二进制及安装器 | `./scripts/release` | Actions | `vX.Y.Z` |
+| CLI npm、二进制及安装器 | `./scripts/release` | 开发机本机发布；`--executor actions` 走 Actions 备用 | `vX.Y.Z` |
 | CLI Landing | `./scripts/release-landing` | Actions / GitHub Pages | `landing/vX.Y.Z` |
 
 Frely 服务包含 cliproxy-egress、cliproxy-control、gateway-srv、web、admin、db-ops 六个自有镜像，
@@ -21,7 +21,7 @@ Network 的 apps/site 当前随服务 Docker 镜像构建与部署，尚无独�
 Explorer 与开发示例也没有生产发布目标。它们不能被计为已经具备独立部署能力的 Landing。
 
 以上为跨仓库发布单元概览；本仓库仅包含 CLI 与 CLI Landing。
-本仓库通过 `--validate-tag` 校验发布身份，实际发布由 Actions 完成，不提供 `--from-tag` 本地执行入口。
+本仓库通过 `--validate-tag` 校验发布身份。CLI 发布默认在本机执行（bun 交叉编译 + npm 发布 + GitHub Release，Actions 仅作手动备用）；Landing 实际发布仍由 Actions 完成。
 
 ## 从命令发版
 

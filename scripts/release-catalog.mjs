@@ -5,8 +5,9 @@ export const catalog = {
   "artifacts": [
     {
       "id": "cli",
-      "defaultExecutor": "actions",
+      "defaultExecutor": "local",
       "executors": [
+        "local",
         "actions"
       ],
       "tagPrefix": "v",

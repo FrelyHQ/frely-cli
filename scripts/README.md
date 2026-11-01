@@ -11,7 +11,7 @@
 | 独立二进制构建 | `npm run build:standalone -- <target>` / `build-standalone.mjs` | Bun 构建与校验和 |
 | 独立二进制验证 | `npm run test:standalone` / `standalone-smoke.mjs` | 先构建对应平台二进制 |
 | 安装器验证 | `npm run test:installer` / `installer-smoke.mjs` | 先构建二进制；离线检查安装和校验和拒绝行为 |
-| CLI 发布 | `./scripts/release` / `release-entry.mjs` / `release-package` | 版本更新、检查、提交、推送 tag、等待 Actions |
+| CLI 发布 | `./scripts/release` / `release-entry.mjs` / `release-package-local` | 本机全量发布（bun 交叉编译 + npm + GitHub Release），`--executor actions` 回退到 `release-package` 走 Actions |
 | Landing 发布 | `./scripts/release-landing` / `release-landing.mjs` | 通过共享 release-entry 提交独立 tag，由 Pages 发布 |
 | 发布目录 | `release-catalog.mjs` | 定义 CLI / Landing 发布单元 |
 | 发布入口验证 | `node --test scripts/release-entry.test.mjs` | 隔离 Git 仓库，不连接生产 |
@@ -19,9 +19,10 @@
 | 发布治理钩子 | `release-freeze.mjs`、`release-publish.mjs`、`release-verify.mjs` | 由 `.agents/skills-config/project-governance/release-workflow.json` 引用 |
 
 npm 包安装与独立二进制安装器测试覆盖不同分发方式，均保留。
-`release-package` 是 CLI 发布实现，并非兼容脚本。
+`release-package-local` 是 CLI 本地发布实现：在本机完成 npm 主包、八个平台二进制（bun 交叉编译）、`@frelyhq/cli-<平台>` 回退包、npmmirror 同步与 GitHub Release；各步骤幂等，失败后重跑续传。前置：本机 `npm login`（需 frely-cli 与 @frelyhq 发布权）。
+`release-package`（`--executor actions`）保留为 Actions 备用路径；publish.yml 已改为仅手动 dispatch（在发布 tag 的 ref 上触发），不再随 tag push 自动运行。
 根目录 `install.sh` / `install.ps1` 是对外分发的仅安装脚本，`start.sh` / `start.ps1` 在安装后继续登录并进入 MCP 流程；`release-platform-packages.mjs` 把各平台程序打包成 `@frelyhq/cli-<平台>` npm 包（安装器的国内回退源）；`site/build.mjs` 是站点构建实现，保留原位置。
 
-本仓库已移除旧目录软链接、废弃发布转发入口和不可执行的本地 tag 发布入口。使用 `--validate-tag` 校验发布身份，实际发布交给 Actions。
+本仓库已移除旧目录软链接、废弃发布转发入口和不可执行的本地 tag 发布入口。使用 `--validate-tag` 校验发布身份；CLI 发布默认在本机执行，Landing 仍由 Actions 完成。
 
 发布约束见 [发布说明](../docs/release-entry/README.md)。

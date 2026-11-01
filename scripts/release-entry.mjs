@@ -42,12 +42,12 @@ export function selectTag(tag) {
 }
 function help(entryArtifact) {
   const command = entryArtifact === catalog.defaultArtifact ? "./scripts/release" : "./scripts/release-" + entryArtifact;
-  console.log("Usage: " + command + " [--executor actions] [--version <semver>] [--dry-run]");
+  console.log("Usage: " + command + " [--executor local|actions] [--version <semver>] [--dry-run]");
   console.log("       ./scripts/release --list");
   console.log("       ./scripts/release --validate-tag <tag>");
   console.log("Command\tDefault executor\tActions tag\tContents");
   for (const item of catalog.artifacts) console.log([item.id === catalog.defaultArtifact ? "./scripts/release" : "./scripts/release-" + item.id, item.defaultExecutor, item.tagPrefix + "X.Y.Z", item.description].join("\t"));
-  console.log("Command invocation and execution location are separate. CLI/package/Pages commands submit tags to Actions.");
+  console.log("Command invocation and execution location are separate. The CLI defaults to full local publishing; --executor actions submits tags to Actions, Landing submits tags to Actions.");
 }
 function assertClean() {
   if (git("status", "--porcelain", "--untracked-files=all")) fail("Release requires a clean worktree");
@@ -107,7 +107,7 @@ function nextVersion(artifact) {
 }
 function legacyCommand(artifact, executor, options) {
   let script;
-  if (catalog.project === "frely-cli" && artifact.id === "cli") script = "release-package";
+  if (catalog.project === "frely-cli" && artifact.id === "cli") script = executor === "actions" ? "release-package" : "release-package-local";
   else if (executor === "local") script = artifact.id === "landing" ? "release-landing-local" : "release-local";
   else return false;
   const args = [];
@@ -132,8 +132,8 @@ export function main(args = process.argv.slice(2), entryArtifact = catalog.defau
   if (!artifact.executors.includes(executor)) fail("Unsupported executor for " + artifact.id + ": " + executor);
   if (options["purge-cache"] && !(catalog.project === "frely" && artifact.id === "landing" && executor === "local"))
     fail("--purge-cache requires the local Frely landing executor");
-  if (options["no-wait"] && !(catalog.project === "frely-cli" && artifact.id === "cli"))
-    fail("--no-wait is supported by the CLI package publisher");
+  if (options["no-wait"] && !(catalog.project === "frely-cli" && artifact.id === "cli" && executor === "actions"))
+    fail("--no-wait is supported by the Actions CLI publisher only");
   if (executor === "local") {
     assertClean();
     run("git", ["fetch", "origin", "main", "--tags"]);

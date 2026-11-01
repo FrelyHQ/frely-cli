@@ -1,0 +1,291 @@
+#!/usr/bin/env bash
+# （环境：CLI 发版, 原因：GitHub Actions 配额不可用时在本机完成 npm/GitHub/平台包全量发布；
+#   与 release-package 同构：同样的准备与验证，只把发布端从 Actions 换成本地 bun 交叉编译 + npm/gh。
+#   每个发布步骤幂等（已发布则跳过），中途失败后重跑本脚本可续传。）
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+PROJECT="frely-cli"
+TARGET="npm/GitHub"
+ENVIRONMENT="production"
+ARTIFACT="npm package + standalone binaries"
+DESTINATION="npm registry + GitHub Releases"
+TARGETS=(darwin-arm64 darwin-x64 linux-arm64 linux-x64 linux-arm64-musl linux-x64-musl windows-arm64 windows-x64)
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/release [--executor local] [--version <semver>] [--dry-run]
+
+Publish frely-cli entirely from this machine (npm package, eight standalone
+binaries, platform packages, GitHub Release) without GitHub Actions.
+If --version is omitted, the next patch after the latest formal vX.Y.Z release is used.
+EOF
+}
+
+version=""
+dry_run=0
+while (($#)); do
+  case "$1" in
+    --version)
+      [[ $# -ge 2 ]] || { echo "missing value for --version" >&2; exit 2; }
+      version="$2"
+      shift 2
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+
+require_clean_main() {
+  local dirty branch
+  dirty="$(git status --porcelain --untracked-files=all)"
+  [[ -z "$dirty" ]] || {
+    echo "release requires a clean worktree:" >&2
+    printf '%s\n' "$dirty" >&2
+    exit 1
+  }
+  branch="$(git symbolic-ref --quiet --short HEAD || true)"
+  [[ "$branch" == "main" ]] || {
+    echo "package release must run from main; current branch: ${branch:-detached}" >&2
+    exit 1
+  }
+}
+
+latest_release_version() {
+  local tag raw
+  while IFS= read -r tag; do
+    raw="${tag#v}"
+    if [[ "$raw" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+      printf '%s\n' "$raw"
+      return 0
+    fi
+  done < <(git tag --list 'v*' --sort=-v:refname)
+  return 1
+}
+
+next_patch_version() {
+  local latest major minor patch
+  latest="$(latest_release_version || true)"
+  [[ -n "$latest" ]] || { echo "no stable vX.Y.Z release tag found; pass --version" >&2; exit 1; }
+  IFS=. read -r major minor patch <<<"$latest"
+  printf '%s.%s.%s\n' "$major" "$minor" "$((10#$patch + 1))"
+}
+
+json_plan() {
+  node - "$version" "$sha" "$tag" "$resume" <<'NODE'
+const [version, sourceSha, tag, resume] = process.argv.slice(2);
+const plan = {
+  schema: "project-governance.release-plan.v1",
+  project: "frely-cli",
+  release_type: "publish",
+  executor: "local",
+  resume: resume === "1",
+  version,
+  source_sha: sourceSha,
+  target: "npm/GitHub",
+  environment: "production",
+  artifact: "npm package + standalone binaries",
+  destination: "npm registry + GitHub Releases",
+  verification: ["npm package version matches Git tag", "GitHub Release standalone assets and checksums"],
+  tag,
+  workflow: ".github/workflows/publish.yml",
+  main_push_required: true,
+};
+process.stdout.write(JSON.stringify(plan));
+NODE
+}
+
+print_plan() {
+  local mode
+  if ((resume)); then mode="local resume"; else mode="local"; fi
+  printf '%s\n' "Release plan"
+  printf 'project: %s\n' "$PROJECT"
+  printf 'release type: publish\n'
+  printf 'publish mode: %s (bun cross-compile on this machine)\n' "$mode"
+  printf 'version: %s\n' "$version"
+  printf 'source SHA: %s\n' "$sha"
+  printf 'target: %s\n' "$TARGET"
+  printf 'environment: %s\n' "$ENVIRONMENT"
+  printf 'build artifact/image: %s\n' "$ARTIFACT"
+  printf 'publish destination: %s\n' "$DESTINATION"
+  printf 'verification endpoints: %s\n' 'npm package/tag match; GitHub Release assets/checksums'
+  printf 'tag: %s\n' "$tag"
+  printf 'RELEASE_PLAN_JSON=%s\n' "$(json_plan)"
+}
+
+npm_published() {
+  [[ "$(npm view "$1@$version" version 2>/dev/null || true)" == "$version" ]]
+}
+
+asset_name() {
+  local target=$1
+  printf 'frely-%s%s' "$target" "$( [[ "$target" == windows-* ]] && printf .exe )"
+}
+
+require_clean_main
+git fetch origin main --tags
+# （环境：发版, 原因：发版必须基于最新 origin/main；落后自动快进，分叉需人工处理）
+if ! git merge --ff-only origin/main; then
+  echo "main has diverged from origin/main; resolve manually before release" >&2
+  exit 1
+fi
+sha="$(git rev-parse HEAD)"
+[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "unable to resolve source SHA" >&2; exit 1; }
+remote_sha="$(git rev-parse origin/main)"
+git merge-base --is-ancestor "$remote_sha" "$sha" || {
+  echo "local main does not contain origin/main; update main before release" >&2
+  exit 1
+}
+
+[[ -n "$version" ]] || version="$(next_patch_version)"
+[[ "$version" =~ $semver_re ]] || { echo "invalid SemVer: $version" >&2; exit 2; }
+tag="v$version"
+
+# Resume: tag already annotated and pushed for exactly this HEAD -> continue the publish steps only.
+resume=0
+local_commit="$(git rev-parse -q --verify "refs/tags/$tag^{commit}" 2>/dev/null || true)"
+if [[ -n "$local_commit" ]]; then
+  mapfile -t remote_lines < <(git ls-remote origin "refs/tags/$tag")
+  (( ${#remote_lines[@]} >= 1 )) || { echo "release tag exists locally but not on origin: push it, then rerun to resume" >&2; exit 1; }
+  remote_object="${remote_lines[0]%%$'\t'*}"
+  remote_commit="${remote_lines[${#remote_lines[@]}-1]%%$'\t'*}"
+  [[ "$local_commit" == "$sha" && "$remote_commit" == "$sha" ]] || {
+    echo "release tag $tag is bound to another source" >&2
+    exit 1
+  }
+  [[ "$(git rev-parse "refs/tags/$tag")" == "$remote_object" ]] || {
+    echo "local and remote tag identity differ" >&2
+    exit 1
+  }
+  [[ "$(node -p "require('./package.json').version")" == "$version" ]] || {
+    echo "package.json version does not match $tag" >&2
+    exit 1
+  }
+  resume=1
+else
+  [[ -z "$(git ls-remote origin "refs/tags/$tag")" ]] || {
+    echo "release tag already exists on origin: $tag" >&2
+    exit 1
+  }
+fi
+
+if ((dry_run)); then
+  print_plan
+  exit 0
+fi
+
+if (( ! resume )); then
+  command -v bun >/dev/null 2>&1 || { echo "bun is required for standalone builds; install it first" >&2; exit 1; }
+fi
+command -v gh >/dev/null 2>&1 || { echo "gh is required to create the GitHub Release" >&2; exit 1; }
+if ! npm whoami >/dev/null 2>&1; then
+  echo "npm is not logged in on this machine; run 'npm login' (needs publish rights for frely-cli and @frelyhq) and rerun" >&2
+  exit 1
+fi
+
+changed_version_files=0
+cleanup() {
+  local status=$?
+  if ((status != 0 && changed_version_files)); then
+    git restore -- package.json package-lock.json
+  fi
+  exit "$status"
+}
+
+if (( ! resume )); then
+  trap cleanup EXIT INT TERM
+  npm version "$version" --no-git-tag-version --allow-same-version >/dev/null
+  if ! git diff --quiet -- package.json package-lock.json; then
+    changed_version_files=1
+  fi
+
+  npm ci --ignore-scripts
+  npm run check
+  npm test
+  npm run build
+  npm pack --dry-run >/dev/null
+
+  if ! git diff --quiet -- package.json package-lock.json; then
+    git add package.json package-lock.json
+    git commit -m "release: v$version"
+    changed_version_files=0
+  fi
+  sha="$(git rev-parse HEAD)"
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "unable to resolve release SHA" >&2; exit 1; }
+  [[ -z "$(git status --porcelain --untracked-files=all)" ]] || {
+    echo "release preparation left an unexpected dirty worktree" >&2
+    git status --short >&2
+    exit 1
+  }
+  print_plan
+
+  git push origin HEAD:main
+  git tag -a "$tag" "$sha" -m "frely-cli $tag"
+  git push origin "refs/tags/$tag"
+  trap - EXIT INT TERM
+else
+  print_plan
+  echo "resuming: tag $tag is already committed and pushed; skipping version bump, verification and git push"
+fi
+
+mkdir -p artifacts
+echo "=== standalone binaries (bun cross-compile)"
+for target in "${TARGETS[@]}"; do
+  asset="$(asset_name "$target")"
+  if [[ -f "artifacts/$asset" && -f "artifacts/$asset.sha256" ]] && (cd artifacts && shasum -a 256 -c "$asset.sha256" >/dev/null 2>&1); then
+    echo "artifacts/$asset already valid, skipped"
+  else
+    node scripts/build-standalone.mjs "$target"
+  fi
+done
+echo "=== checksum verification"
+(cd artifacts && for checksum in frely-*.sha256; do shasum -a 256 -c "$checksum"; done)
+cp install.sh install.ps1 start.sh start.ps1 artifacts/
+
+echo "=== npm publish: frely-cli@$version"
+if npm_published "frely-cli"; then
+  echo "frely-cli@$version already published, skipped"
+else
+  for attempt in 1 2 3; do
+    npm_tag="$(node -p "require('./package.json').version.includes('-') ? 'next' : 'latest'")"
+    if npm publish --access public --tag "$npm_tag"; then
+      break
+    fi
+    npm_published "frely-cli" && break
+    (( attempt < 3 )) || { echo "npm publish failed after 3 attempts" >&2; exit 1; }
+    sleep 5
+  done
+fi
+
+echo "=== npm publish: @frelyhq/cli-<target> platform packages"
+FRELY_RELEASE_NO_PROVENANCE=1 node scripts/release-platform-packages.mjs artifacts "$version" --publish
+
+echo "=== npmmirror sync (best effort)"
+for target in "${TARGETS[@]}"; do
+  curl -fsS -X PUT "https://registry-direct.npmmirror.com/-/package/@frelyhq/cli-${target}/syncs" >/dev/null 2>&1 || true
+done
+
+echo "=== GitHub Release $tag"
+if gh release view "$tag" >/dev/null 2>&1; then
+  echo "release $tag already exists, skipped"
+else
+  gh release create "$tag" artifacts/* --verify-tag --title "frely-cli $tag" --generate-notes
+fi
+
+printf 'frely-cli local publish complete: version=%s sha=%s tag=%s\n' "$version" "$sha" "$tag"
+printf 'fallback: publish.yml no longer triggers on tag push; run it manually (gh workflow run publish.yml --ref %s) only if this local publish must be redone by Actions\n' "$tag"

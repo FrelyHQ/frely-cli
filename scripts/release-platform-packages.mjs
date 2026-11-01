@@ -58,11 +58,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (flags.includes('--publish')) {
     const tag = version.includes('-') ? 'next' : 'latest';
     // Re-runs skip packages an earlier attempt already published; a transient registry or signing error gets two more tries.
+    // （环境：本地发版, 原因：npm provenance 依赖 CI 的 OIDC，本机无法签名，用 FRELY_RELEASE_NO_PROVENANCE=1 关闭）
+    const publishArgs = ['publish', '--access', 'public', ...(process.env.FRELY_RELEASE_NO_PROVENANCE === '1' ? [] : ['--provenance']), '--tag', tag];
     for (const [index, directory] of directories.entries()) {
       const name = platformPackageName(Object.keys(TARGETS)[index]);
       if (published(name, version)) { process.stdout.write(`${name}@${version} already published, skipped\n`); continue; }
       for (let attempt = 1; ; attempt++) {
-        try { execFileSync('npm', ['publish', '--access', 'public', '--provenance', '--tag', tag], { cwd: directory, stdio: 'inherit' }); break; }
+        try { execFileSync('npm', publishArgs, { cwd: directory, stdio: 'inherit' }); break; }
         catch (error) { if (published(name, version)) break; if (attempt >= 3) throw error; }
       }
     }

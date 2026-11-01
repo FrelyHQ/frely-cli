@@ -1,9 +1,10 @@
 name: Publish npm package and standalone release
 
+# （环境：CLI 发版, 原因：发布默认走本机 release-package-local；本 workflow 仅作 Actions
+#   备用路径，需手动在发布 tag 的 ref 上 dispatch（gh workflow run publish.yml --ref vX.Y.Z），
+#   避免本地发布与自动触发在同一 tag 上重复发布。）
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  workflow_dispatch:
 
 permissions:
   contents: read
