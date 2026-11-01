@@ -50,6 +50,11 @@ export function skillSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "").replace(/-+/gu, "-").slice(0, 64).replace(/-+$/u, "") || "agent";
 }
 
+/** The folder name of an item installed as `username/name`: both parts, so two items with the same name from different owners can sit side by side. */
+export function installDirName(installName: string): string {
+  return installName.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "").slice(0, 80).replace(/-+$/u, "");
+}
+
 export async function writeManagedSkill(input: {
   readonly record: Omit<ManagedSkillRecord, "sha256" | "installedAt" | "pendingSha256">;
   readonly content: string;
