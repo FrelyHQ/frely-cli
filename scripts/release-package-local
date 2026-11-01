@@ -244,15 +244,20 @@ else
 fi
 
 mkdir -p artifacts
+# 版本戳在全部构建成功后才写入：失败重跑会整体重建，旧版本产物永远不会被复用
+build_version="$(cat artifacts/.frely-build-version 2>/dev/null || true)"
 echo "=== standalone binaries (bun cross-compile)"
 for target in "${TARGETS[@]}"; do
   asset="$(asset_name "$target")"
-  if [[ -f "artifacts/$asset" && -f "artifacts/$asset.sha256" ]] && (cd artifacts && shasum -a 256 -c "$asset.sha256" >/dev/null 2>&1); then
+  if [[ "$build_version" == "$version" ]] \
+    && [[ -f "artifacts/$asset" && -f "artifacts/$asset.sha256" ]] \
+    && (cd artifacts && shasum -a 256 -c "$asset.sha256" >/dev/null 2>&1); then
     echo "artifacts/$asset already valid, skipped"
   else
     node scripts/build-standalone.mjs "$target"
   fi
 done
+echo "$version" > artifacts/.frely-build-version
 echo "=== checksum verification"
 (cd artifacts && for checksum in frely-*.sha256; do shasum -a 256 -c "$checksum"; done)
 cp install.sh install.ps1 start.sh start.ps1 artifacts/

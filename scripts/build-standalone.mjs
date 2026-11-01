@@ -42,6 +42,11 @@ try {
     child.once("error", reject);
     child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`Standalone compilation failed: ${code}`)));
   });
+  // （环境：darwin 宿主机, 原因：bun 1.4.0 编译产物的内嵌 adhoc 签名无效，Apple Silicon 内核直接 SIGKILL；
+  //   本机重签后才能运行，校验和必须在其之后计算。ubuntu 交叉编译产物无内嵌签名，不受影响。）
+  if (target.startsWith("darwin") && process.platform === "darwin") {
+    await run("codesign", ["--force", "--sign", "-", output]);
+  }
 } finally {
   await writeFile(irohNative, irohDefault);
 }
