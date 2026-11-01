@@ -10,7 +10,14 @@ const SESSION_COOKIE_NAME = "friday_session_token";
 export const CONFIG_VERSION = 3;
 const LEGACY_CONFIG_VERSION = 1;
 const OAUTH_CLIENT_ID = "frely-cli-basic";
-const OAUTH_SCOPE = "openid profile profile:read email offline_access device-relay:provider";
+const OAUTH_SCOPE = "openid profile profile:read email offline_access device-relay:provider cloud:read";
+
+// One login, two audiences: the API resource for account/device calls, plus the Cloud resource so read-only Cloud tools
+// (frely item install, frely api list) work with no controller session. Write and paid tools stay controller-only.
+function appendLoginResources(body: URLSearchParams, relayUrl: string): void {
+  body.append("resource", `${relayUrl}/api`);
+  body.append("resource", `${relayUrl}/mcp`);
+}
 const DEFAULT_RELAY = "https://frely.cloud";
 // app.frely.cloud now belongs to the Frely App; logins saved against it move to frely.cloud (see currentRelayConfig).
 const RETIRED_RELAY_HOSTNAME = "app.frely.cloud";
@@ -502,10 +509,12 @@ export async function readConfig(): Promise<CliConfig> {
 }
 
 async function requestDeviceCode(relayUrl: string): Promise<DeviceCodeResponse> {
+  const codeBody = new URLSearchParams({ client_id: OAUTH_CLIENT_ID, scope: OAUTH_SCOPE });
+  appendLoginResources(codeBody, relayUrl);
   const response = await fetchWithTimeout(`${relayUrl}/api/auth/device/code`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", origin: relayUrl, accept: "application/json" },
-    body: new URLSearchParams({ client_id: OAUTH_CLIENT_ID, scope: OAUTH_SCOPE, resource: `${relayUrl}/api` }).toString(),
+    body: codeBody.toString(),
     redirect: "error",
   });
   const payload = await safeJson(response);
@@ -531,7 +540,8 @@ export async function pollDeviceToken(
   const deadline = Date.now() + expiresIn * 1000;
   let intervalMs = interval * 1000;
   while (Date.now() < deadline) {
-    const body = new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: deviceCode, client_id: OAUTH_CLIENT_ID, resource: `${relayUrl}/api` });
+    const body = new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: deviceCode, client_id: OAUTH_CLIENT_ID });
+    appendLoginResources(body, relayUrl);
     appendSessionBinding(body, deviceId);
     const response = await fetchWithTimeout(`${relayUrl}/api/auth/oauth2/token`, {
       method: "POST",
@@ -624,7 +634,8 @@ async function refreshOAuthCredential(relayUrl: string, refreshToken: string, de
 }
 
 async function refreshOAuthCredentialOnce(relayUrl: string, refreshToken: string, deviceId?: string | null): Promise<AuthCredential> {
-  const body = new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken, client_id: OAUTH_CLIENT_ID, resource: `${relayUrl}/api` });
+  const body = new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken, client_id: OAUTH_CLIENT_ID });
+  appendLoginResources(body, relayUrl);
   appendSessionBinding(body, deviceId);
   let response: Response;
   try {
