@@ -23,6 +23,6 @@ The `allow` lines are only the read-only commands. `frely run`, `edit`, `kill` a
 Tokens are also bound to a key (DPoP), so a copied token file does nothing on another computer; the deny rules close the same-computer case
 as far as a rule can.
 
-On a Linux machine without a Secret Service (a server, a container) the session is stored in an encrypted file under
-`~/.config/frely/controller-vault-v1`, with its key in `~/.local/state/frely/controller.key`. Set `FRELY_CREDENTIAL_KEY` (a 64-hex-character
-key from your secret manager) to keep the key off the disk.
+When the OS credential store is unavailable (a Linux server or container without a Secret Service, a locked keychain over SSH), the session is
+stored in an encrypted file under `~/.config/frely/controller-vault-v1`, with its key in `~/.local/state/frely/controller.key`. Set
+`FRELY_CREDENTIAL_KEY` (a 64-hex-character key from your secret manager) to keep the key off the disk.

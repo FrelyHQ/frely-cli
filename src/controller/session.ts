@@ -44,36 +44,44 @@ export function controllerMcpUrl(relayUrl: string, env: NodeJS.ProcessEnv = proc
 }
 
 /**
- * Where the session lives: the OS credential store, or on a headless Linux (no Secret Service) an encrypted file whose key sits in a
- * separate state file. The file only keeps a copied vault unreadable; the same user's processes can still read both, which is why the
+ * Where the session lives: the OS credential store when one answers, and otherwise an encrypted file (`controller-vault-v1`) whose key sits
+ * in a separate state file. The file only keeps a copied vault unreadable; the same user's processes can still read both, which is why the
  * tokens are also bound to the DPoP key and why Claude Code is told not to read this folder.
  */
 export function sessionStore(env: NodeJS.ProcessEnv = process.env): CredentialStore {
+  // Only the automatic store is backed by the vault; explicit `system` and an operator-injected key stay strict, as configured.
+  if ((env.FRELY_CREDENTIAL_STORE ?? "auto") !== "auto" || env.FRELY_CREDENTIAL_KEY !== undefined) return credentialStore;
+  return layeredSessionStore(credentialStore, controllerVault(env));
+}
+
+/** The encrypted file the session falls back to: its key sits in a separate state file, so the vault alone is unreadable. */
+function controllerVault(env: NodeJS.ProcessEnv): CredentialStore {
   const config = env.XDG_CONFIG_HOME || join(homedir(), ".config");
-  const fallback = () => {
-    const keyFile = resolve(env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "frely", "controller.key");
-    const key = async () => {
-      try { return (await readFile(keyFile, "utf8")).trim(); } catch { /* Created below. */ }
-      const fresh = randomBytes(32).toString("hex");
-      await mkdir(dirname(keyFile), { recursive: true, mode: 0o700 });
-      await writeFile(keyFile, fresh + "\n", { mode: 0o600, flag: "wx" }).catch(async () => undefined);
-      await chmod(keyFile, 0o600).catch(() => undefined);
-      return (await readFile(keyFile, "utf8")).trim();
-    };
-    const vault = async () => createEncryptedCredentialStore(resolve(config, "frely", "controller-vault-v1"), await key());
-    return { getPassword: async (s: string, a: string) => (await vault()).getPassword(s, a), setPassword: async (s: string, a: string, v: string) => (await vault()).setPassword(s, a, v), deletePassword: async (s: string, a: string) => (await vault()).deletePassword(s, a) } satisfies CredentialStore;
+  const keyFile = resolve(env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "frely", "controller.key");
+  const key = async () => {
+    try { return (await readFile(keyFile, "utf8")).trim(); } catch { /* Created below. */ }
+    const fresh = randomBytes(32).toString("hex");
+    await mkdir(dirname(keyFile), { recursive: true, mode: 0o700 });
+    await writeFile(keyFile, fresh + "\n", { mode: 0o600, flag: "wx" }).catch(async () => undefined);
+    await chmod(keyFile, 0o600).catch(() => undefined);
+    return (await readFile(keyFile, "utf8")).trim();
   };
-  const headless = process.platform === "linux" && env.FRELY_CREDENTIAL_KEY === undefined && (env.FRELY_CREDENTIAL_STORE ?? "auto") === "auto";
-  if (!headless) return credentialStore;
-  const file = fallback();
-  // The OS store first; only a machine without one keeps the session in the encrypted file.
+  const vault = async () => createEncryptedCredentialStore(resolve(config, "frely", "controller-vault-v1"), await key());
+  return { getPassword: async (s: string, a: string) => (await vault()).getPassword(s, a), setPassword: async (s: string, a: string, v: string) => (await vault()).setPassword(s, a, v), deletePassword: async (s: string, a: string) => (await vault()).deletePassword(s, a) } satisfies CredentialStore;
+}
+
+/**
+ * The OS store first; whatever it cannot take or serve lives on in the encrypted file. A value already in the file is never shadowed by the
+ * keyring: it is read first and rewritten in place, so one session never splits across two stores.
+ */
+export function layeredSessionStore(system: CredentialStore, vault: CredentialStore): CredentialStore {
   return {
-    async getPassword(service, account) { return (await file.getPassword(service, account)) ?? await credentialStore.getPassword(service, account).catch(() => null); },
+    async getPassword(service, account) { return (await vault.getPassword(service, account)) ?? await system.getPassword(service, account).catch(() => null); },
     async setPassword(service, account, password) {
-      if (await file.getPassword(service, account) === null) { try { await credentialStore.setPassword(service, account, password); return; } catch { /* No Secret Service. */ } }
-      await file.setPassword(service, account, password);
+      if (await vault.getPassword(service, account) === null) { try { await system.setPassword(service, account, password); return; } catch { /* No usable OS store. */ } }
+      await vault.setPassword(service, account, password);
     },
-    async deletePassword(service, account) { const removed = await file.deletePassword(service, account); return await credentialStore.deletePassword(service, account).catch(() => false) || removed; },
+    async deletePassword(service, account) { const removed = await vault.deletePassword(service, account); return await system.deletePassword(service, account).catch(() => false) || removed; },
   };
 }
 
