@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { credentialStore, type CredentialStore } from "../credential-store.js";
 import { CloudItemError, CloudToolError, writeItemFolder, type CloudToolCaller } from "./cloud-item.js";
-import { managedSkillRoot, type SkillHost, type SkillScope } from "./managed.js";
+import { installDirName, managedSkillRoot, type SkillHost, type SkillScope } from "./managed.js";
 
 /** `username/name` of a remote MCP product: the same name the marketplace shows and `frely item install` takes. */
 const MCP_NAME = /^([A-Za-z0-9][A-Za-z0-9-]{0,63})\/([A-Za-z0-9][A-Za-z0-9-]{0,63})$/u;
@@ -191,7 +191,7 @@ function oneLine(text: string, max: number): string {
 
 /** SKILL.md for an MCP used through the CLI. Tool text is the creator's and goes into tools.md only. */
 export function remoteMcpSkill(name: string, tools: readonly RemoteMcpTool[]): { readonly skill: string; readonly toolsDoc: string } {
-  const { slug } = parseMcpName(name);
+  const slug = installDirName(parseMcpName(name).name);
   const names = tools.slice(0, 8).map((tool) => tool.name).join(", ");
   const skill = `---
 name: ${slug}
@@ -237,7 +237,7 @@ export async function installRemoteMcpSkill(input: {
   const { skill, toolsDoc } = remoteMcpSkill(connection.name, tools);
   const home = input.home ?? homedir();
   const cwd = input.cwd ?? process.cwd();
-  const target = join(managedSkillRoot(input.host ?? "generic", input.scope ?? "global", resolve(cwd, input.scope === "project" ? input.dir ?? "." : "."), home), parseMcpName(connection.name).slug);
+  const target = join(managedSkillRoot(input.host ?? "generic", input.scope ?? "global", resolve(cwd, input.scope === "project" ? input.dir ?? "." : "."), home), installDirName(parseMcpName(connection.name).name));
   const file = (path: string, text: string) => ({ path, contentBase64: Buffer.from(text).toString("base64"), isScript: false });
   await writeItemFolder(target, connection.id, "mcp", [file("SKILL.md", skill), file("tools.md", toolsDoc)], home);
   return Object.freeze({ id: connection.id, name: connection.name, path: target, tools: tools.length });

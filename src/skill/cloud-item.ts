@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, posix, resolve, win32 } from "node:path";
-import { assertManagedSkillPath, managedSkillRoot, type SkillHost, type SkillScope } from "./managed.js";
+import { assertManagedSkillPath, installDirName, managedSkillRoot, type SkillHost, type SkillScope } from "./managed.js";
 import { loadOrCreateDeviceSealKey, parseLease, stubFor, type SealedLease } from "./sealed.js";
 import { filesDigest, readInstall, untouched, writeInstall, type InstallRecord } from "./registry.js";
 
@@ -117,9 +117,11 @@ export async function installCloudItem(input: {
   const cwd = input.cwd ?? process.cwd();
   const home = input.home ?? homedir();
   // An item keeps the name its creator gave it, exactly like a Skill copied there by hand.
+  // The folder carries the owner too (`username-name`), so two items with the same name from different owners can both be installed. An id-only install has no owner to name.
+  const folder = input.name !== undefined ? installDirName(input.name) : manifest.slug;
   const target = input.target !== undefined ? resolve(input.target) : manifest.kind === "skill"
-    ? join(managedSkillRoot(input.host ?? "generic", input.scope ?? "global", resolve(cwd, input.scope === "project" ? input.dir ?? "." : "."), home), manifest.slug)
-    : join(resolve(cwd, input.dir ?? "."), manifest.slug);
+    ? join(managedSkillRoot(input.host ?? "generic", input.scope ?? "global", resolve(cwd, input.scope === "project" ? input.dir ?? "." : "."), home), folder)
+    : join(resolve(cwd, input.dir ?? "."), folder);
   const placed = placeSealedScripts(files);
   const written = await writeItemFolder(target, manifest.id, manifest.kind, placed.files, home, manifest.version);
   if (lease !== null && placed.sealed > 0) await writeLease(target, { skillId: manifest.id, version: manifest.version, lease });
