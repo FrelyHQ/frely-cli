@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { Controller, ToolResult } from "./client.js";
 import { runControllerCommand, useControllerOpener, waitForPermission } from "./commands.js";
-import { EXIT } from "./session.js";
+import { EXIT } from "./client.js";
 
 const text = (value: unknown, extra: Partial<ToolResult> = {}): ToolResult => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }], ...extra });
 

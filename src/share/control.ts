@@ -53,7 +53,7 @@ export async function accountShareControl(): Promise<ShareControl> {
   const call = await accountRelayCaller(SHARES_PATH);
   return {
     async create(input) {
-      const controller = await openController({ interactive: isInteractiveTerminal() });
+      const controller = await openController();
       try { return await createShareViaApproval(controller, { deviceId: device.deviceId, ...(input.ttlSeconds !== undefined ? { ttlSeconds: input.ttlSeconds } : {}) }); }
       finally { await controller.close().catch(() => undefined); }
     },

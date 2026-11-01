@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { EXIT } from "../../controller/session.js";
+import { EXIT } from "../../controller/client.js";
 import { runAgentLocal, type LocalIo } from "./command.js";
 import { logPath, readRecord, workspaceOf, writeRecord, type LocalAgentRecord } from "./store.js";
 

@@ -79,7 +79,7 @@ export const API_USAGE = `Frely API — call your Frely account's business opera
   frely api call <tool> [--json '<object>' | --input <file>] [--wait]
 
 "list" prints the operations grouped by area with a one-line description each; add --json for the full tool list.
-Other results are JSON. The first write call asks you to approve this computer in your browser (the controller authorization);
+Other results are JSON. The first write call asks you to approve this computer in your browser;
 frely logout also revokes it. Without a terminal it prints the approval link and exits; run it again after approving.
 Calls may create resources or incur usage. Failed writes are never replayed automatically.
 A new device may only read non-sensitive data; for anything else the error links to the web
@@ -196,7 +196,7 @@ export async function runApi(args: readonly string[]): Promise<{ value?: unknown
 
 /**
  * `frely api list/describe` and read-only calls run on the login token alone; a write or paid tool is invisible there, and
- * `--wait` needs the controller connection to poll the approval, so those return null and the caller falls back to the controller path.
+ * `--wait` needs the FreyMCP connection to poll the approval, so those return null and the caller falls back to that path.
  */
 async function runApiDirect(request: { action: string; name: string | undefined; options: Map<string, string>; fullJson: boolean; wait: boolean; input: Record<string, unknown> }): Promise<{ value?: unknown; text?: string; failed?: boolean } | null> {
   const reader = await openCloudReader();
@@ -222,9 +222,9 @@ async function runApiDirect(request: { action: string; name: string | undefined;
   } finally { await reader.close().catch(() => undefined); }
 }
 
-/** `frely api` on the controller connection: the account tools are FrelyMCP's frely_list and frely_call, so the answers and approvals are the same as in an AI client. */
+/** `frely api` on this machine's FreyMCP connection: the account tools are FrelyMCP's frely_list and frely_call, so the answers and approvals are the same as in an AI client. */
 async function runApiViaController(request: { action: string; name: string | undefined; options: Map<string, string>; fullJson: boolean; wait: boolean; input: Record<string, unknown> }): Promise<{ value?: unknown; text?: string; failed?: boolean }> {
-  const controller = await openController({ interactive: isInteractiveTerminal() });
+  const controller = await openController();
   try {
     const textOf = (result: CallResult) => (Array.isArray(result.content) ? (result.content as Array<{ type?: unknown; text?: unknown }>).filter(part => part.type === "text" && typeof part.text === "string").map(part => part.text as string).join("\n") : "");
     if (request.action === "list" || request.action === "describe") {
@@ -254,7 +254,7 @@ export async function callCloudTool(name: string, input: Record<string, unknown>
   return callCloudToolWith(name, input, { openReader: openCloudReader, openControllerConnection });
 }
 
-/** The two connections a Cloud call needs; production opens the login's reader directly and the controller only on fallback. */
+/** The two connections a Cloud call needs; production opens the login's reader directly and FreyMCP only on fallback. */
 export interface CloudCallDeps {
   openReader(): Promise<CloudReader>;
   openControllerConnection(): Promise<{ call(name: string, args: Record<string, unknown>): Promise<DirectResult>; close(): Promise<void> }>;
@@ -265,7 +265,7 @@ export async function callCloudToolWith(name: string, input: Record<string, unkn
   try {
     return cloudToolResult(await reader.call(name, input));
   } catch (error) {
-    // A read-only login cannot see write or paid tools; those keep the controller connection and its approval codes.
+    // A read-only reader cannot see write or paid tools; those go to the FreyMCP connection and its approval codes.
     if (error instanceof CloudToolError && error.code === "tool_unavailable_or_forbidden") return callCloudToolViaController(name, input, deps.openControllerConnection);
     throw error;
   } finally { await reader.close().catch(() => undefined); }
@@ -287,11 +287,11 @@ function cloudToolResult(result: DirectResult): Record<string, unknown> {
 }
 
 async function openControllerConnection(): Promise<{ call(name: string, args: Record<string, unknown>): Promise<DirectResult>; close(): Promise<void> }> {
-  const controller = await openController({ interactive: isInteractiveTerminal() });
+  const controller = await openController();
   return { call: (name, args) => controller.call(name, args), close: () => controller.close() };
 }
 
-/** The same call on the controller connection (frely_call): for write and paid tools, where an approval code guards every write. */
+/** The same call on the FreyMCP connection (frely_call): for write and paid tools, where an approval code guards every write. */
 async function callCloudToolViaController(name: string, input: Record<string, unknown>, open: CloudCallDeps["openControllerConnection"]): Promise<Record<string, unknown>> {
   const controller = await open();
   try { return cloudToolResult(await controller.call("frely_call", { tool: name, arguments: input })); }

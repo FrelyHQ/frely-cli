@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dpopFetch, outcomeOf } from "./client.js";
-import { generateDpopKey } from "./dpop.js";
-import { ControllerError, EXIT, type ControllerSession } from "./session.js";
+import { mcpFetch, outcomeOf, type LoginMcpSession } from "./client.js";
+import { ControllerError, EXIT } from "./client.js";
 
-const session = (expiresAt = Date.now() + 600_000): ControllerSession => ({ version: 1, relayUrl: "https://frely.test", mcpUrl: "https://mcp.test/mcp", deviceId: `drd_${"a".repeat(32)}`, privateKeyPem: generateDpopKey().privateKeyPem, accessToken: "fmcp_at_one", refreshToken: "r1", expiresAt });
+const session = (mcpToken = "fmcp_at_one"): LoginMcpSession => ({ mcpUrl: "https://mcp.test/mcp", mcpToken });
 
 async function withFetch<T>(handler: (request: { url: string; headers: Headers }) => Response, work: () => Promise<T>): Promise<{ value: T; seen: Array<{ url: string; headers: Headers }> }> {
   const original = globalThis.fetch;
@@ -17,33 +16,24 @@ async function withFetch<T>(handler: (request: { url: string; headers: Headers }
   try { return { value: await work(), seen }; } finally { globalThis.fetch = original; }
 }
 
-test("every request carries the DPoP token and a fresh proof for that request", async () => {
-  const signed = dpopFetch(session());
-  const { seen } = await withFetch(() => new Response("{}"), async () => { await signed.fetch("https://mcp.test/mcp", { method: "POST" }); await signed.fetch("https://mcp.test/mcp", { method: "POST" }); });
-  assert.equal(seen[0]!.headers.get("authorization"), "DPoP fmcp_at_one");
-  assert.ok(seen[0]!.headers.get("dpop"));
-  assert.notEqual(seen[0]!.headers.get("dpop"), seen[1]!.headers.get("dpop"));
+test("every request carries the login's MCP side token as a bearer token", async () => {
+  const signed = mcpFetch(session());
+  const { seen } = await withFetch(() => new Response("{}"), async () => { await signed.fetch("https://mcp.test/mcp", { method: "POST" }); });
+  assert.equal(seen[0]!.headers.get("authorization"), "Bearer fmcp_at_one");
+  assert.ok(signed.session().mcpToken);
 });
 
 test("a refused token is renewed once and the request sent again; a second refusal is exit code 4", async () => {
-  const refreshed = { ...session(), accessToken: "fmcp_at_two" };
+  const refreshed = session("fmcp_at_two");
   let refreshes = 0;
-  const signed = dpopFetch(session(), { refresh: async () => { refreshes++; return refreshed; } });
-  const ok = await withFetch(({ headers }) => new Response("{}", { status: headers.get("authorization") === "DPoP fmcp_at_two" ? 200 : 401 }), () => signed.fetch("https://mcp.test/mcp", { method: "POST" }));
+  const signed = mcpFetch(session(), { refresh: async () => { refreshes++; return refreshed; } });
+  const ok = await withFetch(({ headers }) => new Response("{}", { status: headers.get("authorization") === "Bearer fmcp_at_two" ? 200 : 401 }), () => signed.fetch("https://mcp.test/mcp", { method: "POST" }));
   assert.equal(ok.value.status, 200);
   assert.equal(refreshes, 1);
-  const refused = dpopFetch(session(), { refresh: async (current) => current });
+  const refused = mcpFetch(session(), { refresh: async (current) => current });
   await withFetch(() => new Response("no", { status: 401 }), async () => {
     await assert.rejects(refused.fetch("https://mcp.test/mcp", { method: "POST" }), (error: unknown) => error instanceof ControllerError && error.exitCode === EXIT.auth);
   });
-});
-
-test("an access token about to run out is renewed before the request", async () => {
-  let refreshes = 0;
-  const signed = dpopFetch(session(Date.now() + 5_000), { refresh: async (current) => { refreshes++; return { ...current, accessToken: "fmcp_at_new", expiresAt: Date.now() + 600_000 }; } });
-  const { seen } = await withFetch(() => new Response("{}"), () => signed.fetch("https://mcp.test/mcp", { method: "POST" }));
-  assert.equal(refreshes, 1);
-  assert.equal(seen[0]!.headers.get("authorization"), "DPoP fmcp_at_new");
 });
 
 const text = (value: unknown) => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }] });

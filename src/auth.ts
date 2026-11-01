@@ -10,14 +10,24 @@ const SESSION_COOKIE_NAME = "friday_session_token";
 export const CONFIG_VERSION = 3;
 const LEGACY_CONFIG_VERSION = 1;
 const OAUTH_CLIENT_ID = "frely-cli-basic";
-const OAUTH_SCOPE = "openid profile profile:read email offline_access device-relay:provider cloud:read";
+const OAUTH_SCOPE = "openid profile profile:read email offline_access device-relay:provider cloud:read mcp:invoke";
 
-// One login, two audiences: the API resource for account/device calls, plus the Cloud resource so read-only Cloud tools
-// (frely item install, frely api list) work with no controller session. Write and paid tools stay controller-only.
+// One login, three audiences: the API resource for account/device calls, the Cloud resource for read-only Cloud tools (frely item install,
+// frely api list), and this machine's FreyMCP connection (device tools, Cloud writes) — all approved by the single `frely login`.
 function appendLoginResources(body: URLSearchParams, relayUrl: string): void {
   body.append("resource", `${relayUrl}/api`);
   body.append("resource", `${relayUrl}/mcp`);
+  body.append("resource", frelyMcpUrl(relayUrl));
 }
+
+/** The address of FreyMCP, the resource the machine's side token is for (mirrors the server: the dedicated MCP host for Frely's own sites). */
+export function frelyMcpUrl(relayUrl: string, env: NodeJS.ProcessEnv = process.env): string {
+  if (env.FRELY_MCP_URL) return new URL(env.FRELY_MCP_URL).toString();
+  const url = new URL(relayUrl);
+  if (url.hostname === "frely.cloud" || url.hostname === "app.frely.cloud") return "https://mcp.frely.cloud/mcp";
+  return `${url.origin}/mcp/devices`;
+}
+const FRELY_MCP_TOKEN_FIELD = "frely_mcp_token";
 const DEFAULT_RELAY = "https://frely.cloud";
 // app.frely.cloud now belongs to the Frely App; logins saved against it move to frely.cloud (see currentRelayConfig).
 const RETIRED_RELAY_HOSTNAME = "app.frely.cloud";
@@ -51,6 +61,8 @@ export interface AuthCredential {
   expiresAt?: number;
   /** Bound Frely CLI session id returned by the Relay when per-device sessions are supported. */
   sessionBindingId?: string;
+  /** This machine's FreyMCP side token, minted beside the login access token by the same device-code approval. */
+  mcpToken?: string;
 }
 
 const SESSION_BINDING_DEVICE_ID_PARAM = "session_binding_device_id";
@@ -74,6 +86,8 @@ export interface StoredOAuthCredential {
   expiresAt: number;
   /** Bound Frely CLI session id, when the Relay supported per-device sessions at issue time. */
   sessionBindingId?: string;
+  /** This machine's FreyMCP side token; expires with the login access token and is replaced on every refresh. */
+  mcpToken?: string;
 }
 
 export interface AuthSnapshot {
@@ -321,7 +335,7 @@ export async function resumeDeviceLogin(relayInput?: string): Promise<{ user: Pu
 /** Poll the approved device code, then store the credentials and the signed-in user. */
 export async function finishDeviceLogin(relayUrl: string, device: DeviceCodeResponse | EmailDeviceChallenge, deviceId: string): Promise<{ user: PublicUser; sessionBound: boolean }> {
   const token = await pollDeviceToken(relayUrl, device, deviceId);
-  const user = await fetchUser(relayUrl, { scheme: "bearer", value: token.accessToken, ...(token.refreshToken ? { refreshToken: token.refreshToken } : {}), expiresAt: token.expiresAt, ...(token.sessionBindingId ? { sessionBindingId: token.sessionBindingId } : {}) });
+  const user = await fetchUser(relayUrl, { scheme: "bearer", value: token.accessToken, ...(token.refreshToken ? { refreshToken: token.refreshToken } : {}), expiresAt: token.expiresAt, ...(token.sessionBindingId ? { sessionBindingId: token.sessionBindingId } : {}), ...(token.mcpToken ? { mcpToken: token.mcpToken } : {}) });
   const key = accountKey(relayUrl);
   await credentialStore.setPassword(SERVICE, key, JSON.stringify({
     version: 1,
@@ -330,6 +344,7 @@ export async function finishDeviceLogin(relayUrl: string, device: DeviceCodeResp
     ...(token.refreshToken ? { refreshToken: token.refreshToken } : {}),
     expiresAt: token.expiresAt,
     ...(token.sessionBindingId ? { sessionBindingId: token.sessionBindingId } : {}),
+    ...(token.mcpToken ? { mcpToken: token.mcpToken } : {}),
   } satisfies StoredOAuthCredential));
   try {
     await writeConfig({ version: CONFIG_VERSION, relayUrl, user, deviceId });
@@ -392,10 +407,15 @@ export async function logout(): Promise<void> {
       method: "POST", headers: { cookie: credential.value, origin: config.relayUrl, "content-type": "application/json" }, body: "{}", redirect: "error",
     }).catch(() => undefined);
   } else if (credential?.scheme === "bearer") {
-    const revoke = async (token: string, hint: string) => fetchWithTimeout(`${config.relayUrl}/api/auth/oauth2/revoke`, {
-      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: config.relayUrl },
-      body: new URLSearchParams({ client_id: OAUTH_CLIENT_ID, token, token_type_hint: hint }).toString(), redirect: "error",
-    }).catch(() => undefined);
+    // The machine's binding rides along, so revoking this login disconnects only this computer's FreyMCP connection, not the user's other machines.
+    const revoke = async (token: string, hint: string) => {
+      const body = new URLSearchParams({ client_id: OAUTH_CLIENT_ID, token, token_type_hint: hint });
+      appendSessionBinding(body, config.deviceId);
+      return fetchWithTimeout(`${config.relayUrl}/api/auth/oauth2/revoke`, {
+        method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: config.relayUrl },
+        body: body.toString(), redirect: "error",
+      }).catch(() => undefined);
+    };
     await revoke(credential.value, "access_token");
     if (credential.refreshToken) await revoke(credential.refreshToken, "refresh_token");
   }
@@ -535,7 +555,7 @@ export async function pollDeviceToken(
   relayUrl: string,
   device: DeviceCodeResponse | EmailDeviceChallenge,
   deviceId?: string | null,
-): Promise<{ accessToken: string; refreshToken?: string; expiresAt: number; sessionBindingId?: string }> {
+): Promise<{ accessToken: string; refreshToken?: string; expiresAt: number; sessionBindingId?: string; mcpToken?: string }> {
   // Support both DeviceCodeResponse and EmailDeviceChallenge
   const deviceCode = "device_code" in device ? device.device_code : device.deviceCode;
   const expiresIn = "expires_in" in device ? device.expires_in : device.expiresIn;
@@ -558,7 +578,7 @@ export async function pollDeviceToken(
     const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
     if (response.ok && isString(record.access_token) && (!record.token_type || String(record.token_type).toLowerCase() === "bearer")) {
       const expiresInSeconds = numberPayload(record.expires_in, 1, 86_400);
-      return { accessToken: record.access_token, ...(isString(record.refresh_token) ? { refreshToken: record.refresh_token } : {}), expiresAt: Date.now() + expiresInSeconds * 1000, ...(isString(record[SESSION_BINDING_ID_FIELD]) ? { sessionBindingId: record[SESSION_BINDING_ID_FIELD] as string } : {}) };
+      return { accessToken: record.access_token, ...(isString(record.refresh_token) ? { refreshToken: record.refresh_token } : {}), expiresAt: Date.now() + expiresInSeconds * 1000, ...(isString(record[SESSION_BINDING_ID_FIELD]) ? { sessionBindingId: record[SESSION_BINDING_ID_FIELD] as string } : {}), ...(isString(record[FRELY_MCP_TOKEN_FIELD]) ? { mcpToken: record[FRELY_MCP_TOKEN_FIELD] as string } : {}) };
     }
     const errorCode = typeof record.error === "string" ? record.error : "";
     if (errorCode === "authorization_pending") {
@@ -609,10 +629,12 @@ async function loadCredential(config: CliConfig, refresh: boolean, input?: strin
     const refreshed: StoredOAuthCredential = { version: 1, type: "basic-oauth", accessToken: next.value, ...(next.refreshToken ? { refreshToken: next.refreshToken } : {}), expiresAt: next.expiresAt };
     const sessionBindingId = next.sessionBindingId ?? stored.sessionBindingId;
     if (sessionBindingId) refreshed.sessionBindingId = sessionBindingId;
+    const mcpToken = next.mcpToken ?? stored.mcpToken;
+    if (mcpToken) refreshed.mcpToken = mcpToken;
     await credentialStore.setPassword(SERVICE, accountKey(config.relayUrl), JSON.stringify(refreshed satisfies StoredOAuthCredential));
-    return next;
+    return { ...next, ...(mcpToken ? { mcpToken } : {}) };
   }
-  return { scheme: "bearer", value: stored.accessToken, ...(stored.refreshToken ? { refreshToken: stored.refreshToken } : {}), expiresAt: stored.expiresAt, ...(stored.sessionBindingId ? { sessionBindingId: stored.sessionBindingId } : {}) };
+  return { scheme: "bearer", value: stored.accessToken, ...(stored.refreshToken ? { refreshToken: stored.refreshToken } : {}), expiresAt: stored.expiresAt, ...(stored.sessionBindingId ? { sessionBindingId: stored.sessionBindingId } : {}), ...(stored.mcpToken ? { mcpToken: stored.mcpToken } : {}) };
 }
 
 export const LOGIN_REFRESH_UNAVAILABLE = "Frely login refresh is temporarily unavailable; retrying later.";
@@ -655,7 +677,19 @@ async function refreshOAuthCredentialOnce(relayUrl: string, refreshToken: string
   const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
   if (!response.ok || !isString(record.access_token)) throw new Error("Frely login expired. Run `frely login`.");
   const expiresIn = numberPayload(record.expires_in, 1, 86_400);
-  return { scheme: "bearer", value: record.access_token, ...(isString(record.refresh_token) ? { refreshToken: record.refresh_token } : { refreshToken }), expiresAt: Date.now() + expiresIn * 1000, ...(isString(record[SESSION_BINDING_ID_FIELD]) ? { sessionBindingId: record[SESSION_BINDING_ID_FIELD] as string } : {}) };
+  return { scheme: "bearer", value: record.access_token, ...(isString(record.refresh_token) ? { refreshToken: record.refresh_token } : { refreshToken }), expiresAt: Date.now() + expiresIn * 1000, ...(isString(record[SESSION_BINDING_ID_FIELD]) ? { sessionBindingId: record[SESSION_BINDING_ID_FIELD] as string } : {}), ...(isString(record[FRELY_MCP_TOKEN_FIELD]) ? { mcpToken: record[FRELY_MCP_TOKEN_FIELD] as string } : {}) };
+}
+
+/** Refreshes the login now, whatever its expiry, and returns it with the machine's FreyMCP side token — for a request the server refused. */
+export async function refreshLoginCredential(): Promise<{ config: { relayUrl: string }; credential: AuthCredential }> {
+  const config = await currentRelayConfig(await readConfig());
+  const stored = await loadCredential(config, false);
+  if (!stored?.refreshToken) throw new Error("Frely login expired. Run `frely login`.");
+  const next = await refreshOAuthCredential(config.relayUrl, stored.refreshToken, config.deviceId);
+  const mcpToken = next.mcpToken ?? stored.mcpToken;
+  const refreshed: StoredOAuthCredential = { version: 1, type: "basic-oauth", accessToken: next.value, ...(next.refreshToken ? { refreshToken: next.refreshToken } : {}), expiresAt: next.expiresAt!, ...(mcpToken ? { mcpToken } : {}) };
+  await credentialStore.setPassword(SERVICE, accountKey(config.relayUrl), JSON.stringify(refreshed satisfies StoredOAuthCredential));
+  return { config: { relayUrl: config.relayUrl }, credential: { ...next, ...(mcpToken ? { mcpToken } : {}) } };
 }
 
 export function openVerificationUrl(url: string): void {

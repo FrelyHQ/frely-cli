@@ -86,6 +86,49 @@ test("login binds the session to the local device id when the Relay returns a se
   await logout();
 });
 
+test("login stores the machine's FreyMCP side token and logout revokes this machine's binding", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "frely-cli-mcp-side-token-"));
+  const oldFetch = globalThis.fetch;
+  const previous = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, FRELY_NO_BROWSER: process.env.FRELY_NO_BROWSER };
+  const restore = useMemoryCredentialStore();
+  process.env.XDG_CONFIG_HOME = directory;
+  process.env.FRELY_NO_BROWSER = "1";
+  t.after(async () => {
+    restore(); globalThis.fetch = oldFetch;
+    for (const [name, value] of Object.entries(previous)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+    await rm(directory, { recursive: true, force: true });
+  });
+  let codeBody = "", tokenBody = "";
+  const revokeBodies: string[] = [];
+  globalThis.fetch = async (url, options) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/api/auth/device/code") {
+      codeBody = String(options?.body);
+      return Response.json({ device_code: "synthetic-code", user_code: "SYNTH", verification_uri: "https://test.invalid/device", verification_uri_complete: "https://test.invalid/device?g=SYNTH", expires_in: 300, interval: 1 });
+    }
+    if (path === "/api/auth/oauth2/token") {
+      tokenBody = String(options?.body);
+      return Response.json({ access_token: "synthetic-basic", refresh_token: "synthetic-refresh", token_type: "bearer", expires_in: 3600, frely_mcp_token: "fmcp_at_first" });
+    }
+    if (path === "/api/auth/me") return Response.json({ user: { id: "user_test", email: "user@example.com" } });
+    if (path === "/api/auth/oauth2/revoke") { revokeBodies.push(String(options?.body)); return Response.json({}); }
+    throw new Error("Unexpected synthetic endpoint");
+  };
+  await loginDevice("https://test.invalid");
+  assert.match(codeBody, /scope=[^&]*mcp%3Ainvoke/u);
+  assert.match(tokenBody, /resource=https%3A%2F%2Ftest.invalid%2Fmcp%2Fdevices/u);
+  assert.match(tokenBody, /session_binding_device_id=frd_local_/u);
+  const raw = await basicCredentialStore.getPassword("frely-cli-basic-v1", "https://test.invalid");
+  const stored = JSON.parse(raw!);
+  assert.equal(stored.mcpToken, "fmcp_at_first");
+  // A near-expiry login refreshes and the new side token replaces the old one beside it.
+  await basicCredentialStore.setPassword("frely-cli-basic-v1", "https://test.invalid", JSON.stringify({ ...stored, expiresAt: Date.now() + 5_000 }));
+  const { credential } = await requireLogin();
+  assert.equal(credential.mcpToken, "fmcp_at_first");
+  await logout();
+  assert.ok(revokeBodies.some((body) => /session_binding_device_id=frd_local_/u.test(body)));
+});
+
 test("login without a session id from an older Relay stays backward compatible", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "frely-cli-session-legacy-"));
   const oldFetch = globalThis.fetch;

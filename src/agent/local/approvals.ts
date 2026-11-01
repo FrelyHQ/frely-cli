@@ -1,7 +1,7 @@
 import { ensureDevice } from "../../device/control.js";
 import { openController, resultData, resultText, type Controller } from "../../controller/client.js";
 import { waitForApproval } from "../../controller/approval-wait.js";
-import { ControllerError, EXIT } from "../../controller/session.js";
+import { ControllerError, EXIT } from "../../controller/client.js";
 import { approvedHosts, type LocalAgentRecord } from "./store.js";
 
 /** The shape of FrelyMCP's request_permission / permission_status answers that this file reads. */
@@ -33,7 +33,7 @@ export const siteResource = (host: string): string => `net:${host}`;
  */
 export async function approveSites(record: LocalAgentRecord, io: ApprovalIo, deps: ApprovalDeps = {}): Promise<Record<string, string>> {
   const now = deps.now ?? Date.now;
-  const open = deps.open ?? (() => openController({ interactive: io.interactive }));
+  const open = deps.open ?? (() => openController());
   const missing = record.network.filter((host) => !approvedHosts(record, now()).includes(host));
   const gained: Record<string, string> = {};
   if (missing.length === 0) return gained;

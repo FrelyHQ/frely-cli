@@ -2,11 +2,9 @@ import { spawn } from "node:child_process";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { intOption, parseArgs, requireRemote, type ParsedArgs } from "./args.js";
 import { waitForApproval, type ApprovalRef, type ApprovalWaitOptions } from "./approval-wait.js";
-import { openController, outcomeOf, resultData, resultText, type Controller, type Outcome, type ToolResult } from "./client.js";
-import { controllerLogout, ControllerError, EXIT, readSession } from "./session.js";
+import { openController, outcomeOf, resultData, resultText, ControllerError, EXIT, type Controller, type Outcome, type ToolResult } from "./client.js";
 
-export const CONTROLLER_COMMANDS: ReadonlySet<string> = new Set(["devices", "run", "ps", "logs", "kill", "read", "ls", "grep", "edit", "tools", "call", "permission", "controller"]);
-
+export const CONTROLLER_COMMANDS: ReadonlySet<string> = new Set(["devices", "run", "ps", "logs", "kill", "read", "ls", "grep", "edit", "tools", "call", "permission"]);
 export interface Output { out(text: string): void; err(text: string): void }
 
 export const CONTROLLER_USAGE = `Control your Frely devices from this computer.
@@ -24,12 +22,11 @@ export const CONTROLLER_USAGE = `Control your Frely devices from this computer.
   frely permission wait <short code> [--then '<command>'] [--timeout <s>]
   frely tools [--json]                           What the server offers, with its own instructions
   frely call <tool> [--json '<object>' | --input <file>]   Any tool by name
-  frely controller logout|status             This computer's authorization to control your devices
 
 Every command takes --json (the full result) and --out <file> (write the output there).
 A device is its name or id from "frely devices". A path on this computer is not accepted where <device>:<path> is expected.
 Exit codes: 0 done, 1 this CLI (usage, local file), 2 the tool or the remote command failed, 3 approval needed (the output has the link
-and the "frely permission wait" command), 4 not authorized (run a controller command in a terminal to approve this computer), 5 device offline, 6 limit reached.
+and the "frely permission wait" command), 4 not signed in (run \`frely login\`), 5 device offline, 6 limit reached.
 `;
 
 const MAX_LOCAL_FILE = 1024 * 1024;
@@ -75,7 +72,7 @@ export function useControllerOpener(replacement: typeof openController): () => v
 }
 
 async function withController<T>(io: Output, work: (controller: Controller) => Promise<T>): Promise<T> {
-  const controller = await openIt({ interactive: isInteractive() });
+  const controller = await openIt();
   try { return await work(controller); } finally { await controller.close().catch(() => undefined); }
 }
 
@@ -94,7 +91,6 @@ export async function runControllerCommand(args: readonly string[], io: Output):
   try {
     if (command === undefined || rest.includes("--help") || rest.includes("-h")) { io.out(CONTROLLER_USAGE); return EXIT.ok; }
     switch (command) {
-      case "controller": return await controllerCommand(rest, io);
       case "permission": return await permissionCommand(rest, io);
       case "devices": return await devices(rest, io);
       case "run": return await run(rest, io);
@@ -113,20 +109,6 @@ export async function runControllerCommand(args: readonly string[], io: Output):
     if (error instanceof ControllerError) { io.err(error.message + "\n"); return error.exitCode; }
     throw error;
   }
-}
-
-async function controllerCommand(args: string[], io: Output): Promise<number> {
-  const action = args[0];
-  if (action === "logout") {
-    io.out(await controllerLogout() ? "This computer no longer controls your Frely devices.\n" : "This computer was not authorized as a controller.\n");
-    return EXIT.ok;
-  }
-  if (action === "status") {
-    const session = await readSession();
-    io.out(session ? `Authorized to control your devices: yes\nFrelyMCP: ${session.mcpUrl}\n` : "Authorized to control your devices: no. Run a controller command in a terminal to approve this computer.\n");
-    return EXIT.ok;
-  }
-  throw new ControllerError("Usage: frely controller logout|status", EXIT.cli);
 }
 
 async function devices(args: string[], io: Output): Promise<number> {

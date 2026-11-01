@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Controller, ToolResult } from "../../controller/client.js";
-import { EXIT } from "../../controller/session.js";
+import { EXIT } from "../../controller/client.js";
 import { approveSites, siteResource } from "./approvals.js";
 import type { LocalAgentRecord } from "./store.js";
 

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { inspectAuth, normalizeRelayUrl, requireLogin } from "../../auth.js";
 import { cliLaunchArguments } from "../../cli-launch.js";
 import { credentialStore } from "../../credential-store.js";
-import { ControllerError, EXIT } from "../../controller/session.js";
+import { ControllerError, EXIT } from "../../controller/client.js";
 import { restrictSandboxNetwork, sandboxUnavailableReason, shutdownSandbox } from "../../runtime/sandbox.js";
 import { approveSites, type ApprovalDeps } from "./approvals.js";
 import { API_KEY_SERVICE, agentEnv, gatewayOrigin, readApiKey, spawnConfined } from "./confine.js";

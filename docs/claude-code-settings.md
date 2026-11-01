@@ -1,7 +1,7 @@
 # Claude Code settings for controlling devices
 
-`frely` keeps this computer's controller session (its tokens and the key they are bound to) under `~/.config/frely`. Anything running as
-your user can read that folder, including a model's shell, so tell Claude Code not to. Merge this into `~/.claude/settings.json`
+`frely` keeps this computer's login tokens (the account access token and this machine's FreyMCP side token) under `~/.config/frely`.
+Anything running as your user can read that folder, including a model's shell, so tell Claude Code not to. Merge this into `~/.claude/settings.json`
 (or a project's `.claude/settings.json`):
 
 ```json
@@ -20,9 +20,9 @@ your user can read that folder, including a model's shell, so tell Claude Code n
 ```
 
 The `allow` lines are only the read-only commands. `frely run`, `edit`, `kill` and `call` stay behind Claude Code's own prompt.
-Tokens are also bound to a key (DPoP), so a copied token file does nothing on another computer; the deny rules close the same-computer case
-as far as a rule can.
+A leaked token works until it is disconnected, so the deny rules matter; this machine's connection can be revoked any time on the web
+(My Devices) or by `frely logout`.
 
-When the OS credential store is unavailable (a Linux server or container without a Secret Service, a locked keychain over SSH), the session is
-stored in an encrypted file under `~/.config/frely/controller-vault-v1`, with its key in `~/.local/state/frely/controller.key`. Set
-`FRELY_CREDENTIAL_KEY` (a 64-hex-character key from your secret manager) to keep the key off the disk.
+When the OS credential store is unavailable (a Linux server or container without a Secret Service, a locked keychain over SSH), the login is
+stored in private session files under `~/.config/frely/basic-credentials-v1`. Set `FRELY_CREDENTIAL_KEY` (a 64-hex-character key from your
+secret manager) to keep them in an encrypted file instead.

@@ -2,38 +2,61 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { VERSION } from "../version.js";
-import { createDpopProof, dpopKeyFromPem } from "./dpop.js";
-import { controllerLogin, requestControllerLogin, ControllerError, EXIT, readSession, refreshSession, type ControllerSession } from "./session.js";
+import { frelyMcpUrl, refreshLoginCredential, requireLogin } from "../auth.js";
 
 export type ToolResult = { isError?: boolean; content?: unknown; structuredContent?: unknown; [key: string]: unknown };
 
+/** The exit codes of the device commands. */
+export const EXIT = { ok: 0, cli: 1, tool: 2, approval: 3, auth: 4, offline: 5, limit: 6 } as const;
+
+/** A failure with the exit code the command ends with. */
+export class ControllerError extends Error {
+  constructor(message: string, readonly exitCode: number) { super(message); this.name = "ControllerError"; }
+}
+
+const MCP_TIMEOUT_MS = 15_000;
+
+/** A FreyMCP connection as the CLI uses it: the login's own token, no separate sign-in. */
+export interface LoginMcpSession {
+  mcpUrl: string;
+  mcpToken: string;
+}
+
 /**
- * `fetch` for the FrelyMCP transport: every request carries the DPoP access token and a fresh proof for that request. A refused token is
- * renewed once (another process may have renewed it already) and the request sent again; a request is only ever replayed when the server
- * refused it before running anything.
+ * The login's FreyMCP side of the OAuth credential. The machine's connection needs the token minted beside the login access token;
+ * a login stored before the two channels merged has none and is asked to sign in again.
  */
-export function dpopFetch(initial: ControllerSession, options: { refresh?: (session: ControllerSession) => Promise<ControllerSession>; now?: () => number } = {}): { fetch: typeof fetch; session(): ControllerSession } {
+export async function loginMcpSession(): Promise<LoginMcpSession> {
+  const { config, credential } = await requireLogin();
+  if (!credential.mcpToken) throw new ControllerError("This computer needs a fresh sign-in to control your Frely devices. Run `frely login` again.", EXIT.auth);
+  return { mcpUrl: frelyMcpUrl(config.relayUrl), mcpToken: credential.mcpToken };
+}
+
+/** A refused FreyMCP token is replaced by refreshing the login, which mints a fresh side token for this machine. */
+async function refreshLoginMcpSession(): Promise<LoginMcpSession> {
+  const { config, credential } = await refreshLoginCredential();
+  if (!credential.mcpToken) throw new ControllerError("This computer needs a fresh sign-in to control your Frely devices. Run `frely login` again.", EXIT.auth);
+  return { mcpUrl: frelyMcpUrl(config.relayUrl), mcpToken: credential.mcpToken };
+}
+
+/** `fetch` for the FreyMCP transport: every request carries the login's MCP side token. A refused token is refreshed once and the request sent again. */
+export function mcpFetch(initial: LoginMcpSession, options: { refresh?: (session: LoginMcpSession) => Promise<LoginMcpSession> } = {}): { fetch: typeof fetch; session(): LoginMcpSession } {
   let session = initial;
-  const refresh = options.refresh ?? refreshSession;
-  const now = options.now ?? Date.now;
-  const send = (input: string | URL | Request, init: RequestInit | undefined) => {
-    const url = input instanceof Request ? input.url : String(input);
-    const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+  const refresh = options.refresh ?? refreshLoginMcpSession;
+  const send = async (input: string | URL | Request, init: RequestInit | undefined) => {
     const headers = new Headers(init?.headers);
-    headers.set("authorization", `DPoP ${session.accessToken}`);
-    headers.set("dpop", createDpopProof(dpopKeyFromPem(session.privateKeyPem), { method, url, accessToken: session.accessToken }));
-    return fetch(url, { ...init, headers, redirect: "error" });
+    headers.set("authorization", `Bearer ${session.mcpToken}`);
+    return fetch(input, { ...init, headers, redirect: "error", signal: AbortSignal.timeout(MCP_TIMEOUT_MS) });
   };
   return {
     session: () => session,
     fetch: async (input, init) => {
-      if (session.expiresAt - 30_000 <= now()) session = await refresh(session);
       let response = await send(input, init);
       if (response.status === 401) {
         await response.body?.cancel().catch(() => undefined);
         session = await refresh(session);
         response = await send(input, init);
-        if (response.status === 401) throw new ControllerError("The server did not accept this computer's controller authorization. Run the command again to approve it in your browser.", EXIT.auth);
+        if (response.status === 401) throw new ControllerError("The server did not accept this computer's device connection. Run `frely login` again.", EXIT.auth);
       }
       return response;
     },
@@ -49,17 +72,16 @@ export interface Controller {
 }
 
 /**
- * Opens a controller connection, signing the computer in first when there is no session. A terminal waits for the owner's approval; any other
- * caller is shown the approval link and ends with the "approval needed" exit code, and running the command again continues from that request.
+ * Opens this computer's FreyMCP connection on the login's own credential. There is no separate controller sign-in: the same
+ * `frely login` that owns the account also names this machine, and the connection appears in the web console under that machine.
  */
-export async function openController(options: { interactive: boolean; login?: typeof controllerLogin; request?: typeof requestControllerLogin } = { interactive: false }): Promise<Controller> {
-  let session = await readSession();
-  if (!session) session = await (options.interactive ? (options.login ?? controllerLogin)() : (options.request ?? requestControllerLogin)());
-  const signed = dpopFetch(session);
+export async function openController(): Promise<Controller> {
+  const session = await loginMcpSession();
+  const signed = mcpFetch(session);
   const transport = new StreamableHTTPClientTransport(new URL(session.mcpUrl), {
     fetch: signed.fetch, reconnectionOptions: { maxRetries: 0, initialReconnectionDelay: 1000, maxReconnectionDelay: 1000, reconnectionDelayGrowFactor: 1 },
   });
-  const client = new Client({ name: "frely-cli-controller", version: VERSION });
+  const client = new Client({ name: "frely-cli", version: VERSION });
   try { await client.connect(transport as unknown as Transport); }
   catch (error) {
     await client.close().catch(() => undefined);

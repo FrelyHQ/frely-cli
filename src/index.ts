@@ -33,7 +33,7 @@ import { listLocalServices } from "./share/service-state.js";
 import { listLocalProviders } from "./provider/state.js";
 import { API_USAGE, logoutCloud, runApi } from "./cloud.js";
 import { CONTROLLER_COMMANDS, runControllerCommand } from "./controller/commands.js";
-import { controllerLogout, ControllerError } from "./controller/session.js";
+import { ControllerError } from "./controller/client.js";
 import { runAgentLocal } from "./agent/local/command.js";
 import { cancelRun, listRunSummaries, resumeRun, runOutcome, runSummary, startRun, waitForRun, workerMain } from "./agent/run.js";
 import { effectiveStatus, isRunId, readRun, resolveRun } from "./agent/run-store.js";
@@ -486,13 +486,13 @@ async function main(): Promise<void> {
     // Reconnecting no longer needs the login, so the server-side MCP authorization must go with it.
     const mcpRevoked = await revokeMcpAuthorization().then(() => true, () => false);
     // Cloud credentials are keyed by the signed-in account, so revoke them before removing the login.
+    // This machine's FreyMCP connection goes with the login: logout revokes the refresh token with this
+    // machine's binding, which disconnects the connection server-side.
     const cloudRevoked = await logoutCloud().then(() => true, () => false);
-    const controllerRevoked = await controllerLogout().then(() => true, () => false);
     await logout();
     stdout.write("Frely login removed and MCP background service stopped.\n");
     if (!mcpRevoked) process.stderr.write("MCP authorization revocation was not confirmed; revoke it in Frely account settings if needed.\n");
     if (!cloudRevoked) process.stderr.write("Cloud authorization revocation was not confirmed; revoke it in Frely account settings if needed.\n");
-    if (!controllerRevoked) process.stderr.write("The controller authorization was not revoked; disconnect this computer under My Devices on the web.\n");
     return;
   }
 

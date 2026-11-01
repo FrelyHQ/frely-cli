@@ -1,4 +1,4 @@
-import { ControllerError, EXIT } from "./session.js";
+import { ControllerError, EXIT } from "./client.js";
 
 export interface Target { device: string | null; path: string }
 
