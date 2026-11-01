@@ -140,14 +140,16 @@ export async function writePrivateFile(path: string, content: string): Promise<v
   if (Buffer.byteLength(content) > MAX_FILE_SIZE) throw new Error("Credential exceeded the size limit.");
   const temporary = join(dirname(path), `.${randomUUID()}.tmp`);
   const file = await open(temporary, "wx", 0o600);
+  let renamed = false;
   try {
     await file.writeFile(content, "utf8");
     await file.sync();
     await file.close();
     await rename(temporary, path);
+    renamed = true;
   } finally {
     await file.close().catch(() => undefined);
-    await unlink(temporary).catch((error: unknown) => { if (!hasCode(error, "ENOENT")) throw error; });
+    if (!renamed) await unlink(temporary).catch((error: unknown) => { if (!hasCode(error, "ENOENT")) throw error; });
   }
 }
 function hasCode(error: unknown, code: string): boolean {

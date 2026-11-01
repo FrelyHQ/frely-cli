@@ -286,7 +286,7 @@ async function main(): Promise<void> {
   }
 
   if (command === "skill") {
-    if (args[1] !== "install") { stdout.write(subcommandUsage("skill")); return; }
+    if (args[1] !== "install" || args.includes("--help") || args.includes("-h")) { stdout.write(subcommandUsage("skill")); return; }
     const host = skillHost(option(args, "--host") ?? "generic");
     const scope = skillScope(option(args, "--scope") ?? "global");
     const dir = option(args, "--dir");
@@ -333,7 +333,7 @@ async function main(): Promise<void> {
       if (value.kind === "skill") stdout.write("Restart or reload the agent session so it rescans Skills.\n");
       return;
     }
-    if (args[1] !== "install") { stdout.write(subcommandUsage("item")); return; }
+    if (args[1] !== "install" || args.includes("--help") || args.includes("-h")) { stdout.write(subcommandUsage("item")); return; }
     const itemRef = args[2];
     if (!itemRef || itemRef.startsWith("-")) throw new Error("Usage: frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--json]");
     // Skills, Prompts and Agents are named alike. An Agent's manifest is public, so it is asked first; a name no Agent has is a Skill or Prompt.

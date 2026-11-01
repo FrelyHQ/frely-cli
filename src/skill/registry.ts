@@ -42,8 +42,9 @@ export async function writeInstall(record: InstallRecord, home = homedir()): Pro
   const file = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   try { await file.writeFile(`${JSON.stringify({ ...record, path: resolve(record.path) }, null, 2)}\n`); await file.sync(); }
   finally { await file.close(); }
-  try { await rename(temporary, target); }
-  finally { await unlink(temporary).catch(() => undefined); }
+  let renamed = false;
+  try { await rename(temporary, target); renamed = true; }
+  finally { if (!renamed) await unlink(temporary).catch(() => undefined); }
 }
 
 export async function deleteInstall(path: string, home = homedir()): Promise<void> {
