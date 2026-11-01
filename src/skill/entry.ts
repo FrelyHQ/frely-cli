@@ -1,7 +1,7 @@
 import { rmdir, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { writeItemFolder } from "./cloud-item.js";
+import { CloudItemError, writeItemFolder } from "./cloud-item.js";
 import { managedSkillRoot, type SkillHost, type SkillScope } from "./managed.js";
 import { deleteInstall, listInstalls, readInstall, untouched } from "./registry.js";
 
@@ -23,7 +23,7 @@ Run \`frely doctor --json\` to see whether the CLI is signed in. If not, ask the
 
 - Account operations (API keys, Credit, plans, orders, Creator items): \`frely api list\`, \`frely api describe <tool>\`, \`frely api call <tool> --json '{...}'\`. The first call needs a browser authorization the user completes; if it fails because there is no terminal, tell the user to run the command once themselves.
 - Ask the user before any call that spends Credit, buys something or changes credentials. Some actions also need a one-time approval on the Frely website; give the user the link from the error.
-- Install a marketplace Skill or Prompt: \`frely item install <username/skill-name> --host <your host>\`; add \`--scope project --dir <project>\` to install it for one project instead of globally. Install a published Agent: \`frely agent install <username/name> --host <your host>\`, then \`frely agent run\`. When an Agent needs the user's project files, add \`--read\` (optionally \`--read <dir>\`): the Agent can then read files of that directory through read-only tools that run on this computer, only the files it asks for; \`.git\`, \`.env*\`, key files and git-ignored files are never sent, and the result lists the files read. Tell the user before you add it. If \`frely agent run\` returns \`payment_required\`, the balance is too low: do not ask the user to sign in again; run \`frely api call credit_products.list --json '{}'\`, ask which amount, then \`frely api call payment_checkout.create\` with \`useImmediately\` true, give the user the returned \`checkoutUrl\`, and retry once they have paid. If the install output says Frely has not scanned a Skill, read every file in it before you use it, and tell the user if anything looks unsafe.
+- Install a marketplace Skill or Prompt: \`frely item install <username/skill-name> --host <your host> --json\`; add \`--scope project --dir <project>\` to install it for one project instead of globally. Install a published Agent: \`frely agent install <username/name> --host <your host>\`, then \`frely agent run\`. When an Agent needs the user's project files, add \`--read\` (optionally \`--read <dir>\`): the Agent can then read files of that directory through read-only tools that run on this computer, only the files it asks for; \`.git\`, \`.env*\`, key files and git-ignored files are never sent, and the result lists the files read. Tell the user before you add it. If \`frely agent run\` returns \`payment_required\`, the balance is too low: do not ask the user to sign in again; run \`frely api call credit_products.list --json '{}'\`, ask which amount, then \`frely api call payment_checkout.create\` with \`useImmediately\` true, give the user the returned \`checkoutUrl\`, and retry once they have paid. If the install output says Frely has not scanned a Skill, read every file in it before you use it, and tell the user if anything looks unsafe.
 - Use a marketplace MCP without configuring it in your client: \`frely item install <username/mcp-name>\` installs a Skill that calls it through \`frely remote tools|call <username/mcp-name>\`. Each call is billed or needs a pass as in any MCP client. \`frely remote config <username/mcp-name>\` prints the \`mcpServers\` JSON for clients that should connect to that one MCP directly.
 
 ## What needs FrelyMCP
@@ -44,6 +44,23 @@ Never put keys or tokens on a command line or in a file; use \`--api-key-stdin\`
 export interface EntrySkillInstallResult {
   readonly name: "frely";
   readonly path: string;
+}
+
+/**
+ * The entry Skill beside a freshly installed item, so one `frely item install` command is all an agent needs. A folder Frely did not
+ * write, or one the user edited, is skipped, not an error: the item wins and its install never fails on the entry Skill.
+ */
+export async function ensureEntrySkill(input: {
+  readonly host?: SkillHost;
+  readonly scope?: SkillScope;
+  readonly dir?: string;
+  readonly cwd?: string;
+  readonly home?: string;
+}): Promise<EntrySkillInstallResult | null> {
+  return installEntrySkill(input).catch((error: unknown) => {
+    if (error instanceof CloudItemError && (error.code === "unmanaged_item_exists" || error.code === "managed_item_modified")) return null;
+    throw error;
+  });
 }
 
 /**

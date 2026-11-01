@@ -57,7 +57,7 @@ import type { SkillHost, SkillScope } from "./skill/managed.js";
 import { CloudToolError, installCloudItem, parseItemRef, trustCloudItem } from "./skill/cloud-item.js";
 import { checkItemUpdates, updateCloudItem } from "./skill/item-update.js";
 import { runSealedScript } from "./skill/sealed-run.js";
-import { installEntrySkill } from "./skill/entry.js";
+import { installEntrySkill, ensureEntrySkill } from "./skill/entry.js";
 import { callRemoteTool, connectRemoteMcp, installRemoteMcpSkill, isNotASkill, listRemoteTools, mcpClientConfig, parseMcpName, RemoteMcpError } from "./skill/remote-mcp.js";
 import { callCloudTool } from "./cloud.js";
 import { createInterface } from "node:readline/promises";
@@ -74,8 +74,9 @@ async function installAgent(target: string, args: string[]): Promise<void> {
   const relayUrl = normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl);
   const projectDir = option(args, "--dir");
   const value = await installSkillAdapter({ manifestUrl: agentManifestUrl(target, relayUrl), host, scope, ...(projectDir ? { cwd: resolve(projectDir) } : {}), ...(apiKey ? { apiKey } : {}) });
-  if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
-  else stdout.write(`Agent: ${value.name}\nSkill: ${value.skillPath}\nAuth: ${value.authMode}\nState: ${value.state}\n${value.hostAction ? `Host action: ${value.hostAction}\n` : ""}`);
+  const entry = await ensureEntrySkill({ host, scope, ...(projectDir ? { dir: projectDir } : {}) });
+  if (args.includes("--json")) stdout.write(`${JSON.stringify({ ...value, ...(entry ? { entrySkill: entry.path } : {}) })}\n`);
+  else stdout.write(`Agent: ${value.name}\nSkill: ${value.skillPath}\nAuth: ${value.authMode}\nState: ${value.state}\n${value.hostAction ? `Host action: ${value.hostAction}\n` : ""}${entry ? `Frely Skill: ${entry.path}\n` : ""}`);
 }
 
 async function main(): Promise<void> {
@@ -350,13 +351,14 @@ async function main(): Promise<void> {
       if (!isNotASkill(error) || itemRef.includes("@") || !/^[^/@]+\/[^/@]+$/u.test(itemRef)) throw error;
       return installRemoteMcpSkill({ ref: itemRef, call: callCloudTool, host, scope, ...(dir ? { dir } : {}), ...(args.includes("--replace") ? { replace: true } : {}) }).catch((mcpError: unknown) => { throw isNotASkill(mcpError) || (mcpError instanceof CloudToolError && mcpError.code === "remote_mcp_not_found") ? error : mcpError; });
     });
+    const entry = await ensureEntrySkill({ host, scope, ...(dir ? { dir } : {}) });
     if ("tools" in value) {
-      if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
+      if (args.includes("--json")) { stdout.write(`${JSON.stringify({ ...value, ...(entry ? { entrySkill: entry.path } : {}) })}\n`); return; }
       stdout.write(`MCP: ${value.name}\nPath: ${value.path}\nTools: ${value.tools}\nThe Skill calls this MCP through frely remote; no MCP client configuration is needed. Restart or reload the agent session so it rescans Skills.\n`);
       return;
     }
-    if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
-    stdout.write(`${value.kind === "prompt" ? "Prompt" : "Skill"}: ${value.name} (v${value.version})\nPath: ${value.path}\nFiles: ${value.files}\n`);
+    if (args.includes("--json")) { stdout.write(`${JSON.stringify({ ...value, ...(entry ? { entrySkill: entry.path } : {}) })}\n`); return; }
+    stdout.write(`${value.kind === "prompt" ? "Prompt" : "Skill"}: ${value.name} (v${value.version})\nPath: ${value.path}\nFiles: ${value.files}\n${entry ? `Frely Skill: ${entry.path}\n` : ""}`);
     if (value.premium === "installed") stdout.write("Paid part: installed\n");
     if (value.premium === "pass_required") stdout.write(`Paid part: not installed. Buy a pass in the marketplace or with frely api call passes.buy --json '{"productKind":"cloud_skill","productId":"${value.id}","duration":"monthly"}', then run this command again.\n`);
     if (value.sealedScripts > 0) stdout.write(`${value.sealedScripts} paid script${value.sealedScripts === 1 ? " is" : "s are"} encrypted on this device. They run through frely item run (the placeholder files do that for you) inside the Frely command sandbox, and stop working when your pass ends. Frely cannot show you their source.\n`);
