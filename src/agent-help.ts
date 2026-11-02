@@ -15,7 +15,6 @@ export const COMMANDS = [
   { id: "link.local.add", usage: "frely link local add <name> --url <http://127.0.0.1:port/path> [--header K=V] | frely link local add <name> [--env K=V] -- <command> [args...]", auth: "none", effect: "local-write", purpose: "Add a local MCP server by loopback URL or by the command that starts it (stdio). It is connected once to check it works; it stays off for remote clients until the owner turns it on in the web console." },
   { id: "link.local.remove", usage: "frely link local remove <name>", auth: "none", effect: "local-write", purpose: "Remove a manually added local MCP server." },
   { id: "link.status", usage: "frely link status [--json]", auth: "none", effect: "read", purpose: "Show the remote-control state (not enabled by default / on / off and locked here), its URL, workspace, authorization expiry and background service state. Makes no network request." },
-  { id: "link.stop", usage: "frely link stop", auth: "none", effect: "local-service", purpose: "Stop the local MCP background service without revoking authorization; frely link on resumes it. Supported updates restore running services without this command." },
   { id: "link.auto-update", usage: "frely link auto-update [on|off]", auth: "none", effect: "local-write", purpose: "Show or set whether this device's background service installs new stable versions of its own installation while idle and restarts itself. Off by default; macOS and Linux only." },
   { id: "link.off", usage: "frely link off", auth: "account", effect: "remote-write", purpose: "Turn remote control off and lock it on this computer: revoke the authorization for every connected client, uninstall the background service (kept running provider-only when local Providers exist) and write a local lock. The web page cannot turn it on again; only frely link on here can." },
   { id: "mcp.stdio", usage: "frely mcp stdio [--workspace <path>]", auth: "mcp", effect: "local-execution", purpose: "Serve authorized local tools over stdio for a local MCP client." },
@@ -271,7 +270,7 @@ const SHORT_USAGE: Readonly<Record<string, string>> = {
   "link.on": "frely link on [--workspace <path>] [--days 1..365] [--no-browser] [--json]",
   "link.workspace": "frely link workspace list|add <path>|remove <path>",
   "link.local": "frely link local list|add <name> (--url <address>|-- <command>)|remove <name>",
-  "link.lifecycle": "frely link status|stop|off",
+  "link.lifecycle": "frely link status|off",
   "skill.install": "frely skill install [--host <host>]",
   "item.install": "frely item install <username/name[@version]> [--host <host>]",
   "item.update": "frely item update [<folder>]",
@@ -332,5 +331,5 @@ export function linkUsage(): string {
     + "\nStatus: frely link status [--json]; diagnostics: frely doctor [-v] [--json]\n\n"
     + "Run frely link on on the computer to control. It asks for browser approval the first time (the home directory, or --workspace) and when authorization has expired, installs and starts the background service, and prints the MCP URL. Add that URL to ChatGPT, Claude Code on another computer, or another HTTP MCP client, then authorize with OAuth.\n"
     + "Prompts go to stderr; stdout contains only the URL or JSON. --days 1..365 renews now; the URL stays the same.\n"
-    + "frely link stop only stops the service; frely link off revokes access for every client. Clients share the device workspace and managed processes. Shell runs under the device OS account.\n";
+    + "frely link off turns remote control off and locks it on this computer: it revokes access for every client, and only frely link on here turns it on again. Clients share the device workspace and managed processes. Shell runs under the device OS account.\n";
 }

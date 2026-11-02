@@ -206,8 +206,8 @@ test("Windows package instructions preserve manager and prefix, escape paths, an
   assert.match(command, /frely-cli@1\.2\.3/); assert.match(command, /--prefix/); assert.match(command, /--ignore-scripts/);
   assert.match(command, /--min-release-age-exclude=frely-cli/);
   assert.doesNotMatch(command, /mcp start/);
-  // The restore step must only resume the service; a plain `mcp start` could open an approval prompt mid-update.
-  assert.match(manualUpdateCommand(installation, "1.2.3", true), /finally \{[^}]*link on --resume \}/);
+  // The restore step must only start the installed service; `link on` could open an approval prompt mid-update.
+  assert.match(manualUpdateCommand(installation, "1.2.3", true), /finally \{[^}]*mcp service start \}/);
 });
 
 test("update accepts no switches and directs version checks to doctor", async () => {

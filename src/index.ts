@@ -129,7 +129,11 @@ async function main(): Promise<void> {
     await new Promise<never>(() => undefined);
   }
   if (command === "sandbox" && args[1] === "proxy") {
-    await runSandboxProxyCommand(args.slice(2), (text) => { stdout.write(text); });
+    // The sandbox reads the proxy once, when the background service starts: restart a running one so the change applies now.
+    if (await runSandboxProxyCommand(args.slice(2), (text) => { stdout.write(text); })) {
+      if ((await serviceStatus()).active) { await installDeviceRelayService(); stdout.write("Background service restarted to use it.\n"); }
+      else stdout.write("It applies the next time the background service starts.\n");
+    }
     return;
   }
   if (command === "--version" || command === "-v" || command === "version") {
@@ -717,10 +721,7 @@ async function main(): Promise<void> {
 
   if (command === "link" && args[1] === "on") {
     // Turning remote control back on is the one way out of `false`: it has to happen here, on this computer.
-    if (!args.includes("--resume")) await setRemoteLock(false);
-    else if (await remoteLocked()) { stdout.write("Remote control is turned off on this computer; run `frely link on` to allow it again.\n"); return; }
-    // Internal: update scripts only resume the installed service, never prompt for approval.
-    if (args.includes("--resume")) { const service = await startMcpService(); stdout.write(`Frely MCP service ${service.active ? "started" : "not active"}.\n`); return; }
+    await setRemoteLock(false);
     // Pre-login install command (start.sh / start.ps1): never inherited by the service, logged or stored.
     const installToken = takeInstallToken();
     let workspace = option(args, "--workspace");
@@ -755,7 +756,9 @@ async function main(): Promise<void> {
     }
     return;
   }
-  if (command === "link" && args[1] === "stop") { const service = await stopMcpService(); stdout.write(`Frely MCP service ${service.active ? "still active" : "stopped"}.\n`); return; }
+  // Internal, for update scripts: stop the installed service before an update and start it again after, never prompting for approval.
+  if (command === "mcp" && args[1] === "service" && args[2] === "stop") { const service = await stopMcpService(); stdout.write(`Frely background service ${service.active ? "still active" : "stopped"}.\n`); return; }
+  if (command === "mcp" && args[1] === "service" && args[2] === "start") { const service = await startMcpService(); stdout.write(`Frely background service ${service.active ? "started" : "not active"}.\n`); return; }
 
   if (command === "link" && args[1] === "off") {
     // The local lock comes first: even if the revoke below cannot reach Frely, this computer already refuses remote control.

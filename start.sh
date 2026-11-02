@@ -15,11 +15,11 @@ install_dir="${FRELY_INSTALL_DIR:-$HOME/.local/bin}"
 # A failed stop (no service) is ignored; only a successful stop is remembered for resuming.
 old="$install_dir/frely"
 stopped=0
-# The installed binary may predate the rename of `frely mcp` to `frely link`, so both are tried.
-if [ -x "$old" ] && { "$old" link stop </dev/null >/dev/null 2>&1 || "$old" mcp stop </dev/null >/dev/null 2>&1; }; then stopped=1; fi
+# `mcp service stop|start` is the internal update pair; every released version accepts it.
+if [ -x "$old" ] && "$old" mcp service stop </dev/null >/dev/null 2>&1; then stopped=1; fi
 
 # Put the service we stopped back, so a failed update does not leave it stopped.
-resume() { if [ "$stopped" = 1 ]; then "$old" link on --resume </dev/null >/dev/null 2>&1 || "$old" mcp start --resume </dev/null >/dev/null 2>&1 || :; stopped=0; fi; }
+resume() { if [ "$stopped" = 1 ]; then "$old" mcp service start </dev/null >/dev/null 2>&1 || :; stopped=0; fi; }
 fail() { resume; printf '%s\n' "frely start failed: $*" >&2; exit 1; }
 
 # install.sh next to this file (a checkout, tests); otherwise the copy served beside start.sh.

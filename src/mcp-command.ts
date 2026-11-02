@@ -8,26 +8,23 @@ import { installMcpService, serviceStatus, startMcpService } from "./service.js"
 
 /**
  * The controlled-side group is `frely link`: whether this computer accepts remote control, whatever the channel (an MCP client, `frely run`
- * from another computer, a hosted Agent). `link on` is the idempotent enable/start/print-URL action; a bare `frely link` prints the usage.
- * `mcp serve` and `mcp stdio` stay: installed system services and local MCP clients launch them by that name. The Windows update bridge
- * (`mcp service start|stop`, `mcp start --resume`, `mcp stop`) only maps onto the new names so a service stopped by an older CLI's
- * update command still comes back; every other `frely mcp …` command is gone.
+ * from another computer, a hosted Agent). It has one switch, `link on` / `link off`, plus `link status`; a bare `frely link` prints the usage.
+ * `link on` is the idempotent enable/start/print-URL action. The internal `frely mcp …` commands are not in help: `mcp serve` and `mcp stdio`
+ * are what installed services and local MCP clients launch, and `mcp service stop|start` is what update scripts run around an update.
  */
 export function normalizeLinkArgs(input: readonly string[]): string[] {
   const args = [...input];
   if (args[0] === "mcp") {
-    if (args[1] === "service" && args.length === 3 && (args[2] === "start" || args[2] === "stop")) return args[2] === "start" ? ["link", "on", "--resume"] : ["link", "stop"];
-    if (args.length === 3 && args[1] === "start" && args[2] === "--resume") return ["link", "on", "--resume"];
-    if (args.length === 2 && args[1] === "stop") return ["link", "stop"];
+    if (args[1] === "service" && args.length === 3 && (args[2] === "start" || args[2] === "stop")) return args;
     if (args[1] !== "serve" && args[1] !== "stdio") throw new Error("Unknown command. Controlled-side commands are under frely link; run frely link --help.");
     return checkOptions(args, args[1]);
   }
   if (args[0] !== "link") return args;
   if (args.slice(1).some((arg) => arg === "--help" || arg === "-h") || args[1] === "help") return ["link", "help"];
   if (!args[1]) return ["link", "help"];
-  if (!["workspace", "local", "auto-update", "stop", "on", "off", "status"].includes(args[1])) throw new Error("Unknown link command. Run frely link --help.");
+  if (!["workspace", "local", "auto-update", "on", "off", "status"].includes(args[1])) throw new Error("Unknown link command. Run frely link --help.");
   const action = args[1]!;
-  if (action === "stop" || action === "off") {
+  if (action === "off") {
     if (args.length > 2) throw new Error("Unsupported link option. Run frely link --help.");
     return args;
   }
@@ -71,7 +68,7 @@ const valueOptions: Record<string, readonly string[]> = {
   stdio: ["--workspace"],
 };
 const flagOptions: Record<string, readonly string[]> = {
-  on: ["--json", "--resume", "--no-browser"],
+  on: ["--json", "--no-browser"],
   status: ["--json"],
   serve: ["--provider-only", "--standby"],
 };

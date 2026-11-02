@@ -2,21 +2,20 @@
 
 Normal updates on supported macOS/Linux installations preserve device identity, the MCP address, credentials, workspace and authorization expiry. `frely update` restores a matching service that was running. A runtime with automatic refresh support also loads updates made by its original installer at the same path after active work finishes. No extra stop/start commands are part of that normal flow.
 
-## Manual pause and resume
+## Turning remote control off
 
 ```sh
-frely link stop
-frely link on
-frely doctor
+frely link off
+frely link status
 ```
 
-Use stop to pause the device's shared remote service and start to resume it. This service also carries any configured local Provider traffic. These commands do not revoke server authorization. Stop is an explicit service operation and can interrupt work; finish tasks before using it. A stopped service is not revived by installation refresh.
+`frely link off` revokes device MCP execution authorization for every client, writes a local lock and uninstalls the background service; when local Providers or background services exist, the service keeps running in standby mode. Only `frely link on` on this computer turns it on again. There is no separate pause command.
 
-`frely link off` revokes device MCP execution authorization and uninstalls the background service; when local Providers exist, the service keeps running in provider-only mode. Update commands printed by 0.7.x still run `frely mcp service stop|start`, which newer versions accept as a hidden alias.
+Update scripts (`start.sh`, `start.ps1` and the Windows command printed by `frely update`) stop the installed service with the internal `frely mcp service stop` before replacing the binary and start it again with `frely mcp service start`. These internal commands never prompt and are not listed in help.
 
 ## One-time transition from older runtimes
 
-An already-running old process cannot gain automatic refresh code merely because files on disk changed. If doctor shows an old runtime without refresh support, finish its tasks, update using the original installer and perform one stop/start in a local terminal. Subsequent supported updates handle service switching.
+An already-running old process cannot gain automatic refresh code merely because files on disk changed. If doctor shows an old runtime without refresh support, finish its tasks, update by running the start script again, which stops the service and starts it on the new binary. Subsequent supported updates handle service switching.
 
 An old service without a private maintenance endpoint also cannot be drained by `frely update`; it gives local-terminal guidance. Do not restart the service through the MCP session that depends on it.
 

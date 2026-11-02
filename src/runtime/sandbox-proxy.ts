@@ -106,27 +106,31 @@ export function resolveUpstreamProxy(options: { saved?: UpstreamProxy | undefine
   return (options.platform ?? process.platform) === "darwin" ? (options.system ?? readSystemProxy)() : undefined;
 }
 
-/** `frely sandbox proxy [<url> [--no-proxy <list>] | --clear]`: show, save or remove the proxy used by the command sandbox. */
-export async function runSandboxProxyCommand(args: readonly string[], write: (text: string) => void): Promise<void> {
+/**
+ * `frely sandbox proxy [<url> [--no-proxy <list>] | --clear]`: show, save or remove the proxy used by the command sandbox.
+ * Returns true when the saved value changed, so the caller restarts a running background service to apply it.
+ */
+export async function runSandboxProxyCommand(args: readonly string[], write: (text: string) => void): Promise<boolean> {
   const noProxyIndex = args.indexOf("--no-proxy");
   const noProxy = noProxyIndex === -1 ? undefined : args[noProxyIndex + 1];
   if (noProxyIndex !== -1 && !noProxy) throw new Error("--no-proxy needs a comma-separated list.");
   const rest = noProxyIndex === -1 ? [...args] : args.filter((_, index) => index !== noProxyIndex && index !== noProxyIndex + 1);
   if (rest.includes("--clear")) {
     await saveProxy(undefined);
-    write("Saved sandbox proxy removed. Restart the MCP service (frely link stop, then frely link on) for it to take effect.\n");
-    return;
+    write("Saved sandbox proxy removed.\n");
+    return true;
   }
   if (rest.length === 0) {
     const saved = readSavedProxy();
     const effective = resolveUpstreamProxy();
     write(saved ? `Saved sandbox proxy: ${redact(saved.http)}${saved.noProxy ? ` (no proxy for ${saved.noProxy})` : ""}\n` : "No sandbox proxy saved.\n");
     write(effective ? `In use when the sandbox starts: ${redact(effective.https ?? effective.http)}${saved ? "" : " (from this environment or the system settings)"}\n` : "In use when the sandbox starts: none (direct connections).\n");
-    return;
+    return false;
   }
   if (rest.length !== 1) throw new Error("Usage: frely sandbox proxy [<http://host:port> [--no-proxy <list>] | --clear]");
   await saveProxy({ url: rest[0]!, ...(noProxy ? { noProxy } : {}) });
-  write(`Sandbox proxy saved: ${redact(rest[0])}. Restart the MCP service (frely link stop, then frely link on) for it to take effect.\n`);
+  write(`Sandbox proxy saved: ${redact(rest[0])}.\n`);
+  return true;
 }
 
 /** The proxy URL without its password, for display. */

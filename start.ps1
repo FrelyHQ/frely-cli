@@ -12,9 +12,8 @@ $directory = if ($env:FRELY_INSTALL_DIR) { $env:FRELY_INSTALL_DIR } else { Join-
 $old = Join-Path $directory 'frely.exe'
 $stopped = $false
 if (Test-Path -LiteralPath $old) {
-  try { & $old link stop *> $null; $stopped = ($LASTEXITCODE -eq 0) } catch { $stopped = $false }
-  # The installed binary may predate the rename of `frely mcp` to `frely link`.
-  if (-not $stopped) { try { & $old mcp stop *> $null; $stopped = ($LASTEXITCODE -eq 0) } catch { $stopped = $false } }
+  # `mcp service stop|start` is the internal update pair; every released version accepts it.
+  try { & $old mcp service stop *> $null; $stopped = ($LASTEXITCODE -eq 0) } catch { $stopped = $false }
 }
 $here = if ($PSCommandPath) { Split-Path -Parent $PSCommandPath } else { $null }
 $installer = if ($here) { Join-Path $here 'install.ps1' } else { $null }
@@ -31,7 +30,7 @@ try {
   }
 } catch {
   # A failed update must not leave the service we stopped stopped.
-  if ($stopped) { try { & $old link on --resume *> $null; if ($LASTEXITCODE -ne 0) { & $old mcp start --resume *> $null } } catch {} }
+  if ($stopped) { try { & $old mcp service start *> $null } catch {} }
   throw
 }
 $frely = Join-Path $directory 'frely.exe'
