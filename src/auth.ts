@@ -10,7 +10,7 @@ const SESSION_COOKIE_NAME = "friday_session_token";
 export const CONFIG_VERSION = 3;
 const LEGACY_CONFIG_VERSION = 1;
 const OAUTH_CLIENT_ID = "frely-cli-basic";
-const OAUTH_SCOPE = "openid profile profile:read email offline_access device-relay:provider cloud:read mcp:invoke";
+const OAUTH_SCOPE = "openid profile profile:read email offline_access device-relay:provider cloud:read mcp:invoke gateway:invoke";
 
 // One login, three audiences: the API resource for account/device calls, the Cloud resource for read-only Cloud tools (frely item install,
 // frely api list), and this machine's FreyMCP connection (device tools, Cloud writes) — all approved by the single `frely login`.
