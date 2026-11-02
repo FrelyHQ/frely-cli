@@ -419,7 +419,7 @@ function normalizedFrelyUrl(value: string, code: "invalid_manifest_url" | "manif
   if (url.username || url.password || url.hash) throw new SkillAccessError(code, "Frely URL is invalid.");
   const loopback = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
   const frely = url.hostname === "frely.cloud" || url.hostname.endsWith(".frely.cloud");
-  if (!(url.protocol === "https:" && frely) && !(url.protocol === "http:" && loopback)) throw new SkillAccessError(code, "Frely URL must use a Frely HTTPS host or loopback development host.");
+  if (!(url.protocol === "https:" && (frely || loopback)) && !(url.protocol === "http:" && loopback)) throw new SkillAccessError(code, "Frely URL must use a Frely HTTPS host or loopback development host.");
   return url;
 }
 
