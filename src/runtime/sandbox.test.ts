@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSandboxConfig, deniedReadReference, detectSandboxBackend, isSandboxDisabled, PATH_GRANTS_META_KEY, pathGrantsFromMeta, protectedWriteDenials, sandboxDenialHint, sensitiveReadPaths } from "./sandbox.js";
+import { gitConfigGuardableRoot, buildSandboxConfig, deniedReadReference, detectSandboxBackend, isSandboxDisabled, PATH_GRANTS_META_KEY, pathGrantsFromMeta, protectedWriteDenials, sandboxDenialHint, sensitiveReadPaths } from "./sandbox.js";
 
 test("sandbox backend detection reports off when disabled and never throws", () => {
   const previous = process.env.FRELY_SANDBOX;
@@ -337,4 +337,12 @@ test("a Docker socket denial gets only the unsandboxed hint, never a path: grant
   assert.doesNotMatch(hint, /\.docker/u);
   assert.doesNotMatch(hint, /\/var\/run/u);
   assert.equal(hint.match(/request_permission/gu)?.length, 1);
+});
+
+test("gitConfigGuardableRoot refuses the home folder, its parents and the filesystem root", () => {
+  assert.equal(gitConfigGuardableRoot("/", "/tmp/h/u"), false);
+  assert.equal(gitConfigGuardableRoot("/tmp/h/u", "/tmp/h/u"), false);
+  assert.equal(gitConfigGuardableRoot("/tmp/h", "/tmp/h/u"), false);
+  assert.equal(gitConfigGuardableRoot("/tmp/h/u/project", "/tmp/h/u"), true);
+  assert.equal(gitConfigGuardableRoot("/tmp/other", "/tmp/h/u"), true);
 });

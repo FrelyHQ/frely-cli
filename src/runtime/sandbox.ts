@@ -415,6 +415,15 @@ export interface SandboxCommandOptions {
  * is returned unchanged only when the owner turned the sandbox off
  * (`FRELY_SANDBOX=off`) or approved the `unsandboxed` grant for this call.
  */
+/** False when `root` is the home folder, a folder containing it, or the filesystem root: scanning it for `.git/config` would read every top-level home folder. */
+export function gitConfigGuardableRoot(root: string, home: string = homedir()): boolean {
+  const norm = (path: string): string => { try { return realpathSync(path); } catch { return normalize(path); } };
+  const r = norm(root);
+  const h = norm(home);
+  if (r === parse(r).root) return false;
+  return r !== h && !h.startsWith(r.endsWith(sep) ? r : r + sep);
+}
+
 export async function sandboxCommandDetailed(command: string, workspaceRoot: string, allowedGroups: readonly string[] = [], options: SandboxCommandOptions = {}): Promise<SandboxedCommand> {
   if (isSandboxDisabled()) return { command, gitConfig: false };
   // The owner opened raw outbound connections for this call, which the sandbox cannot offer without losing its other limits.
@@ -424,7 +433,8 @@ export async function sandboxCommandDetailed(command: string, workspaceRoot: str
   const init = await ensureInitialized(workspaceRoot);
   if (!init.ready || !baseConfig) throw new Error(sandboxUnavailableMessage(init.ready ? "sandbox configuration missing" : init.reason));
   // Without git the guard cannot check the file afterwards, so `.git/config` then stays read-only.
-  const gitConfig = options.allowGitConfig === true && await gitConfigGuardAvailable();
+  // A workspace that is, or contains, the home folder is never scanned: the guard would list ~/Documents, ~/Music and so on, which makes macOS ask for access.
+  const gitConfig = options.allowGitConfig === true && gitConfigGuardableRoot(workspaceRoot) && await gitConfigGuardAvailable();
   const commandId = randomUUID();
   // initialize() fixed allowWrite to the first workspace that ran a command; give every call its own workspace.
   const { allowGitConfig: _unused, ...filesystem } = buildSandboxConfig(workspaceRoot, allowedGroups, { allowGitConfig: gitConfig }).filesystem ?? {};
@@ -544,7 +554,7 @@ export function sandboxDenialHint(stderr: string, command?: string, exitCode?: n
     hints.push("Writing to .git/hooks stays blocked in the Frely command sandbox: hooks run programs outside it, so no approval opens it and request_permission will not help. Ask the user to add or change the hook themselves.");
   }
   if (/\.git[\\/]config\b/u.test(text) && DENIAL_TEXT.test(text)) {
-    hints.push("Writing .git/config is allowed in run_command for a .git directory inside the workspace, and never in start_process (run it with run_command instead).");
+    hints.push("Writing .git/config is allowed in run_command for a .git directory inside the workspace, and never in start_process (run it with run_command instead). When the workspace is the home folder, .git/config stays read-only: add the repository as its own workspace.");
   }
   const groups = [...Object.entries(SENSITIVE_PATH_GROUPS), ["friday-admin", ADMIN_SESSION_PATHS] as const]
     .filter(([, paths]) => paths.some((path) => commandNamesPath(text, path))).map(([group]) => group);
