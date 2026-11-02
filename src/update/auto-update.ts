@@ -29,18 +29,16 @@ export async function writeAutoUpdate(enabled: boolean, path = autoUpdatePath())
   await chmod(path, 0o600);
 }
 
-/** The owner's Web switch as last seen on an MCP frame, kept in a file so a restarted service keeps it until the next frame says otherwise. */
+/**
+ * Older versions let the Relay turn auto-update on through a frame field. A frame carries no user signature, so that
+ * switch is gone: only the local file (`frely link auto-update`) counts. The path stays only to delete a leftover file.
+ */
 export function remoteAutoUpdatePath(): string { return `${autoUpdatePath()}-remote`; }
-let remoteSeen: boolean | undefined;
-export async function setRemoteAutoUpdate(enabled: boolean, path = remoteAutoUpdatePath()): Promise<void> {
-  if (remoteSeen === enabled) return;
-  remoteSeen = enabled;
-  await writeAutoUpdate(enabled, path).catch(() => { remoteSeen = undefined; });
-}
 
-/** On when either the local command or the owner's Web switch is on. */
+/** On only when the local command switched it on; a leftover Relay-set file from an older version is removed, never read. */
 export async function readEffectiveAutoUpdate(): Promise<boolean> {
-  return (await readAutoUpdate()) || (await readAutoUpdate(remoteAutoUpdatePath()));
+  await rm(remoteAutoUpdatePath(), { force: true }).catch(() => {});
+  return readAutoUpdate();
 }
 
 /**

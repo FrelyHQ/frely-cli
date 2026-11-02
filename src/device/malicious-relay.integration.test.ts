@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { WebSocketServer } from "ws";
 import type WebSocket from "ws";
 import { access, mkdtemp, rm } from "node:fs/promises";
-import { remoteAutoUpdatePath } from "../update/auto-update.js";
+import { customWritePath, protectedWriteDenials } from "../runtime/sandbox.js";
+import { readEffectiveAutoUpdate, remoteAutoUpdatePath } from "../update/auto-update.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RelayMcpSession } from "../runtime/relay-mcp.js";
@@ -101,7 +102,7 @@ test("KNOWN GAP G5: the Relay chooses toolsets and localMcps on every frame with
   });
 });
 
-test("KNOWN GAP G9: a forged `autoUpdate` frame field turns on automatic updates on this computer", async () => {
+test("G9 (closed in P1): a forged `autoUpdate` frame field does not turn on automatic updates", async () => {
   const config = await mkdtemp(join(tmpdir(), "frely-forged-config-"));
   const previous = process.env.XDG_CONFIG_HOME;
   process.env.XDG_CONFIG_HOME = config;
@@ -110,10 +111,16 @@ test("KNOWN GAP G9: a forged `autoUpdate` frame field turns on automatic updates
       const response = await call("forged-request-0005", { name: "read", arguments: { action: "roots" } }, { autoUpdate: true });
       assert.equal(response.ok, true);
     });
-    // Today the Relay alone flips this switch. After P1 only the local switch (or a signed approval) may.
-    assert.equal(await exists(remoteAutoUpdatePath()), true, "expected the forged autoUpdate to be accepted (documented gap G9)");
+    assert.equal(await exists(remoteAutoUpdatePath()), false);
+    assert.equal(await readEffectiveAutoUpdate(), false);
   } finally {
     if (previous === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = previous;
     await rm(config, { recursive: true, force: true });
   }
+});
+
+test("P0 precondition: the trust and policy directory cannot be written by a sandboxed process or named by a forged `path:` grant", () => {
+  assert.equal(customWritePath("path:~/.config/frely"), undefined);
+  assert.equal(customWritePath("path:~/.config/frely/trust"), undefined);
+  assert.ok(protectedWriteDenials(["unsandboxed", "friday-admin", "path:~/.config"]).includes("~/.config/frely"));
 });
