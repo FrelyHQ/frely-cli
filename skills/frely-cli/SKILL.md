@@ -6,7 +6,7 @@ description: >-
 
 # Frely CLI Skill
 
-Use the installed `frely` CLI. Do not rely on remembered syntax: run `frely help --agent --json` for the current command contract and follow it, and run `frely update` if a command is missing.
+Use the installed `frely` CLI. Do not rely on remembered syntax: run `frely help --agent --json --summary` for the grouped command index, then `frely help --agent --json <command id or group>` (for example `agent` or `agent.run`) for full usage, examples and confirmation notes, and run `frely update` if a command is missing.
 
 ## Command Routing
 
