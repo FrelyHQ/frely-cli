@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { credentialStore as secureCredentialStore, type CredentialStore } from "../../credential-store.js";
 import { sandboxCommandDetailed, sandboxViolationLines } from "../../runtime/sandbox.js";
 import { MODEL_HOST } from "./model-proxy.js";
+import { dataDirOf } from "./store.js";
 
 export const API_KEY_SERVICE = "frely-cli-local-agent-key-v1";
 
@@ -32,7 +33,7 @@ export function agentEnv(workspace: string, hosts: { model: boolean }, base: Nod
   const env: NodeJS.ProcessEnv = {};
   for (const name of PASS_THROUGH) if (base[name] !== undefined) env[name] = base[name];
   const cache = join(workspace, ".cache");
-  Object.assign(env, { XDG_CACHE_HOME: cache, UV_CACHE_DIR: join(cache, "uv"), PIP_CACHE_DIR: join(cache, "pip"), npm_config_cache: join(cache, "npm"), BUN_INSTALL_CACHE_DIR: join(cache, "bun") });
+  Object.assign(env, { FRELY_AGENT_DATA_DIR: dataDirOf(workspace), XDG_CACHE_HOME: cache, UV_CACHE_DIR: join(cache, "uv"), PIP_CACHE_DIR: join(cache, "pip"), npm_config_cache: join(cache, "npm"), BUN_INSTALL_CACHE_DIR: join(cache, "bun") });
   if (hosts.model) {
     const base = `http://${MODEL_HOST}`;
     Object.assign(env, {

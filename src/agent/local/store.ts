@@ -40,6 +40,16 @@ export function assertSlug(slug: string): void {
   if (!SLUG.test(slug)) throw new Error("The Agent name must be lower-case letters, digits and dashes.");
 }
 
+/** Where an Agent keeps its own data on this computer: `<workspace>/.frely/` holds `config.yaml` and `memory/`. Nothing in it is uploaded. */
+export const dataDirOf = (workspace: string): string => join(workspace, ".frely");
+
+/** Creates `.frely/memory/` in the Agent's folder when missing; existing files are left alone. */
+export async function ensureDataDir(workspace: string): Promise<string> {
+  const dir = dataDirOf(workspace);
+  await mkdir(join(dir, "memory"), { recursive: true, mode: 0o700 });
+  return dir;
+}
+
 export const workspaceOf = (slug: string): string => join(agentsRoot(), slug);
 export const recordPath = (slug: string): string => join(stateDir(), `${slug}.json`);
 export const logPath = (slug: string): string => join(stateDir(), `${slug}.log`);

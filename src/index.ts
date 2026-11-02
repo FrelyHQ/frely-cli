@@ -210,7 +210,17 @@ async function main(): Promise<void> {
     const action = args[1];
     if (action === undefined) { stdout.write(subcommandUsage("agent")); return; }
     if (action === "local") {
-      process.exitCode = await runAgentLocal(args.slice(2), { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY), readSecret: () => readStdinSecret(8192) });
+      process.exitCode = await runAgentLocal(args.slice(2), { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY), readSecret: () => readStdinSecret(8192) }, {}, async (serviceArgs) => {
+        const controller = new AbortController();
+        const onSignal = () => controller.abort();
+        process.once("SIGINT", onSignal); process.once("SIGTERM", onSignal);
+        try {
+          return await runServiceCommand(serviceArgs, { write: (text) => { stdout.write(text); } }, {
+            control: accountServiceControl, probe: probeLoopback, ensureFrpc: () => ensureFrpc({ log: (text) => { stdout.write(text); } }), spawnFrpc: spawnFrpcProcess, signal: controller.signal,
+            installDaemon: async () => { await installDeviceRelayService(); },
+          });
+        } finally { process.off("SIGINT", onSignal); process.off("SIGTERM", onSignal); }
+      });
       return;
     }
     if (action === "install") {

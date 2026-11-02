@@ -12,7 +12,7 @@ import { API_KEY_SERVICE, agentEnv, gatewayOrigin, readApiKey, spawnConfined } f
 import { parseManifest } from "./manifest.js";
 import { download, githubUrl, parseSource, resolveRegisteredRepo, type AgentSource } from "./source.js";
 import {
-  SLUG, agentsRoot, approvedHosts, assertSlug, insideAgentsRoot, isRunning, listRecords, logPath, readRecord, removeRecordFiles, stateDir, workspaceOf, writeRecord,
+  SLUG, agentsRoot, approvedHosts, assertSlug, insideAgentsRoot, isRunning, listRecords, logPath, readRecord, removeRecordFiles, ensureDataDir, dataDirOf, stateDir, workspaceOf, writeRecord,
   type LocalAgentRecord,
 } from "./store.js";
 import { superviseAgent } from "./supervisor.js";
@@ -24,6 +24,9 @@ export interface LocalIo {
   readSecret(): Promise<string>;
 }
 
+/** Runs `frely service ...` with the given arguments; wired by the CLI entry so this module needs no network code. */
+export type ShareService = (args: readonly string[]) => Promise<number>;
+
 export const LOCAL_USAGE = `Usage:
   frely agent local add <username/name | https://github.com/owner/repo> [--name <folder-name>]
   frely agent local start <name> [--foreground]
@@ -32,6 +35,7 @@ export const LOCAL_USAGE = `Usage:
   frely agent local list [--json]
   frely agent local remove <name>
   frely agent local key --api-key-stdin | --clear
+  frely agent local share <name> --port <n> [--background]   Let your own FrelyMCP call this Agent (it must serve A2A on 127.0.0.1:<n>)
 `;
 
 const fail = (message: string, code: number = EXIT.cli): never => { throw new ControllerError(message, code); };
@@ -46,7 +50,7 @@ function value(args: readonly string[], name: string): string | undefined {
 const positional = (args: readonly string[]): string[] => args.filter((arg, index) => !arg.startsWith("--") && !(index > 0 && ["--name", "--lines"].includes(args[index - 1]!)));
 
 /** Runs `frely agent local ...`; returns the exit code. */
-export async function runAgentLocal(args: readonly string[], io: LocalIo, deps: ApprovalDeps = {}): Promise<number> {
+export async function runAgentLocal(args: readonly string[], io: LocalIo, deps: ApprovalDeps = {}, shareService?: ShareService): Promise<number> {
   try {
     const [action, ...rest] = args;
     switch (action) {
@@ -57,6 +61,7 @@ export async function runAgentLocal(args: readonly string[], io: LocalIo, deps: 
       case "list": return await list(rest, io);
       case "remove": return await remove(rest, io);
       case "key": return await key(rest, io);
+      case "share": return await share(rest, shareService);
       case "supervise": return await superviseAgent(rest[0] ?? "");
       default: io.out(LOCAL_USAGE); return action === undefined ? EXIT.ok : EXIT.cli;
     }
@@ -116,6 +121,8 @@ async function add(args: string[], io: LocalIo, deps: ApprovalDeps): Promise<num
     if (code !== 0) return fail(`Setup failed (exit ${code}). Fix it or remove the Agent with frely agent local remove ${record.slug}, then run add again.`, EXIT.tool);
   }
   await writeRecord({ ...record, setupDone: true });
+  await ensureDataDir(record.workspace);
+  io.out(`  data: ${dataDirOf(record.workspace)} (also FRELY_AGENT_DATA_DIR for the Agent; stays on this computer)\n`);
   io.out(`Added. Start it with: frely agent local start ${record.slug}\n`);
   return EXIT.ok;
 }
@@ -258,3 +265,15 @@ async function key(args: string[], io: LocalIo): Promise<number> {
   return EXIT.ok;
 }
 
+
+/** Registers the Agent's local A2A port as an A2A service, labelled with the Agent's name, so the owner's FrelyMCP can call it. Data stays local; only Frely can reach the port. */
+async function share(args: string[], shareService: ShareService | undefined): Promise<number> {
+  const [slug] = positional(args.filter((arg, index) => !(index > 0 && args[index - 1] === "--port")));
+  if (!slug) return fail("Usage: frely agent local share <name> --port <n> [--background]");
+  assertSlug(slug);
+  const record = await readRecord(slug) ?? fail(`No local Agent named ${slug}.`);
+  if (!isRunning(record)) return fail(`${slug} is not running. Start it first: frely agent local start ${slug}`);
+  const port = value(args, "--port") ?? fail("--port <n> is required: the 127.0.0.1 port where the Agent serves A2A.");
+  if (!shareService) return fail("Sharing is not available in this context.");
+  return shareService(["share", "--type", "a2a", "--port", port, "--label", `agent-${slug}`, ...(flag(args, "--background") ? ["--background"] : [])]);
+}

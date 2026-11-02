@@ -95,3 +95,27 @@ test("add refuses an address that is not a Frely Agent or a public GitHub reposi
   assert.equal(await runAgentLocal(["add", "http://example.com/x.git"], h.io), EXIT.cli);
   assert.match(h.errors(), /Frely Agent name.*public GitHub address/u);
 });
+
+test("share refuses a stopped Agent and passes an A2A service request for a running one", async () => {
+  isolate();
+  await writeRecord(make("worker"));
+  const calls: string[][] = [];
+  const share = async (args: readonly string[]) => { calls.push([...args]); return 0; };
+  const stopped = harness();
+  assert.equal(await runAgentLocal(["share", "worker", "--port", "8123"], stopped.io, {}, share), EXIT.cli);
+  assert.match(stopped.errors(), /is not running/u);
+  await writeRecord(make("worker", { pid: process.pid }));
+  assert.equal(await runAgentLocal(["share", "worker", "--port", "8123", "--background"], harness().io, {}, share), EXIT.ok);
+  assert.deepEqual(calls, [["share", "--type", "a2a", "--port", "8123", "--label", "agent-worker", "--background"]]);
+  assert.equal(await runAgentLocal(["share", "worker"], harness().io, {}, share), EXIT.cli);
+});
+
+test("the Agent's data folder is inside its workspace and offered through FRELY_AGENT_DATA_DIR", async () => {
+  isolate();
+  const { ensureDataDir, dataDirOf } = await import("./store.js");
+  const { agentEnv } = await import("./confine.js");
+  const workspace = workspaceOf("data-agent");
+  assert.equal(await ensureDataDir(workspace), dataDirOf(workspace));
+  assert.ok(existsSync(join(workspace, ".frely", "memory")));
+  assert.equal(agentEnv(workspace, { model: false }).FRELY_AGENT_DATA_DIR, join(workspace, ".frely"));
+});
