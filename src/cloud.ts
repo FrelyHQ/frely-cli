@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { credentialStore } from "./credential-store.js";
 import { inspectAuth, normalizeRelayUrl } from "./auth.js";
-import { CloudToolError } from "./skill/cloud-item.js";
+import { ApprovalRequiredError, CloudToolError, type Approval } from "./skill/cloud-item.js";
 import { openController } from "./controller/client.js";
 import { waitForApproval, type ApprovalOutcome, type ApprovalRef } from "./controller/approval-wait.js";
 import { openCloudReader, type CloudReader, type DirectResult } from "./cloud/direct.js";
@@ -23,10 +23,10 @@ export function permissionHint(result: object): string | null {
       if (url.protocol !== "https:" && url.hostname !== "127.0.0.1" && url.hostname !== "localhost") continue;
       if (error.code === "confirmation_required") {
         if (typeof error.approvalCode !== "string" || !/^[A-HJ-NP-Z]{8}$/.test(error.approvalCode)) continue;
-        return `${typeof error.summary === "string" ? error.summary + "\n" : ""}Approve this in your browser: ${url.toString()}\nCode: ${error.approvalCode.slice(0, 4)}-${error.approvalCode.slice(4)}\nThen run the same call again with "approvalCode":"${error.approvalCode}" added to the input, or add --wait to let the CLI wait and run it once. To wait in the background: frely permission wait ${error.approvalCode}`;
+        return `${typeof error.summary === "string" ? error.summary + "\n" : ""}Approve this in your browser:\n${url.toString()}\nCode: ${error.approvalCode.slice(0, 4)}-${error.approvalCode.slice(4)}\nThen run the same call again with "approvalCode":"${error.approvalCode}" added to the input, or add --wait to let the CLI wait and run it once. To wait in the background: frely permission wait ${error.approvalCode}`;
       }
       const waiting = typeof error.shortCode === "string" && /^[A-Za-z]{8}$/.test(error.shortCode) ? `\nTo wait in the background: frely permission wait ${error.shortCode}, then run the call again (or use --wait).` : "";
-      return `This device needs ${need}${typeof error.group === "string" ? " to " + error.group : ""}. Grant it in your browser (passkey or authenticator code required): ${url.toString()}${waiting}`;
+      return `This device needs ${need}${typeof error.group === "string" ? " to " + error.group : ""}. Grant it in your browser (passkey or authenticator code required):\n${url.toString()}${waiting}`;
     } catch { /* Not a permission failure. */ }
   }
   return null;
@@ -36,7 +36,7 @@ type CallResult = { isError?: boolean; content?: unknown; [key: string]: unknown
 const WAIT_DEFAULT_MS = 5 * 60_000, WAIT_MAX_MS = 10 * 60_000;
 
 /** The error object of a failed tool result, or null when the result is not a JSON error. */
-function toolError(result: object): { code?: unknown; url?: unknown; approvalCode?: unknown; shortCode?: unknown; expiresAt?: unknown } | null {
+function toolError(result: object): { code?: unknown; url?: unknown; approvalCode?: unknown; shortCode?: unknown; expiresAt?: unknown; approval?: unknown; summary?: unknown } | null {
   const { isError, content } = result as { isError?: unknown; content?: unknown };
   if (isError !== true || !Array.isArray(content)) return null;
   for (const part of content) {
@@ -45,6 +45,19 @@ function toolError(result: object): { code?: unknown; url?: unknown; approvalCod
     try { const error = (JSON.parse(text) as { error?: object }).error; if (error && typeof error === "object") return error; } catch { /* Not JSON. */ }
   }
   return null;
+}
+
+/** The approval a refusal asks for: the server's `approval` object, or the older loose fields (`shortCode` / `approvalCode`, `url`) when a server predates it. */
+export function approvalOf(error: { code?: unknown; url?: unknown; approvalCode?: unknown; shortCode?: unknown; expiresAt?: unknown; approval?: unknown; summary?: unknown }): Approval | null {
+  const named = error.approval as { code?: unknown; url?: unknown; expiresAt?: unknown; summary?: unknown; then?: unknown } | undefined;
+  const confirmation = error.code === "confirmation_required";
+  const code = typeof named?.code === "string" ? named.code : confirmation ? error.approvalCode : error.shortCode;
+  const url = typeof named?.url === "string" ? named.url : error.url;
+  if (typeof code !== "string" || !/^[A-Za-z]{8}$/u.test(code) || typeof url !== "string") return null;
+  const expiresAt = typeof named?.expiresAt === "string" ? named.expiresAt : typeof error.expiresAt === "string" ? error.expiresAt : undefined;
+  const summary = typeof named?.summary === "string" ? named.summary : typeof error.summary === "string" ? error.summary : undefined;
+  const then = named?.then === "repeat" || named?.then === "repeat_with_approval_code" ? named.then : confirmation ? "repeat_with_approval_code" : "repeat";
+  return { code: code.toUpperCase(), url, ...(expiresAt ? { expiresAt } : {}), ...(summary ? { summary } : {}), then };
 }
 
 /**
@@ -254,6 +267,32 @@ export async function callCloudTool(name: string, input: Record<string, unknown>
   return callCloudToolWith(name, input, { openReader: openCloudReader, openControllerConnection });
 }
 
+/**
+ * Like callCloudTool, for a command that should not hand the owner's approval back to the caller: a write that needs approval prints the
+ * link at once, then waits for the owner here (up to 10 minutes) and runs the call once when it is approved. Not approved in time: the same
+ * ApprovalRequiredError, so the caller can exit with 3 and say what to run again.
+ */
+export async function callCloudToolAwaiting(name: string, input: Record<string, unknown>, deps: CloudCallDeps = { openReader: openCloudReader, openControllerConnection },
+  wait: (controller: { call(name: string, args: Record<string, unknown>): Promise<DirectResult> }, ref: ApprovalRef, timeoutMs: number) => Promise<ApprovalOutcome> = (controller, ref, timeoutMs) => waitForApproval(controller as never, ref, timeoutMs)): Promise<Record<string, unknown>> {
+  const reader = await deps.openReader();
+  try {
+    return cloudToolResult(await reader.call(name, input));
+  } catch (error) {
+    if (!(error instanceof CloudToolError && error.code === "tool_unavailable_or_forbidden")) throw error;
+  } finally { await reader.close().catch(() => undefined); }
+  const controller = await deps.openControllerConnection();
+  try {
+    const call = (arguments_: Record<string, unknown>) => controller.call("frely_call", { tool: name, arguments: arguments_ }) as Promise<CallResult>;
+    let result = await call(input);
+    const hint = permissionHint(result);
+    if (hint) {
+      process.stderr.write(hint + "\nWaiting for approval (up to 10 minutes); this command continues by itself once the owner approves.\n");
+      result = await rerunAfterApproval(result, call, input, (ref, timeoutMs) => wait(controller, ref, timeoutMs));
+    }
+    return cloudToolResult(result, true);
+  } finally { await controller.close().catch(() => undefined); }
+}
+
 /** The two connections a Cloud call needs; production opens the login's reader directly and FreyMCP only on fallback. */
 export interface CloudCallDeps {
   openReader(): Promise<CloudReader>;
@@ -272,11 +311,16 @@ export async function callCloudToolWith(name: string, input: Record<string, unkn
 }
 
 /** One tool result as the calling command needs it: the JSON object on success, CloudToolError(code) on failure. Permission hints go to stderr either way. */
-function cloudToolResult(result: DirectResult): Record<string, unknown> {
+function cloudToolResult(result: DirectResult, hintShown = false): Record<string, unknown> {
   const hint = permissionHint(result);
-  if (hint) process.stderr.write(hint + "\n");
+  if (hint && !hintShown) process.stderr.write(hint + "\n");
   const text = Array.isArray(result.content) ? (result.content as Array<{ type?: unknown; text?: unknown }>).find(part => part.type === "text")?.text : undefined;
   if (result.isError === true) {
+    const refusal = toolError(result);
+    if (refusal && (refusal.code === "permission_required" || refusal.code === "confirmation_required")) {
+      const approval = approvalOf(refusal);
+      if (approval) throw new ApprovalRequiredError(refusal.code, approval);
+    }
     let code = "operation_failed";
     try { const parsed = (JSON.parse(String(text)) as { error?: { code?: unknown } }).error?.code; if (typeof parsed === "string") code = parsed; } catch { /* Keep the generic code. */ }
     throw new CloudToolError(code);

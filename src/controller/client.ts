@@ -15,6 +15,8 @@ export class ControllerError extends Error {
 }
 
 const MCP_TIMEOUT_MS = 15_000;
+/** A permission_status with wait=true is held by the server for up to 50 seconds; the request must outlast that hold. */
+const MCP_WAIT_TIMEOUT_MS = 65_000;
 
 /** A FreyMCP connection as the CLI uses it: the login's own token, no separate sign-in. */
 export interface LoginMcpSession {
@@ -39,6 +41,18 @@ async function refreshLoginMcpSession(): Promise<LoginMcpSession> {
   return { mcpUrl: frelyMcpUrl(config.relayUrl), mcpToken: credential.mcpToken };
 }
 
+/** True for a permission_status call with wait=true, which the server holds open for up to 50 seconds before it answers. */
+export function holdsForWait(body: unknown): boolean {
+  if (typeof body !== "string" || !body.includes("permission_status")) return false;
+  try {
+    const messages = JSON.parse(body) as unknown;
+    return (Array.isArray(messages) ? messages : [messages]).some((message) => {
+      const params = (message as { params?: { name?: unknown; arguments?: { wait?: unknown } } } | null)?.params;
+      return params?.name === "permission_status" && params.arguments?.wait === true;
+    });
+  } catch { return false; }
+}
+
 /** `fetch` for the FreyMCP transport: every request carries the login's MCP side token. A refused token is refreshed once and the request sent again. */
 export function mcpFetch(initial: LoginMcpSession, options: { refresh?: (session: LoginMcpSession) => Promise<LoginMcpSession> } = {}): { fetch: typeof fetch; session(): LoginMcpSession } {
   let session = initial;
@@ -46,7 +60,7 @@ export function mcpFetch(initial: LoginMcpSession, options: { refresh?: (session
   const send = async (input: string | URL | Request, init: RequestInit | undefined) => {
     const headers = new Headers(init?.headers);
     headers.set("authorization", `Bearer ${session.mcpToken}`);
-    return fetch(input, { ...init, headers, redirect: "error", signal: AbortSignal.timeout(MCP_TIMEOUT_MS) });
+    return fetch(input, { ...init, headers, redirect: "error", signal: AbortSignal.timeout(holdsForWait(init?.body) ? MCP_WAIT_TIMEOUT_MS : MCP_TIMEOUT_MS) });
   };
   return {
     session: () => session,

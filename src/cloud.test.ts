@@ -116,3 +116,34 @@ test("a failure that is not an approval, or has no reference to wait on, is retu
   const noCode = refusal({ code: "permission_required", message: "The owner denied this a moment ago." });
   assert.equal(await rerunAfterApproval(noCode, never, {}, never), noCode);
 });
+
+test("approvalOf reads the server's approval object, or the older loose fields", async () => {
+  const { approvalOf } = await import("./cloud.js");
+  const named = approvalOf({ code: "permission_required", approval: { code: "abcdefgh", url: "https://frely.cloud/device?g=ABCDEFGH", expiresAt: "2026-11-02T16:00:00Z", then: "repeat" } });
+  assert.deepEqual(named, { code: "ABCDEFGH", url: "https://frely.cloud/device?g=ABCDEFGH", expiresAt: "2026-11-02T16:00:00Z", then: "repeat" });
+  const loose = approvalOf({ code: "confirmation_required", approvalCode: "ABCDEFGH", url: "https://frely.cloud/device?g=ABCDEFGH", summary: "Install" });
+  assert.equal(loose?.then, "repeat_with_approval_code");
+  assert.equal(approvalOf({ code: "permission_required", url: "https://x.test" }), null);
+});
+
+test("callCloudToolAwaiting waits for the owner's approval inside the call, then runs it once with the approval code", async () => {
+  const { callCloudToolAwaiting } = await import("./cloud.js");
+  const { CloudToolError, ApprovalRequiredError } = await import("./skill/cloud-item.js");
+  const refusal = failure({ code: "confirmation_required", approvalCode: "ABCDEFGH", url: "https://frely.cloud/device?g=ABCDEFGH", expiresAt: new Date(Date.now() + 60_000).toISOString(), summary: "Install" });
+  const calls: Array<Record<string, unknown>> = [];
+  const deps = {
+    openReader: async () => ({ tools: async () => [], call: async () => { throw new CloudToolError("tool_unavailable_or_forbidden"); }, close: async () => undefined }),
+    openControllerConnection: async () => ({
+      call: async (_name: string, args: Record<string, unknown>) => { calls.push(args); return (args.arguments as Record<string, unknown>).approvalCode ? { content: [{ type: "text", text: JSON.stringify({ kind: "skill", id: "s", name: "a/b" }) }], structuredContent: { kind: "skill", id: "s", name: "a/b" } } : refusal; },
+      close: async () => undefined,
+    }),
+  };
+  const done = await callCloudToolAwaiting("items.claim_install", { name: "a/b" }, deps as never, async () => ({ status: "approved" }) as ApprovalOutcome);
+  assert.equal(done.kind, "skill");
+  assert.equal(calls.length, 2);
+  assert.equal((calls[1]!.arguments as Record<string, unknown>).approvalCode, "ABCDEFGH");
+  // Not approved in time: the approval is handed back as fields, and nothing runs a second time.
+  calls.length = 0;
+  await assert.rejects(callCloudToolAwaiting("items.claim_install", { name: "a/b" }, deps as never, async () => ({ status: "pending" }) as ApprovalOutcome), (error: unknown) => error instanceof ApprovalRequiredError && error.approval.code === "ABCDEFGH");
+  assert.equal(calls.length, 1);
+});

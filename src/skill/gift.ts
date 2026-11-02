@@ -10,7 +10,8 @@ export async function redeemGift(code: string, call: (name: string, input: Recor
   if (!GIFT_CODE.test(code)) throw new Error("--gift takes the share code from the prompt (it starts with fsl_).");
   try {
     const value = await call("share_links.redeem", { code });
-    out.write(`Gift claimed${typeof value.giftUnits === "number" && value.giftUnits > 0 ? ` (${value.giftUnits} Credit units added)` : ""}.\n`);
+    const by = (value.claimedBy as { email?: unknown } | undefined)?.email;
+    out.write(`Gift claimed${typeof by === "string" ? ` by ${by}` : ""}${typeof value.giftUnits === "number" && value.giftUnits > 0 ? ` (${value.giftUnits} Credit units added)` : ""}.\n`);
   } catch (error) {
     if (error instanceof CloudToolError && error.code === "creator_share_already_claimed") { out.write("Gift was already claimed by this account.\n"); return; }
     throw error;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mcpFetch, outcomeOf, type LoginMcpSession } from "./client.js";
+import { holdsForWait, mcpFetch, outcomeOf, type LoginMcpSession } from "./client.js";
 import { ControllerError, EXIT } from "./client.js";
 
 const session = (mcpToken = "fmcp_at_one"): LoginMcpSession => ({ mcpUrl: "https://mcp.test/mcp", mcpToken });
@@ -48,4 +48,12 @@ test("tool results map to the exit codes", () => {
   assert.equal(outcomeOf({ ...text("Frely device is offline. On that computer, run `frely link on`, then try again."), isError: true }).exitCode, EXIT.offline);
   assert.equal(outcomeOf({ ...text({ error: { code: "credit_limit" } }), isError: true }).exitCode, EXIT.limit);
   assert.equal(outcomeOf({ ...text("No device matches"), isError: true }).exitCode, EXIT.tool);
+});
+
+test("only a permission_status with wait=true gets the long timeout", () => {
+  const call = (name: string, args: object) => JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } });
+  assert.equal(holdsForWait(call("permission_status", { code: "ABCDEFGH", wait: true })), true);
+  assert.equal(holdsForWait(call("permission_status", { code: "ABCDEFGH" })), false);
+  assert.equal(holdsForWait(call("list_devices", { wait: true })), false);
+  assert.equal(holdsForWait(undefined), false);
 });
