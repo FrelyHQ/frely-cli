@@ -1,6 +1,6 @@
 {
   "name": "frely-cli",
-  "version": "0.23.17",
+  "version": "0.23.18",
   "description": "Frely CLI — FrelyMCP gives ChatGPT, Claude, Codex and other MCP clients access to your computer",
   "license": "Apache-2.0",
   "repository": {
