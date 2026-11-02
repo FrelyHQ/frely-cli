@@ -388,7 +388,8 @@ async function outsideMessage(input: string): Promise<string> {
   const stat = await lstat(input).catch(() => undefined);
   const dir = stat?.isDirectory() ? input : dirname(input);
   const home = homedir();
-  const shown = dir === home ? "~" : dir.startsWith(home + sep) ? `~/${dir.slice(home.length + 1).split(sep).join("/")}` : dir;
+  // `path:` resources spell paths with forward slashes, also on Windows (`D:/work`).
+  const shown = dir === home ? "~" : dir.startsWith(home + sep) ? `~/${dir.slice(home.length + 1).split(sep).join("/")}` : dir.split(sep).join("/");
   return `${input} is outside the workspace. To work there, call request_permission with resource "path:${shown}" and tool "files" (the owner approves on the web), then repeat this call.`;
 }
 

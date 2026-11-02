@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -55,7 +55,7 @@ test("multiple workspaces route absolute paths, reject relative/outside paths, k
     const missing = await client.callTool({ name: "list_directory", arguments: { path: outside } });
     assert.equal(missing.isError, true);
     assert.match(text(missing), /outside the workspace/);
-    assert.ok(text(missing).includes(`path:${outside}`) && text(missing).includes('tool "files"'));
+    assert.ok(text(missing).includes(`path:${outside.split(sep).join("/")}`) && text(missing).includes('tool "files"'));
 
     const processes = await client.callTool({ name: "process", arguments: { action: "list" } });
     assert.equal(processes.isError, undefined);
@@ -112,7 +112,7 @@ test("approved path: grants make file tools treat the directory as a workspace f
   await mkdir(join(granted, "sub"));
   await writeFile(join(granted, "sub", "n.txt"), "granted\n");
   await writeFile(join(primary, "a.txt"), "primary\n");
-  const meta = { "frely/pathGrants": [`path:${granted}`] };
+  const meta = { "frely/pathGrants": [`path:${granted.split(sep).join("/")}`] };
   const { client, close } = await connect(primary);
   try {
     const file = join(granted, "sub", "n.txt");
@@ -120,7 +120,7 @@ test("approved path: grants make file tools treat the directory as a workspace f
     const denied = await client.callTool({ name: "read_file", arguments: { path: file } });
     assert.equal(denied.isError, true);
     assert.match(text(denied), /request_permission/);
-    assert.ok(text(denied).includes(`path:${join(granted, "sub")}`));
+    assert.ok(text(denied).includes(`path:${join(granted, "sub").split(sep).join("/")}`));
     // With the grant: read, write, list, move and a relative path still means the single registered workspace.
     assert.equal(text(await client.callTool({ name: "read_file", arguments: { path: file }, _meta: meta })), "granted\n");
     const written = await client.callTool({ name: "write_file", arguments: { path: join(granted, "new.txt"), content: "x" }, _meta: meta });
@@ -143,13 +143,17 @@ test("a granted parent directory never opens protected credential folders to fil
   const home = join(granted, "home");
   await mkdir(join(home, ".ssh"), { recursive: true });
   await writeFile(join(home, ".ssh", "id"), "secret");
-  const meta = { "frely/pathGrants": [`path:${granted}`] };
+  const meta = { "frely/pathGrants": [`path:${granted.split(sep).join("/")}`] };
   const { client, close } = await connect(primary);
-  const previous = process.env.HOME;
+  const previous = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
   process.env.HOME = home;
+  process.env.USERPROFILE = home;
   try {
     const read = await client.callTool({ name: "read_file", arguments: { path: join(home, ".ssh", "id") }, _meta: meta });
     assert.equal(read.isError, true);
     assert.match(text(read), /protected/);
-  } finally { process.env.HOME = previous; await close(); }
+  } finally {
+    for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    await close();
+  }
 });
