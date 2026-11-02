@@ -4,7 +4,6 @@ import { applyDataDir, activeDataDir } from "./data-dir.js";
 import { update } from "./update/update.js";
 import { requireMcpAuthorization, inspectMcpMetadata, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, lockLinkOnServer, generateMcpKey, parseMcpDays, MCP_DEFAULT_DAYS } from "./mcp-authorization.js";
 import { chmod, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { sshProxyConnect } from "./runtime/ssh-proxy.js";
 import { parseTunnelArguments, startTunnel, tunnelUsage } from "./runtime/tunnel.js";
 import { runSandboxProxyCommand } from "./runtime/sandbox-proxy.js";
@@ -44,6 +43,7 @@ import { appInstallStatus, installApp, openApp, uninstallApp, updateApp } from "
 import { detectSandboxBackend } from "./runtime/sandbox.js";
 import { LocalMcpHub, loadManualEntries } from "./runtime/local-mcp.js";
 import { reportedWorkspaces } from "./runtime/workspace-registry.js";
+import { ensureDefaultWorkspace } from "./default-workspace.js";
 import { VERSION } from "./version.js";
 import { agentHelp, cliUsage, linkUsage, subcommandUsage } from "./agent-help.js";
 import { ensureMcpAuthorization, grantInactive, mcpStartLogin, normalizeLinkArgs, startMcp, takeInstallToken } from "./mcp-command.js";
@@ -448,7 +448,7 @@ async function main(): Promise<void> {
       try {
         let mcp: EmailDeviceChallenge["mcp"];
         if (args.includes("--mcp")) {
-          const workspace = await realpath(resolve(option(args, "--workspace") || homedir()));
+          const workspace = option(args, "--workspace") ? await realpath(resolve(option(args, "--workspace")!)) : await ensureDefaultWorkspace();
           const days = parseMcpDays(option(args, "--days") ?? DEFAULT_EMAIL_LOGIN_MCP_DAYS);
           mcp = { ...generateMcpKey(), workspace, days };
         }

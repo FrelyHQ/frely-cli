@@ -42,14 +42,19 @@ test("a locked computer neither registers nor claims, and a failed round does no
 async function fixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), "frely-link-claim-"));
   const restore = useMemoryCredentialStore();
-  const previous = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME };
+  const previous = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, HOME: process.env.HOME };
   process.env.XDG_CONFIG_HOME = directory;
+  // The default workspace (~/Frely) is created on registering: keep it out of the real home directory.
+  const home = await realpath(await mkdtemp(join(tmpdir(), "frely-link-home-")));
+  process.env.HOME = home;
   const originalFetch = globalThis.fetch;
   t.after(async () => {
     restore();
     globalThis.fetch = originalFetch;
     if (previous.XDG_CONFIG_HOME === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = previous.XDG_CONFIG_HOME;
+    if (previous.HOME === undefined) delete process.env.HOME; else process.env.HOME = previous.HOME;
     await rm(directory, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
   });
   const relayUrl = "https://test.invalid", userId = "user_test", deviceId = `drd_${"2".repeat(32)}`;
   await mkdir(join(directory, "frely"), { recursive: true, mode: 0o700 });
@@ -79,11 +84,11 @@ async function fixture(t: TestContext) {
   return { state, deviceId };
 }
 
-test("registering sends a public key, the home workspace and a signature that proves possession", async (t) => {
+test("registering sends a public key, the default ~/Frely workspace and a signature that proves possession", async (t) => {
   const f = await fixture(t);
   await registerLinkKey();
   assert.ok(f.state.registered);
-  assert.equal(f.state.registered.workspace, await realpath(homedir()));
+  assert.equal(f.state.registered.workspace, join(await realpath(homedir()), "Frely"));
   // Registering again reuses the stored key.
   const first = f.state.registered.keyThumbprint;
   await registerLinkKey();

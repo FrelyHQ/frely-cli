@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -15,8 +15,12 @@ import { useMemoryCredentialStore } from "./test-support.js";
 async function fixture(t: TestContext, denied = false, offeredLink: (id: string) => unknown = () => "https://test.invalid/device?g=ABCDEFGH") {
   const directory = await mkdtemp(join(tmpdir(), "frely-mcp-url-"));
   const restore = useMemoryCredentialStore();
-  const previous = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, FRELY_NO_BROWSER: process.env.FRELY_NO_BROWSER };
+  const previous = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, FRELY_NO_BROWSER: process.env.FRELY_NO_BROWSER, HOME: process.env.HOME };
   process.env.XDG_CONFIG_HOME = directory;
+  // A device without --workspace shares ~/Frely, which is created on setup: keep that out of the real home directory.
+  const home = join(directory, "home");
+  await mkdir(home);
+  process.env.HOME = home;
   process.env.FRELY_NO_BROWSER = "1";
   const originalFetch = globalThis.fetch;
   t.after(async () => {
@@ -73,7 +77,7 @@ async function fixture(t: TestContext, denied = false, offeredLink: (id: string)
     state.installations.push(workspace);
     return { installed: true, active: true, platform: process.platform, workspace };
   };
-  return { directory, relayUrl, userId, mcpResource, state, notify, install };
+  return { directory, home, relayUrl, userId, mcpResource, state, notify, install };
 }
 
 test("frely mcp sets up an unconfigured device once, then returns the same authorization silently", async (t) => {
@@ -101,6 +105,15 @@ test("frely mcp sets up an unconfigured device once, then returns the same autho
   assert.deepEqual(f.state.installations, [workspace]);
   assert.deepEqual(f.state.messages, []);
   assert.equal(await readFile(mcpMetadataPath(), "utf8"), metadata);
+});
+
+test("a new device without --workspace shares ~/Frely, creating it, not the home directory", async (t) => {
+  const f = await fixture(t);
+  const authorization = await ensureMcpAuthorization({ notify: f.notify }, f.install);
+  const expected = join(await realpath(f.home), "Frely");
+  assert.equal(authorization.grant.workspace, expected);
+  assert.ok((await stat(expected)).isDirectory());
+  assert.deepEqual(f.state.installations, [expected]);
 });
 
 test("frely link on clears an authorization saved for another account and sets up again", async (t) => {
@@ -293,7 +306,7 @@ test("frely link on without a login signs in first and keeps prompts off stdout,
     await assert.rejects(promisify(execFile)(process.execPath, [entry, ...args], {
       cwd: directory,
       // An unreachable loopback relay: the sign-in request fails at once instead of waiting for a browser approval.
-      env: { ...process.env, XDG_CONFIG_HOME: directory, FRELY_NO_BROWSER: "1", FRELY_RELAY_URL: "http://127.0.0.1:9" },
+      env: { ...process.env, HOME: directory, XDG_CONFIG_HOME: directory, FRELY_NO_BROWSER: "1", FRELY_RELAY_URL: "http://127.0.0.1:9" },
       timeout: 20000,
     }), (error: unknown) => {
       const result = error as Error & { code: number; stdout: string; stderr: string };
