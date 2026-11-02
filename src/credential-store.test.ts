@@ -1,11 +1,11 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
-import { chmod, copyFile, link, mkdtemp, readFile, readdir, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, link, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCredentialStore, credentialStoreBackend, type CredentialStore } from "./credential-store.js";
-import { createEncryptedCredentialStore } from "./credential-file.js";
+import { createEncryptedCredentialStore, ensureCredentialDirectory } from "./credential-file.js";
 import { createNativeCredentialStore } from "./credential-native.js";
 import { createSystemCredentialStore } from "./credential-system.js";
 import { runCredentialCommand, type CredentialCommand } from "./credential-command.js";
@@ -144,6 +144,17 @@ test("vault rejects symbolic links, hard links and unsafe POSIX permissions", { 
   await chmod(root, 0o755);
   await assert.rejects(createEncryptedCredentialStore(root, key).getPassword("s", "a"), /permissions are unsafe/);
   await chmod(root, 0o700);
+});
+
+test("a vault folder may sit in a 0755 parent like ~/.config, but not in a group-writable one", { skip: process.platform === "win32" }, async (t) => {
+  const { directory } = await fixture(t);
+  const parent = join(directory, "config");
+  await mkdir(parent, { mode: 0o755 });
+  await chmod(parent, 0o755);
+  assert.equal(await ensureCredentialDirectory(join(parent, "frely"), true), true);
+  assert.equal((await stat(join(parent, "frely"))).mode & 0o777, 0o700);
+  await chmod(parent, 0o775);
+  await assert.rejects(ensureCredentialDirectory(join(parent, "frely"), true), /permissions are unsafe/);
 });
 
 test("system vault migrates legacy values and stores only a master key in the OS", async (t) => {
