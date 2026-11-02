@@ -28,6 +28,8 @@ export function frelyMcpUrl(relayUrl: string, env: NodeJS.ProcessEnv = process.e
   return `${url.origin}/mcp/devices`;
 }
 const FRELY_MCP_TOKEN_FIELD = "frely_mcp_token";
+/** Set by the relay when the account has no free slot for this computer to sign in as a controller; the login itself still succeeds. */
+const FRELY_CONTROLLER_STATUS_FIELD = "frely_controller_status";
 const DEFAULT_RELAY = "https://frely.cloud";
 // app.frely.cloud now belongs to the Frely App; logins saved against it move to frely.cloud (see currentRelayConfig).
 const RETIRED_RELAY_HOSTNAME = "app.frely.cloud";
@@ -576,6 +578,8 @@ export async function pollDeviceToken(
     const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
     if (response.ok && isString(record.access_token) && (!record.token_type || String(record.token_type).toLowerCase() === "bearer")) {
       const expiresInSeconds = numberPayload(record.expires_in, 1, 86_400);
+      // Not an error: the computer works as a controlled device. It connects as a controller on a later sign-in once a slot is free.
+      if (record[FRELY_CONTROLLER_STATUS_FIELD] === "slots_full") process.stderr.write("This computer is signed in, but your account has no free slot for it to act as a controller. Disconnect a device or controller in the Frely web console, or upgrade your plan, then run `frely login` again.\n");
       return { accessToken: record.access_token, ...(isString(record.refresh_token) ? { refreshToken: record.refresh_token } : {}), expiresAt: Date.now() + expiresInSeconds * 1000, ...(isString(record[SESSION_BINDING_ID_FIELD]) ? { sessionBindingId: record[SESSION_BINDING_ID_FIELD] as string } : {}), ...(isString(record[FRELY_MCP_TOKEN_FIELD]) ? { mcpToken: record[FRELY_MCP_TOKEN_FIELD] as string } : {}) };
     }
     const errorCode = typeof record.error === "string" ? record.error : "";
