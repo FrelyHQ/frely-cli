@@ -1,7 +1,7 @@
 import { VERSION } from "./version.js";
 
 export const COMMANDS = [
-  { id: "login", usage: "frely login [--relay <url>] [--no-browser] | frely login --wait | frely login --email <address> [--invite <link>] [--mcp] [--workspace <path>] [--days <n>] then frely login --code <6-digit code>", auth: "browser-or-email", effect: "authorization", purpose: "Authorize the CLI for the user's Frely account. The browser form blocks until the user approves, then returns, so continue the task when it exits; if the command is stopped first, run `frely login --wait` to resume on the same link. With --email, Frely emails a code; the user pastes it into `frely login --code` (enter only the 6 digits; the mail also shows a short reference such as K7, which is only for matching the mail). Add --mcp to also enable device MCP for the workspace (default 90 days) once the code is verified; do this when the user is registering for the first time, and tell them before asking for the code." },
+  { id: "login", usage: "frely login [--relay <url>] [--no-browser] | frely login --wait | frely login --email <address> [--invite <link>] then frely login --code <6-digit code>", auth: "browser-or-email", effect: "authorization", purpose: "Authorize the CLI for the user's Frely account. The browser form blocks until the user approves, then returns, so continue the task when it exits; if the command is stopped first, run `frely login --wait` to resume on the same link. With --email, Frely emails a code; the user pastes it into `frely login --code` (enter only the 6 digits; the mail also shows a short reference such as K7, which is only for matching the mail). Remote control is turned on separately with `frely link on`." },
   { id: "logout", usage: "frely logout", auth: "none", effect: "local-write", purpose: "Remove login, revoke Cloud authorization and stop the MCP background service." },
   { id: "uninstall", usage: "frely uninstall [--yes] [--json]", auth: "optional-account", effect: "remote-write", purpose: "Remove Frely from this computer: revoke this device's Device MCP authorization, Cloud and account login on the Frely side, stop and uninstall the background service, delete saved login, device and MCP data, installed Agent Skills and the frely program itself. It lists everything first and removes nothing until the user types yes; without a terminal it only lists, and --yes confirms. Frely App and server-side Providers/Agents are not removed. Refuses to run inside device MCP. Destructive: run only when the user asks for it." },
   { id: "doctor", usage: "frely doctor [-v] [--json]", auth: "optional-account", effect: "diagnostic", purpose: "Show the signed-in account, installation, available updates, MCP and connection status; -v verifies the account online and runs detailed diagnostics." },
@@ -24,10 +24,9 @@ export const COMMANDS = [
   { id: "item.run", usage: "frely item run <script> [args...]", auth: "cloud-oauth", effect: "local-execution", purpose: "Run an encrypted paid script of an installed item inside the Frely command sandbox. The placeholder file at the script's path calls this for you. The access lease is renewed when it is near its end; without a valid pass the script does not run." },
   { id: "item.update", usage: "frely item update [<folder>] [--json]", auth: "cloud-oauth", effect: "local-write", purpose: "Without a folder, list the installed marketplace items and say which have a newer version; nothing is changed. With a folder, install the newer version into that folder, after you decide to. Frely never updates an item by itself. A folder you edited is refused, and a new version needs a new review (frely item trust) unless Frely's scan passed for it." },
   { id: "item.install", usage: "frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--gift <code>] [--json]", auth: "cloud-oauth", effect: "local-write", purpose: "Install a download-install Prompt or Skill from the marketplace through Frely Cloud. The paid part is installed only with a valid pass; otherwise the command prints how to buy one. Skills go to the host Skill folder, Prompts to --dir (default: current directory). Scripts are saved without execute permission. --gift <code> first claims the share link (fsl_ code) the item came with, then installs." },
-  { id: "remote.tools", usage: "frely remote tools <username/name> [--json] [--replace]", auth: "cloud-oauth", effect: "remote-read", purpose: "List the tools of a remote MCP product from the marketplace, with their input schemas, without configuring it in an MCP client. The first use asks Frely for a key that works only for this MCP. If the name now belongs to a different MCP than the one connected before, it stops; --replace switches to the new one." },
-  { id: "remote.call", usage: "frely remote call <username/name> <tool> [--json '<object>' | --input <file>] [--replace]", auth: "cloud-oauth", effect: "remote-call", purpose: "Call one tool of a remote MCP product and print the result as JSON (exit code 1 when the tool reports an error). Each call is billed or needs a pass exactly as in an MCP client; ask the user before a call that writes data they did not ask for." },
-  { id: "remote.config", usage: "frely remote config <username/name> [--write <file>] [--replace]", auth: "cloud-oauth", effect: "remote-write", purpose: "Get a new key for one remote MCP product (it replaces the previous one) and print the mcpServers JSON that MCP clients take for it; with --write the entry is merged into that JSON file (created 0600) instead of printed. The key works only for this MCP." },
-  { id: "agent.install", usage: "frely agent install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <project>] [--api-key-stdin] [--json]", auth: "optional-api-key", effect: "local-write", purpose: "Install the public Agent's trigger Skill; an API key goes only through stdin to secure storage." },
+  { id: "item.tools", usage: "frely item tools <username/name> [--json] [--replace]", auth: "cloud-oauth", effect: "remote-read", purpose: "List the tools of a remote MCP product from the marketplace, with their input schemas, without configuring it in an MCP client. The first use asks Frely for a key that works only for this MCP. If the name now belongs to a different MCP than the one connected before, it stops; --replace switches to the new one." },
+  { id: "item.call", usage: "frely item call <username/name> <tool> [--json '<object>' | --input <file>] [--replace]", auth: "cloud-oauth", effect: "remote-call", purpose: "Call one tool of a remote MCP product and print the result as JSON (exit code 1 when the tool reports an error). Each call is billed or needs a pass exactly as in an MCP client; ask the user before a call that writes data they did not ask for." },
+  { id: "item.config", usage: "frely item config <username/name> [--write <file>] [--replace]", auth: "cloud-oauth", effect: "remote-write", purpose: "Get a new key for one remote MCP product (it replaces the previous one) and print the mcpServers JSON that MCP clients take for it; with --write the entry is merged into that JSON file (created 0600) instead of printed. The key works only for this MCP." },
   { id: "agent.run", usage: "frely agent run <username/name> (--input <text>|--input-stdin) [--read [<dir>] [--read-max-bytes <n>] [--read-max-rounds <n>]] [--progress-summary|--no-progress-summary] [--json]", auth: "installed-api-key-or-account", effect: "remote-call", purpose: "Send the complete relevant user request to the installed Agent through model-scoped MCP. Usage may be billed. The call runs in a background worker and is recorded on this computer (run id on stderr), so a cut-off command loses nothing: use `frely agent result`. A long call keeps running at Frely and the worker waits for it (reading is free); `frely agent result` shows its newest progress line while it runs. --no-progress-summary asks the Agent not to write progress lines (use it when the user says so, for example in AGENTS.md); without a flag the account setting applies. With --read the Agent may read files of <dir> (default: the git root of the current directory) through read-only tools that run here: only files it asks for leave this computer; .git, .env*, key files, git-ignored and binary files are refused; defaults 1 MiB read and 16 rounds per run; each round is billed, and the result lists filesRead." },
   { id: "agent.result", usage: "frely agent result (<runId>|--last) [--wait] [--resume] [--json]", auth: "none", effect: "read", purpose: "Show a run of `frely agent run` from this computer: running (rounds done, files read so far), completed (the full text) or failed/interrupted. --wait blocks until it ends. --resume continues an interrupted or failed run from the rounds already done; the interrupted round is billed again." },
   { id: "agent.runs", usage: "frely agent runs [--json]", auth: "none", effect: "read", purpose: "List the recent agent runs on this computer (kept 7 days)." },
@@ -40,7 +39,6 @@ export const COMMANDS = [
   { id: "agent.local.logs", usage: "frely agent local logs <name> [--lines <n>] [--follow]", auth: "none", effect: "read", purpose: "Show what a local Agent printed, including what the sandbox blocked." },
   { id: "agent.local.list", usage: "frely agent local list [--json]", auth: "none", effect: "read", purpose: "List the Agents on this computer, whether each is running, and the sites each has been approved for." },
   { id: "agent.local.remove", usage: "frely agent local remove <name>", auth: "none", effect: "local-write", purpose: "Stop a local Agent and delete its folder and records. Only the Agent's own folder is removed." },
-  { id: "agent.local.share", usage: "frely agent local share <name> --port <n> [--background]", auth: "account", effect: "remote-write", purpose: "Let your own FrelyMCP call a running local Agent that serves A2A on 127.0.0.1:<n>. Registers an A2A service labelled agent-<name>; only Frely can reach the port and the Agent's data (its .frely folder, also FRELY_AGENT_DATA_DIR) stays on this computer. Relayed traffic counts against the weekly relay allowance." },
   { id: "agent.local.key", usage: "frely agent local key --api-key-stdin | --clear", auth: "account", effect: "local-write", purpose: "Save the Frely API key that local Agents use for model calls; it goes only through stdin to secure storage. FRELY_API_KEY overrides it." },
   { id: "provider.share", usage: "frely provider share [ollama|openai-compatible] [--url <loopback-v1-url>] [--models <a,b>] [--slot <slot-id>] [--name <name>]", auth: "account", effect: "remote-write", purpose: "Publish a local model Provider. If a prepared Provider on this device is not finished, resume it instead. Prints this week's remaining relay allowance; relayed traffic counts against the weekly relay allowance." },
   { id: "provider.list", usage: "frely provider list [--json]", auth: "account", effect: "read", purpose: "List configured local Providers." },
@@ -67,9 +65,9 @@ export const COMMANDS = [
   { id: "app.status", usage: "frely app status [--json]", auth: "local", effect: "read", purpose: "Show whether the Frely App is installed, its version, install path, running state and how it is managed." },
   { id: "app.update", usage: "frely app update [--json]", auth: "local", effect: "local-write", purpose: "Update the Frely App through Homebrew or by re-downloading the latest release." },
   { id: "app.uninstall", usage: "frely app uninstall", auth: "local", effect: "local-write", purpose: "Uninstall the Frely App. Credentials stay with frely-cli." },
-  { id: "computer.enable", usage: "frely computer enable", auth: "local", effect: "local-write", purpose: "Lift the local block set by `frely computer disable` and pre-install the computer-use runtime. Computer use (desktop control by a remote MCP client) is built in and stays off until the owner turns it on for the device on the Frely connections page (passkey or authenticator code required). On macOS the first use asks that Mac for Accessibility and Screen Recording permission." },
-  { id: "computer.doctor", usage: "frely computer doctor", auth: "local", effect: "local-execution", purpose: "Check and request the OS permissions computer use needs (macOS Accessibility and Screen Recording; Windows as applicable) by running the installed runtime's doctor. `frely computer enable` runs it automatically, and a computer-use call that fails for missing permission starts it too." },
-  { id: "computer.disable", usage: "frely computer disable", auth: "local", effect: "local-write", purpose: "Block computer use on this device at once, whatever the web page says. The web page cannot lift this; only `frely computer enable` does." },
+  { id: "computer.on", usage: "frely computer on", auth: "local", effect: "local-write", purpose: "Lift the local block set by `frely computer off` and pre-install the computer-use runtime. Computer use (desktop control by a remote MCP client) is built in and stays off until the owner turns it on for the device on the Frely connections page (passkey or authenticator code required). On macOS the first use asks that Mac for Accessibility and Screen Recording permission." },
+  { id: "computer.doctor", usage: "frely computer doctor", auth: "local", effect: "local-execution", purpose: "Check and request the OS permissions computer use needs (macOS Accessibility and Screen Recording; Windows as applicable) by running the installed runtime's doctor. `frely computer on` runs it automatically, and a computer-use call that fails for missing permission starts it too." },
+  { id: "computer.off", usage: "frely computer off", auth: "local", effect: "local-write", purpose: "Block computer use on this device at once, whatever the web page says. The web page cannot lift this; only `frely computer on` does." },
   { id: "computer.status", usage: "frely computer status [--json]", auth: "local", effect: "read", purpose: "Show whether computer use is blocked locally, the runtime version it needs and whether it is installed yet (it installs on first use)." },
   { id: "computer.mcp", usage: "frely computer mcp", auth: "local", effect: "local-execution", purpose: "Stdio MCP server for computer use; local MCP forwarding starts it. Not needed for normal use." },
   { id: "network", usage: "frely network setup|status|find|use|logout [--json]", auth: "network", effect: "subcommand-dependent", purpose: "Access Frely Network (preview) using its separate setup and credentials." },
@@ -102,8 +100,8 @@ export function agentHelp() {
 /** Group key per command id, in the order the summary lists them. Keys are what `frely help --agent --json <group>` accepts. */
 const AGENT_GROUPS: readonly { key: string; title: string; test: (id: string) => boolean }[] = [
   { key: "account", title: "Account and CLI", test: (id) => ["login", "logout", "uninstall", "doctor", "update", "help"].includes(id) },
-  { key: "api", title: "Account API and remote MCP products", test: (id) => id === "api" || id.startsWith("remote.") },
-  { key: "items", title: "Marketplace items", test: (id) => id.startsWith("item.") },
+  { key: "api", title: "Account API", test: (id) => id === "api" },
+  { key: "items", title: "Marketplace items and remote MCP products", test: (id) => id.startsWith("item.") },
   { key: "skills", title: "Skills", test: (id) => id.startsWith("skill.") },
   { key: "agents", title: "Agents", test: (id) => id.startsWith("agent.") },
   { key: "devices", title: "Control your devices", test: (id) => ["devices", "run", "ps", "logs", "kill", "read", "ls", "grep", "edit", "permission", "tools", "call"].includes(id) },
@@ -122,7 +120,7 @@ const INTERNAL_IDS: ReadonlySet<string> = new Set(["mcp.stdio", "mcp.serve", "co
 const DETAILS: Readonly<Record<string, { examples?: readonly string[]; confirm?: string }>> = {
   login: {
     examples: ["frely login --email user@example.com", "frely login --code 123456"],
-    confirm: "Tell the user before asking for the 6-digit code; never add --mcp unless the user is registering for the first time.",
+    confirm: "Tell the user before asking for the 6-digit code.",
   },
   api: {
     examples: ["frely api list", "frely api describe credit_products.list", "frely api call credit_products.list --json '{}'", "frely api call <tool> --json '{...}' --wait"],
@@ -136,7 +134,6 @@ const DETAILS: Readonly<Record<string, { examples?: readonly string[]; confirm?:
     examples: ["frely item install alice/skill-name --host claude-code --json", "frely item install alice/prompt-name --scope project --dir ./my-project"],
     confirm: "A paid part needs a pass; the command prints how to buy one. If the output says Frely has not scanned a Skill, read every file in it before use.",
   },
-  "agent.install": { examples: ["frely agent install alice/reviewer --host codex --json"] },
   "link.on": {
     examples: ["frely link on", "frely link on --workspace ~/projects --days 30 --no-browser"],
     confirm: "Opens this computer to remote clients after a browser approval by the owner; do it only when the user asked for remote control.",
@@ -171,7 +168,7 @@ const SUMMARY_OVERRIDES: Readonly<Record<string, string>> = {
   "sandbox.proxy": "Show, save or remove the proxy the command sandbox uses",
   "app.update": "Update the Frely App",
   doctor: "Show sign-in, installation, update and connection status",
-  "remote.tools": "List the tools of a marketplace remote MCP, with input schemas",
+  "item.tools": "List the tools of a marketplace remote MCP, with input schemas",
   "item.trust": "Mark an installed item as reviewed, or check it with --check",
   "agent.status": "Inspect an installed Agent Skill and its Key budget",
   "agent.local.list": "List local Agents, whether running, and approved sites",
@@ -179,7 +176,7 @@ const SUMMARY_OVERRIDES: Readonly<Record<string, string>> = {
   "link.local.list": "List local MCP servers that remote clients could use",
   "app.status": "Show whether the Frely App is installed and running",
   "computer.status": "Show whether computer use is blocked and its runtime state",
-  "computer.enable": "Lift the local computer-use block and pre-install its runtime",
+  "computer.on": "Lift the local computer-use block and pre-install its runtime",
   "link.workspace.add": "Add a workspace directory for this device",
 };
 
@@ -236,13 +233,13 @@ const GROUPS: readonly { title: string; ids: readonly string[] }[] = [
   { title: "Control your devices", ids: ["devices", "run", "ps", "logs", "kill", "read", "ls", "grep", "edit", "permission", "tools", "call"] },
   { title: "Account", ids: ["login", "logout", "uninstall", "doctor", "update"] },
   { title: "Let others control this computer", ids: ["link.on", "link.workspace", "link.local", "link.lifecycle"] },
-  { title: "Agents", ids: ["agent.install", "agent.run", "agent.status", "agent.remove", "agent.local"] },
+  { title: "Agents", ids: ["agent.run", "agent.status", "agent.remove", "agent.local"] },
   { title: "Skills", ids: ["skill.install"] },
-  { title: "Marketplace items", ids: ["item.install", "item.update", "item.run", "item.trust"] },
+  { title: "Marketplace items", ids: ["item.install", "item.update", "item.run", "item.trust", "item.tools", "item.call", "item.config"] },
   { title: "Providers", ids: ["provider.share", "provider.list"] },
   { title: "Share", ids: ["share", "service.share", "service.manage"] },
   { title: "Command sandbox", ids: ["tunnel", "sandbox.proxy"] },
-  { title: "API", ids: ["api", "remote.tools", "remote.call", "remote.config"] },
+  { title: "API", ids: ["api"] },
 ];
 
 // Short, flag-light forms for the human `--help` overview. The full usage
@@ -276,7 +273,6 @@ const SHORT_USAGE: Readonly<Record<string, string>> = {
   "item.update": "frely item update [<folder>]",
   "item.run": "frely item run <script> [args...]",
   "item.trust": "frely item trust <folder> [--check]",
-  "agent.install": "frely agent install <username/name> [--host <host>] [--api-key-stdin]",
   "agent.run": "frely agent run <username/name> (--input <text>|--input-stdin) [--read [<dir>]]",
   "agent.result": "frely agent result (<runId>|--last) [--wait] [--resume]",
   "agent.runs": "frely agent runs",
@@ -299,9 +295,9 @@ const SHORT_USAGE: Readonly<Record<string, string>> = {
   tunnel: "frely tunnel <host>:<port> [--local-port N]",
   "sandbox.proxy": "frely sandbox proxy [<url> [--no-proxy <list>] | --clear]",
   api: "frely api list|describe|call",
-  "remote.tools": "frely remote tools <username/name> [--json]",
-  "remote.call": "frely remote call <username/name> <tool> [--json '<object>']",
-  "remote.config": "frely remote config <username/name> [--write <file>]",
+  "item.tools": "frely item tools <username/name> [--json]",
+  "item.call": "frely item call <username/name> <tool> [--json '<object>']",
+  "item.config": "frely item config <username/name> [--write <file>]",
 };
 
 export function cliUsage(): string {

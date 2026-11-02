@@ -162,11 +162,11 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === "remote") {
+  if (command === "item" && (args[1] === "tools" || args[1] === "call" || args[1] === "config")) {
     const action = args[1];
     const ref = args[2];
-    if (action !== "tools" && action !== "call" && action !== "config") { stdout.write(subcommandUsage("remote")); return; }
-    if (!ref || ref.startsWith("-")) throw new Error(`Usage: frely remote ${action} <username/name>${action === "call" ? " <tool> [--json '<object>' | --input <file>]" : ""}`);
+    if (action !== "tools" && action !== "call" && action !== "config") { stdout.write(subcommandUsage("item")); return; }
+    if (!ref || ref.startsWith("-")) throw new Error(`Usage: frely item ${action} <username/name>${action === "call" ? " <tool> [--json '<object>' | --input <file>]" : ""}`);
     parseMcpName(ref);
     const deps = { call: callCloudTool, replace: args.includes("--replace") };
     try {
@@ -186,7 +186,7 @@ async function main(): Promise<void> {
         return;
       }
       const tool = args[3];
-      if (!tool || tool.startsWith("-")) throw new Error("Usage: frely remote call <username/name> <tool> [--json '<object>' | --input <file>]");
+      if (!tool || tool.startsWith("-")) throw new Error("Usage: frely item call <username/name> <tool> [--json '<object>' | --input <file>]");
       if (args.includes("--json") && args.includes("--input")) throw new Error("Use --json or --input.");
       const inline = option(args, "--json"), path = option(args, "--input");
       const text = path !== undefined ? await readInputFile(path) : inline ?? "{}";
@@ -214,23 +214,7 @@ async function main(): Promise<void> {
     const action = args[1];
     if (action === undefined) { stdout.write(subcommandUsage("agent")); return; }
     if (action === "local") {
-      process.exitCode = await runAgentLocal(args.slice(2), { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY), readSecret: () => readStdinSecret(8192) }, {}, async (serviceArgs) => {
-        const controller = new AbortController();
-        const onSignal = () => controller.abort();
-        process.once("SIGINT", onSignal); process.once("SIGTERM", onSignal);
-        try {
-          return await runServiceCommand(serviceArgs, { write: (text) => { stdout.write(text); } }, {
-            control: accountServiceControl, probe: probeLoopback, ensureFrpc: () => ensureFrpc({ log: (text) => { stdout.write(text); } }), spawnFrpc: spawnFrpcProcess, signal: controller.signal,
-            installDaemon: async () => { await installDeviceRelayService(); },
-          });
-        } finally { process.off("SIGINT", onSignal); process.off("SIGTERM", onSignal); }
-      });
-      return;
-    }
-    if (action === "install") {
-      const target = args[2];
-      if (!target || target.startsWith("-")) throw new Error("Usage: frely agent install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <project>] [--api-key-stdin] [--json]");
-      await installAgent(target, args);
+      process.exitCode = await runAgentLocal(args.slice(2), { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY), readSecret: () => readStdinSecret(8192) });
       return;
     }
     if (action === "run") {
@@ -383,14 +367,14 @@ async function main(): Promise<void> {
     const scope = skillScope(option(args, "--scope") ?? "global");
     const dir = option(args, "--dir");
     const value = await installCloudItem({ ...parseItemRef(itemRef), call: callCloudTool, host, scope, ...(dir ? { dir } : {}) }).catch(async (error: unknown) => {
-      // A name that is not a Skill may be a remote MCP: install the Skill that uses it through `frely remote`.
+      // A name that is not a Skill may be a remote MCP: install the Skill that uses it through `frely item`.
       if (!isNotASkill(error) || itemRef.includes("@") || !/^[^/@]+\/[^/@]+$/u.test(itemRef)) throw error;
       return installRemoteMcpSkill({ ref: itemRef, call: callCloudTool, host, scope, ...(dir ? { dir } : {}), ...(args.includes("--replace") ? { replace: true } : {}) }).catch((mcpError: unknown) => { throw isNotASkill(mcpError) || (mcpError instanceof CloudToolError && mcpError.code === "remote_mcp_not_found") ? error : mcpError; });
     });
     const entry = await ensureEntrySkill({ host, scope, ...(dir ? { dir } : {}) });
     if ("tools" in value) {
       if (args.includes("--json")) { stdout.write(`${JSON.stringify({ ...value, ...(entry ? { entrySkill: entry.path } : {}) })}\n`); return; }
-      stdout.write(`MCP: ${value.name}\nPath: ${value.path}\nTools: ${value.tools}\nThe Skill calls this MCP through frely remote; no MCP client configuration is needed. Restart or reload the agent session so it rescans Skills.\n`);
+      stdout.write(`MCP: ${value.name}\nPath: ${value.path}\nTools: ${value.tools}\nThe Skill calls this MCP through frely item call; no MCP client configuration is needed. Restart or reload the agent session so it rescans Skills.\n`);
       return;
     }
     if (args.includes("--json")) { stdout.write(`${JSON.stringify({ ...value, ...(entry ? { entrySkill: entry.path } : {}) })}\n`); return; }
@@ -446,18 +430,7 @@ async function main(): Promise<void> {
           stdout.write(`Logged in as ${user.email}.\n`);
           await installStandbyService();
 
-          const mcp = pendingChallenge.mcp;
-          if (mcp && result.mcpPreapproval) {
-            const authorization = await ensureMcpAuthorization({
-              workspace: mcp.workspace, days: String(mcp.days),
-              notify: (message) => { process.stderr.write(message); },
-              preset: { privateKeyPem: mcp.privateKeyPem, preapproval: result.mcpPreapproval },
-            });
-            stdout.write(`Device MCP enabled for ${authorization.grant.workspace} until ${authorization.grant.expiresAt}. Remove it any time with \`frely link off\`.\n`);
-            stdout.write(`MCP address: ${authorization.mcpUrl}\n`);
-          } else {
-            stdout.write("Run `frely link on` on the computer you want to control, then connect your MCP client with OAuth.\n");
-          }
+          stdout.write("Run `frely link on` on the computer you want to control, then connect your MCP client with OAuth.\n");
         } catch (error) {
           stdout.write(`Verification failed: ${error instanceof Error ? error.message : String(error)}\n`);
           process.exitCode = 1;
@@ -466,13 +439,7 @@ async function main(): Promise<void> {
       }
 
       try {
-        let mcp: EmailDeviceChallenge["mcp"];
-        if (args.includes("--mcp")) {
-          const workspace = option(args, "--workspace") ? await realpath(resolve(option(args, "--workspace")!)) : await ensureDefaultWorkspace();
-          const days = parseMcpDays(option(args, "--days") ?? DEFAULT_EMAIL_LOGIN_MCP_DAYS);
-          mcp = { ...generateMcpKey(), workspace, days };
-        }
-        const challenge = await initEmailDeviceLogin(relayUrl, email!, invite, mcp);
+        const challenge = await initEmailDeviceLogin(relayUrl, email!, invite);
         await savePendingEmailChallenge(relayUrl, challenge);
 
         if (json) {
@@ -482,15 +449,11 @@ async function main(): Promise<void> {
             expiresIn: challenge.expiresIn,
             challengeId: challenge.challengeId,
             ...(challenge.reference ? { reference: challenge.reference } : {}),
-            ...(mcp ? { deviceMcp: { workspace: mcp.workspace, days: mcp.days } } : {}),
           }, null, 2) + "\n");
         } else {
           stdout.write(`Verification code sent to ${challenge.email}\n`);
           if (challenge.reference) stdout.write(`Mail reference: ${challenge.reference} (use the newest mail with this reference; enter only the 6 digits)\n`);
           stdout.write(`Expires in: ${challenge.expiresIn} seconds\n`);
-          if (mcp) {
-            stdout.write(`Entering the code also lets remote agents read and write files and run commands in ${mcp.workspace} for ${mcp.days} days. Remove it later with \`frely link off\`.\n`);
-          }
           stdout.write(`Run: frely login --code <code>\n`);
         }
       } catch (error) {
@@ -566,7 +529,7 @@ async function main(): Promise<void> {
   }
 
   if (command === "doctor") {
-    const value = await doctor({ verbose: args.includes("-v") || args.includes("--verbose"), mcp: args.includes("--mcp") });
+    const value = await doctor({ verbose: args.includes("-v") || args.includes("--verbose") });
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value, null, 2)}\n`);
     else stdout.write(formatDoctor(value));
     if (!value.ok) process.exitCode = 1;

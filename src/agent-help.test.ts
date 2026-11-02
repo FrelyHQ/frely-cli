@@ -56,7 +56,7 @@ test("command groups without a direct action print their subcommands offline", a
     [["link"], /frely link on/],
     [["link", "workspace"], /frely link workspace list/],
     [["link", "local"], /frely link local list/],
-    [["agent"], /frely agent install/],
+    [["agent"], /frely agent run/],
     [["provider"], /frely provider list/],
     [["api"], /frely api list/],
     [["app"], /frely app status/],
@@ -100,7 +100,7 @@ test("agent help by group or id returns full entries with examples", async () =>
   const same = JSON.parse((await run("agents")).stdout) as { commands: Entry[] };
   assert.equal(same.commands.length, agents.commands.length);
   const one = JSON.parse((await run("api")).stdout) as { commands: Entry[] };
-  assert.ok(one.commands.some((command) => command.id === "remote.call"), "the api group includes remote.*");
+  assert.ok(one.commands.some((command) => command.id === "api"), "the api group lists api");
   assert.match(one.commands.find((command) => command.id === "api")?.confirm ?? "", /Credit/);
   await assert.rejects(run("nope"), (error: Error & { stdout: string; code: number }) => {
     assert.equal(error.code, 1);
@@ -120,7 +120,7 @@ test("every agent help command belongs to a group and examples point at real com
   }
   const internal = (agentHelpView({ name: "internal" }).value as { commands: { id: string }[] }).commands.map((command) => command.id).sort();
   assert.deepEqual(internal, ["computer.mcp", "mcp.serve", "mcp.stdio", "network"]);
-  for (const id of ["login", "api", "agent.run", "item.install", "agent.install", "link.on", "permission", "share"]) {
+  for (const id of ["login", "api", "agent.run", "item.install", "link.on", "permission", "share"]) {
     const entry = (agentHelpView({ name: id }).value as { commands: { id: string; examples?: string[] }[] }).commands.find((command) => command.id === id);
     assert.ok(entry?.examples?.length, `${id} has examples`);
     for (const example of entry!.examples!) assert.ok(/^(frely |printf .*\| frely )/u.test(example), `${id}: ${example}`);

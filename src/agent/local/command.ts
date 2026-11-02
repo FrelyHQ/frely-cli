@@ -24,9 +24,6 @@ export interface LocalIo {
   readSecret(): Promise<string>;
 }
 
-/** Runs `frely service ...` with the given arguments; wired by the CLI entry so this module needs no network code. */
-export type ShareService = (args: readonly string[]) => Promise<number>;
-
 export const LOCAL_USAGE = `Usage:
   frely agent local add <username/name | https://github.com/owner/repo> [--name <folder-name>]
   frely agent local start <name> [--foreground]
@@ -35,7 +32,6 @@ export const LOCAL_USAGE = `Usage:
   frely agent local list [--json]
   frely agent local remove <name>
   frely agent local key --api-key-stdin | --clear
-  frely agent local share <name> --port <n> [--background]   Let your own FrelyMCP call this Agent (it must serve A2A on 127.0.0.1:<n>)
 `;
 
 const fail = (message: string, code: number = EXIT.cli): never => { throw new ControllerError(message, code); };
@@ -50,7 +46,7 @@ function value(args: readonly string[], name: string): string | undefined {
 const positional = (args: readonly string[]): string[] => args.filter((arg, index) => !arg.startsWith("--") && !(index > 0 && ["--name", "--lines"].includes(args[index - 1]!)));
 
 /** Runs `frely agent local ...`; returns the exit code. */
-export async function runAgentLocal(args: readonly string[], io: LocalIo, deps: ApprovalDeps = {}, shareService?: ShareService): Promise<number> {
+export async function runAgentLocal(args: readonly string[], io: LocalIo, deps: ApprovalDeps = {}): Promise<number> {
   try {
     const [action, ...rest] = args;
     switch (action) {
@@ -61,7 +57,6 @@ export async function runAgentLocal(args: readonly string[], io: LocalIo, deps: 
       case "list": return await list(rest, io);
       case "remove": return await remove(rest, io);
       case "key": return await key(rest, io);
-      case "share": return await share(rest, shareService);
       case "supervise": return await superviseAgent(rest[0] ?? "");
       default: io.out(LOCAL_USAGE); return action === undefined ? EXIT.ok : EXIT.cli;
     }
@@ -263,17 +258,4 @@ async function key(args: string[], io: LocalIo): Promise<number> {
   await credentialStore.setPassword(API_KEY_SERVICE, origin, secret);
   io.out("The API key was saved in this computer's secure storage. Local Agents use it for their model calls.\n");
   return EXIT.ok;
-}
-
-
-/** Registers the Agent's local A2A port as an A2A service, labelled with the Agent's name, so the owner's FrelyMCP can call it. Data stays local; only Frely can reach the port. */
-async function share(args: string[], shareService: ShareService | undefined): Promise<number> {
-  const [slug] = positional(args.filter((arg, index) => !(index > 0 && args[index - 1] === "--port")));
-  if (!slug) return fail("Usage: frely agent local share <name> --port <n> [--background]");
-  assertSlug(slug);
-  const record = await readRecord(slug) ?? fail(`No local Agent named ${slug}.`);
-  if (!isRunning(record)) return fail(`${slug} is not running. Start it first: frely agent local start ${slug}`);
-  const port = value(args, "--port") ?? fail("--port <n> is required: the 127.0.0.1 port where the Agent serves A2A.");
-  if (!shareService) return fail("Sharing is not available in this context.");
-  return shareService(["share", "--type", "a2a", "--port", port, "--label", `agent-${slug}`, ...(flag(args, "--background") ? ["--background"] : [])]);
 }

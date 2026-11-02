@@ -55,7 +55,7 @@ test("the entry Skill tells how to get a payment link and installs an Agent by n
   assert.match(ENTRY_SKILL, /payment_required/u);
   assert.match(ENTRY_SKILL, /credit_products\.list/u);
   assert.match(ENTRY_SKILL, /payment_checkout\.create/u);
-  assert.match(ENTRY_SKILL, /frely agent install <username\/name>/u);
+  assert.match(ENTRY_SKILL, /frely item install <username\/name>/u);
   assert.doesNotMatch(ENTRY_SKILL, /frely agent install <id>/u);
 });
 

@@ -17,9 +17,9 @@ Use the installed `frely` CLI. Do not rely on remembered syntax: run `frely help
 | List, inspect, or call account APIs (API keys, Credit, plans, orders, Creator items) | `frely api list` / `frely api describe` / `frely api call` | Account APIs |
 | Spend Credit, buy something, or change credentials | ask first, then `frely api call` | Confirmation |
 | Install a marketplace Skill, Prompt, or MCP | `frely item install` | Marketplace installs |
-| Install or run a published Agent | `frely agent install` → `frely agent run` | Marketplace installs |
+| Install or run a published Agent | `frely item install` → `frely agent run` | Marketplace installs |
 | `frely agent run` returned `payment_required` | credit recovery flow | Error handling |
-| Print `mcpServers` JSON for a direct MCP connection | `frely remote config <username/mcp-name>` | Marketplace installs |
+| Print `mcpServers` JSON for a direct MCP connection | `frely item config <username/mcp-name>` | Marketplace installs |
 | Control another computer, use Cloud MCPs, drive a connected browser, or work from a no-shell client | FrelyMCP setup | FrelyMCP |
 
 ## Preflight
@@ -38,8 +38,8 @@ Run `frely doctor --json` to see whether the CLI is signed in. If not, ask the u
 ## Marketplace installs
 
 - Install a marketplace Skill or Prompt: `frely item install <username/skill-name> --host <your host>`; add `--scope project --dir <project>` to install it for one project instead of globally.
-- Install a published Agent: `frely agent install <username/name> --host <your host>`, then `frely agent run`. When an Agent needs the user's project files, add `--read` (optionally `--read <dir>`): the Agent can then read files of that directory through read-only tools that run on this computer, only the files it asks for; `.git`, `.env*`, key files and git-ignored files are never sent, and the result lists the files read. Tell the user before you add it.
-- Use a marketplace MCP without configuring it in your client: `frely item install <username/mcp-name>` installs a Skill that calls it through `frely remote tools|call <username/mcp-name>`. Each call is billed or needs a pass as in any MCP client. `frely remote config <username/mcp-name>` prints the `mcpServers` JSON for clients that should connect to that one MCP directly.
+- Install a published Agent: `frely item install <username/name> --host <your host>`, then `frely agent run`. When an Agent needs the user's project files, add `--read` (optionally `--read <dir>`): the Agent can then read files of that directory through read-only tools that run on this computer, only the files it asks for; `.git`, `.env*`, key files and git-ignored files are never sent, and the result lists the files read. Tell the user before you add it.
+- Use a marketplace MCP without configuring it in your client: `frely item install <username/mcp-name>` installs a Skill that calls it through `frely item tools|call <username/mcp-name>`. Each call is billed or needs a pass as in any MCP client. `frely item config <username/mcp-name>` prints the `mcpServers` JSON for clients that should connect to that one MCP directly.
 
 ## Confirmation
 
