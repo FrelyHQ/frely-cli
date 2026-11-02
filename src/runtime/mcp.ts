@@ -281,6 +281,8 @@ async function dispatch(
       return read(() => p2p.send(transferWorkspace, { path: resolvedPath.relativeInput, bytes: p2pBytes, sha256: p2pSha, to: { id: to.id!, relayUrl: typeof to.relayUrl === "string" ? to.relayUrl : null, directAddresses: to.directAddresses!.filter((entry): entry is string => typeof entry === "string").slice(0, 16) }, relayUrl: args.relayUrl }));
     }
     if (name === "transfer_prepare") return read(() => transferPrepare(transferWorkspace, resolvedPath.relativeInput));
+    // Object-storage upload/download links are not deployed and a link is chosen by the Relay, so the two calls are closed until signed approvals cover them (plan gap G4).
+    if (name === "transfer_upload" || name === "transfer_download") throw new Error("Upload and download links are turned off in this version. Use device-to-device transfer.");
     const headers = args.headers ?? {};
     if (!headers || typeof headers !== "object" || Array.isArray(headers)) throw new Error("headers must be an object.");
     const target: TransferTarget = { url: textArg(args, "url"), headers: headers as Record<string, string> };

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 // One npm package per release target: @frelyhq/cli-<target> holds package/frely[.exe] and its .sha256.
@@ -33,12 +33,14 @@ export function buildPlatformPackages(artifacts, version, output) {
     const hash = readFileSync(join(artifacts, `${asset}.sha256`), 'utf8').trim().split(/\s+/u)[0];
     if (!/^[0-9a-f]{64}$/iu.test(hash ?? '')) throw new Error(`Invalid checksum for ${asset}`);
     writeFileSync(join(directory, `${binary}.sha256`), `${hash.toLowerCase()}  ${binary}\n`);
+    const signature = join(artifacts, `${asset}.sha256.sig`);
+    if (existsSync(signature)) copyFileSync(signature, join(directory, `${binary}.sha256.sig`));
     writeFileSync(join(directory, 'package.json'), `${JSON.stringify({
       name: platformPackageName(target), version,
       description: `Frely CLI executable for ${target}. Installed by https://frely.cloud/install.sh; not meant to be required.`,
       license, repository: { type: 'git', url: 'git+https://github.com/FrelyHQ/frely-cli.git' }, homepage,
       os: [platform.os], cpu: [platform.cpu], ...(platform.libc ? { libc: [platform.libc] } : {}),
-      files: [binary, `${binary}.sha256`],
+      files: [binary, `${binary}.sha256`, ...(existsSync(signature) ? [`${binary}.sha256.sig`] : [])],
       preferUnplugged: true,
     }, null, 2)}\n`);
     directories.push(directory);

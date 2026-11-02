@@ -68,18 +68,15 @@ test("a package-manager installation updates without pausing admission", async (
   assert.deepEqual(calls, ["pkg 2.0.0", "unlock"]);
 });
 
-test("the Web switch is remembered across restarts and combined with the local one", async () => {
+test("the Relay's autoUpdate switch is ignored and a leftover file from an older version is removed", async () => {
   const home = await mkdtemp(join(tmpdir(), "frely-au-remote-"));
   const saved = process.env.XDG_CONFIG_HOME;
   process.env.XDG_CONFIG_HOME = home;
   try {
-    const { readEffectiveAutoUpdate, setRemoteAutoUpdate, remoteAutoUpdatePath } = await import("./auto-update.js");
+    const { readEffectiveAutoUpdate, remoteAutoUpdatePath } = await import("./auto-update.js");
+    await writeAutoUpdate(true, remoteAutoUpdatePath());
     assert.equal(await readEffectiveAutoUpdate(), false);
-    await setRemoteAutoUpdate(true);
-    assert.equal(await readAutoUpdate(remoteAutoUpdatePath()), true);
-    assert.equal(await readEffectiveAutoUpdate(), true);
-    await setRemoteAutoUpdate(false);
-    assert.equal(await readEffectiveAutoUpdate(), false);
+    assert.equal(await readAutoUpdate(remoteAutoUpdatePath()), false);
     await writeAutoUpdate(true);
     assert.equal(await readEffectiveAutoUpdate(), true);
   } finally { if (saved === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = saved; }

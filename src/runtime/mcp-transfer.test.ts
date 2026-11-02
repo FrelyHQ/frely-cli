@@ -38,6 +38,7 @@ test("transfer_upload and transfer_download refuse http, private and loopback ta
     for (const name of ["transfer_upload", "transfer_download"]) {
       const result = await client.callTool({ name, arguments: { path: name === "transfer_upload" ? "a.bin" : "b.bin", url, bytes: 5, sha256 }, _meta: gate });
       assert.equal(result.isError, true, `${name} ${url}`);
+      assert.match(text(result), /turned off/u);
     }
   }
   const header = await client.callTool({ name: "transfer_upload", arguments: { path: "a.bin", url: "https://example.com/x", headers: { authorization: "x" }, bytes: 5, sha256 }, _meta: gate });

@@ -1,10 +1,11 @@
 import { remoteLocked } from "../remote-lock.js";
 import { watchServiceInstallation } from "../update/service-refresh.js";
-import { readEffectiveAutoUpdate, setRemoteAutoUpdate, watchAutoUpdate } from "../update/auto-update.js";
+import { readEffectiveAutoUpdate, watchAutoUpdate } from "../update/auto-update.js";
 import { MaintenanceGate, serveMaintenance } from "../update/maintenance.js";
 import { isDefinitiveAuthorizationFailure, requireLocalMcpAuthorization, requireMcpAuthorization } from "../mcp-authorization.js";
 import { McpLease } from "../runtime/mcp-lease.js";
 import WebSocket, { type RawData } from "ws";
+import { observeApprovals, setObserveIdentity } from "../trust/observe.js";
 import { connectionGrant, directConnectionGrant, ensureDevice, storedDevice, type ConnectionGrant } from "./control.js";
 import { nextDeviceTransportKind, selectDeviceTransport, type DeviceTransportGrant, type DeviceTransportKind } from "./transport.js";
 import { connectionReporter, type ConnectionEvent } from "./connection-status.js";
@@ -59,6 +60,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
   diagnostic(log, "relay.started");
   // A machine that is already enrolled starts without the web app; the checks run in the background.
   const device = await storedDevice() ?? await ensureDevice();
+  setObserveIdentity({ device: device.deviceId, deviceKey: device.keyThumbprint });
   const reporter = connectionReporter(device, options.workspace);
   const maintenance = options.managedService && process.platform !== "win32" ? new MaintenanceGate() : undefined;
   const closeMaintenance = maintenance ? await serveMaintenance(maintenance) : undefined;
@@ -334,7 +336,7 @@ async function handleFrame(
   inflight.set(envelope.id, { request: envelope, controller });
   const operation = envelope.method === "provider"
     ? executeProviderRequest(envelope, socket, controller.signal, cancelled, log)
-    : executeMcpRequest(envelope, session, lease).then((payload) => {
+    : executeMcpRequest(envelope, session, lease, log).then((payload) => {
         if (!cancelled.has(envelope.id)) send(socket, { protocol: DEVICE_RELAY_PROTOCOL, type: "response", id: envelope.id, ok: true, payload }, log);
       });
   void operation.catch((error) => {
@@ -347,13 +349,14 @@ async function handleFrame(
   });
 }
 
-async function executeMcpRequest(request: DeviceRelayRequest, session: RelaySession | null, lease: McpLease | null): Promise<unknown> {
+async function executeMcpRequest(request: DeviceRelayRequest, session: RelaySession | null, lease: McpLease | null, log?: DiagnosticLog): Promise<unknown> {
   if (!session || !lease || request.authorizationId !== lease.authorizationId) throw new Error("MCP execution authorization is missing or mismatched.");
   lease.assert();
   // The local lock of the three-state remote link is checked on every request, so `frely link off` takes effect at once.
   if (await remoteLocked()) throw new Error("Remote control is turned off on this computer. Run `frely link on` on it to allow it again.");
-  // The owner's Web switch rides on every authorized MCP frame; absent means off.
-  await setRemoteAutoUpdate(request.autoUpdate === true);
+  // Observation only (plan P1): count whether the signed approvals riding on this request verify; never blocks.
+  await observeApprovals(request.payload, log);
+  // `autoUpdate` on the frame is ignored: an unsigned Relay field must not switch on automatic updates (gap G9).
   return session.execute(request.payload, request.id, request.toolsets, request.localMcps);
 }
 

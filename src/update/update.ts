@@ -11,6 +11,7 @@ import { serviceCommand, serviceStatus, startMcpService, stopMcpService } from "
 import { inspectInstallation, manualUpdateCommand, packageArguments, type Installation } from "./installation.js";
 import { compareVersions, latestRelease, NPM_REGISTRIES, standaloneAsset, type Release, type ReleaseSource } from "./release.js";
 import { acquireMaintenance, MaintenanceBusyError } from "./maintenance.js";
+import { checkReleaseSignature } from "./release-signature.js";
 
 const execFile = promisify(execFileCallback);
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -83,7 +84,7 @@ async function systemUnpack(tarball: string, directory: string): Promise<void> {
 }
 
 export async function prepareStandalone(installation: Installation, release: Release,
-  fetchFile = download, execute = installedVersion, unpack = systemUnpack): Promise<PreparedUpdate> {
+  fetchFile = download, execute = installedVersion, unpack = systemUnpack, signing?: { keys?: readonly string[]; required?: boolean }): Promise<PreparedUpdate> {
   const target = installation.entry;
   if (!(await lstat(target)).isFile()) throw new Error("The installation is not a regular file.");
   const stage = await mkdtemp(join(dirname(target), ".frely-update-"));
@@ -92,9 +93,11 @@ export async function prepareStandalone(installation: Installation, release: Rel
     const asset = standaloneAsset();
     // Each source supplies its own checksum; any failure (connection, size, checksum, startup) moves to the next source as a whole.
     const fromSource = async (source: ReleaseSource) => {
-      await rm(join(stage, "checksum"), { force: true }); await rm(next, { force: true }); await rm(join(stage, "npm"), { recursive: true, force: true });
+      await rm(join(stage, "checksum"), { force: true }); await rm(join(stage, "checksum.sig"), { force: true }); await rm(next, { force: true }); await rm(join(stage, "npm"), { recursive: true, force: true });
       if (source.kind === "github") {
         await fetchFile(`${source.baseUrl}/${asset}.sha256`, join(stage, "checksum"), 1024);
+        // The signature is optional while signing is record-only; a missing file is not an error, a wrong one is.
+        await fetchFile(`${source.baseUrl}/${asset}.sha256.sig`, join(stage, "checksum.sig"), 1024).catch(() => rm(join(stage, "checksum.sig"), { force: true }));
         await fetchFile(`${source.baseUrl}/${asset}`, next, 200 * 1024 * 1024);
       } else {
         const tarball = join(stage, "package.tgz"), unpacked = join(stage, "npm");
@@ -104,8 +107,11 @@ export async function prepareStandalone(installation: Installation, release: Rel
         await unpack(tarball, unpacked);
         await rename(join(unpacked, "package", "frely"), next);
         await copyFile(join(unpacked, "package", "frely.sha256"), join(stage, "checksum"));
+        await copyFile(join(unpacked, "package", "frely.sha256.sig"), join(stage, "checksum.sig")).catch(() => {});
       }
-      await validateStandalone(next, await readFile(join(stage, "checksum"), "utf8"), release.version, execute);
+      const checksumText = await readFile(join(stage, "checksum"), "utf8");
+      checkReleaseSignature({ version: release.version, asset, checksumText, signature: await readFile(join(stage, "checksum.sig"), "utf8").catch(() => undefined), ...(signing ?? {}) });
+      await validateStandalone(next, checksumText, release.version, execute);
     };
     let lastError: unknown = new Error("No release source is available.");
     let prepared = false;
