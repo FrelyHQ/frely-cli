@@ -1,0 +1,40 @@
+name: Dependency audit
+
+# Fails on high/critical advisories in production dependencies.
+# The weekly schedule catches advisories published after the code last changed;
+# PRs and pushes only run it when the dependency files change.
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - package.json
+      - package-lock.json
+      - .github/workflows/audit.yml
+  pull_request:
+    paths:
+      - package.json
+      - package-lock.json
+      - .github/workflows/audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: npm audit (production, high+)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
