@@ -3,7 +3,7 @@ import { terminateProcessTree } from "../../runtime/process-tree.js";
 import { restrictSandboxNetwork, shutdownSandbox } from "../../runtime/sandbox.js";
 import { agentEnv, gatewayOrigin, readApiKey, spawnConfined } from "./confine.js";
 import { MODEL_HOST, startModelProxy } from "./model-proxy.js";
-import { approvedHosts, readRecord, socketPath, writeRecord } from "./store.js";
+import { approvedHosts, ensureDataDir, readRecord, socketPath, writeRecord } from "./store.js";
 
 export class SupervisorError extends Error {
   constructor(message: string) { super(message); this.name = "SupervisorError"; }
@@ -23,6 +23,7 @@ export async function superviseAgent(slug: string): Promise<number> {
   const apiKey = await readApiKey(origin);
   if (!apiKey) throw new SupervisorError(`${slug} needs a Frely API key for its model calls. Create one at ${login.config.relayUrl}/user/keys, then run: frely agent local key --api-key-stdin`);
 
+  await ensureDataDir(record.workspace);
   const sites = approvedHosts(record);
   const skipped = record.network.filter((host) => !sites.includes(host));
   if (skipped.length > 0) process.stderr.write(`Not approved, so blocked: ${skipped.join(", ")}. Run frely agent local start ${slug} again to ask.\n`);
