@@ -2,7 +2,7 @@
 import { formatApprovalCode } from "./approval-code.js";
 import { applyDataDir, activeDataDir } from "./data-dir.js";
 import { update } from "./update/update.js";
-import { requireMcpAuthorization, inspectMcpMetadata, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, generateMcpKey, parseMcpDays, MCP_DEFAULT_DAYS } from "./mcp-authorization.js";
+import { requireMcpAuthorization, inspectMcpMetadata, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, lockLinkOnServer, generateMcpKey, parseMcpDays, MCP_DEFAULT_DAYS } from "./mcp-authorization.js";
 import { chmod, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { sshProxyConnect } from "./runtime/ssh-proxy.js";
@@ -48,6 +48,7 @@ import { VERSION } from "./version.js";
 import { agentHelp, cliUsage, linkUsage, subcommandUsage } from "./agent-help.js";
 import { ensureMcpAuthorization, grantInactive, mcpStartLogin, normalizeLinkArgs, startMcp, takeInstallToken } from "./mcp-command.js";
 import { remoteLocked, remoteState, setRemoteLock } from "./remote-lock.js";
+import { watchLinkClaim } from "./link-claim.js";
 import { getKeyBudget, KeyBudgetError, publicKeyBudgetError } from "./key-budget.js";
 import { runNetwork, publicNetworkError } from "./network.js";
 import { runComputerCommand } from "./computer/command.js";
@@ -77,6 +78,21 @@ async function installAgent(target: string, args: string[]): Promise<void> {
   const entry = await ensureEntrySkill({ host, scope, ...(projectDir ? { dir: projectDir } : {}) });
   if (args.includes("--json")) stdout.write(`${JSON.stringify({ ...value, ...(entry ? { entrySkill: entry.path } : {}) })}\n`);
   else stdout.write(`Agent: ${value.name}\nSkill: ${value.skillPath}\nAuth: ${value.authMode}\nState: ${value.state}\n${value.hostAction ? `Host action: ${value.hostAction}\n` : ""}${entry ? `Frely Skill: ${entry.path}\n` : ""}`);
+}
+
+/**
+ * After a login the computer is `null`: not controlled. A standby background service keeps it connected to Frely (the same connection and
+ * heartbeat a controlled computer uses) so the owner can turn remote control on from the web after two-step verification; it serves no tools
+ * until then. Skipped while the local lock is set (`frely link off`), without a service manager, or with FRELY_NO_SERVICE=1.
+ */
+async function installStandbyService(): Promise<void> {
+  if (process.env.FRELY_NO_SERVICE === "1" || (await remoteLocked())) return;
+  try {
+    if ((await serviceStatus()).installed) return;
+    await installDeviceRelayService(undefined, { standby: true });
+  } catch (error) {
+    process.stderr.write(`Could not start the standby service (${error instanceof Error ? error.message : String(error)}). Remote control stays off; run frely link on to enable it on this computer.\n`);
+  }
 }
 
 async function main(): Promise<void> {
@@ -388,6 +404,7 @@ async function main(): Promise<void> {
         return;
       }
       stdout.write(`Logged in as ${resumed.user.email}.\n`);
+      await installStandbyService();
       return;
     }
 
@@ -407,6 +424,7 @@ async function main(): Promise<void> {
           const { user } = await finishDeviceLogin(relayUrl, pendingChallenge, deviceId);
           await deletePendingEmailChallenge(relayUrl);
           stdout.write(`Logged in as ${user.email}.\n`);
+          await installStandbyService();
 
           const mcp = pendingChallenge.mcp;
           if (mcp && result.mcpPreapproval) {
@@ -474,6 +492,7 @@ async function main(): Promise<void> {
     }, { openBrowser: !noBrowser });
     const user = result.user;
     stdout.write(`Logged in as ${user.email}.\n`);
+    await installStandbyService();
     if (!("sessionBound" in result) || !result.sessionBound) {
       stdout.write("Your server version is older and does not support logging out per device yet.\n");
     }
@@ -605,7 +624,12 @@ async function main(): Promise<void> {
     if (serviceConfigHome) await trimServiceLog().catch(() => undefined);
     if (serviceCredentialStore) process.env.FRELY_CREDENTIAL_STORE = serviceCredentialStore;
     await requireLogin();
-    const providerOnly = args.includes("--provider-only");
+    // `--standby` is the background service of a computer that is not (yet) controlled: it serves local Providers only until the owner turns
+    // remote control on, then restarts in full mode. It stays provider-only while the local lock is set (`frely link off`).
+    const standby = args.includes("--standby");
+    const localLease = standby ? await inspectMcpMetadata().catch(() => null) : null;
+    const standbyIdle = standby && ((await remoteLocked()) || !localLease || grantInactive(localLease));
+    const providerOnly = args.includes("--provider-only") || standbyIdle;
     // Without --workspace (a service re-registered by hand, Windows after a reboot) use the workspace the device MCP grant is bound to; a different directory never matches the grant and would leave remote execution disabled.
     const grantWorkspace = providerOnly || option(args, "--workspace") ? undefined : (await inspectMcpMetadata().catch(() => null))?.grant.workspace;
     const workspace = providerOnly ? undefined : resolve(option(args, "--workspace") || grantWorkspace || process.cwd());
@@ -630,6 +654,7 @@ async function main(): Promise<void> {
     }
     localMcp?.start();
     piNode?.start();
+    if (standbyIdle) void watchLinkClaim({ signal: controller.signal, log: nodeLog, onClaimed: stop });
     // Services saved with `frely service share --background` stay connected for as long as the daemon runs.
     const services = superviseServices({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Services stopped: ${error instanceof Error ? error.message : String(error)}`));
     try {
@@ -719,9 +744,9 @@ async function main(): Promise<void> {
   if (command === "link" && args[1] === "off") {
     // The local lock comes first: even if the revoke below cannot reach Frely, this computer already refuses remote control.
     await setRemoteLock(true);
-    await revokeMcpAuthorization((message) => { process.stderr.write(message); });
+    await lockLinkOnServer((message) => { process.stderr.write(message); });
     if ((await listLocalProviders()).length > 0 || (await listLocalServices().catch(() => [])).some((service) => service.background)) {
-      await installDeviceRelayService();
+      await installDeviceRelayService(undefined, { standby: true });
       stdout.write("Remote control is off and locked on this computer; only `frely link on` here can turn it on again. The background service keeps running for local Providers and services.\n");
     } else {
       await uninstallMcpService();

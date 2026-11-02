@@ -18,6 +18,16 @@
 
 调用失败时运行 `frely doctor` 查看概览，再用 `frely doctor -v` 查看诊断细节；同时确认客户端 OAuth 授权已经完成、设备在线。授权到期按下文续期。没有合适的远程客户端时，可以先阅读代码与文档，不把“安装完成”记录成“连接成功”。
 
+## 远程链接三态（null / true / false）
+
+一台电脑是否接受远程控制有三种状态，`frely link status` 显示当前状态：
+
+- **null（默认）**：装好 CLI 并 `frely login` 之后的状态，电脑不是被控端。后台待命服务只保持与 Frely 的连接（复用被控端同一条连接和 30 秒心跳），不提供任何工具。此时可以在网页、API 或 MCP 中，经两种不同的二次验证（必含 passkey 或验证器）后启用，变成 true；也可以在本机运行 `frely link on`。
+- **true**：已确认作为被控端，授权有效期内可被远程客户端控制。授权到期后回到 null。
+- **false**：本机运行 `frely link off` 或在网页关闭后的状态。网页不能再启用，只能在这台电脑上运行 `frely link on` 重新开启。本机锁文件优先：即使服务端记录有误，这台电脑也拒绝所有远程请求。
+
+被控端命令统一在 `frely link …` 下（`on`、`off`、`status`、`stop`、`workspace`、`local`、`auto-update`）。旧的 `frely mcp start|status|stop|remove|…` 命令已移除；`frely mcp serve` 与 `frely mcp stdio` 保留给系统服务和本地 MCP 客户端使用。
+
 ## 产品定义与入口
 
 FrelyMCP 的产品定位是：**让 Agent 从任何地方访问你的设备。** 用户在目标电脑运行 Frely CLI，由网页中的 Agent，或另一台电脑上的 Codex、Claude Code 等命令行 Agent，通过远程 HTTP MCP 和 OAuth 访问文件、Shell 和进程工具。设备通过出站连接接入 Relay，无需开放公网端口；执行发生在目标电脑。调用端无需安装 Frely CLI。

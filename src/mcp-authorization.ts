@@ -226,6 +226,58 @@ export async function setupMcpAuthorization(workspaceInput: string, daysInput?: 
   throw new Error("MCP approval expired. Run frely link on.");
 }
 
+const LINK_KEY_SERVICE = "frely-cli-link-key-v1";
+const linkKeyAccount = (relayUrl: string, userId: string, deviceId: string) => `${new URL(relayUrl).origin}|${userId}|${deviceId}`;
+
+/**
+ * Registers the key this computer will use when the web turns remote control on for it (tri-state `null` to `true`), together with the
+ * workspace it will serve (the home directory). The private key never leaves this computer; the relay only sees the public key and a
+ * signature that proves possession. Idempotent: the same key is registered again on every start of the standby service.
+ */
+export async function registerLinkKey(): Promise<void> {
+  const auth = await requireLogin();
+  const device = await ensureDevice();
+  const account = linkKeyAccount(auth.config.relayUrl, auth.user.id, device.deviceId);
+  let privateKeyPem = await credentialStore.getPassword(LINK_KEY_SERVICE, account);
+  if (!privateKeyPem) {
+    privateKeyPem = generateMcpKey().privateKeyPem;
+    await credentialStore.setPassword(LINK_KEY_SERVICE, account, privateKeyPem);
+  }
+  const identity = identityFromPrivateKey(privateKeyPem);
+  const workspace = await realpath(homedir());
+  const issuedAt = new Date().toISOString();
+  const nonce = randomBytes(24).toString("base64url");
+  const signature = identity.signMessage(JSON.stringify(["frely.link.register.v1", device.deviceId, identity.keyThumbprint, workspace, issuedAt, nonce]));
+  const response = await relayFetch(auth.config.relayUrl, auth.credential, ENDPOINT, { method: "POST", body: JSON.stringify({ action: "link-register",
+    deviceId: device.deviceId, publicKeySpki: identity.publicKeySpki, keyThumbprint: identity.keyThumbprint, workspace, issuedAt, nonce, signature }) });
+  if (!response.ok) await throwMcpAuthorizationError(response);
+}
+
+/**
+ * Picks up the lease the web approved for the registered key and saves it as this computer's device MCP authorization, exactly as
+ * `frely link on` would. Returns false when the web has not enabled remote control (or this computer already has an active lease).
+ */
+export async function claimLinkAuthorization(): Promise<boolean> {
+  const auth = await requireLogin();
+  const existing = await inspectMcpMetadata().catch(() => null);
+  if (existing && existing.relayUrl === auth.config.relayUrl && existing.userId === auth.user.id && existing.grant.status === "active" && Date.parse(existing.grant.expiresAt ?? "") > Date.now()) return false;
+  const device = await ensureDevice();
+  const privateKeyPem = await credentialStore.getPassword(LINK_KEY_SERVICE, linkKeyAccount(auth.config.relayUrl, auth.user.id, device.deviceId));
+  if (!privateKeyPem) return false;
+  const response = await relayFetch(auth.config.relayUrl, auth.credential, ENDPOINT, { method: "POST", body: JSON.stringify({ action: "link-claim", deviceId: device.deviceId }) });
+  if (!response.ok) await throwMcpAuthorizationError(response);
+  const payload = await response.json() as Record<string, unknown>;
+  if (payload.status !== "enabled") return false;
+  const grant = validateView(payload.authorization);
+  const identity = identityFromPrivateKey(privateKeyPem);
+  if (grant.status !== "active" || grant.deviceId !== device.deviceId || grant.keyThumbprint !== identity.keyThumbprint) throw new Error("The remote control lease does not match this computer's key.");
+  const metadata: McpMetadata = { version: 1, relayUrl: auth.config.relayUrl, mcpResource: validateMcpResource(payload.mcpResource), userId: auth.user.id, grant };
+  await credentialStore.setPassword(SERVICE, account(metadata), JSON.stringify({ version: 1, privateKeyPem, metadata } satisfies McpSecret));
+  await writeMetadata(metadata);
+  if (existing && existing.grant.id !== grant.id) await credentialStore.deletePassword(SERVICE, account(existing));
+  return true;
+}
+
 export async function revokeMcpAuthorization(notify: (message: string) => void = () => undefined): Promise<void> {
   // An authorization of another account cannot be revoked from this login; it is cleared locally instead.
   const metadata = await discardForeignMcpAuthorization(await inspectMcpMetadataOrQuarantine(notify), notify);
@@ -236,6 +288,19 @@ export async function revokeMcpAuthorization(notify: (message: string) => void =
   // Retain metadata on cleanup failure so status/cleanup remain possible.
   await credentialStore.deletePassword(SERVICE, account(metadata));
   await unlink(mcpMetadataPath());
+}
+/**
+ * `frely link off` on the server: revoke this computer's lease and lock it (tri-state `false`), so the web cannot turn remote control on again.
+ * Works for a computer without a lease too. The saved lease and its key are removed afterwards; a failure keeps them so the command can be run again.
+ */
+export async function lockLinkOnServer(notify: (message: string) => void = () => undefined): Promise<void> {
+  const metadata = await discardForeignMcpAuthorization(await inspectMcpMetadataOrQuarantine(notify), notify);
+  const auth = await requireLogin().catch(() => null);
+  if (!auth) { if (metadata) { await clearMcpAuthorization(metadata); } return; }
+  const device = await ensureDevice();
+  const response = await relayFetch(auth.config.relayUrl, auth.credential, ENDPOINT, { method: "POST", body: JSON.stringify({ action: "link-disable", deviceId: device.deviceId }) });
+  if (!response.ok) throw new Error("Frely did not confirm turning remote control off. It is off on this computer; run frely link off again to tell Frely.");
+  if (metadata) await clearMcpAuthorization(metadata);
 }
 export function assertMcpActive(view: McpAuthorizationView, now = Date.now()): void {
   if (view.status !== "active" || !view.expiresAt || !Number.isFinite(Date.parse(view.expiresAt)) || Date.parse(view.expiresAt) <= now) {
