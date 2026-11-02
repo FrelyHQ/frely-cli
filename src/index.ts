@@ -59,6 +59,7 @@ import { CloudToolError, installCloudItem, parseItemRef, trustCloudItem } from "
 import { checkItemUpdates, updateCloudItem } from "./skill/item-update.js";
 import { runSealedScript } from "./skill/sealed-run.js";
 import { installEntrySkill, ensureEntrySkill } from "./skill/entry.js";
+import { redeemGift } from "./skill/gift.js";
 import { callRemoteTool, connectRemoteMcp, installRemoteMcpSkill, isNotASkill, listRemoteTools, mcpClientConfig, parseMcpName, RemoteMcpError } from "./skill/remote-mcp.js";
 import { callCloudTool } from "./cloud.js";
 import { createInterface } from "node:readline/promises";
@@ -355,7 +356,9 @@ async function main(): Promise<void> {
     }
     if (args[1] !== "install" || args.includes("--help") || args.includes("-h")) { stdout.write(subcommandUsage("item")); return; }
     const itemRef = args[2];
-    if (!itemRef || itemRef.startsWith("-")) throw new Error("Usage: frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--json]");
+    if (!itemRef || itemRef.startsWith("-")) throw new Error("Usage: frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--gift <code>] [--json]");
+    const gift = option(args, "--gift");
+    if (gift !== undefined) await redeemGift(gift, callCloudTool, args.includes("--json") ? process.stderr : stdout);
     // Skills, Prompts and Agents are named alike. An Agent's manifest is public, so it is asked first; a name no Agent has is a Skill or Prompt.
     if (/^creator_distribution_/u.test(itemRef) || args.includes("--api-key-stdin")) { await installAgent(itemRef, args); return; }
     if (!(/^cloud_skill_|^skill_/u.test(itemRef))) {
