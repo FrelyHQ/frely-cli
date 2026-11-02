@@ -119,6 +119,16 @@ test("rejects non-Frely manifest URLs before fetching", async () => {
   assert.equal(called, false);
 });
 
+test("accepts https on a loopback host (a local development stack with a self-signed certificate) but not on other hosts", async () => {
+  for (const manifestUrl of ["https://localhost:43001/api/public/agents/x", "https://127.0.0.1:43001/api/public/agents/x"]) {
+    let called = false;
+    const fetchFn = (async () => { called = true; return new Response("{}"); }) as typeof fetch;
+    await assert.rejects(() => installSkillAdapter({ manifestUrl, host: "generic", scope: "global", fetchFn }), (error: Error) => !/Frely URL/u.test(error.message));
+    assert.equal(called, true);
+  }
+  await assert.rejects(() => installSkillAdapter({ manifestUrl: "https://localhost.evil.example/model.json", host: "generic", scope: "global", fetchFn: fetch }), /Frely URL/u);
+});
+
 test("rejects an MCP URL that does not match the published model identity", async () => {
   const root = await tempRoot();
   try {
