@@ -678,7 +678,6 @@ async function main(): Promise<void> {
     // Turning remote control back on is the one way out of `false`: it has to happen here, on this computer.
     if (!args.includes("--resume")) await setRemoteLock(false);
     else if (await remoteLocked()) { stdout.write("Remote control is turned off on this computer; run `frely link on` to allow it again.\n"); return; }
-    if (process.argv[3] === "url") process.stderr.write("`frely link on` is deprecated; use `frely link on`.\n");
     // Internal: update scripts only resume the installed service, never prompt for approval.
     if (args.includes("--resume")) { const service = await startMcpService(); stdout.write(`Frely MCP service ${service.active ? "started" : "not active"}.\n`); return; }
     // Pre-login install command (start.sh / start.ps1): never inherited by the service, logged or stored.
