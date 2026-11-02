@@ -17,6 +17,9 @@ test("diagnostics exclude untrusted messages, nested data and stack headers", ()
   assert.equal(entry.tool, "unknown");
   assert.ok(entry.error.stack.some((line: string) => line.includes("diagnostics.test.js:")));
   assert.equal(diagnosticError(new Error("WebSocket closed (4412: hard_lifetime)")).message, "WebSocket closed (4412: hard_lifetime).");
+  assert.equal(diagnosticError(new Error("WebSocket closed (1012: Service Restart)")).message, "WebSocket closed (1012: Service Restart).");
+  assert.equal(diagnosticError(new Error("WebSocket closed (1006)")).message, "WebSocket closed (1006).");
+  assert.equal(diagnosticError(new Error("WebSocket closed (4000: idle\u00e9 timeout)")).message, "WebSocket closed (4000: idle? timeout).");
   assert.equal(diagnosticError(new Error("Frely request failed with HTTP 502.")).message, "HTTP 502.");
   assert.doesNotThrow(() => diagnostic(() => { throw new Error("sink failed"); }, "mcp.request_started"));
 });
