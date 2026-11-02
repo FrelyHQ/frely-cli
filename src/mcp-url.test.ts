@@ -15,12 +15,13 @@ import { useMemoryCredentialStore } from "./test-support.js";
 async function fixture(t: TestContext, denied = false, offeredLink: (id: string) => unknown = () => "https://test.invalid/device?g=ABCDEFGH") {
   const directory = await mkdtemp(join(tmpdir(), "frely-mcp-url-"));
   const restore = useMemoryCredentialStore();
-  const previous = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, FRELY_NO_BROWSER: process.env.FRELY_NO_BROWSER, HOME: process.env.HOME };
+  const previous = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, FRELY_NO_BROWSER: process.env.FRELY_NO_BROWSER, HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
   process.env.XDG_CONFIG_HOME = directory;
   // A device without --workspace shares ~/Frely, which is created on setup: keep that out of the real home directory.
   const home = join(directory, "home");
   await mkdir(home);
   process.env.HOME = home;
+  process.env.USERPROFILE = home;
   process.env.FRELY_NO_BROWSER = "1";
   const originalFetch = globalThis.fetch;
   t.after(async () => {
@@ -306,7 +307,7 @@ test("frely link on without a login signs in first and keeps prompts off stdout,
     await assert.rejects(promisify(execFile)(process.execPath, [entry, ...args], {
       cwd: directory,
       // An unreachable loopback relay: the sign-in request fails at once instead of waiting for a browser approval.
-      env: { ...process.env, HOME: directory, XDG_CONFIG_HOME: directory, FRELY_NO_BROWSER: "1", FRELY_RELAY_URL: "http://127.0.0.1:9" },
+      env: { ...process.env, HOME: directory, USERPROFILE: directory, XDG_CONFIG_HOME: directory, FRELY_NO_BROWSER: "1", FRELY_RELAY_URL: "http://127.0.0.1:9" },
       timeout: 20000,
     }), (error: unknown) => {
       const result = error as Error & { code: number; stdout: string; stderr: string };
