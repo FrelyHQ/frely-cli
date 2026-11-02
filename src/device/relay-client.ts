@@ -201,12 +201,13 @@ export function isRelayRestartClose(error: unknown): boolean {
   return error instanceof DeviceTransportConnectionError && error.closeCode !== undefined && isRelayRestartCode(error.closeCode);
 }
 
-export const RELAY_RESTART_RETRY_WINDOW_MS = 60_000;
+export const RELAY_RESTART_RETRY_WINDOW_MS = 10 * 60_000;
 const MAX_BACKOFF_MS = 15_000;
 
 /**
- * After the relay announced a restart, retry about once a second for a minute (also when attempts fail
- * while the container is still starting), then fall back to the exponential backoff.
+ * After the relay announced a restart, retry about every 2 seconds for ten minutes (also when attempts fail
+ * while the container is still starting), then fall back to the exponential backoff. A release that stops the
+ * whole application keeps the relay away for minutes, so the window must outlast it or devices return up to 15 s late.
  */
 export function nextReconnectDelay(
   state: { backoffMs: number; restartSince?: number | undefined },
@@ -216,7 +217,7 @@ export function nextReconnectDelay(
 ): { delayMs: number; backoffMs: number; restartSince?: number | undefined } {
   const restartSince = state.restartSince ?? (isRelayRestartClose(error) ? now : undefined);
   if (restartSince !== undefined && now - restartSince < RELAY_RESTART_RETRY_WINDOW_MS) {
-    return { delayMs: Math.round(800 + random() * 400), backoffMs: state.backoffMs, restartSince };
+    return { delayMs: Math.round(1600 + random() * 800), backoffMs: state.backoffMs, restartSince };
   }
   return { delayMs: state.backoffMs, backoffMs: Math.min(state.backoffMs * 2, MAX_BACKOFF_MS) };
 }
