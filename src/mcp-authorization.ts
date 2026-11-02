@@ -259,17 +259,25 @@ export async function registerLinkKey(): Promise<void> {
  * Picks up the lease the web approved for the registered key and saves it as this computer's device MCP authorization, exactly as
  * `frely link on` would. Returns false when the web has not enabled remote control (or this computer already has an active lease).
  */
-export async function claimLinkAuthorization(): Promise<boolean> {
+/**
+ * Asks the relay what the web did to this computer's remote link: `"claimed"` (a lease the web approved was saved), `"locked"` (the web turned
+ * remote control off, so the caller writes the local lock) or `"none"`. The relay is asked even while a lease is active, because that is when
+ * a web "off" has to reach a running service. An older relay never answers `locked`, which reads as `none`.
+ */
+export type LinkClaimResult = "claimed" | "locked" | "none";
+
+export async function claimLinkAuthorization(): Promise<LinkClaimResult> {
   const auth = await requireLogin();
   const existing = await inspectMcpMetadata().catch(() => null);
-  if (existing && existing.relayUrl === auth.config.relayUrl && existing.userId === auth.user.id && existing.grant.status === "active" && Date.parse(existing.grant.expiresAt ?? "") > Date.now()) return false;
   const device = await ensureDevice();
-  const privateKeyPem = await credentialStore.getPassword(LINK_KEY_SERVICE, linkKeyAccount(auth.config.relayUrl, auth.user.id, device.deviceId));
-  if (!privateKeyPem) return false;
   const response = await relayFetch(auth.config.relayUrl, auth.credential, ENDPOINT, { method: "POST", body: JSON.stringify({ action: "link-claim", deviceId: device.deviceId }) });
   if (!response.ok) await throwMcpAuthorizationError(response);
   const payload = await response.json() as Record<string, unknown>;
-  if (payload.status !== "enabled") return false;
+  if (payload.status === "locked") return "locked";
+  if (payload.status !== "enabled") return "none";
+  if (existing && existing.relayUrl === auth.config.relayUrl && existing.userId === auth.user.id && existing.grant.status === "active" && Date.parse(existing.grant.expiresAt ?? "") > Date.now()) return "none";
+  const privateKeyPem = await credentialStore.getPassword(LINK_KEY_SERVICE, linkKeyAccount(auth.config.relayUrl, auth.user.id, device.deviceId));
+  if (!privateKeyPem) return "none";
   const grant = validateView(payload.authorization);
   const identity = identityFromPrivateKey(privateKeyPem);
   if (grant.status !== "active" || grant.deviceId !== device.deviceId || grant.keyThumbprint !== identity.keyThumbprint) throw new Error("The remote control lease does not match this computer's key.");
@@ -277,7 +285,7 @@ export async function claimLinkAuthorization(): Promise<boolean> {
   await credentialStore.setPassword(SERVICE, account(metadata), JSON.stringify({ version: 1, privateKeyPem, metadata } satisfies McpSecret));
   await writeMetadata(metadata);
   if (existing && existing.grant.id !== grant.id) await credentialStore.deletePassword(SERVICE, account(existing));
-  return true;
+  return "claimed";
 }
 
 export async function revokeMcpAuthorization(notify: (message: string) => void = () => undefined): Promise<void> {

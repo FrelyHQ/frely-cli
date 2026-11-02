@@ -15,7 +15,7 @@ test("the watch registers once, polls until the web enabled remote control, then
   let claimed = false;
   await watchLinkClaim({
     signal: controller.signal, log: () => undefined, intervalMs: 1, onClaimed: () => { claimed = true; },
-    deps: { locked: async () => false, register: async () => { calls.push("register"); }, claim: async () => { calls.push("claim"); return ++claims === 3; } },
+    deps: { locked: async () => false, register: async () => { calls.push("register"); }, claim: async () => { calls.push("claim"); return ++claims === 3 ? "claimed" : "none"; }, lock: async () => undefined },
   });
   assert.equal(claimed, true);
   assert.deepEqual(calls, ["register", "claim", "claim", "claim"]);
@@ -32,11 +32,24 @@ test("a locked computer neither registers nor claims, and a failed round does no
     deps: {
       locked: async () => locked,
       register: async () => { calls.push("register"); },
-      claim: async () => { calls.push("claim"); if (!failed) { failed = true; throw new Error("offline"); } return true; },
+      claim: async () => { calls.push("claim"); if (!failed) { failed = true; throw new Error("offline"); } return "claimed"; },
+      lock: async () => undefined,
     },
   });
   assert.deepEqual(calls, ["register", "claim", "claim"]);
   assert.ok(logs.some((line) => /offline/.test(line)));
+});
+
+test("the web turning remote control off writes the local lock and reports it, in full mode too", async () => {
+  const calls: string[] = [];
+  let locked = false, reported = 0, claimed = false;
+  await watchLinkClaim({
+    signal: new AbortController().signal, log: () => undefined, intervalMs: 1, onClaimed: () => { claimed = true; }, onLocked: () => { reported++; },
+    deps: { locked: async () => locked, register: async () => undefined, claim: async () => { calls.push("claim"); return calls.length === 2 ? "locked" : "none"; }, lock: async () => { calls.push("lock"); locked = true; } },
+  });
+  assert.deepEqual(calls, ["claim", "claim", "lock"]);
+  assert.equal(reported, 1);
+  assert.equal(claimed, false);
 });
 
 async function fixture(t: TestContext) {
@@ -60,7 +73,7 @@ async function fixture(t: TestContext) {
   await mkdir(join(directory, "frely"), { recursive: true, mode: 0o700 });
   await writeFile(join(directory, "frely", "config.json"), JSON.stringify({ version: 3, relayUrl, user: { id: userId, email: "user@example.com" } }), { mode: 0o600 });
   await basicCredentialStore.setPassword("frely-cli-basic-v1", relayUrl, JSON.stringify({ version: 1, type: "basic-oauth", accessToken: "synthetic-basic", expiresAt: Date.now() + 3600000 }));
-  const state = { registered: null as null | { keyThumbprint: string; workspace: string; publicKeySpki: string }, enabled: false, stamp: undefined as number | undefined };
+  const state = { registered: null as null | { keyThumbprint: string; workspace: string; publicKeySpki: string }, enabled: false, locked: false, stamp: undefined as number | undefined };
   globalThis.fetch = async (url, options) => {
     const path = new URL(String(url)).pathname;
     if (path === "/api/auth/me") return Response.json({ user: { id: userId, email: "user@example.com" } });
@@ -78,6 +91,7 @@ async function fixture(t: TestContext) {
       return Response.json({ status: "registered" });
     }
     assert.equal(body.action, "link-claim");
+    if (state.locked) return Response.json({ status: "locked" });
     if (!state.enabled || !state.registered) return Response.json({ status: "none" });
     return Response.json({ status: "enabled", mcpResource: "https://mcp.test.invalid/mcp", authorization: view() });
   };
@@ -97,19 +111,21 @@ test("registering sends a public key, the default ~/Frely workspace and a signat
 
 test("claiming saves the lease the web approved for the registered key as the device MCP authorization", async (t) => {
   const f = await fixture(t);
-  assert.equal(await claimLinkAuthorization(), false, "nothing registered yet");
+  assert.equal(await claimLinkAuthorization(), "none", "nothing registered yet");
   await registerLinkKey();
-  assert.equal(await claimLinkAuthorization(), false, "the web has not enabled it");
+  assert.equal(await claimLinkAuthorization(), "none", "the web has not enabled it");
   f.state.enabled = true;
-  assert.equal(await claimLinkAuthorization(), true);
+  assert.equal(await claimLinkAuthorization(), "claimed");
   const metadata = await inspectMcpMetadata();
   assert.equal(metadata?.grant.status, "active");
   assert.equal(metadata?.grant.keyThumbprint, f.state.registered!.keyThumbprint);
   // The saved lease is usable like one made by `frely link on`: the private key matches it.
   const authorization = await requireMcpAuthorization();
   assert.equal(authorization.grant.id, `mca_${"a".repeat(32)}`);
-  // Already active: nothing to do.
-  assert.equal(await claimLinkAuthorization(), false);
+  // Already active: nothing to do, but a web "off" still reaches the computer.
+  assert.equal(await claimLinkAuthorization(), "none");
+  f.state.locked = true;
+  assert.equal(await claimLinkAuthorization(), "locked");
 });
 
 test("a lease for another key is refused", async (t) => {
