@@ -13,7 +13,7 @@ permissions:
 jobs:
   verify:
     name: Verify (${{ matrix.os }}, Node ${{ matrix.node }})
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ fromJSON(matrix.runner || format('"{0}"', matrix.os)) }}
     strategy:
       fail-fast: false
       matrix:
@@ -26,6 +26,9 @@ jobs:
         include:
           - os: ubuntu-24.04
             node: 24
+          # macOS runs on the maintainer's Mac (runner frely-cli-macos). A fork's pull request never reaches it: it keeps the GitHub-hosted runner.
+          - os: macos-latest
+            runner: ${{ github.event.pull_request.head.repo.fork && '"macos-latest"' || '["self-hosted","frely-cli-macos"]' }}
 
     steps:
       - name: Check out source
