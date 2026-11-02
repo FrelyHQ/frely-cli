@@ -45,7 +45,7 @@ import { reportedWorkspaces } from "./runtime/workspace-registry.js";
 import { VERSION } from "./version.js";
 import { agentHelpView, cliUsage, linkUsage, subcommandUsage } from "./agent-help.js";
 import { grantInactive, mcpStartLogin, normalizeLinkArgs, startMcp, takeInstallToken } from "./mcp-command.js";
-import { remoteLocked, remoteState, setRemoteLock } from "./remote-lock.js";
+import { remoteLocked, remoteState, setLinkOnPending, setRemoteLock } from "./remote-lock.js";
 import { watchLinkClaim } from "./link-claim.js";
 import { getKeyBudget, KeyBudgetError, publicKeyBudgetError } from "./key-budget.js";
 import { runNetwork, publicNetworkError } from "./network.js";
@@ -631,7 +631,8 @@ async function main(): Promise<void> {
     }
     localMcp?.start();
     piNode?.start();
-    if (standbyIdle) void watchLinkClaim({ signal: controller.signal, log: nodeLog, onClaimed: stop });
+    // Standby waits for the web to turn remote control on; full mode waits for the web to turn it off. Both restart the service.
+    void watchLinkClaim({ signal: controller.signal, log: nodeLog, onClaimed: stop, onLocked: stop });
     // Services saved with `frely service share --background` stay connected for as long as the daemon runs.
     const services = superviseServices({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Services stopped: ${error instanceof Error ? error.message : String(error)}`));
     try {
@@ -678,6 +679,8 @@ async function main(): Promise<void> {
 
   if (command === "link" && args[1] === "on") {
     // Turning remote control back on is the one way out of `false`: it has to happen here, on this computer.
+    await setLinkOnPending(true);
+    try {
     await setRemoteLock(false);
     // Pre-login install command (start.sh / start.ps1): never inherited by the service, logged or stored.
     const installToken = takeInstallToken();
@@ -696,6 +699,7 @@ async function main(): Promise<void> {
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
     else stdout.write(`${authorization.mcpUrl}\n`);
     return;
+    } finally { await setLinkOnPending(false); }
   }
   if (command === "link" && args[1] === "status") {
     const metadata = await inspectMcpMetadataOrQuarantine((message) => { process.stderr.write(message); });
