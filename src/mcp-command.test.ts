@@ -14,7 +14,9 @@ test("link accepts the documented short entry and explicit subcommands", () => {
   assert.deepEqual(normalizeLinkArgs(["link", "on", "--workspace", "/project with spaces", "--days", "90"]), ["link", "on", "--workspace", "/project with spaces", "--days", "90"]);
   assert.deepEqual(normalizeLinkArgs(["link", "on", "--json"]), ["link", "on", "--json"]);
   assert.deepEqual(normalizeLinkArgs(["link", "status", "--json"]), ["link", "status", "--json"]);
-  assert.throws(() => normalizeLinkArgs(["link", "stop", "--json"]), /Unsupported link option/);
+  // One switch, on/off: there is no start or stop.
+  assert.throws(() => normalizeLinkArgs(["link", "stop"]), /Unknown link command/);
+  assert.throws(() => normalizeLinkArgs(["link", "on", "--resume"]), /Unsupported option/);
   assert.throws(() => normalizeLinkArgs(["link", "off", "--json"]), /Unsupported link option/);
   assert.throws(() => normalizeLinkArgs(["link", "start"]), /Unknown link command/);
   // A bare group stays bare; the CLI prints its subcommands instead of listing.
@@ -23,7 +25,6 @@ test("link accepts the documented short entry and explicit subcommands", () => {
     ["link", "workspace", "list"],
     ["link", "workspace", "list", "--json"],
     ["link", "workspace", "add", "/project"],
-    ["link", "stop"],
     ["link", "on"],
     ["link", "status"],
     ["link", "off"],
@@ -33,14 +34,13 @@ test("link accepts the documented short entry and explicit subcommands", () => {
   ]) assert.deepEqual(normalizeLinkArgs(args), args);
 });
 
-test("the old frely mcp commands are gone except the internal serve/stdio and the update bridge", () => {
-  for (const args of [["mcp"], ["mcp", "start"], ["mcp", "url"], ["mcp", "status"], ["mcp", "remove"], ["mcp", "workspace", "list"], ["mcp", "local", "list"], ["mcp", "auto-update"], ["mcp", "help"]]) {
+test("the old frely mcp commands are gone except the internal serve/stdio and service stop/start", () => {
+  for (const args of [["mcp"], ["mcp", "start"], ["mcp", "start", "--resume"], ["mcp", "stop"], ["mcp", "url"], ["mcp", "status"], ["mcp", "remove"], ["mcp", "workspace", "list"], ["mcp", "local", "list"], ["mcp", "auto-update"], ["mcp", "help"]]) {
     assert.throws(() => normalizeLinkArgs(args), /frely link/, args.join(" "));
   }
-  // Windows update commands printed by older CLIs still bring the service back.
-  assert.deepEqual(normalizeLinkArgs(["mcp", "service", "start"]), ["link", "on", "--resume"]);
-  assert.deepEqual(normalizeLinkArgs(["mcp", "start", "--resume"]), ["link", "on", "--resume"]);
-  assert.deepEqual(normalizeLinkArgs(["mcp", "stop"]), ["link", "stop"]);
+  // Update scripts stop the installed service before an update and start it after.
+  assert.deepEqual(normalizeLinkArgs(["mcp", "service", "start"]), ["mcp", "service", "start"]);
+  assert.deepEqual(normalizeLinkArgs(["mcp", "service", "stop"]), ["mcp", "service", "stop"]);
 });
 
 test("MCP help works offline for the entry and subcommands", async () => {
@@ -71,7 +71,6 @@ test("invalid MCP arguments fail before login, authorization, service installati
     ["link", "setup"],
     ["link", "renew"],
     ["link", "revoke"],
-    ["link", "stop", "--force"],
     ["link", "off", "--force"],
     ["link", "workspace", "--json"],
     ["link", "workspace", "list", "--verbose"],

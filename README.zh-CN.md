@@ -59,15 +59,15 @@ frely skill install --host <claude-code|codex|pi|generic>
 | 命令 | 作用 |
 | --- | --- |
 | `frely skill install --host <host>` | 为 Agent 宿主（`claude-code`、`codex`、`pi` 或 `generic`）安装 `frely` Skill。 |
-| `frely link on` | 需要时登录，开启设备 MCP，启动服务并输出 MCP URL。可重复运行。 |
-| `frely link status` | 显示 MCP URL、工作区、授权到期时间和服务状态。 |
+| `frely link on` | 开启远程控制：需要时登录，在浏览器里批准这台电脑，启动后台服务并输出 MCP URL。可重复运行：授权过期会续期，服务停了会启动。 |
+| `frely link off` | 关闭远程控制：撤销所有客户端的访问，并在本机锁定，之后只有在这台电脑上运行 `frely link on` 才能重新开启。后台服务会卸载；有本地 Provider 时继续运行。 |
+| `frely link status` | 显示远程控制是开启、关闭还是尚未开启，以及 MCP URL、工作区、到期时间和服务状态。 |
 | `frely link workspace add <path>` | 共享另一个文件夹。`frely link workspace list` 列出全部。 |
-| `frely link stop` / `frely link on` | 暂停或恢复后台服务。 |
-| `frely link off` | 撤销所有客户端的访问并卸载服务。 |
+| `frely link auto-update [on\|off]` | 让后台服务在空闲时自动升级（macOS/Linux，默认关闭）。 |
 | `frely doctor` | 检查登录、安装、服务和连接。`-v` 显示详情。 |
 | `frely update` | 原地升级到最新版本。 |
 | `frely login` / `frely logout` | 登录或退出 Frely 账号。 |
-| `frely sandbox proxy <url>` | 让命令沙箱的网络流量转发到你自己的 HTTP(S) 代理。未设置时使用 CLI 进程的 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`，macOS 上还会读系统代理。`--clear` 删除；重启服务后生效。 |
+| `frely sandbox proxy <url>` | 让命令沙箱的网络流量转发到你自己的 HTTP(S) 代理。未设置时使用 CLI 进程的 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`，macOS 上还会读系统代理。`--clear` 删除。正在运行的后台服务会自动重启以生效。 |
 | `frely tunnel <host>:<port>` | 在沙箱命令内使用：监听 `127.0.0.1`，把 TCP 连接经沙箱转发到 `host:port`，供数据库、redis 客户端使用。`--local-port N` 指定本地端口。 |
 | `frely uninstall` | 从这台电脑移除 Frely（先列出全部内容）。 |
 
@@ -77,9 +77,13 @@ frely skill install --host <claude-code|codex|pi|generic>
 
 通过 FrelyMCP，让网页版 ChatGPT、Claude 等没有 Shell 的客户端使用 Frely，或操作另一台电脑。
 
-FrelyMCP 是整个账号共用的一个 MCP 地址：`https://mcp.frely.cloud/mcp`。每台运行过 `frely link on` 的电脑都在它后面。
+FrelyMCP 是整个账号共用的一个 MCP 地址：`https://mcp.frely.cloud/mcp`。每台开启了远程控制（`frely link on`）的电脑都在它后面。
 
-### 连接有浏览器的电脑
+### 1. 在电脑上开启远程控制
+
+已安装 `frely` 时，运行 `frely link on`。否则用下面的启动脚本：它安装最新版 `frely` 并替你运行 `frely link on`；随时再运行一次即可升级。
+
+**有浏览器：**
 
 ```sh
 # macOS / Linux
@@ -91,25 +95,24 @@ curl -fsSL https://frely.cloud/start.sh | sh
 curl.exe -fsSLo "$env:TEMP\frely-start.ps1" https://frely.cloud/start.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-start.ps1"
 ```
 
-脚本安装最新版 `frely`，打开浏览器登录（新账号可在同一页面注册），请你批准这台设备，最后输出 MCP URL。随时可以再运行一次来升级。工作区默认是用户主目录，设置 `FRELY_WORKSPACE=/path` 可共享其他文件夹。[详情](https://cli.frely.cloud/docs/help/how-do-i-install/)
+浏览器会打开，用于登录（新账号可在同一页面注册）和批准这台电脑，最后输出 MCP URL。工作区默认是 `~/Frely`（自动创建），设置 `FRELY_WORKSPACE=/path` 可共享其他文件夹。AI 客户端需要工作区以外的文件夹时，可以在网页上允许。[详情](https://cli.frely.cloud/docs/help/how-do-i-install/)
 
-### 连接服务器（无需浏览器）
-
-在 Frely 网站 **My Devices → Add a computer → Create install command** 获取一次性安装命令，或让已连接 FrelyMCP 的 ChatGPT、Claude 添加一台电脑。粘贴到服务器上运行：
+**服务器（无浏览器）：** 在 Frely 网站 **My Devices → Add a computer → Create install command** 获取一次性安装命令，或让已连接 FrelyMCP 的 ChatGPT、Claude 添加一台电脑。粘贴到服务器上运行：
 
 ```sh
 curl -fsSL https://frely.cloud/start.sh | FRELY_INSTALL_TOKEN=fit_... sh
 ```
 
-它会安装 `frely`、登录你的账号、开启设备 MCP 并启动后台服务。令牌只能用一次，15 分钟内有效。Linux 上请运行 `sudo loginctl enable-linger $USER`，退出 SSH 后服务才能保持在线。[详情](https://cli.frely.cloud/docs/help/install-on-a-server/)
+它会登录你的账号，并在不打开浏览器的情况下开启远程控制。令牌只能用一次，15 分钟内有效。Linux 上请运行 `sudo loginctl enable-linger $USER`，退出 SSH 后服务才能保持在线。[详情](https://cli.frely.cloud/docs/help/install-on-a-server/)
 
-1. 在要被控制的电脑上运行 `frely link on`（上面的安装脚本已经包含这一步）。
-2. 把 URL 作为使用 OAuth 的远程 MCP 服务加到客户端：
+### 2. 把 FrelyMCP 加到客户端
+
+1. 把 `https://mcp.frely.cloud/mcp` 作为使用 OAuth 的远程 MCP 服务添加：
    - ChatGPT 或 Claude：用这个 URL 添加自定义连接器。
    - 另一台电脑上的 Claude Code：`claude mcp add --transport http frely "https://mcp.frely.cloud/mcp"`，然后打开 `/mcp` 完成授权。
-3. 登录 Frely 并批准该客户端。
+2. 登录 Frely 并批准该客户端。
 
-验证连接：让客户端列出工作区的顶层文件名。
+验证连接：让客户端列出工作区的顶层文件名。要停止，在那台电脑上运行 `frely link off`。
 
 - **AI 能做什么**：先 `list_devices`，再在选定的电脑上用 `read`、`edit_file`、`process`、`web_fetch`，账号操作用 `frely_list` 和 `frely_call`。[详情](https://cli.frely.cloud/docs/help/what-can-the-ai-do/)
 - **本机 MCP 服务**：只监听回环地址的服务会被自动发现（`frely link local list`），每个都要在 Frely 上逐个开启才对远程可见。[详情](https://cli.frely.cloud/docs/help/local-mcp-servers/)

@@ -59,16 +59,15 @@ frely skill install --host <claude-code|codex|pi|generic>
 | Command | What it does |
 | --- | --- |
 | `frely skill install --host <host>` | Install the `frely` Skill for an agent host (`claude-code`, `codex`, `pi` or `generic`). |
-| `frely link on` | Sign in if needed, enable Device MCP, start the service and print the MCP URL. Safe to re-run. |
-| `frely link status` | Show the MCP URL, workspace, authorization expiry and service state. |
+| `frely link on` | Turn remote control on: sign in if needed, approve this computer in the browser, start the background service and print the MCP URL. Safe to re-run: it renews expired access and starts a stopped service. |
+| `frely link off` | Turn remote control off: revoke access for every client and lock it on this computer, so only `frely link on` here turns it on again. The background service is uninstalled, or kept running for local Providers. |
+| `frely link status` | Show whether remote control is on, off or not enabled yet, with the MCP URL, workspace, expiry and service state. |
 | `frely link workspace add <path>` | Share another folder. `frely link workspace list` shows them all. |
-| `frely link stop` / `frely link on` | Pause or resume the background service. |
 | `frely link auto-update [on\|off]` | Let the background service update itself while idle (macOS/Linux, off by default). |
-| `frely link off` | Revoke access for every client and uninstall the service. |
 | `frely doctor` | Check sign-in, installation, service and connection. `-v` for details. |
 | `frely update` | Update to the latest version in place. |
 | `frely login` / `frely logout` | Sign in or out of your Frely account. `frely login --email <you@example.com>` then `--code <code>` signs in without a browser. |
-| `frely sandbox proxy <url>` | Forward the command sandbox's network traffic to your own HTTP(S) proxy. Without it the CLI uses `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` and, on macOS, the system proxy. `--clear` removes it; restart the service to apply. |
+| `frely sandbox proxy <url>` | Forward the command sandbox's network traffic to your own HTTP(S) proxy. Without it the CLI uses `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` and, on macOS, the system proxy. `--clear` removes it. A running background service restarts to apply the change. |
 | `frely tunnel <host>:<port>` | Inside a sandboxed command: listen on `127.0.0.1` and forward TCP connections to `host:port` through the sandbox, for database and redis clients. `--local-port N` picks the local port. |
 | `frely uninstall` | Remove Frely from this computer (lists everything first). |
 
@@ -78,9 +77,13 @@ All commands and options: [command reference](https://cli.frely.cloud/docs/help/
 
 Use FrelyMCP from clients with no shell, such as web ChatGPT and Claude, or to work on another computer.
 
-FrelyMCP is one MCP address for your whole account: `https://mcp.frely.cloud/mcp`. Every computer where you ran `frely link on` appears behind it.
+FrelyMCP is one MCP address for your whole account: `https://mcp.frely.cloud/mcp`. Every computer with remote control on (`frely link on`) appears behind it.
 
-### Connect a computer with a browser
+### 1. Turn on remote control on the computer
+
+If `frely` is installed, run `frely link on`. Otherwise the start scripts below install the latest `frely` and run `frely link on` for you; run them again any time to update.
+
+**With a browser:**
 
 ```sh
 # macOS / Linux
@@ -92,25 +95,24 @@ curl -fsSL https://frely.cloud/start.sh | sh
 curl.exe -fsSLo "$env:TEMP\frely-start.ps1" https://frely.cloud/start.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-start.ps1"
 ```
 
-The script installs the latest `frely`, opens the browser to sign in (new accounts can register there), asks you to approve this device and prints your MCP URL. Run it again any time to update. The workspace is `~/Frely` by default (created for you); set `FRELY_WORKSPACE=/path` to share another folder. When an AI client needs a folder outside it, you can allow that folder on the web. [More](https://cli.frely.cloud/docs/help/how-do-i-install/)
+The browser opens to sign in (new accounts can register there) and to approve this computer, then the MCP URL is printed. The workspace is `~/Frely` by default (created for you); set `FRELY_WORKSPACE=/path` to share another folder. When an AI client needs a folder outside it, you can allow that folder on the web. [More](https://cli.frely.cloud/docs/help/how-do-i-install/)
 
-### Connect a server (no browser)
-
-Get a one-time install command on the Frely website (**My Devices → Add a computer → Create install command**), or ask ChatGPT or Claude connected to FrelyMCP to add a computer. Paste it on the server:
+**On a server (no browser):** get a one-time install command on the Frely website (**My Devices → Add a computer → Create install command**), or ask ChatGPT or Claude connected to FrelyMCP to add a computer. Paste it on the server:
 
 ```sh
 curl -fsSL https://frely.cloud/start.sh | FRELY_INSTALL_TOKEN=fit_... sh
 ```
 
-It installs `frely`, signs in to your account, enables Device MCP and starts the background service. The token works once and expires after 15 minutes. On Linux, run `sudo loginctl enable-linger $USER` so the service stays online after you log out of SSH. [More](https://cli.frely.cloud/docs/help/install-on-a-server/)
+It signs in to your account and turns remote control on without a browser. The token works once and expires after 15 minutes. On Linux, run `sudo loginctl enable-linger $USER` so the service stays online after you log out of SSH. [More](https://cli.frely.cloud/docs/help/install-on-a-server/)
 
-1. On the computer to control, run `frely link on` (the install scripts above already do this).
-2. Add the URL to your client as a remote MCP server with OAuth:
+### 2. Add FrelyMCP to your client
+
+1. Add `https://mcp.frely.cloud/mcp` as a remote MCP server with OAuth:
    - ChatGPT or Claude: add a custom connector with the URL.
    - Claude Code on another computer: `claude mcp add --transport http frely "https://mcp.frely.cloud/mcp"`, then open `/mcp` to authorize.
-3. Sign in to Frely and approve the client.
+2. Sign in to Frely and approve the client.
 
-To check the connection, ask the client to list the top-level names in your workspace.
+To check the connection, ask the client to list the top-level names in your workspace. To stop it, run `frely link off` on that computer.
 
 - **What the AI can do**: `list_devices`, then `read`, `edit_file`, `process` and `web_fetch` on the computer you pick, plus your account through `frely_list` and `frely_call`. [More](https://cli.frely.cloud/docs/help/what-can-the-ai-do/)
 - **Local MCP servers**: loopback servers are found automatically (`frely link local list`); each stays hidden until you turn it on in Frely. [More](https://cli.frely.cloud/docs/help/local-mcp-servers/)
