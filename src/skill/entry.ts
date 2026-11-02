@@ -13,7 +13,7 @@ name: frely
 description: Use when the user wants to work with their Frely account or the Frely marketplace through the frely CLI (credits, API keys, plans, orders, installing a Frely Skill or Agent), or wants to connect a computer or an AI client to FrelyMCP.
 ---
 
-Use the installed \`frely\` CLI. Do not rely on remembered syntax: run \`frely help --agent --json\` for the current command contract, and \`frely update\` if a command is missing.
+Use the installed \`frely\` CLI. Do not rely on remembered syntax: run \`frely help --agent --json --summary\` for the grouped command index, then \`frely help --agent --json <command id or group>\` (for example \`agent\` or \`agent.run\`) for full usage, examples and confirmation notes, and \`frely update\` if a command is missing.
 
 ## Sign in
 

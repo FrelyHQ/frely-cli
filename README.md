@@ -72,7 +72,7 @@ frely skill install --host <claude-code|codex|pi|generic>
 | `frely tunnel <host>:<port>` | Inside a sandboxed command: listen on `127.0.0.1` and forward TCP connections to `host:port` through the sandbox, for database and redis clients. `--local-port N` picks the local port. |
 | `frely uninstall` | Remove Frely from this computer (lists everything first). |
 
-All commands and options: [command reference](https://cli.frely.cloud/docs/help/commands/). `frely help --agent --json` prints the full machine-readable contract.
+All commands and options: [command reference](https://cli.frely.cloud/docs/help/commands/). `frely help --agent --json` prints the full machine-readable contract; add `--summary` for a short grouped index, or a command id or group (for example `agent.run`, `agent`) for one command family with examples.
 
 ## Use with FrelyMCP
 

@@ -99,6 +99,139 @@ export function agentHelp() {
   };
 }
 
+/** Group key per command id, in the order the summary lists them. Keys are what `frely help --agent --json <group>` accepts. */
+const AGENT_GROUPS: readonly { key: string; title: string; test: (id: string) => boolean }[] = [
+  { key: "account", title: "Account and CLI", test: (id) => ["login", "logout", "uninstall", "doctor", "update", "help"].includes(id) },
+  { key: "api", title: "Account API and remote MCP products", test: (id) => id === "api" || id.startsWith("remote.") },
+  { key: "items", title: "Marketplace items", test: (id) => id.startsWith("item.") },
+  { key: "skills", title: "Skills", test: (id) => id.startsWith("skill.") },
+  { key: "agents", title: "Agents", test: (id) => id.startsWith("agent.") },
+  { key: "devices", title: "Control your devices", test: (id) => ["devices", "run", "ps", "logs", "kill", "read", "ls", "grep", "edit", "permission", "tools", "call"].includes(id) },
+  { key: "link", title: "Let others control this computer", test: (id) => id.startsWith("link.") },
+  { key: "providers", title: "Providers", test: (id) => id.startsWith("provider.") },
+  { key: "share", title: "Share", test: (id) => id === "share" || id.startsWith("service.") },
+  { key: "sandbox", title: "Command sandbox", test: (id) => id === "tunnel" || id === "sandbox.proxy" },
+  { key: "app", title: "Frely App", test: (id) => id.startsWith("app.") },
+  { key: "computer", title: "Computer use", test: (id) => id.startsWith("computer.") && id !== "computer.mcp" },
+];
+
+/** Commands meant for services, not for an Agent to pick; listed in the summary only with --all. */
+const INTERNAL_IDS: ReadonlySet<string> = new Set(["mcp.stdio", "mcp.serve", "computer.mcp", "network"]);
+
+/** Examples and confirmation notes, shown only in the detail view. Keep to commands an Agent runs often. */
+const DETAILS: Readonly<Record<string, { examples?: readonly string[]; confirm?: string }>> = {
+  login: {
+    examples: ["frely login --email user@example.com", "frely login --code 123456"],
+    confirm: "Tell the user before asking for the 6-digit code; never add --mcp unless the user is registering for the first time.",
+  },
+  api: {
+    examples: ["frely api list", "frely api describe credit_products.list", "frely api call credit_products.list --json '{}'", "frely api call <tool> --json '{...}' --wait"],
+    confirm: "Ask the user before any call that spends Credit, buys something or changes credentials. A call that needs the owner's approval prints a link: show it to the user, and use --wait in the foreground.",
+  },
+  "agent.run": {
+    examples: ["printf '%s' \"$REQUEST\" | frely agent run alice/reviewer --input-stdin --json", "frely agent run alice/reviewer --input 'summarize this repo' --read --json", "frely agent result --last --wait"],
+    confirm: "Usage may be billed; tell the user before adding --read. On payment_required do not ask the user to sign in again: offer a Credit top-up through frely api.",
+  },
+  "item.install": {
+    examples: ["frely item install alice/skill-name --host claude-code --json", "frely item install alice/prompt-name --scope project --dir ./my-project"],
+    confirm: "A paid part needs a pass; the command prints how to buy one. If the output says Frely has not scanned a Skill, read every file in it before use.",
+  },
+  "agent.install": { examples: ["frely agent install alice/reviewer --host codex --json"] },
+  "link.on": {
+    examples: ["frely link on", "frely link on --workspace ~/projects --days 30 --no-browser"],
+    confirm: "Opens this computer to remote clients after a browser approval by the owner; do it only when the user asked for remote control.",
+  },
+  permission: {
+    examples: ["frely permission request my-mac --resource ssh --reason 'deploy' --command 'ssh host'", "frely permission wait K7 --then 'ssh host'"],
+    confirm: "The owner approves on the web. Exit code 3 prints the approval link: show it to the user, then run `permission wait` in the background.",
+  },
+  share: {
+    examples: ["frely share 3000 --ttl 2"],
+    confirm: "Publishes a local web service on the Internet; the owner approves in the browser each time. Tell the user the link is public.",
+  },
+};
+
+type CommandEntry = (typeof COMMANDS)[number];
+
+function groupOf(command: CommandEntry): string {
+  if (INTERNAL_IDS.has(command.id)) return "internal";
+  return AGENT_GROUPS.find((group) => group.test(command.id))?.key ?? "internal";
+}
+
+/** One-line summaries where the first sentence of `purpose` does not read well alone. */
+const SUMMARY_OVERRIDES: Readonly<Record<string, string>> = {
+  logout: "Remove login and stop the MCP background service",
+  "item.update": "List installed items with newer versions, or update one folder",
+  "item.run": "Run an encrypted paid script of an installed item in the sandbox",
+  "item.install": "Install a Prompt or Skill from the marketplace",
+  "agent.run": "Send the user's request to an installed Agent (may be billed)",
+  "agent.local.add": "Download an Agent's repository to run locally",
+  "link.on": "Enable, renew or start remote control of this computer; prints the MCP URL",
+  "link.auto-update": "Show or set automatic updates of the background service",
+  "sandbox.proxy": "Show, save or remove the proxy the command sandbox uses",
+  "app.update": "Update the Frely App",
+  doctor: "Show sign-in, installation, update and connection status",
+  "remote.tools": "List the tools of a marketplace remote MCP, with input schemas",
+  "item.trust": "Mark an installed item as reviewed, or check it with --check",
+  "agent.status": "Inspect an installed Agent Skill and its Key budget",
+  "agent.local.list": "List local Agents, whether running, and approved sites",
+  edit: "Write a device file from a local file or a JSON patch",
+  "link.local.list": "List local MCP servers that remote clients could use",
+  "app.status": "Show whether the Frely App is installed and running",
+  "computer.status": "Show whether computer use is blocked and its runtime state",
+  "computer.enable": "Lift the local computer-use block and pre-install its runtime",
+  "link.workspace.add": "Add a workspace directory for this device",
+};
+
+function firstSentence(text: string, max = 72): string {
+  const sentence = (text.split(/\.\s|\s\(|;\s|:\s/u)[0] ?? text).replace(/[.:;,]$/u, "");
+  if (sentence.length <= max) return sentence;
+  const cut = sentence.slice(0, max - 1);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), 40))}…`;
+}
+
+export type AgentHelpView = { readonly summary?: boolean; readonly all?: boolean; readonly name?: string };
+
+/**
+ * `agentHelp()` is the full contract. `{ summary: true }` is a short index (one `id [effect] summary` line per command, grouped) for choosing a command;
+ * `{ name }` returns the full entries of one command (`agent.run`) or group (`agent`, `agents`, `link`) with examples and
+ * confirmation notes. An unknown name returns `{ ok: false }` with the names that exist.
+ */
+export function agentHelpView(view: AgentHelpView = {}): { readonly ok: boolean; readonly value: unknown } {
+  const base = { schemaVersion: "frely.cli.agent-help.v1", cliVersion: VERSION };
+  if (view.name !== undefined) {
+    const name = view.name;
+    const matches = COMMANDS.filter((command) => command.id === name || command.id.startsWith(`${name}.`) || groupOf(command) === name);
+    if (matches.length === 0) {
+      const known = [...AGENT_GROUPS.map((group) => group.key), "internal"];
+      return { ok: false, value: { ok: false, error: `Unknown command or group: ${name}`, known, hint: "frely help --agent --json --summary" } };
+    }
+    return {
+      ok: true,
+      value: { ...base, query: name, commands: matches.map((command) => ({ ...command, group: groupOf(command), ...DETAILS[command.id] })) },
+    };
+  }
+  if (view.summary === true) {
+    const keys = view.all === true ? [...AGENT_GROUPS.map((group) => group.key), "internal"] : AGENT_GROUPS.map((group) => group.key);
+    const groups = keys.map((key) => ({
+      key,
+      title: AGENT_GROUPS.find((group) => group.key === key)?.title ?? "Internal (services)",
+      commands: COMMANDS.filter((command) => groupOf(command) === key).map((command) => `${command.id} [${command.effect}] ${SUMMARY_OVERRIDES[command.id] ?? firstSentence(command.purpose)}`),
+    })).filter((group) => group.commands.length > 0);
+    return {
+      ok: true,
+      value: {
+        ...base,
+        view: "summary",
+        instructions: agentHelp().instructions,
+        groups,
+        detail: "frely help --agent --json <command id or group key> prints full usage, examples and confirmation notes; without a name and --summary it prints everything.",
+      },
+    };
+  }
+  return { ok: true, value: agentHelp() };
+}
+
 const GROUPS: readonly { title: string; ids: readonly string[] }[] = [
   { title: "Control your devices", ids: ["devices", "run", "ps", "logs", "kill", "read", "ls", "grep", "edit", "permission", "tools", "call"] },
   { title: "Account", ids: ["login", "logout", "uninstall", "doctor", "update"] },
@@ -177,7 +310,7 @@ export function cliUsage(): string {
     lines.push(`\n${group.title}:\n`);
     for (const id of group.ids) lines.push(`  ${SHORT_USAGE[id] ?? id}\n`);
   }
-  lines.push("\nFull flags and the machine-readable contract: frely help --agent --json\n");
+  lines.push("\nFull flags and the machine-readable contract: frely help --agent --json [--summary | <command or group>]\n");
   return lines.join("");
 }
 

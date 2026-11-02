@@ -45,7 +45,7 @@ import { detectSandboxBackend } from "./runtime/sandbox.js";
 import { LocalMcpHub, loadManualEntries } from "./runtime/local-mcp.js";
 import { reportedWorkspaces } from "./runtime/workspace-registry.js";
 import { VERSION } from "./version.js";
-import { agentHelp, cliUsage, linkUsage, subcommandUsage } from "./agent-help.js";
+import { agentHelpView, cliUsage, linkUsage, subcommandUsage } from "./agent-help.js";
 import { ensureMcpAuthorization, grantInactive, mcpStartLogin, normalizeLinkArgs, startMcp, takeInstallToken } from "./mcp-command.js";
 import { remoteLocked, remoteState, setRemoteLock } from "./remote-lock.js";
 import { watchLinkClaim } from "./link-claim.js";
@@ -136,7 +136,10 @@ async function main(): Promise<void> {
     return;
   }
   if ((command === "help" || command === "--help") && args.includes("--agent")) {
-    stdout.write(JSON.stringify(agentHelp(), null, args.includes("--json") ? undefined : 2) + "\n");
+    const name = args.slice(1).find((arg) => !arg.startsWith("-"));
+    const result = agentHelpView({ summary: args.includes("--summary"), all: args.includes("--all"), ...(name === undefined ? {} : { name }) });
+    stdout.write(JSON.stringify(result.value, null, args.includes("--json") ? undefined : 2) + "\n");
+    if (!result.ok) process.exitCode = 1;
     return;
   }
   if (!command || command === "help" || command === "--help" || command === "-h") return usage();
