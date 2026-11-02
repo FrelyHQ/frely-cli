@@ -12,7 +12,7 @@ import { readAppInstall, verifyCapsule } from "./agent/app-install.js";
 import { isSandboxDisabled, sandboxUnavailableReason } from "./runtime/sandbox.js";
 
 export interface DiagnosticCheck { name: string; ok: boolean; detail: string; status: "pass" | "fail" | "info" }
-export interface DoctorOptions { verbose?: boolean; /** Compatibility with doctor --mcp. */ mcp?: boolean }
+export interface DoctorOptions { verbose?: boolean; }
 const defaultDependencies = { inspectAuth, probeCredentialStore, whoami, inspectMcpMetadata, requireMcpAuthorization,
   reconcileMcpAuthorization: async (metadata: Awaited<ReturnType<typeof inspectMcpMetadata>>, code: string) => {
     if (!metadata) return;
@@ -35,7 +35,7 @@ export async function statusSnapshot() {
 /** Release checks are bounded and informational; verbose also validates account/MCP online. */
 export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDependencies = defaultDependencies) {
   const updatePromise = dependencies.inspectUpdate();
-  const verbose = options.verbose === true || options.mcp === true;
+  const verbose = options.verbose === true;
   const checks: DiagnosticCheck[] = [];
   const add = (name: string, status: DiagnosticCheck["status"], detail: string) =>
     checks.push({ name, status, ok: status !== "fail", detail });
@@ -68,7 +68,7 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
     || !Number.isFinite(Date.parse(metadata.grant.expiresAt)) || Date.parse(metadata.grant.expiresAt) <= now));
   const mcpMatches = Boolean(metadata && bindingMatches && metadata.grant.deviceId === binding?.deviceId
     && metadata.relayUrl === binding?.relayUrl && metadata.userId === binding?.userId);
-  add("mcp", metadataError || expired || (metadata && !mcpMatches) || (!metadata && options.mcp) ? "fail" : metadata ? "pass" : "info",
+  add("mcp", metadataError || expired || (metadata && !mcpMatches) ? "fail" : metadata ? "pass" : "info",
     metadataIssue ?? (!metadata ? "Not enabled (optional)."
       : expired ? "Authorization expired or inactive. Run frely link on to renew."
       : !mcpMatches ? "Authorization does not match this account/device. Run frely link on."

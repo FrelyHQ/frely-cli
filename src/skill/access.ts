@@ -58,7 +58,7 @@ export class SkillAccessError extends Error {
 /** An Agent is named like every product: `username/name`, optionally `@<version>`. */
 const AGENT_NAME = /^([^/@\s]{1,64})\/([^/@\s]{1,64})(?:@([1-9][0-9]{0,8}))?$/u;
 
-/** `frely agent install` takes `username/name[@version]` (or the distribution id older scripts use) and reads its public manifest on the account's Frely origin. */
+/** `frely item install` takes an Agent as `username/name[@version]` (or the distribution id older scripts use) and reads its public manifest on the account's Frely origin. */
 export function agentManifestUrl(target: string, relayUrl: string): string {
   if (!DISTRIBUTION_ID.test(target) && !AGENT_NAME.test(target)) throw new SkillAccessError("input_invalid", "Use the Agent's name, for example username/name, or username/name@3 for a version.");
   return `${relayUrl}/api/public/agents/${target.split("/").map(encodeURIComponent).join("/")}`;

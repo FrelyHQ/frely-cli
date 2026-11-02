@@ -86,7 +86,7 @@ test("connect failures from Frely reach the caller", async () => {
   await assert.rejects(listRemoteTools("alice/crm", { call, store: memoryStore() }), (error: unknown) => error instanceof CloudToolError && error.code === "remote_mcp_not_found");
 });
 
-test("installs a Skill folder that uses the MCP through frely remote", async () => {
+test("installs a Skill folder that uses the MCP through frely item", async () => {
   const home = await realpath(await mkdtemp(join(tmpdir(), "frely-mcp-")));
   try {
     const result = await installRemoteMcpSkill({ ref: "alice/crm", call: connector(), store: memoryStore(), fetchImpl: server(() => "key-1"), host: "claude-code", scope: "global", home });
@@ -94,7 +94,7 @@ test("installs a Skill folder that uses the MCP through frely remote", async () 
     assert.equal(result.tools, 1);
     const skill = await readFile(join(result.path, "SKILL.md"), "utf8");
     assert.match(skill, /^---\nname: alice-crm\ndescription: Use the Frely MCP alice\/crm \(tools: crm_find_contacts\)/u);
-    assert.match(skill, /frely remote call alice\/crm <tool>/u);
+    assert.match(skill, /frely item call alice\/crm <tool>/u);
     assert.ok(!skill.includes("key-1"), "no key in the Skill");
     assert.match(await readFile(join(result.path, "tools.md"), "utf8"), /## crm_find_contacts\n\nFind contacts/u);
   } finally { await rm(home, { recursive: true, force: true }); }
