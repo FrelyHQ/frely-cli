@@ -110,7 +110,7 @@ test("a stopped record beside an active service is stale, not a final stop", asy
   assert.equal(report.details?.connection.state, "stopped");
 });
 
-test("unconfigured MCP is optional; legacy strict MCP diagnostics remain strict", async () => {
+test("unconfigured MCP is optional", async () => {
   const f = fixture();
   f.dependencies.inspectAuth = async () => ({ configured: false, credentialStored: false, configPath: "/test/config.json" });
   f.dependencies.inspectMcpMetadata = async () => null;
@@ -118,7 +118,6 @@ test("unconfigured MCP is optional; legacy strict MCP diagnostics remain strict"
   const report = await doctor({}, f.dependencies);
   assert.equal(report.ok, true);
   assert.match(report.summary.mcp, /Not enabled/);
-  assert.equal((await doctor({ mcp: true }, f.dependencies)).ok, false);
 });
 
 test("invalid MCP metadata is a failure, not silently treated as optional", async () => {

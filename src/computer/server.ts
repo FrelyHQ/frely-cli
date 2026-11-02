@@ -10,7 +10,7 @@ import { ComputerToolset } from "./toolset.js";
 
 export { COMPUTER_MCP_NAME };
 
-/** The local key of the two-key rule: computer use is on unless `frely computer disable` vetoed it; checked on every list and call. */
+/** The local key of the two-key rule: computer use is on unless `frely computer off` vetoed it; checked on every list and call. */
 export async function computerLocallyEnabled(): Promise<boolean> {
   return !(await computerLocallyVetoed());
 }

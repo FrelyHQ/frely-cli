@@ -40,7 +40,7 @@ export async function getKeyBudget(input: {
     } catch {
       throw new KeyBudgetError("credential_store_failed", "Could not read the saved API key securely.");
     }
-    if (!apiKey) throw new KeyBudgetError("api_key_required", "The saved API key is unavailable. Reinstall with frely agent install <distribution-id> --api-key-stdin.");
+    if (!apiKey) throw new KeyBudgetError("api_key_required", "The saved API key is unavailable. Reinstall with frely item install <distribution-id> --api-key-stdin.");
   } else {
     apiKey = input.apiKey!;
     try {

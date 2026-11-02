@@ -63,7 +63,7 @@ The CLI checks the lease before queued work starts. A running lease uses wall ti
 
 Completed writes are not rolled back. An arbitrary shell command can create effects or detached processes outside the managed process set. Workspace selection is not a shell sandbox. Same-user malware and administrators are outside this credential boundary.
 
-`frely doctor --mcp` checks the protected credential and server state; `frely doctor` treats an unconfigured MCP as optional.
+`frely doctor -v` checks the protected credential and server state; an unconfigured MCP is treated as optional.
 
 ## Commands
 
@@ -74,7 +74,7 @@ frely link on --workspace /path/to/project
 frely link on --workspace /path/to/project --days 365
 frely link on --days 365
 
-frely doctor --mcp
+frely doctor -v
 frely link on
 frely link off
 ```

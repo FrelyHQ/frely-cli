@@ -47,7 +47,7 @@ test("ensureEntrySkill installs beside an item and yields when the folder is tak
 
 test("the entry Skill keeps device MCP opt-in", () => {
   assert.match(ENTRY_SKILL, /^---\nname: frely\n/u);
-  assert.doesNotMatch(ENTRY_SKILL, /login --email <address> --mcp/u);
+  assert.doesNotMatch(ENTRY_SKILL, /--mcp/u);
   assert.match(ENTRY_SKILL, /Do nothing until the user agrees/u);
 });
 
@@ -55,8 +55,8 @@ test("the entry Skill tells how to get a payment link and installs an Agent by n
   assert.match(ENTRY_SKILL, /payment_required/u);
   assert.match(ENTRY_SKILL, /credit_products\.list/u);
   assert.match(ENTRY_SKILL, /payment_checkout\.create/u);
-  assert.match(ENTRY_SKILL, /frely agent install <username\/name>/u);
-  assert.doesNotMatch(ENTRY_SKILL, /frely agent install <id>/u);
+  assert.match(ENTRY_SKILL, /frely item install <username\/name> --host/u);
+  assert.doesNotMatch(ENTRY_SKILL, /frely agent install/u);
 });
 
 test("a project install goes under --dir and no marker file is left in the Skill folder", async () => {

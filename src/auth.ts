@@ -141,15 +141,15 @@ export interface EmailDeviceChallenge {
   expiresIn: number;
   /** Short tag shown in the code mail, so the user can pick the right (latest) mail. Not part of the code. */
   reference?: string;
-  /** Device MCP request prepared before the code is entered; `privateKeyPem` never leaves this machine. */
-  mcp?: { privateKeyPem: string; keyThumbprint: string; workspace: string; days: number };
 }
+
+/** Device MCP request prepared before an install token is redeemed; `privateKeyPem` never leaves this machine. */
+export interface DeviceMcpRequest { privateKeyPem: string; keyThumbprint: string; workspace: string; days: number }
 
 export async function initEmailDeviceLogin(
   relayInput: string,
   email: string,
   invite?: string,
-  mcp?: EmailDeviceChallenge["mcp"],
 ): Promise<EmailDeviceChallenge> {
   const relayUrl = normalizeRelayUrl(relayInput);
   await probeCredentialStore();
@@ -185,7 +185,6 @@ export async function initEmailDeviceLogin(
     email: typeof data.email === "string" ? data.email : email,
     expiresIn: expiresIn,
     ...(typeof data.reference === "string" ? { reference: data.reference } : {}),
-    ...(mcp ? { mcp } : {}),
   };
 }
 
@@ -193,7 +192,7 @@ export async function completeEmailDeviceLogin(
   relayInput: string,
   challenge: EmailDeviceChallenge,
   code: string,
-): Promise<{ user: PublicUser; sessionBound: boolean; mcpPreapproval?: string }> {
+): Promise<{ user: PublicUser; sessionBound: boolean }> {
   const relayUrl = normalizeRelayUrl(relayInput);
 
   const response = await fetch(`${relayUrl}/api/auth/device/email/verify`, {
@@ -203,7 +202,6 @@ export async function completeEmailDeviceLogin(
       userCode: challenge.userCode,
       challengeId: challenge.challengeId,
       code,
-      ...(challenge.mcp ? { mcp: { keyThumbprint: challenge.mcp.keyThumbprint, workspace: challenge.mcp.workspace, days: challenge.mcp.days } } : {}),
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
@@ -232,7 +230,7 @@ export async function completeEmailDeviceLogin(
 
   // After email verification, device code has been approved
   // Caller should poll /oauth2/token to get access token
-  return { user: publicUser, sessionBound: false, ...(typeof data.mcpPreapproval === "string" ? { mcpPreapproval: data.mcpPreapproval } : {}) };
+  return { user: publicUser, sessionBound: false };
 }
 
 /**
@@ -242,7 +240,7 @@ export async function completeEmailDeviceLogin(
 export async function redeemInstallToken(
   relayInput: string | undefined,
   token: string,
-  mcp?: EmailDeviceChallenge["mcp"],
+  mcp?: DeviceMcpRequest,
 ): Promise<{ relayUrl: string; device: DeviceCodeResponse; user: PublicUser; mcpPreapproval?: string }> {
   const relayUrl = normalizeRelayUrl(relayInput);
   await probeCredentialStore();

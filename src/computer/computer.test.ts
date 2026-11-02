@@ -151,7 +151,7 @@ test("the MCP server lists the reviewed tools and passes image blocks through in
   }
 });
 
-test("computer use is built in: offered without registration, `disable` is a local veto and `enable` lifts it", async () => {
+test("computer use is built in: offered without registration, `off` is a local veto and `on` lifts it", async () => {
   const home = await mkdtemp(join(tmpdir(), "frely-computer-cmd-"));
   const previous = process.env.XDG_CONFIG_HOME;
   const previousBin = process.env.FRELY_COMPUTER_BIN;
@@ -168,14 +168,14 @@ test("computer use is built in: offered without registration, `disable` is a loc
     assert.equal(await computerLocallyEnabled(), true);
     assert.match(await runComputerCommand(["status"]), /allowed here/);
     // The veto removes it from the device's offer and from the toolset at once.
-    assert.match(await runComputerCommand(["disable"]), /blocked on this device/);
+    assert.match(await runComputerCommand(["off"]), /blocked on this device/);
     assert.deepEqual(await builtinLocalMcps("/cli/index.js"), []);
     assert.equal(await computerLocallyEnabled(), false);
     assert.equal(JSON.parse(await runComputerCommand(["status", "--json"])).enabled, false);
-    assert.match(await runComputerCommand(["disable"]), /already blocked/);
-    // Enable lifts the veto and drops an entry an older `frely computer enable` registered by hand.
+    assert.match(await runComputerCommand(["off"]), /already blocked/);
+    // Enable lifts the veto and drops an entry an older `frely computer on` registered by hand.
     await addManualEntry({ name: "computer", transport: "stdio", command: "old", args: [] });
-    assert.match(await runComputerCommand(["enable"]), /stays off until you turn it on/);
+    assert.match(await runComputerCommand(["on"]), /stays off until you turn it on/);
     assert.equal((await builtinLocalMcps("/cli/index.js")).length, 1);
     assert.equal((await loadManualEntries()).some((item) => item.name === "computer"), false);
   } finally {

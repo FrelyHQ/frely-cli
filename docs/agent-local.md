@@ -12,6 +12,8 @@ frely agent local remove <name>
 frely agent local key --api-key-stdin | --clear
 ```
 
+To let your own FrelyMCP call an Agent that serves A2A on `127.0.0.1:<port>`, register it as a service: `frely service share --type a2a --port <n> --label agent-<name>`.
+
 ## What the repository declares
 
 The repository needs a `frely.yaml` with a `local:` section:
