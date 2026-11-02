@@ -65,17 +65,23 @@ export function agentManifestUrl(target: string, relayUrl: string): string {
 }
 
 /** An installed Agent's distribution id from the id or `username/name` a user typed; a version written after the name is ignored. */
-export async function resolveAgentTarget(target: string, relayUrl: string, home = homedir(), fetchFn: typeof fetch = fetch): Promise<string> {
+export async function resolveAgentTarget(target: string, relayUrl: string, home = homedir(), fetchFn: typeof fetch = fetch,
+  /** Asks the signed-in account what the name is (items.resolve): the Agent's id as this account sees it, or null when that is not known. */
+  resolveSignedIn?: (name: string) => Promise<string | null>): Promise<string> {
   if (DISTRIBUTION_ID.test(target)) return target;
   const match = AGENT_NAME.exec(target);
   if (match === null) throw new SkillAccessError("input_invalid", "Use the Agent's name, for example username/name.");
   const installed = await findManagedSkillByInstallName(`${match[1]}/${match[2]}`, home);
   if (installed) return installed.distributionId;
+  const signedIn = resolveSignedIn === undefined ? null : await resolveSignedIn(`${match[1]}/${match[2]}${match[3] ? "@" + match[3] : ""}`);
+  if (signedIn !== null) return signedIn;
   return (await fetchManifest(agentManifestUrl(`${match[1]}/${match[2]}`, relayUrl), fetchFn)).id;
 }
 
 export async function installSkillAdapter(input: {
   readonly manifestUrl: string;
+  /** The manifest the account already fetched while signed in (items.resolve); without it the public manifest is fetched. */
+  readonly manifest?: unknown;
   readonly host: SkillHost;
   readonly scope: SkillScope;
   readonly apiKey?: string;
@@ -85,7 +91,7 @@ export async function installSkillAdapter(input: {
   readonly credentialStore?: CredentialStore;
 }) {
   const fetchFn = input.fetchFn ?? fetch;
-  const manifest = await fetchManifest(input.manifestUrl, fetchFn);
+  const manifest = input.manifest !== undefined ? parseManifest(input.manifest, normalizedFrelyUrl(input.manifestUrl, "invalid_manifest_url")) : await fetchManifest(input.manifestUrl, fetchFn);
   const home = input.home ?? homedir();
   const existing = await readManagedSkill(manifest.id, home);
   const slug = existing?.slug ?? (manifest.installName === undefined ? skillSlug(manifest.name) : installDirName(manifest.installName));

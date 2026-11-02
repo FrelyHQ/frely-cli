@@ -43,6 +43,24 @@ export class CloudToolError extends Error {
   }
 }
 
+/** What the owner must approve, as separate fields (the server's `approval` object): a host reads the link and the code from here, never from a sentence. */
+export interface Approval {
+  readonly code: string;
+  readonly url: string;
+  readonly expiresAt?: string;
+  readonly summary?: string;
+  /** `repeat`: run the same command again unchanged. `repeat_with_approval_code`: once, with the approval code. */
+  readonly then: "repeat" | "repeat_with_approval_code";
+}
+
+/** A Cloud call that needs the owner's approval first and was not approved while this command waited. Exit code 3. */
+export class ApprovalRequiredError extends CloudToolError {
+  constructor(code: string, readonly approval: Approval) {
+    super(code);
+    this.name = "ApprovalRequiredError";
+  }
+}
+
 export class CloudItemError extends Error {
   constructor(readonly code: "input_invalid" | "item_invalid" | "unmanaged_item_exists" | "managed_item_modified" | "remote_mcp_owner_changed", message: string) {
     super(message);

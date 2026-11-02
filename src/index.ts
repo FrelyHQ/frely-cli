@@ -59,23 +59,27 @@ import { runSealedScript } from "./skill/sealed-run.js";
 import { installEntrySkill, ensureEntrySkill } from "./skill/entry.js";
 import { redeemGift } from "./skill/gift.js";
 import { callRemoteTool, connectRemoteMcp, installRemoteMcpSkill, isNotASkill, listRemoteTools, mcpClientConfig, parseMcpName, RemoteMcpError } from "./skill/remote-mcp.js";
-import { callCloudTool } from "./cloud.js";
+import { callCloudTool, callCloudToolAwaiting } from "./cloud.js";
+import { claimInstall, ItemNotFoundError, resolveItem, type ResolvedItem } from "./skill/resolve.js";
+import { ApprovalRequiredError } from "./skill/cloud-item.js";
 import { createInterface } from "node:readline/promises";
 import { runUninstall } from "./uninstall.js";
 
 
 
+const ITEM_INSTALL_USAGE = "Usage: frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--gift <code>] [--replace] [--api-key-stdin] [--json]";
+
 /** Installs a published Agent as a local trigger Skill, from `username/name[@version]` (or the distribution id older scripts use). */
-async function installAgent(target: string, args: string[]): Promise<void> {
+async function installAgent(target: string, args: string[], resolved: { manifest?: unknown; extra?: Record<string, unknown>; accountLine?: string } = {}): Promise<void> {
   const host = skillHost(option(args, "--host") ?? "generic");
   const scope = skillScope(option(args, "--scope") ?? "global");
   const apiKey = args.includes("--api-key-stdin") ? await readStdinSecret(8192) : undefined;
   const relayUrl = normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl);
   const projectDir = option(args, "--dir");
-  const value = await installSkillAdapter({ manifestUrl: agentManifestUrl(target, relayUrl), host, scope, ...(projectDir ? { cwd: resolve(projectDir) } : {}), ...(apiKey ? { apiKey } : {}) });
+  const value = await installSkillAdapter({ manifestUrl: agentManifestUrl(target, relayUrl), ...(resolved.manifest === undefined ? {} : { manifest: resolved.manifest }), host, scope, ...(projectDir ? { cwd: resolve(projectDir) } : {}), ...(apiKey ? { apiKey } : {}) });
   const entry = await ensureEntrySkill({ host, scope, ...(projectDir ? { dir: projectDir } : {}) });
-  if (args.includes("--json")) stdout.write(`${JSON.stringify({ ...value, ...(entry ? { entrySkill: entry.path } : {}) })}\n`);
-  else stdout.write(`Agent: ${value.name}\nSkill: ${value.skillPath}\nAuth: ${value.authMode}\nState: ${value.state}\n${value.hostAction ? `Host action: ${value.hostAction}\n` : ""}${entry ? `Frely Skill: ${entry.path}\n` : ""}`);
+  if (args.includes("--json")) stdout.write(`${JSON.stringify({ ...value, ...resolved.extra, ...(entry ? { entrySkill: entry.path } : {}) })}\n`);
+  else stdout.write(`${resolved.accountLine ?? ""}Agent: ${value.name}\nSkill: ${value.skillPath}\nAuth: ${value.authMode}\nState: ${value.state}\n${value.hostAction ? `Host action: ${value.hostAction}\n` : ""}${entry ? `Frely Skill: ${entry.path}\n` : ""}`);
 }
 
 /**
@@ -176,7 +180,8 @@ async function main(): Promise<void> {
     if (action === "run") {
       const target = args[2];
       if (!target || target.startsWith("-")) throw new Error(RUN_USAGE);
-      const distributionId = await resolveAgentTarget(target, normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl));
+      const distributionId = await resolveAgentTarget(target, normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl), undefined, undefined,
+        async (name) => { const found = await resolveItem(name, callCloudTool).catch((error: unknown) => { if (error instanceof ItemNotFoundError) return null; throw error; }); return found?.kind === "agent" ? found.id : null; });
       const task = args.includes("--input-stdin") ? await readStdinText(128 * 1024) : option(args, "--input");
       if (!task) throw new Error("Agent input is required. Use --input or --input-stdin.");
       const read = await readOptions(args);
@@ -349,31 +354,57 @@ async function main(): Promise<void> {
     }
     if (args[1] !== "install" || args.includes("--help") || args.includes("-h")) { stdout.write(subcommandUsage("item")); return; }
     const itemRef = args[2];
-    if (!itemRef || itemRef.startsWith("-")) throw new Error("Usage: frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--gift <code>] [--api-key-stdin] [--json]");
-    const gift = option(args, "--gift");
-    if (gift !== undefined) await redeemGift(gift, callCloudTool, args.includes("--json") ? process.stderr : stdout);
-    // Skills, Prompts and Agents are named alike. An Agent's manifest is public, so it is asked first; a name no Agent has is a Skill or Prompt.
-    if (/^creator_distribution_/u.test(itemRef) || args.includes("--api-key-stdin")) { await installAgent(itemRef, args); return; }
-    if (!(/^cloud_skill_|^skill_/u.test(itemRef))) {
-      const installed = await installAgent(itemRef, args).then(() => true, (error: unknown) => { if (error instanceof SkillAccessError && error.code === "agent_not_found") return false; throw error; });
-      if (installed) return;
+    if (!itemRef || itemRef.startsWith("-")) throw new Error(ITEM_INSTALL_USAGE);
+    // An option this command does not know is an error, not a silent no-op (a host that adds --wait would otherwise think it waited).
+    const valueFlags = new Set(["--host", "--scope", "--dir", "--gift"]), plainFlags = new Set(["--api-key-stdin", "--json", "--replace"]);
+    for (let i = 3; i < args.length; i++) {
+      const arg = args[i]!;
+      if (valueFlags.has(arg)) { i++; continue; }
+      if (!plainFlags.has(arg)) throw new Error(`Unknown option ${arg} for frely item install.\n${ITEM_INSTALL_USAGE}`);
     }
+    const gift = option(args, "--gift");
+    if (gift !== undefined && !/^fsl_[A-Za-z0-9_-]{32}$/u.test(gift)) throw new Error("--gift takes the share code from the prompt (it starts with fsl_).");
+    const json = args.includes("--json");
     const host = skillHost(option(args, "--host") ?? "generic");
     const scope = skillScope(option(args, "--scope") ?? "global");
     const dir = option(args, "--dir");
-    const value = await installCloudItem({ ...parseItemRef(itemRef), call: callCloudTool, host, scope, ...(dir ? { dir } : {}) }).catch(async (error: unknown) => {
-      // A name that is not a Skill may be a remote MCP: install the Skill that uses it through `frely item tools|call`.
+    const byId = /^creator_distribution_/u.test(itemRef) || /^cloud_skill_|^skill_/u.test(itemRef) || args.includes("--api-key-stdin");
+    // One command does the whole install. The server says what the name is for this account; when a gift is present or an MCP needs its key,
+    // the owner confirms once on the web (account, item and gift shown) and this command waits for it, then claims and installs. No fallback on failure.
+    let resolved: ResolvedItem | null = null;
+    if (!byId) {
+      resolved = gift === undefined ? await resolveItem(itemRef, callCloudTool) : null;
+      if (gift !== undefined || resolved?.kind === "remote_mcp") {
+        const claimed = await claimInstall(itemRef, gift, callCloudToolAwaiting);
+        if (claimed !== null) resolved = claimed;
+        else if (gift !== undefined) { await redeemGift(gift, callCloudTool, json ? process.stderr : stdout); resolved = null; }
+      }
+    }
+    const extra: Record<string, unknown> = { ...(resolved?.claimedBy ? { claimedBy: resolved.claimedBy } : {}), ...(resolved?.gift ? { gift: resolved.gift } : {}) };
+    const accountLine = resolved?.claimedBy ? `Account: ${resolved.claimedBy.email ?? resolved.claimedBy.id}\n${resolved.gift?.claimed === true ? "Gift: claimed\n" : resolved.gift ? "Gift: already claimed by this account\n" : ""}` : "";
+    if (byId || resolved?.kind === "agent") { await installAgent(itemRef, args, { ...(resolved?.manifest === undefined ? {} : { manifest: resolved.manifest }), extra, accountLine }); return; }
+    if (resolved === null && gift === undefined) {
+      // A server without items.resolve: the older name-by-name lookup, unchanged.
+      const installed = await installAgent(itemRef, args, { extra, accountLine }).then(() => true, (error: unknown) => { if (error instanceof SkillAccessError && error.code === "agent_not_found") return false; throw error; });
+      if (installed) return;
+    }
+    const call = (name: string, input: Record<string, unknown>) => name === "mcps.connect" && resolved?.connect ? Promise.resolve(resolved.connect) : callCloudTool(name, input);
+    const value = await (resolved?.kind === "remote_mcp"
+      ? installRemoteMcpSkill({ ref: itemRef, call, host, scope, ...(dir ? { dir } : {}), ...(args.includes("--replace") ? { replace: true } : {}) })
+      : installCloudItem({ ...parseItemRef(itemRef), call: callCloudTool, host, scope, ...(dir ? { dir } : {}) })).catch(async (error: unknown) => {
+      if (resolved !== null) throw error;
+      // The older lookup: a name that is not a Skill may be a remote MCP.
       if (!isNotASkill(error) || itemRef.includes("@") || !/^[^/@]+\/[^/@]+$/u.test(itemRef)) throw error;
-      return installRemoteMcpSkill({ ref: itemRef, call: callCloudTool, host, scope, ...(dir ? { dir } : {}), ...(args.includes("--replace") ? { replace: true } : {}) }).catch((mcpError: unknown) => { throw isNotASkill(mcpError) || (mcpError instanceof CloudToolError && mcpError.code === "remote_mcp_not_found") ? error : mcpError; });
+      return installRemoteMcpSkill({ ref: itemRef, call, host, scope, ...(dir ? { dir } : {}), ...(args.includes("--replace") ? { replace: true } : {}) }).catch((mcpError: unknown) => { throw isNotASkill(mcpError) || (mcpError instanceof CloudToolError && mcpError.code === "remote_mcp_not_found") ? error : mcpError; });
     });
     const entry = await ensureEntrySkill({ host, scope, ...(dir ? { dir } : {}) });
     if ("tools" in value) {
-      if (args.includes("--json")) { stdout.write(`${JSON.stringify({ ...value, ...(entry ? { entrySkill: entry.path } : {}) })}\n`); return; }
-      stdout.write(`MCP: ${value.name}\nPath: ${value.path}\nTools: ${value.tools}\nThe Skill calls this MCP through frely item tools|call; no MCP client configuration is needed. Restart or reload the agent session so it rescans Skills.\n`);
+      if (args.includes("--json")) { stdout.write(`${JSON.stringify({ ...value, ...extra, ...(entry ? { entrySkill: entry.path } : {}) })}\n`); return; }
+      stdout.write(`${accountLine}MCP: ${value.name}\nPath: ${value.path}\nTools: ${value.tools}\nThe Skill calls this MCP through frely item tools|call; no MCP client configuration is needed. Restart or reload the agent session so it rescans Skills.\n`);
       return;
     }
-    if (args.includes("--json")) { stdout.write(`${JSON.stringify({ ...value, ...(entry ? { entrySkill: entry.path } : {}) })}\n`); return; }
-    stdout.write(`${value.kind === "prompt" ? "Prompt" : "Skill"}: ${value.name} (v${value.version})\nPath: ${value.path}\nFiles: ${value.files}\n${entry ? `Frely Skill: ${entry.path}\n` : ""}`);
+    if (args.includes("--json")) { stdout.write(`${JSON.stringify({ ...value, ...extra, ...(entry ? { entrySkill: entry.path } : {}) })}\n`); return; }
+    stdout.write(`${accountLine}${value.kind === "prompt" ? "Prompt" : "Skill"}: ${value.name} (v${value.version})\nPath: ${value.path}\nFiles: ${value.files}\n${entry ? `Frely Skill: ${entry.path}\n` : ""}`);
     if (value.premium === "installed") stdout.write("Paid part: installed\n");
     if (value.premium === "pass_required") stdout.write(`Paid part: not installed. Buy a pass in the marketplace or with frely api call passes.buy --json '{"productKind":"cloud_skill","productId":"${value.id}","duration":"monthly"}', then run this command again.\n`);
     if (value.sealedScripts > 0) stdout.write(`${value.sealedScripts} paid script${value.sealedScripts === 1 ? " is" : "s are"} encrypted on this device. They run through frely item run (the placeholder files do that for you) inside the Frely command sandbox, and stop working when your pass ends. Frely cannot show you their source.\n`);
@@ -830,6 +861,13 @@ main().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
   const jsonMode = process.argv.includes("--json");
   const command = process.argv[2];
+  if (error instanceof ApprovalRequiredError) {
+    // The approval as separate fields, never joined to other text: a host reads the link and the code from here.
+    if (jsonMode) process.stdout.write(`${JSON.stringify({ ok: false, error: { code: error.code, message: "The owner has not approved this yet." }, approval: error.approval })}\n`);
+    else process.stderr.write(`Approval needed. The owner has not approved this yet.\n${error.approval.url}\nCode: ${error.approval.code.slice(0, 4)}-${error.approval.code.slice(4)}\n${error.approval.then === "repeat" ? "After the owner approves, run the same command again." : "After the owner approves, run the same command again with the approval code."}\n`);
+    process.exitCode = 3;
+    return;
+  }
   if (jsonMode && command === "network") process.stdout.write(`${JSON.stringify(publicNetworkError(error))}\n`);
   else if (jsonMode && command === "agent") process.stdout.write(`${JSON.stringify(error instanceof KeyBudgetError ? publicKeyBudgetError(error) : publicSkillAccessError(error))}\n`);
   // A managed service writes to a shared log, so startup failures there carry a time.

@@ -271,6 +271,8 @@ async function callCommand(args: string[], io: Output): Promise<number> {
   const { parsed, input } = callArgs(args);
   const [name] = parsed.positionals;
   if (!name || parsed.positionals.length !== 1 || !/^[a-zA-Z0-9_.:-]{1,128}$/u.test(name)) throw new ControllerError("Usage: frely call <tool> [--json '<object>' | --input <file>]", EXIT.cli);
+  // A Frely account tool is named group.action (share_links.redeem): it is not a tool of a device, which would otherwise be asked for.
+  if (/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/u.test(name)) throw new ControllerError(`${name} is a Frely account tool, not a device tool. Run: frely api call ${name} --json '<object>'`, EXIT.cli);
   const file = parsed.values.get("--input");
   const arguments_ = input ?? (file !== undefined ? parseObject((await readLocal(file, "The input")).toString("utf8")) : {});
   return toolCall(io, parsed, name, arguments_);
