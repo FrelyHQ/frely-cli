@@ -40,5 +40,5 @@ frely="$install_dir/frely"
 
 if [ -n "$install_token" ]; then FRELY_INSTALL_TOKEN="$install_token"; export FRELY_INSTALL_TOKEN; fi
 # Default workspace: the home directory (credential and start-up files stay protected); FRELY_WORKSPACE picks another.
-if [ -n "${FRELY_WORKSPACE:-}" ]; then exec "$frely" mcp start --workspace "$FRELY_WORKSPACE" </dev/null
-else exec "$frely" mcp start </dev/null; fi
+if [ -n "${FRELY_WORKSPACE:-}" ]; then exec "$frely" link on --workspace "$FRELY_WORKSPACE" </dev/null
+else exec "$frely" link on </dev/null; fi

@@ -137,7 +137,7 @@ const SHORT_USAGE: Readonly<Record<string, string>> = {
   "link.on": "frely link on [--workspace <path>] [--days 1..365] [--no-browser] [--json]",
   "link.workspace": "frely link workspace list|add <path>|remove <path>",
   "link.local": "frely link local list|add <name> (--url <address>|-- <command>)|remove <name>",
-  "link.lifecycle": "frely link status|stop|remove",
+  "link.lifecycle": "frely link status|stop|off",
   "skill.install": "frely skill install [--host <host>]",
   "item.install": "frely item install <username/name[@version]> [--host <host>]",
   "item.update": "frely item update [<folder>]",
