@@ -373,7 +373,9 @@ async function main(): Promise<void> {
     // the owner confirms once on the web (account, item and gift shown) and this command waits for it, then claims and installs. No fallback on failure.
     let resolved: ResolvedItem | null = null;
     if (!byId) {
-      resolved = gift === undefined ? await resolveItem(itemRef, callCloudTool) : null;
+      // Without a login there is no account to ask: a public Agent still installs from its public manifest (the older lookup below).
+      const signedIn = await readConfig().then(() => true, () => false);
+      resolved = gift === undefined && signedIn ? await resolveItem(itemRef, callCloudTool) : null;
       if (gift !== undefined || resolved?.kind === "remote_mcp") {
         const claimed = await claimInstall(itemRef, gift, callCloudToolAwaiting);
         if (claimed !== null) resolved = claimed;
