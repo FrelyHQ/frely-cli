@@ -1,3 +1,6 @@
+import { lstat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, sep } from "node:path";
 import { createHash } from "node:crypto";
 import type { MaintenanceGate } from "../update/maintenance.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -13,10 +16,10 @@ class ImageResult {
 }
 import { VERSION } from "../version.js";
 import { ensureWorkspaceRegistered, listWorkspaces } from "./workspace-registry.js";
-import { resolveWorkspace, resolveWorkspacePair } from "./workspace-router.js";
+import { OutsideWorkspaceError, resolveWorkspace, resolveWorkspacePair } from "./workspace-router.js";
 import type { LocalMcpHub } from "./local-mcp.js";
 import type { LocalModelsHub } from "../provider/local-models.js";
-import { pathGrantsFromMeta } from "./sandbox.js";
+import { customWritePath, pathGrantsFromMeta } from "./sandbox.js";
 import { networkAllowFromMeta, webFetch } from "./web-fetch.js";
 import { P2pTransfers, type P2pAddress } from "./p2p.js";
 import { TRANSFER_TOOLS, transferAllowedFromMeta, transferDownload, transferPrepare, transferUpload, type TransferTarget } from "./transfer.js";
@@ -213,6 +216,17 @@ async function dispatch(
   p2p: P2pTransfers = new P2pTransfers(),
 ): Promise<unknown> {
   const guarded = <T>(work: () => Promise<T>) => async () => { signal.throwIfAborted(); return work(); };
+  // Directories the owner approved on the web (`path:` grants) act as workspaces for this call only; nothing is stored here.
+  let grantedWorkspaces: Map<string, Workspace> | undefined;
+  const grantedFor = async () => grantedWorkspaces ??= await grantWorkspaces(pathGrants);
+  let granted: ReadonlyMap<string, Workspace> = new Map();
+  const routed = async <T>(route: () => T): Promise<T> => {
+    granted = pathGrants.some((grant) => grant.startsWith("path:")) ? await grantedFor() : new Map();
+    try { return route(); } catch (error) {
+      if (error instanceof OutsideWorkspaceError) throw new Error(await outsideMessage(error.input));
+      throw error;
+    }
+  };
   const read = <T>(work: () => Promise<T>) => workspaceScheduler.read(guarded(work));
   const write = <T>(work: () => Promise<T>) => workspaceScheduler.write(guarded(work));
   const processRead = <T>(work: () => Promise<T>) => processScheduler.read(guarded(work));
@@ -254,7 +268,7 @@ async function dispatch(
     if (name === "transfer_p2p_info") return p2p.info();
     if (name === "transfer_p2p_status") return p2p.status(textArg(args, "jobId"));
     if (name === "transfer_p2p_cancel") return p2p.cancel(textArg(args, "jobId"));
-    const resolvedPath = resolveWorkspace(workspaces as Map<string, Workspace>, textArg(args, "path"));
+    const resolvedPath = await routed(() => resolveWorkspace(workspaces as Map<string, Workspace>, textArg(args, "path"), granted));
     const transferWorkspace = resolvedPath.workspace.withGrants(pathGrants);
     if (name === "transfer_p2p_listen" || name === "transfer_p2p_send") {
       const p2pBytes = intArg(args, "bytes", 0, 1, 104857600), p2pSha = textArg(args, "sha256");
@@ -291,10 +305,11 @@ async function dispatch(
   }
 
   // For all other tools, resolve the workspace based on the input path/cwd
-  const resolved = resolveWorkspace(
+  const resolved = await routed(() => resolveWorkspace(
     workspaces as Map<string, Workspace>,
     name === "run_command" || name === "start_process" ? textArg(args, "cwd", ".") : (name === "move_path" ? textArg(args, "from", ".") : textArg(args, "path", ".")),
-  );
+    granted,
+  ));
   const workspace = resolved.workspace.withGrants(pathGrants), relativeInput = resolved.relativeInput;
 
   if (name === "list_directory") {
@@ -335,7 +350,7 @@ async function dispatch(
   if (name === "create_directory") return write(() => workspace.createDirectory(relativeInput));
   if (name === "delete_path") return write(() => workspace.deletePath(relativeInput, boolArg(args, "recursive", false)));
   if (name === "move_path") {
-    const pair = resolveWorkspacePair(workspaces as Map<string, Workspace>, textArg(args, "from", "."), textArg(args, "to"));
+    const pair = await routed(() => resolveWorkspacePair(workspaces as Map<string, Workspace>, textArg(args, "from", "."), textArg(args, "to"), granted));
     return write(() => pair.workspace.withGrants(pathGrants).movePath(pair.relativeFrom, pair.relativeTo, boolArg(args, "overwrite", false)));
   }
   if (name === "run_command") {
@@ -352,6 +367,29 @@ async function dispatch(
     });
   }
   throw new Error(`Unknown tool: ${name}`);
+}
+
+/** One workspace per existing `path:` directory the owner approved for this call, with those grants applied so credential folders stay protected. */
+async function grantWorkspaces(pathGrants: readonly string[]): Promise<Map<string, Workspace>> {
+  const result = new Map<string, Workspace>();
+  for (const grant of pathGrants) {
+    const dir = grant.startsWith("path:") ? customWritePath(grant) : undefined;
+    if (!dir) continue;
+    try {
+      const workspace = (await Workspace.open(dir)).withGrants(pathGrants);
+      result.set(workspace.root, workspace);
+    } catch { /* A missing or non-directory grant is skipped. */ }
+  }
+  return result;
+}
+
+/** The error for a path no workspace or approved directory contains, naming the `path:` resource to ask the owner for. */
+async function outsideMessage(input: string): Promise<string> {
+  const stat = await lstat(input).catch(() => undefined);
+  const dir = stat?.isDirectory() ? input : dirname(input);
+  const home = homedir();
+  const shown = dir === home ? "~" : dir.startsWith(home + sep) ? `~/${dir.slice(home.length + 1).split(sep).join("/")}` : dir;
+  return `${input} is outside the workspace. To work there, call request_permission with resource "path:${shown}" and tool "files" (the owner approves on the web), then repeat this call.`;
 }
 
 function tool(name: string, description: string, properties: Record<string, unknown>, flags: ToolFlags) {
