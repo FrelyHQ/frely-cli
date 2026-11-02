@@ -11,6 +11,28 @@ permissions:
   contents: read
 
 jobs:
+  native-credentials-macos:
+    name: Native credentials (macOS, GitHub-hosted)
+    runs-on: macos-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify native credential persistence on macOS
+        run: npm run test:credentials
+
   verify:
     name: Verify (${{ matrix.os }}, Node ${{ matrix.node }})
     runs-on: ${{ fromJSON(matrix.runner || format('"{0}"', matrix.os)) }}
@@ -55,8 +77,10 @@ jobs:
       - name: Verify packed installation without lifecycle scripts
         run: npm run test:install
 
+      # The Mac runner is a background service without an unlocked login keychain, and the check must not touch the owner's real keychain,
+      # so on the self-hosted Mac it runs in the `native-credentials-macos` job below, on a GitHub-hosted Mac.
       - name: Verify native credential persistence on macOS and Windows
-        if: runner.os != 'Linux'
+        if: runner.os != 'Linux' && runner.environment != 'self-hosted'
         run: npm run test:credentials
 
       - name: Install Linux test credential service
