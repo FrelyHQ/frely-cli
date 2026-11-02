@@ -37,7 +37,7 @@ try {
 $frely = Join-Path $directory 'frely.exe'
 if (!(Test-Path -LiteralPath $frely)) { throw "Frely was not installed at $frely." }
 if ($installToken) { $env:FRELY_INSTALL_TOKEN = $installToken; Remove-Variable installToken }
-# Default workspace: the home directory (credential and start-up files stay protected); FRELY_WORKSPACE picks another.
+# Default workspace: ~/Frely, created if missing; FRELY_WORKSPACE picks another folder. Other folders can be allowed later on the web.
 if ($env:FRELY_WORKSPACE) { & $frely link on --workspace $env:FRELY_WORKSPACE } else { & $frely link on }
 # Run through `irm https://frely.cloud/w | iex` there is no script file; `exit` would close the user's PowerShell window.
 if ($PSCommandPath) { exit $LASTEXITCODE }

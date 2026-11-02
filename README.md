@@ -92,7 +92,7 @@ curl -fsSL https://frely.cloud/start.sh | sh
 curl.exe -fsSLo "$env:TEMP\frely-start.ps1" https://frely.cloud/start.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-start.ps1"
 ```
 
-The script installs the latest `frely`, opens the browser to sign in (new accounts can register there), asks you to approve this device and prints your MCP URL. Run it again any time to update. The workspace is your home directory by default; set `FRELY_WORKSPACE=/path` to share another folder. [More](https://cli.frely.cloud/docs/help/how-do-i-install/)
+The script installs the latest `frely`, opens the browser to sign in (new accounts can register there), asks you to approve this device and prints your MCP URL. Run it again any time to update. The workspace is `~/Frely` by default (created for you); set `FRELY_WORKSPACE=/path` to share another folder. When an AI client needs a folder outside it, you can allow that folder on the web. [More](https://cli.frely.cloud/docs/help/how-do-i-install/)
 
 ### Connect a server (no browser)
 

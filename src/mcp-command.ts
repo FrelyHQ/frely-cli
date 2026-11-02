@@ -1,6 +1,6 @@
 import { approvalCodeOfLink, formatApprovalCode } from "./approval-code.js";
+import { ensureDefaultWorkspace } from "./default-workspace.js";
 import { realpath } from "node:fs/promises";
-import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { attachDeviceCodeMcp, finishDeviceLogin, localDeviceId, loginDevice, readConfig, redeemInstallToken, requireLogin } from "./auth.js";
 import { discardForeignMcpAuthorization, generateMcpKey, inspectMcpMetadata, inspectMcpMetadataOrQuarantine, MCP_DEFAULT_DAYS, parseMcpDays, requireMcpAuthorization, setupMcpAuthorization, takeDeviceCodeMcpPreapproval, type McpAuthorization, type McpMetadata, type McpPreset } from "./mcp-authorization.js";
@@ -116,7 +116,7 @@ export async function setupMcp(
   input: McpSetupInput,
   installService: typeof installMcpService = installMcpService,
 ): Promise<McpAuthorization> {
-  const workspace = metadata?.grant.workspace ?? input.workspace ?? homedir();
+  const workspace = metadata?.grant.workspace ?? input.workspace ?? await ensureDefaultWorkspace();
   input.notify(metadata ? `Renewing device MCP authorization for ${workspace}\n` : `Enabling device MCP for ${workspace}\n`);
   const authorization = await setupMcpAuthorization(workspace, input.days, Boolean(metadata), ({ verificationUri, keyThumbprint, days }) => {
     input.notify(`Device MCP execution authorization: ${days} days\nMCP key: ${keyThumbprint}\nApprove: ${verificationUri}\n${approvalCodeOfLink(verificationUri) ? `Code: ${approvalCodeOfLink(verificationUri)}\n` : ""}`);
@@ -207,7 +207,7 @@ export async function mcpStartLogin(
   if (signedIn && !input.installToken) return {};
   // The preapproval is bound to the workspace: keep the one an earlier setup on this computer used.
   const earlier = input.workspace ? null : await inspectMcpMetadata().catch(() => null);
-  const workspace = await realpath(resolve(input.workspace || earlier?.grant.workspace || homedir()));
+  const workspace = input.workspace || earlier?.grant.workspace ? await realpath(resolve(input.workspace || earlier!.grant.workspace)) : await ensureDefaultWorkspace();
   const days = parseMcpDays(input.days ?? process.env.FRELY_MCP_DAYS ?? MCP_DEFAULT_DAYS);
   const mcp = { ...generateMcpKey(), workspace, days };
   if (!input.installToken) {

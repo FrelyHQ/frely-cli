@@ -2,6 +2,7 @@ import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
 import { realpath, rename, unlink } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { ensureDefaultWorkspace } from "./default-workspace.js";
 import { requireLogin, openVerificationUrl } from "./auth.js";
 import { credentialStore } from "./credential-store.js";
 import { ensureCredentialDirectory, readPrivateFile, writePrivateFile } from "./credential-file.js";
@@ -244,7 +245,8 @@ export async function registerLinkKey(): Promise<void> {
     await credentialStore.setPassword(LINK_KEY_SERVICE, account, privateKeyPem);
   }
   const identity = identityFromPrivateKey(privateKeyPem);
-  const workspace = await realpath(homedir());
+  // A device that already has a device MCP grant keeps serving that workspace; a new one serves ~/Frely.
+  const workspace = await realpath((await inspectMcpMetadata().catch(() => null))?.grant.workspace ?? await ensureDefaultWorkspace());
   const issuedAt = new Date().toISOString();
   const nonce = randomBytes(24).toString("base64url");
   const signature = identity.signMessage(JSON.stringify(["frely.link.register.v1", device.deviceId, identity.keyThumbprint, workspace, issuedAt, nonce]));

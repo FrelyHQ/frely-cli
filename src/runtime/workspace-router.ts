@@ -1,11 +1,29 @@
 import { relative, isAbsolute, sep } from "node:path";
 import { Workspace } from "./workspace.js";
 
+/** An absolute path outside every registered workspace and every approved `path:` directory. */
+export class OutsideWorkspaceError extends Error {
+  constructor(readonly input: string) {
+    super(`${input} is not inside any registered workspace.`);
+  }
+}
+
+/**
+ * `granted` holds the directories of the `path:` grants the owner approved for this call. They are not registered
+ * workspaces: they only catch absolute paths no registered workspace contains, and never count toward the
+ * "single workspace" rule, so relative paths and in-workspace paths behave exactly as before.
+ */
 export function resolveWorkspace(
   workspaces: Map<string, Workspace>,
   input: string,
+  granted: ReadonlyMap<string, Workspace> = new Map(),
 ): { workspace: Workspace; relativeInput: string } {
+  if (isAbsolute(input) && granted.size > 0 && containingRoots(workspaces, input).length === 0) {
+    const [root] = containingRoots(granted, input);
+    if (root) return { workspace: granted.get(root)!, relativeInput: within(root, input) };
+  }
   if (workspaces.size === 1) {
+    if (isAbsolute(input) && containingRoots(workspaces, input).length === 0) throw new OutsideWorkspaceError(input);
     // Single workspace: backward compatible behavior
     const workspace = workspaces.values().next().value as Workspace;
     return { workspace, relativeInput: input };
@@ -13,12 +31,7 @@ export function resolveWorkspace(
 
   requireAbsolute(workspaces, input);
   const [root] = containingRoots(workspaces, input);
-  if (!root) {
-    const roots = Array.from(workspaces.keys()).join("\n  ");
-    throw new Error(
-      `${input} is not inside any registered workspace:\n  ${roots}`,
-    );
-  }
+  if (!root) throw new OutsideWorkspaceError(input);
   return { workspace: workspaces.get(root)!, relativeInput: within(root, input) };
 }
 
@@ -31,9 +44,10 @@ export function resolveWorkspacePair(
   workspaces: Map<string, Workspace>,
   from: string,
   to: string,
+  granted: ReadonlyMap<string, Workspace> = new Map(),
 ): { workspace: Workspace; relativeFrom: string; relativeTo: string } {
-  const a = resolveWorkspace(workspaces, from);
-  const b = resolveWorkspace(workspaces, to);
+  const a = resolveWorkspace(workspaces, from, granted);
+  const b = resolveWorkspace(workspaces, to, granted);
   if (a.workspace === b.workspace) return { workspace: a.workspace, relativeFrom: a.relativeInput, relativeTo: b.relativeInput };
   const toRoots = new Set(containingRoots(workspaces, to));
   const shared = containingRoots(workspaces, from).find((root) => toRoots.has(root));
@@ -51,7 +65,7 @@ function requireAbsolute(workspaces: Map<string, Workspace>, input: string): voi
 }
 
 /** Roots that contain `input`, deepest first, so nested workspaces win over their parents. */
-function containingRoots(workspaces: Map<string, Workspace>, input: string): string[] {
+function containingRoots(workspaces: ReadonlyMap<string, Workspace>, input: string): string[] {
   return Array.from(workspaces.keys())
     .filter((root) => {
       const rel = relative(root, input);

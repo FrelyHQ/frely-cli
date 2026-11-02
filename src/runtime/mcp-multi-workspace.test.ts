@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join, sep } from "node:path";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -54,8 +54,8 @@ test("multiple workspaces route absolute paths, reject relative/outside paths, k
     }
     const missing = await client.callTool({ name: "list_directory", arguments: { path: outside } });
     assert.equal(missing.isError, true);
-    assert.match(text(missing), /not inside any registered workspace/);
-    assert.ok(text(missing).includes(primary) && text(missing).includes(second));
+    assert.match(text(missing), /outside the workspace/);
+    assert.ok(text(missing).includes(`/${basename(outside)}"`) && text(missing).includes('tool "files"'));
 
     const processes = await client.callTool({ name: "process", arguments: { action: "list" } });
     assert.equal(processes.isError, undefined);
@@ -104,4 +104,56 @@ test("workspaces added or removed while the runtime is running take effect witho
     assert.equal(removed.isError, true);
     assert.deepEqual(JSON.parse(text(await client.callTool({ name: "workspace_info", arguments: {} }))).workspaces, [primary]);
   } finally { await close(); }
+});
+
+test("approved path: grants make file tools treat the directory as a workspace for that call only", async () => {
+  const primary = await realpath(await mkdtemp(join(tmpdir(), "frely-grant-primary-")));
+  const granted = await realpath(await mkdtemp(join(tmpdir(), "frely-grant-dir-")));
+  await mkdir(join(granted, "sub"));
+  await writeFile(join(granted, "sub", "n.txt"), "granted\n");
+  await writeFile(join(primary, "a.txt"), "primary\n");
+  const meta = { "frely/pathGrants": [`path:${granted.split(sep).join("/")}`] };
+  const { client, close } = await connect(primary);
+  try {
+    const file = join(granted, "sub", "n.txt");
+    // Without the grant the path is refused and the error names the directory to ask for.
+    const denied = await client.callTool({ name: "read_file", arguments: { path: file } });
+    assert.equal(denied.isError, true);
+    assert.match(text(denied), /request_permission/);
+    assert.ok(text(denied).includes(`/${basename(granted)}/sub"`));
+    // With the grant: read, write, list, move and a relative path still means the single registered workspace.
+    assert.equal(text(await client.callTool({ name: "read_file", arguments: { path: file }, _meta: meta })), "granted\n");
+    const written = await client.callTool({ name: "write_file", arguments: { path: join(granted, "new.txt"), content: "x" }, _meta: meta });
+    assert.equal(written.isError, undefined);
+    const listed = JSON.parse(text(await client.callTool({ name: "list_directory", arguments: { path: granted }, _meta: meta })));
+    assert.deepEqual(listed.map((entry: { name: string }) => entry.name).sort(), ["new.txt", "sub"]);
+    const moved = await client.callTool({ name: "move_path", arguments: { from: join(granted, "new.txt"), to: join(granted, "moved.txt") }, _meta: meta });
+    assert.equal(moved.isError, undefined);
+    assert.equal(text(await client.callTool({ name: "read_file", arguments: { path: "a.txt" }, _meta: meta })), "primary\n");
+    // A different directory stays refused, and the grant does not outlive the call.
+    const other = await client.callTool({ name: "read_file", arguments: { path: join(tmpdir(), "elsewhere.txt") }, _meta: meta });
+    assert.equal(other.isError, true);
+    assert.equal((await client.callTool({ name: "read_file", arguments: { path: file } })).isError, true);
+  } finally { await close(); }
+});
+
+test("a granted parent directory never opens protected credential folders to file tools", async () => {
+  const primary = await realpath(await mkdtemp(join(tmpdir(), "frely-grant-primary-")));
+  const granted = await realpath(await mkdtemp(join(tmpdir(), "frely-grant-dir-")));
+  const home = join(granted, "home");
+  await mkdir(join(home, ".ssh"), { recursive: true });
+  await writeFile(join(home, ".ssh", "id"), "secret");
+  const meta = { "frely/pathGrants": [`path:${granted.split(sep).join("/")}`] };
+  const { client, close } = await connect(primary);
+  const previous = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  try {
+    const read = await client.callTool({ name: "read_file", arguments: { path: join(home, ".ssh", "id") }, _meta: meta });
+    assert.equal(read.isError, true);
+    assert.match(text(read), /protected/);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    await close();
+  }
 });
