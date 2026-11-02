@@ -109,17 +109,18 @@ export async function ensureCredentialDirectory(path: string, create: boolean): 
     if (!create) return false;
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const parent = await lstat(dirname(path));
-    assertPrivate(parent, true);
+    assertPrivate(parent, true, true);
     await mkdir(path, { mode: 0o700 }).catch((error: unknown) => { if (!hasCode(error, "EEXIST")) throw error; });
     info = await lstat(path);
   }
-  assertPrivate(await lstat(dirname(path)), true);
+  assertPrivate(await lstat(dirname(path)), true, true);
   assertPrivate(info, true);
   return true;
 }
-function assertPrivate(info: Stats, directory: boolean): void {
+/** `parent`: the folder that holds the vault folder (for example ~/.config) only has to be owned by the user and closed to group/other writes; it is commonly 0755. The vault folder and its files stay owner-only. */
+function assertPrivate(info: Stats, directory: boolean, parent = false): void {
   if (info.isSymbolicLink() || (directory ? !info.isDirectory() : !info.isFile()) || (!directory && info.nlink !== 1)) throw new Error("Credential vault paths must be regular owner-controlled files and directories, not links.");
-  if (process.platform !== "win32" && ((info.mode & 0o077) !== 0 || (process.getuid && info.uid !== process.getuid()))) throw new Error("Credential vault permissions are unsafe. Use owner-only directories (0700) and files (0600).");
+  if (process.platform !== "win32" && ((info.mode & (parent ? 0o022 : 0o077)) !== 0 || (process.getuid && info.uid !== process.getuid()))) throw new Error("Credential vault permissions are unsafe. Use owner-only directories (0700) and files (0600).");
 }
 export async function readPrivateFile(path: string): Promise<string | null> {
   let before: Stats;
