@@ -203,7 +203,7 @@ test("device reports capabilities once per connection", async () => {
   }
 });
 
-test("relay restart close codes retry about once a second for a minute, then back off", async () => {
+test("relay restart close codes retry about every 2 seconds for ten minutes, then back off", async () => {
   const { nextReconnectDelay, RELAY_RESTART_RETRY_WINDOW_MS } = await import("./relay-client.js");
   const closed = (code: number) => new Promise<unknown>((resolve) => {
     const server = new WebSocketServer({ port: 0, handleProtocols: () => DEVICE_RELAY_PROTOCOL });
@@ -219,17 +219,17 @@ test("relay restart close codes retry about once a second for a minute, then bac
   const restart = await closed(1012);
   assert.equal(isTransportFallbackEligible(restart), false);
   const first = nextReconnectDelay({ backoffMs: 8000 }, restart, 1_000, () => 0.5);
-  assert.equal(first.delayMs, 1000);
+  assert.equal(first.delayMs, 2000);
   assert.equal(first.backoffMs, 8000);
   // Plain connection failures inside the window keep the fast cadence.
-  const during = nextReconnectDelay({ backoffMs: 8000, restartSince: first.restartSince }, new Error("refused"), 1_000 + 30_000, () => 0);
-  assert.equal(during.delayMs, 800);
+  const during = nextReconnectDelay({ backoffMs: 8000, restartSince: first.restartSince }, new Error("refused"), 1_000 + 5 * 60_000, () => 0);
+  assert.equal(during.delayMs, 1600);
   // After the window the exponential backoff resumes.
   const after = nextReconnectDelay({ backoffMs: 8000, restartSince: first.restartSince }, new Error("refused"), 1_000 + RELAY_RESTART_RETRY_WINDOW_MS, () => 0);
   assert.equal(after.delayMs, 8000);
   assert.equal(after.backoffMs, 15_000);
   assert.equal(after.restartSince, undefined);
   // 1001 counts as restart too; other codes do not.
-  assert.equal(nextReconnectDelay({ backoffMs: 4000 }, await closed(1001), 0, () => 0).delayMs, 800);
+  assert.equal(nextReconnectDelay({ backoffMs: 4000 }, await closed(1001), 0, () => 0).delayMs, 1600);
   assert.equal(nextReconnectDelay({ backoffMs: 4000 }, await closed(1011), 0, () => 0).delayMs, 4000);
 });
