@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
@@ -232,4 +232,34 @@ test("relay restart close codes retry about every 2 seconds for ten minutes, the
   // 1001 counts as restart too; other codes do not.
   assert.equal(nextReconnectDelay({ backoffMs: 4000 }, await closed(1001), 0, () => 0).delayMs, 1600);
   assert.equal(nextReconnectDelay({ backoffMs: 4000 }, await closed(1011), 0, () => 0).delayMs, 4000);
+});
+
+test("a relay that goes silent is detected without waiting for the OS", async () => {
+  const server = new WebSocketServer({ port: 0, handleProtocols: () => DEVICE_RELAY_PROTOCOL });
+  await new Promise<void>((resolve) => server.once("listening", () => resolve()));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("missing test address");
+  const connected = new Promise<void>((resolve) => server.once("connection", () => resolve()));
+  const abort = new AbortController();
+  const lines: string[] = [];
+  mock.timers.enable({ apis: ["setInterval", "Date"] });
+  try {
+    const runtime = serveConnection(`ws://127.0.0.1:${address.port}`, "t", `drd_${"a".repeat(32)}`, null, null, abort.signal, (line) => lines.push(line));
+    const failed = runtime.then(() => undefined, (error: unknown) => error);
+    await connected;
+    await new Promise((resolve) => setImmediate(resolve));
+    mock.timers.tick(30_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(lines.some((line) => line.includes("relay.socket_closed")), false);
+    mock.timers.tick(20_000);
+    const error = await failed;
+    assert.match(String((error as Error).message), /heartbeat timed out/);
+    assert.ok(isTransportFallbackEligible(error));
+    assert.ok(lines.some((line) => line.includes("relay.socket_closed")));
+  } finally {
+    mock.timers.reset();
+    abort.abort();
+    for (const client of server.clients) client.terminate();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });

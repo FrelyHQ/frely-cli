@@ -32,7 +32,7 @@ const messages = new Set([
   "MCP command timed out; mutation outcome may be unknown.", "MCP command output limit exceeded.",
   "MCP command could not be started.", "No Frely login is stored. Run `frely login`.",
   "Frely login expired. Run `frely login`.", "Frely login refresh is temporarily unavailable; retrying later.", "Frely request timed out.",
-  "Device transport WebSocket failed.",
+  "Device transport WebSocket failed.", "Device transport heartbeat timed out.",
   "MCP_AUTHORIZATION_EXPIRED", "The operation was aborted", "fetch failed",
 ]);
 
