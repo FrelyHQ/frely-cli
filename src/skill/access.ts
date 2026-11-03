@@ -48,7 +48,7 @@ interface PublicVirtualModelManifest {
 }
 export class SkillAccessError extends Error {
   constructor(
-    readonly code: "invalid_manifest_url" | "agent_not_found" | "manifest_fetch_failed" | "manifest_invalid" | "target_not_installed" | "auth_required" | "remote_authorization_failed" | "entitlement_required" | "payment_required" | "remote_call_failed" | "input_invalid" | "host_unsupported" | "credential_store_failed",
+    readonly code: "invalid_manifest_url" | "agent_not_found" | "manifest_fetch_failed" | "manifest_invalid" | "target_not_installed" | "auth_required" | "remote_authorization_failed" | "empty_result" | "entitlement_required" | "payment_required" | "remote_call_failed" | "input_invalid" | "host_unsupported" | "credential_store_failed",
     message: string,
   ) {
     super(message);
@@ -218,8 +218,14 @@ async function openInstalledAgent(input: InstalledAgentInput) {
 function remoteCallError(error: unknown, authMode: "account" | "api-key"): SkillAccessError {
   if (error instanceof SkillInvocationError && error.code === "entitlement_required") return new SkillAccessError("entitlement_required", "This Frely Agent is not available to the configured credential.");
   if (error instanceof SkillInvocationError && error.code === "payment_required") return new SkillAccessError("payment_required", "Not enough Frely Credit. Run `frely api call credit_products.list` and `frely api call payment_checkout.create` (pass useImmediately:true) to get a payment link for the user, then retry once they have paid.");
-  if (error instanceof SkillInvocationError && error.code === "remote_authorization_failed") return new SkillAccessError("remote_authorization_failed", authMode === "api-key" ? "The model-scoped API key was rejected. Reinstall with frely item install <username/name> --api-key-stdin." : "Frely authorization failed. Run `frely login` again.");
-  return new SkillAccessError("remote_call_failed", error instanceof SkillInvocationError && error.details.remoteCode ? `The remote Frely Agent call failed (${error.details.remoteCode}).` : "The remote Frely Agent call failed.");
+  if (error instanceof SkillInvocationError && error.code === "remote_authorization_failed") return new SkillAccessError("remote_authorization_failed", authMode === "api-key" ? "The model-scoped API key was rejected. Reinstall with frely item install <username/name> --api-key-stdin." : `Frely rejected this login${error.details.status === undefined ? "" : ` (HTTP ${error.details.status})`}. Run \`frely login\` again.`);
+  if (error instanceof SkillInvocationError && error.code === "empty_result") return new SkillAccessError("empty_result", "The Frely Agent returned no text (nothing was charged for an empty answer). This is not a login problem; retry, and report it if it repeats.");
+  if (error instanceof SkillInvocationError) {
+    const parts = [error.details.status === undefined ? "" : `HTTP ${error.details.status}`, error.details.remoteCode ?? ""].filter(Boolean);
+    const detail = parts.length > 0 ? ` (${parts.join(", ")})` : "";
+    return new SkillAccessError("remote_call_failed", `The remote Frely Agent call failed${detail}${error.details.remoteMessage ? `: ${error.details.remoteMessage}` : "."}`);
+  }
+  return new SkillAccessError("remote_call_failed", "The remote Frely Agent call failed.");
 }
 
 export async function invokeInstalledAgent(input: InstalledAgentInput & {

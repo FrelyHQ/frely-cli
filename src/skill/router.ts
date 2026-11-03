@@ -28,11 +28,15 @@ export interface SkillInvocationResult {
 
 export class SkillInvocationError extends Error {
   constructor(
-    readonly code: "payment_required" | "entitlement_required" | "remote_authorization_failed" | "capability_unavailable" | "remote_call_failed",
+    readonly code: "payment_required" | "entitlement_required" | "remote_authorization_failed" | "capability_unavailable" | "remote_call_failed" | "empty_result",
     readonly details: Readonly<{
       readonly capabilityId?: string;
       /** The remote `error.data.code` when this client does not know it. */
       readonly remoteCode?: string;
+      /** The HTTP status of the failed call, when the server answered at all. */
+      readonly status?: number;
+      /** The remote error message (trimmed), when the server sent one. */
+      readonly remoteMessage?: string;
       readonly registrationUrl?: string;
     }> = {},
   ) {
@@ -182,7 +186,7 @@ export const remoteAgentMcpInvoker: RemoteAgentMcpInvoker = {
 
   async invokeTurn(input) {
     const result = await postInvoke(input, { input: input.task, tools: input.tools, ...(input.items.length === 0 ? {} : { items: input.items }) });
-    if (result === undefined || result.isError === true) throw new SkillInvocationError("remote_authorization_failed");
+    if (result === undefined || result.isError === true) assertUsableResult(result, "");
     const structured = isRecord(result.structuredContent) ? result.structuredContent : {};
     const requestId = typeof structured.request_id === "string" ? { requestId: structured.request_id.slice(0, 128) } : {};
     const usage = turnUsage(structured.usage);
@@ -200,7 +204,7 @@ export const remoteAgentMcpInvoker: RemoteAgentMcpInvoker = {
       return Object.freeze({ status: "tool_calls" as const, calls, items, ...extra });
     }
     const text = resultText(result);
-    if (text.length === 0) throw new SkillInvocationError("remote_authorization_failed");
+    if (text.length === 0) throw new SkillInvocationError("empty_result");
     return Object.freeze({ status: "completed" as const, text, ...extra });
   },
 };
@@ -217,9 +221,7 @@ export const remoteAgentTaskClient: RemoteAgentTaskClient = {
 /** The text and, for an Agent task, its state, task id and newest progress line. */
 function taskResult(result: Record<string, unknown> | undefined): SkillInvocationResult {
   const text = resultText(result);
-  if (result === undefined || result.isError === true || text.length === 0) {
-    throw new SkillInvocationError("remote_authorization_failed");
-  }
+  assertUsableResult(result, text);
   const structured = isRecord(result.structuredContent) ? result.structuredContent : {};
   const state = structured.state === "running" || structured.state === "completed" || structured.state === "failed" || structured.state === "canceled" ? structured.state : undefined;
   const taskId = typeof structured.taskId === "string" && /^[A-Za-z0-9_-]{1,128}$/u.test(structured.taskId) ? structured.taskId : undefined;
@@ -257,16 +259,42 @@ async function postInvoke(
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   const payload = await response.json().catch(() => null) as unknown;
-  if (!response.ok || !isRecord(payload)) {
-    throw new SkillInvocationError("remote_authorization_failed");
+  const status = response.status;
+  const remote = remoteErrorDetails(payload);
+  if (isRecord(payload) && isRecord(payload.error)) {
+    // Any other code is passed on as is, with the HTTP status and the remote message, so the caller can see what really failed.
+    if (remote.code === "payment_required" || remote.code === "entitlement_required" || remote.code === "capability_unavailable") throw new SkillInvocationError(remote.code);
+    if (status === 401 || status === 403) throw new SkillInvocationError("remote_authorization_failed", { status, ...remote.details });
+    throw new SkillInvocationError("remote_call_failed", { status, ...remote.details });
   }
-  if (isRecord(payload.error)) {
-    const data = isRecord(payload.error.data) ? payload.error.data : {};
-    // Any other code is passed on as is; only a failed HTTP call or an empty result means the login was refused.
-    if (data.code === "payment_required" || data.code === "entitlement_required" || data.code === "capability_unavailable") throw new SkillInvocationError(data.code);
-    throw new SkillInvocationError("remote_call_failed", typeof data.code === "string" ? { remoteCode: data.code.slice(0, 64) } : {});
-  }
+  // Only a refused login means authorization failed; every other failure (5xx, rate limit, a page that is not JSON) is reported as what it is.
+  if (status === 401 || status === 403) throw new SkillInvocationError("remote_authorization_failed", { status });
+  if (!response.ok || !isRecord(payload)) throw new SkillInvocationError("remote_call_failed", { status, remoteCode: response.ok ? "invalid_response" : `http_${status}` });
   return isRecord(payload.result) ? payload.result : undefined;
+}
+
+/** The remote error code and message of a JSON-RPC or HTTP error body, trimmed; either may be absent. */
+function remoteErrorDetails(payload: unknown): { code?: string; details: { remoteCode?: string; remoteMessage?: string } } {
+  const root = isRecord(payload) ? payload : {};
+  const error = isRecord(root.error) ? root.error : root;
+  const data = isRecord(error.data) ? error.data : {};
+  const raw = [data.code, error.code, root.code].find((value): value is string => typeof value === "string" && value.length > 0);
+  const message = [error.message, root.message].find((value): value is string => typeof value === "string" && value.length > 0);
+  return {
+    ...(raw === undefined ? {} : { code: raw }),
+    details: { ...(raw === undefined ? {} : { remoteCode: raw.slice(0, 64) }), ...(message === undefined ? {} : { remoteMessage: message.slice(0, 200) }) },
+  };
+}
+
+/** An error result is a failed call (with its code when there is one); an empty text with no error is its own case. */
+function assertUsableResult(result: Record<string, unknown> | undefined, text: string): asserts result is Record<string, unknown> {
+  if (result === undefined) throw new SkillInvocationError("remote_call_failed", { remoteCode: "no_result" });
+  if (result.isError === true) {
+    const structured = isRecord(result.structuredContent) ? result.structuredContent : {};
+    const code = [structured.code, structured.error].find((value): value is string => typeof value === "string" && value.length > 0);
+    throw new SkillInvocationError("remote_call_failed", { remoteCode: (code ?? "tool_error").slice(0, 64), ...(text.length > 0 ? { remoteMessage: text.slice(0, 200) } : {}) });
+  }
+  if (text.length === 0) throw new SkillInvocationError("empty_result");
 }
 
 function resultText(result: Record<string, unknown> | undefined): string {

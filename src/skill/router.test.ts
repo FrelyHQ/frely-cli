@@ -209,3 +209,43 @@ test("sends progressSummary and reads task state, id and progress from invoke, t
     globalThis.fetch = oldFetch;
   }
 });
+
+test("HTTP failures keep their status and code; only a refused login is an authorization failure", async () => {
+  const oldFetch = globalThis.fetch;
+  const run = async (response: Response) => {
+    globalThis.fetch = (async () => response) as typeof fetch;
+    return remoteAgentMcpInvoker.invoke({ relayUrl, modelId: "user/vm-agent/v1", token: "token", task: "task" }).then(() => assert.fail("must reject"), (error: unknown) => error as SkillInvocationError);
+  };
+  try {
+    const unavailable = await run(Response.json({ error: "abuse_guard_unavailable", message: "Request protection is unavailable" }, { status: 503 }));
+    assert.equal(unavailable.code, "remote_call_failed");
+    assert.equal(unavailable.details.status, 503);
+    const html = await run(new Response("<html>bad gateway</html>", { status: 502 }));
+    assert.equal(html.code, "remote_call_failed");
+    assert.equal(html.details.status, 502);
+    assert.equal(html.details.remoteCode, "http_502");
+    const refused = await run(Response.json({ jsonrpc: "2.0", error: { code: -32001, message: "bad token" } }, { status: 401 }));
+    assert.equal(refused.code, "remote_authorization_failed");
+    assert.equal(refused.details.status, 401);
+    const bare401 = await run(new Response("", { status: 401 }));
+    assert.equal(bare401.code, "remote_authorization_failed");
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("an empty Agent result and a tool error are their own errors, not authorization failures", async () => {
+  const oldFetch = globalThis.fetch;
+  const run = async (result: Record<string, unknown>) => {
+    globalThis.fetch = (async () => Response.json({ jsonrpc: "2.0", id: "skill-invoke", result })) as typeof fetch;
+    return remoteAgentMcpInvoker.invoke({ relayUrl, modelId: "user/vm-agent/v1", token: "token", task: "task" }).then(() => assert.fail("must reject"), (error: unknown) => error as SkillInvocationError);
+  };
+  try {
+    assert.equal((await run({ content: [{ type: "text", text: "" }] })).code, "empty_result");
+    const failed = await run({ isError: true, content: [{ type: "text", text: "boom" }], structuredContent: { code: "agent_unavailable" } });
+    assert.equal(failed.code, "remote_call_failed");
+    assert.equal(failed.details.remoteCode, "agent_unavailable");
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
