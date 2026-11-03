@@ -67,7 +67,7 @@ import { redeemGift } from "./skill/gift.js";
 import { callRemoteTool, connectRemoteMcp, installRemoteMcpSkill, isNotASkill, listRemoteTools, mcpClientConfig, parseMcpName, RemoteMcpError } from "./skill/remote-mcp.js";
 import { callCloudTool, callCloudToolAwaiting } from "./cloud.js";
 import { claimInstall, ItemNotFoundError, resolveItem, type ResolvedItem } from "./skill/resolve.js";
-import { ApprovalRequiredError } from "./skill/cloud-item.js";
+import { ApprovalRequiredError, type Approval } from "./skill/cloud-item.js";
 import { createInterface } from "node:readline/promises";
 import { runUninstall } from "./uninstall.js";
 
@@ -415,7 +415,9 @@ async function main(): Promise<void> {
       const signedIn = await readConfig().then(() => true, () => false);
       resolved = gift === undefined && signedIn ? await resolveItem(itemRef, callCloudTool) : null;
       if (gift !== undefined || resolved?.kind === "remote_mcp") {
-        const claimed = await claimInstall(itemRef, gift, callCloudToolAwaiting);
+        // With --json the approval is printed as its own line at once, before the command waits (the final result is the last line).
+        const announce = (approval: Approval) => { if (json) stdout.write(`${JSON.stringify({ state: "waiting", approval })}\n`); };
+        const claimed = await claimInstall(itemRef, gift, (name, input) => callCloudToolAwaiting(name, input, undefined, undefined, announce));
         if (claimed !== null) resolved = claimed;
         else if (gift !== undefined) { await redeemGift(gift, callCloudTool, json ? process.stderr : stdout); resolved = null; }
       }

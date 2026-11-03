@@ -273,7 +273,9 @@ export async function callCloudTool(name: string, input: Record<string, unknown>
  * ApprovalRequiredError, so the caller can exit with 3 and say what to run again.
  */
 export async function callCloudToolAwaiting(name: string, input: Record<string, unknown>, deps: CloudCallDeps = { openReader: openCloudReader, openControllerConnection },
-  wait: (controller: { call(name: string, args: Record<string, unknown>): Promise<DirectResult> }, ref: ApprovalRef, timeoutMs: number) => Promise<ApprovalOutcome> = (controller, ref, timeoutMs) => waitForApproval(controller as never, ref, timeoutMs)): Promise<Record<string, unknown>> {
+  wait: (controller: { call(name: string, args: Record<string, unknown>): Promise<DirectResult> }, ref: ApprovalRef, timeoutMs: number) => Promise<ApprovalOutcome> = (controller, ref, timeoutMs) => waitForApproval(controller as never, ref, timeoutMs),
+  /** Called with the approval as soon as the server asks for it, before this command starts to wait: a host that only reads the first lines of output can show it. */
+  onApproval?: (approval: Approval) => void): Promise<Record<string, unknown>> {
   const reader = await deps.openReader();
   try {
     return cloudToolResult(await reader.call(name, input));
@@ -286,7 +288,11 @@ export async function callCloudToolAwaiting(name: string, input: Record<string, 
     let result = await call(input);
     const hint = permissionHint(result);
     if (hint) {
-      process.stderr.write(hint + "\nWaiting for approval (up to 10 minutes); this command continues by itself once the owner approves.\n");
+      const approval = approvalOf(toolError(result) ?? {});
+      if (approval) onApproval?.(approval);
+      // This command waits for the owner itself, so the generic hint's "run the call again" does not apply: say to keep it running.
+      process.stderr.write((approval ? `${approval.summary ? approval.summary + "\n" : ""}Approve this in your browser:\n${approval.url}\nCode: ${approval.code.slice(0, 4)}-${approval.code.slice(4)}\n` : hint + "\n")
+        + "Keep this command running (up to 10 minutes): it continues by itself once the owner approves.\n");
       result = await rerunAfterApproval(result, call, input, (ref, timeoutMs) => wait(controller, ref, timeoutMs));
     }
     return cloudToolResult(result, true);

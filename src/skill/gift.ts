@@ -1,5 +1,11 @@
 import { CloudToolError } from "./cloud-item.js";
 
+/** Credit units are a millionth of a dollar: 2000000 is "$2.00". */
+export function creditUsd(units: number): string {
+  const [whole, fraction = ""] = (units / 1_000_000).toFixed(6).replace(/0+$/u, "").split(".");
+  return `$${whole}.${fraction.padEnd(2, "0")}`;
+}
+
 const GIFT_CODE = /^fsl_[A-Za-z0-9_-]{32}$/u;
 
 /**
@@ -11,7 +17,7 @@ export async function redeemGift(code: string, call: (name: string, input: Recor
   try {
     const value = await call("share_links.redeem", { code });
     const by = (value.claimedBy as { email?: unknown } | undefined)?.email;
-    out.write(`Gift claimed${typeof by === "string" ? ` by ${by}` : ""}${typeof value.giftUnits === "number" && value.giftUnits > 0 ? ` (${value.giftUnits} Credit units added)` : ""}.\n`);
+    out.write(`Gift claimed${typeof by === "string" ? ` by ${by}` : ""}${typeof value.giftUnits === "number" && value.giftUnits > 0 ? ` (${creditUsd(value.giftUnits)} Credit added)` : ""}.\n`);
   } catch (error) {
     if (error instanceof CloudToolError && error.code === "creator_share_already_claimed") { out.write("Gift was already claimed by this account.\n"); return; }
     throw error;
