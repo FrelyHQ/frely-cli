@@ -4,10 +4,12 @@ type Call = (name: string, input: Record<string, unknown>) => Promise<Record<str
 
 /** What a name is for the signed-in account (the server's items.resolve / items.claim_install answer). */
 export interface ResolvedItem {
-  readonly kind: "skill" | "agent" | "remote_mcp";
+  readonly kind: "skill" | "agent" | "remote_mcp" | "github_skill";
   readonly id: string;
   readonly name: string;
   readonly version: number | null;
+  /** A listed public GitHub Skill: the repository and the exact commit Frely's page shows. Frely holds no files for it. */
+  readonly github?: { readonly login: string; readonly repo: string; readonly commitSha: string; readonly license: string | null; readonly hasScripts: boolean };
   /** An Agent's manifest as this account sees it. */
   readonly manifest?: unknown;
   /** Only after items.claim_install: the account that claimed and installs. */
@@ -17,7 +19,7 @@ export interface ResolvedItem {
   readonly connect?: Record<string, unknown>;
 }
 
-const KINDS = new Set(["skill", "agent", "remote_mcp"]);
+const KINDS = new Set(["skill", "agent", "remote_mcp", "github_skill"]);
 
 function asResolved(value: Record<string, unknown>): ResolvedItem {
   if (typeof value.kind !== "string" || !KINDS.has(value.kind) || typeof value.id !== "string" || typeof value.name !== "string") throw new CloudToolError("invalid_operation_output");

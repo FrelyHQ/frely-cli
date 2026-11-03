@@ -68,7 +68,7 @@ export class CloudItemError extends Error {
   }
 }
 
-interface ItemFile { readonly path: string; readonly contentBase64: string; readonly isScript: boolean; readonly sealed?: true }
+export interface ItemFile { readonly path: string; readonly contentBase64: string; readonly isScript: boolean; readonly sealed?: true }
 interface ItemManifest { readonly id: string; readonly kind: "prompt" | "skill"; readonly slug: string; readonly displayName: string; readonly version: number; readonly hasScripts: boolean; readonly premiumFileCount: number; readonly scanned: boolean }
 
 export interface CloudItemInstallResult {
@@ -221,7 +221,7 @@ function parseContent(value: Record<string, unknown>, skillId: string | null): {
 }
 
 /** Item paths are canonical forward-slash relative paths on every platform; `join` maps them to the OS. */
-function safeRelativePath(path: string): string {
+export function safeRelativePath(path: string): string {
   const normalized = posix.normalize(path);
   if (!path || path.includes("\0") || path.includes("\\") || posix.isAbsolute(path) || win32.isAbsolute(path) || normalized.split("/").some((part) => part === ".." || part === "" || part === "." || part.includes(":"))) {
     throw new CloudItemError("item_invalid", "Frely returned an unsafe file path.");

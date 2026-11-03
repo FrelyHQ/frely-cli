@@ -59,7 +59,8 @@ import { runComputerCommand } from "./computer/command.js";
 import { runComputerMcpServer } from "./computer/server.js";
 import { agentManifestUrl, installSkillAdapter, publicSkillAccessError, removeSkillAdapter, resolveAgentTarget, SkillAccessError, skillAdapterStatus } from "./skill/access.js";
 import type { SkillHost, SkillScope } from "./skill/managed.js";
-import { CloudToolError, installCloudItem, parseItemRef, trustCloudItem } from "./skill/cloud-item.js";
+import { CloudItemError, CloudToolError, installCloudItem, parseItemRef, trustCloudItem } from "./skill/cloud-item.js";
+import { installGithubItem } from "./skill/github-item.js";
 import { checkItemUpdates, updateCloudItem } from "./skill/item-update.js";
 import { runSealedScript } from "./skill/sealed-run.js";
 import { installEntrySkill, ensureEntrySkill } from "./skill/entry.js";
@@ -429,6 +430,15 @@ async function main(): Promise<void> {
       // A server without items.resolve: the older name-by-name lookup, unchanged.
       const installed = await installAgent(itemRef, args, { extra, accountLine }).then(() => true, (error: unknown) => { if (error instanceof SkillAccessError && error.code === "agent_not_found") return false; throw error; });
       if (installed) return;
+    }
+    if (/^github-/iu.test(itemRef) && resolved?.kind !== "github_skill") throw new CloudItemError("input_invalid", resolved === null ? "Installing a GitHub Skill needs a login: run frely login first." : `${itemRef} is not a listed GitHub Skill. Open its page on Frely once so it is listed.`);
+    if (resolved?.kind === "github_skill" && resolved.github) {
+      const installed = await installGithubItem({ ...resolved.github, commitSha: resolved.github.commitSha, host, scope, ...(dir ? { dir } : {}) });
+      const entry = await ensureEntrySkill({ host, scope, ...(dir ? { dir } : {}) });
+      if (json) { stdout.write(`${JSON.stringify({ ...installed, ...extra, ...(entry ? { entrySkill: entry.path } : {}) })}\n`); return; }
+      stdout.write(`${accountLine}GitHub Skill: ${installed.name} (commit ${installed.commit.slice(0, 7)}, license ${installed.license ?? "none declared"})\nPath: ${installed.path}\nFiles: ${installed.files}\n${entry ? `Frely Skill: ${entry.path}\n` : ""}`);
+      stdout.write(`Frely did not scan this Skill and does not host it; the files came straight from GitHub at that commit and were saved without execute permission.${installed.hasScripts ? " It contains scripts." : ""} Read every file in it before you use it (look for deleting files, reading credentials, unrelated network calls, obfuscated code, or instructions to hide actions from the user). If it is safe, run: frely item trust ${installed.path}\nRestart or reload the agent session so it rescans Skills.\n`);
+      return;
     }
     const call = (name: string, input: Record<string, unknown>) => name === "mcps.connect" && resolved?.connect ? Promise.resolve(resolved.connect) : callCloudTool(name, input);
     const value = await (resolved?.kind === "remote_mcp"
