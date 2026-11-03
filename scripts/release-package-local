@@ -194,7 +194,7 @@ if (( ! resume )); then
 fi
 command -v gh >/dev/null 2>&1 || { echo "gh is required to create the GitHub Release" >&2; exit 1; }
 if ! npm whoami >/dev/null 2>&1; then
-  echo "npm is not logged in on this machine; run 'npm login' (needs publish rights for frely-cli and @frelyhq) and rerun" >&2
+  echo "npm is not logged in on this machine. Normal releases use ./scripts/release (GitHub Actions publishes with the NPM_TOKEN secret, no npm login needed). Only for the emergency local path: run 'npm login' (needs publish rights for frely-cli and @frelyhq), disable publish.yml in Actions so the tag push does not publish twice, and rerun" >&2
   exit 1
 fi
 
