@@ -47,9 +47,18 @@ verify() {
   else fail "A system SHA-256 verifier is required."; fi
   [ "$actual" = "$expected" ]
 }
+# GitHub carries each executable gzip-compressed (<asset>.gz); the .sha256 beside it is the checksum of the decompressed file.
+# Releases published before gzip assets existed have only the plain executable, so a missing .gz falls back to it.
 from_github() {
   if [ "$version" = latest ]; then base="$github/latest/download"; else base="$github/download/v${version#v}"; fi
-  fetch "$base/$asset" "$stage/$asset" && fetch "$base/$asset.sha256" "$stage/$asset.sha256" && verify "$stage/$asset" "$stage/$asset.sha256"
+  fetch "$base/$asset.sha256" "$stage/$asset.sha256" || return 1
+  if fetch "$base/$asset.gz" "$stage/$asset.gz"; then
+    # Cap the decompressed size (200 MB); a truncated file fails the checksum below.
+    gzip -dc "$stage/$asset.gz" | head -c 209715200 > "$stage/$asset"; rm -f "$stage/$asset.gz"
+  else
+    fetch "$base/$asset" "$stage/$asset" || return 1
+  fi
+  verify "$stage/$asset" "$stage/$asset.sha256"
 }
 # from_npm REGISTRY: the package tarball holds package/frely and package/frely.sha256.
 from_npm() {
@@ -78,7 +87,7 @@ probe_speed() { # probe_speed "<bytes> <speed>" -> integer speed, 0 when nothing
 }
 probe_github() {
   if [ "$version" = latest ]; then base="$github/latest/download"; else base="$github/download/v${version#v}"; fi
-  probe_speed "$(probe_one "$base/$asset")" > "$stage/probe.github"
+  probe_speed "$(probe_one "$base/$asset.gz")" > "$stage/probe.github"
 }
 probe_npmmirror() {
   registry=https://registry.npmmirror.com wanted="${version#v}" started="$(date +%s)"
@@ -110,7 +119,7 @@ for source in $sources; do
     *) fail "Unknown install source: $source (use github, npmmirror, npmjs)." ;;
   esac
   [ -z "$downloaded" ] || break
-  rm -rf "$stage/$asset" "$stage/$asset.sha256" "$stage/npm" "$stage/package.tgz" "$stage/meta.json"
+  rm -rf "$stage/$asset" "$stage/$asset.gz" "$stage/$asset.sha256" "$stage/npm" "$stage/package.tgz" "$stage/meta.json"
   printf 'Frely: %s unavailable or failed verification; trying the next source.\n' "$source" >&2
 done
 [ -n "$downloaded" ] || fail "No source supplied a verified release (checksum mismatch or no connection); installation was not changed."

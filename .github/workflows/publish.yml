@@ -176,8 +176,25 @@ jobs:
             test -f "artifacts/frely-${target}${suffix}.sha256"
           done
           (cd artifacts && for checksum in frely-*.sha256; do sha256sum -c "$checksum"; done)
-          cp install.sh install.ps1 start.sh start.ps1 artifacts/
-          find artifacts -maxdepth 1 -type f -print | sort
+          # GitHub carries only the gzip of each executable (about 40% of the size); the .sha256 and .sig beside it stay those of the
+          # decompressed binary. npm platform packages are built from artifacts/ and keep the original executables.
+          mkdir github-assets
+          for target in "${targets[@]}"; do
+            suffix=""
+            [[ "$target" == windows-* ]] && suffix=".exe"
+            name="frely-${target}${suffix}"
+            gzip -9 -n -c "artifacts/${name}" > "github-assets/${name}.gz"
+            expected="$(awk 'NR == 1 { print $1 }' "artifacts/${name}.sha256")"
+            actual="$(gunzip -c "github-assets/${name}.gz" | sha256sum | awk '{print $1}')"
+            test "$expected" = "$actual" || { echo "${name}.gz does not decompress to the checksummed executable" >&2; exit 1; }
+            cp "artifacts/${name}.sha256" "github-assets/"
+            if [[ -f "artifacts/${name}.sha256.sig" ]]; then cp "artifacts/${name}.sha256.sig" "github-assets/"; fi
+          done
+          cp install.sh install.ps1 start.sh start.ps1 github-assets/
+          find github-assets -maxdepth 1 -type f -print | sort
+          if find github-assets -maxdepth 1 -type f -name 'frely-*' ! -name '*.gz' ! -name '*.sha256' ! -name '*.sig' | grep .; then
+            echo "A raw executable must not be uploaded to the GitHub Release." >&2; exit 1
+          fi
 
       - name: Create GitHub Release
         env:
@@ -185,7 +202,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release create "$GITHUB_REF_NAME" artifacts/* \
+          gh release create "$GITHUB_REF_NAME" github-assets/* \
             --verify-tag \
             --title "frely-cli $GITHUB_REF_NAME" \
             --generate-notes

@@ -4,6 +4,7 @@ import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import { checkReleaseSignature, releaseSigningMessage } from "./release-signature.js";
 import { prepareStandalone } from "./update.js";
 import { standaloneAsset } from "./release.js";
@@ -35,7 +36,7 @@ test("an update whose executable or checksum was swapped fails and leaves the in
     { version: "1.2.3", sources: [{ kind: "github", baseUrl: "https://example.invalid" }] },
     async (url, path) => {
       if (url.endsWith(".sig")) { if (signature === undefined) throw new Error("404"); await writeFile(path, signature); return; }
-      await writeFile(path, url.endsWith(".sha256") ? `${hash(checksumBody)}  frely\n` : body);
+      await writeFile(path, url.endsWith(".sha256") ? `${hash(checksumBody)}  frely\n` : url.endsWith(".gz") ? gzipSync(body) : body);
     }, async () => "1.2.3", undefined, { keys });
   const good = signed("1.2.3", asset, "new");
   await (await prepare("new", "new", good)).cleanup();
