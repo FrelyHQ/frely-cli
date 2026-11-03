@@ -72,7 +72,7 @@ test("a run reads files through tool rounds, refuses .env and ends with the answ
     assert.match(seen[0]!.task, /^plan it\n\n---\nLocal workspace/u);
     assert.match(seen[0]!.task, /README\.md/u);
     assert.doesNotMatch(seen[0]!.task, /\.env/u);
-    assert.equal(seen[0]!.tools, 7);
+    assert.equal(seen[0]!.tools, 8);
     assert.deepEqual(seen[0]!.items, []);
     assert.equal(seen[1]!.items.length, 2);
     assert.equal(seen[2]!.items.length, 4);

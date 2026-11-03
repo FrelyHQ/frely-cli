@@ -35,7 +35,7 @@ test("local policy refuses git internals, env files, key material and package cr
 });
 
 test("tools match the FrelyMCP workspace tool names", () => {
-  assert.deepEqual(READ_TOOLS.map((tool) => tool.name), ["workspace_info", "list_directory", "find_files", "search_files", "read_file", "read_file_lines", "stat_path"]);
+  assert.deepEqual(READ_TOOLS.map((tool) => tool.name), ["workspace_info", "list_directory", "find_files", "search_files", "find_definition", "read_file", "read_file_lines", "stat_path"]);
 });
 
 test("reads allowed files and records them", async () => {
@@ -87,6 +87,24 @@ test("listings, file search and content search leave out denied and ignored file
     assert.ok(found.includes("src/main.ts"));
     for (const hidden of [".env", "server.pem", "ignored.txt", "build/out.js"]) assert.ok(!found.includes(hidden), hidden);
     assert.deepEqual(JSON.parse(search!.output), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("search skips git-ignored files before counting results, and find_definition locates declarations", async () => {
+  const root = await repo();
+  try {
+    for (let index = 0; index < 5; index += 1) await writeFile(join(root, "build", `gen${index}.js`), "needle\n");
+    await writeFile(join(root, "src", "util.ts"), "// needle\nexport function parseConfig(text: string) {\n  return text;\n}\nparseConfig(\"x\");\n");
+    const bridge = await WorkspaceReadBridge.open(root);
+    const [search, defs] = await bridge.answerRound([
+      call("search_files", { query: "needle", maxResults: 1 }),
+      call("find_definition", { name: "parseConfig" }, "c2"),
+    ]);
+    assert.deepEqual((JSON.parse(search!.output) as { path: string }[]).map((hit) => hit.path), ["src/util.ts"]);
+    const found = JSON.parse(defs!.output) as { path: string; line: number }[];
+    assert.deepEqual(found.map((hit) => `${hit.path}:${hit.line}`), ["src/util.ts:2"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -38,6 +38,9 @@ export const READ_TOOLS: readonly CallerToolDefinition[] = Object.freeze([
   tool("search_files", "Search file contents for text (or a regular expression).", {
     path: { type: "string" }, query: { type: "string" }, regex: { type: "boolean" }, caseSensitive: { type: "boolean" }, maxResults: { type: "integer" }, contextLines: { type: "integer" },
   }, ["query"]),
+  tool("find_definition", "Find where an identifier (function, class, type, method, constant) is defined; returns file, line and the declaration line.", {
+    name: { type: "string" }, path: { type: "string" }, maxResults: { type: "integer" }, contextLines: { type: "integer" },
+  }, ["name"]),
   tool("read_file", "Read a text file (up to 64 KiB per call; use startLine/endLine for the rest).", { path: { type: "string" }, startLine: { type: "integer" }, endLine: { type: "integer" } }, ["path"]),
   tool("read_file_lines", "Read a line range of a text file.", { path: { type: "string" }, startLine: { type: "integer" }, endLine: { type: "integer" } }, ["path", "startLine"]),
   tool("stat_path", "Size and type of a file or directory.", { path: { type: "string" } }, ["path"]),
@@ -199,10 +202,19 @@ export class WorkspaceReadBridge {
           caseSensitive: args.caseSensitive === true,
           maxResults: intArg(args, "maxResults", 50, 1, 500),
           contextLines: intArg(args, "contextLines", 0, 0, 10),
+          gitignore: true,
         });
-        const kept = await this.visible(hits.map((hit) => ({ hit, path: hit.path })));
-        for (const { hit } of kept) this.noteRead(hit.path, Buffer.byteLength(hit.text, "utf8"), log);
-        return JSON.stringify(kept.map(({ hit }) => hit));
+        return this.keptHits(hits, log);
+      }
+      case "find_definition": {
+        const path = pathArg(args, "path", ".");
+        if (localDenyReason(path) !== null) return DENIED;
+        const hits = await this.workspace.findDefinition(path, stringArg(args, "name"), {
+          maxResults: intArg(args, "maxResults", 20, 1, 200),
+          contextLines: intArg(args, "contextLines", 0, 0, 10),
+          gitignore: true,
+        });
+        return this.keptHits(hits, log);
       }
       case "read_file":
       case "read_file_lines": {
@@ -221,6 +233,12 @@ export class WorkspaceReadBridge {
       default:
         return `error: unknown tool ${name.slice(0, 64)}`;
     }
+  }
+
+  private async keptHits(hits: ReadonlyArray<{ path: string; text: string }>, log: (path: string) => void): Promise<string> {
+    const kept = await this.visible(hits.map((hit) => ({ hit, path: hit.path })));
+    for (const { hit } of kept) this.noteRead(hit.path, Buffer.byteLength(hit.text, "utf8"), log);
+    return JSON.stringify(kept.map(({ hit }) => hit));
   }
 
   private async ignored(path: string): Promise<boolean> {
