@@ -3,8 +3,10 @@ import { constants } from "node:fs";
 import { lstat, mkdir, open, readdir, rename, rmdir, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { linkSkill, unlinkSkill, type LinkOutcome, type LinkRecord } from "./agent-links.js";
 
-export type SkillHost = "chatgpt" | "codex" | "claude-code" | "pi" | "generic";
+export const SKILL_HOSTS = ["chatgpt", "codex", "claude-code", "pi", "workbuddy", "codebuddy", "generic"] as const;
+export type SkillHost = (typeof SKILL_HOSTS)[number];
 export type SkillScope = "global" | "project";
 
 export interface ManagedSkillRecord {
@@ -25,6 +27,8 @@ export interface ManagedSkillRecord {
   readonly installedAt: string;
   /** Hash of a Skill file being written; set only while a write is in flight. */
   readonly pendingSha256?: string;
+  /** Links (or copies) of this Skill folder in other agents' Skill folders. */
+  readonly links?: readonly LinkRecord[];
 }
 
 export class ManagedSkillError extends Error {
@@ -34,15 +38,9 @@ export class ManagedSkillError extends Error {
   }
 }
 
-export function managedSkillRoot(host: SkillHost, scope: SkillScope, cwd = process.cwd(), home = homedir()): string {
-  if (scope === "project") {
-    if (host === "claude-code") return join(resolve(cwd), ".claude", "skills");
-    if (host === "pi") return join(resolve(cwd), ".pi", "skills");
-    return join(resolve(cwd), ".agents", "skills");
-  }
-  if (host === "claude-code") return join(home, ".claude", "skills");
-  if (host === "pi") return join(home, ".pi", "agent", "skills");
-  return join(home, ".agents", "skills");
+/** Every Skill has one copy, in `.agents/skills`; agents that do not read that folder get links (see agent-links.ts). */
+export function managedSkillRoot(_host: SkillHost, scope: SkillScope, cwd = process.cwd(), home = homedir()): string {
+  return scope === "project" ? join(resolve(cwd), ".agents", "skills") : join(home, ".agents", "skills");
 }
 
 /** The Skill's own name, as its creator wrote it; nothing is added to it. */
@@ -56,10 +54,10 @@ export function installDirName(installName: string): string {
 }
 
 export async function writeManagedSkill(input: {
-  readonly record: Omit<ManagedSkillRecord, "sha256" | "installedAt" | "pendingSha256">;
+  readonly record: Omit<ManagedSkillRecord, "sha256" | "installedAt" | "pendingSha256" | "links">;
   readonly content: string;
   readonly home?: string;
-}): Promise<ManagedSkillRecord> {
+}): Promise<ManagedSkillRecord & { readonly linkOutcomes: readonly LinkOutcome[] }> {
   const home = input.home ?? homedir();
   const current = await readOwnedFile(input.record.skillPath);
   const previous = await readManagedSkill(input.record.distributionId, home).catch(() => null);
@@ -72,9 +70,16 @@ export async function writeManagedSkill(input: {
   // The record goes first with the new hash pending, so a crash between the two writes is recoverable.
   await atomicWrite(recordPath(home, stamp.distributionId), `${JSON.stringify({ ...stamp, sha256: current === null ? sha256 : hashText(current), pendingSha256: sha256 }, null, 2)}\n`);
   await atomicWrite(input.record.skillPath, input.content);
-  const record: ManagedSkillRecord = Object.freeze({ ...stamp, sha256 });
+  const folder = dirname(input.record.skillPath);
+  const linked = await linkSkill({
+    canonical: folder, home, host: input.record.host,
+    ...(previous?.links ? { previous: previous.links } : {}),
+    ...(previous ? { previousFiles: { "SKILL.md": previous.sha256 } } : {}),
+    adopt: async (path) => previous != null && resolve(dirname(previous.skillPath)) === resolve(path) && await readOwnedFile(previous.skillPath).then((text) => text !== null && hashText(text) === previous.sha256, () => false),
+  });
+  const record: ManagedSkillRecord = Object.freeze({ ...stamp, sha256, ...(linked.links.length > 0 ? { links: linked.links } : {}) });
   await atomicWrite(recordPath(home, record.distributionId), `${JSON.stringify(record, null, 2)}\n`);
-  return record;
+  return Object.freeze({ ...record, linkOutcomes: linked.outcomes });
 }
 
 export async function readManagedSkill(distributionId: string, home = homedir()): Promise<ManagedSkillRecord | null> {
@@ -84,10 +89,10 @@ export async function readManagedSkill(distributionId: string, home = homedir())
   try { value = JSON.parse(text); } catch { throw new ManagedSkillError("local_state_invalid", "Installed Frely Skill metadata is invalid."); }
   const item = recordValue(value);
   const authMode = item?.authMode === undefined ? "account" : item.authMode;
-  if (!item || item.version !== 1 || item.distributionId !== distributionId || typeof item.manifestUrl !== "string" || typeof item.modelId !== "string" || typeof item.mcpUrl !== "string" || typeof item.name !== "string" || typeof item.slug !== "string" || typeof item.skillPath !== "string" || typeof item.sha256 !== "string" || typeof item.installedAt !== "string" || !["chatgpt", "codex", "claude-code", "pi", "generic"].includes(String(item.host)) || !["global", "project"].includes(String(item.scope)) || !["account", "api-key"].includes(String(authMode))) {
+  if (!item || item.version !== 1 || item.distributionId !== distributionId || typeof item.manifestUrl !== "string" || typeof item.modelId !== "string" || typeof item.mcpUrl !== "string" || typeof item.name !== "string" || typeof item.slug !== "string" || typeof item.skillPath !== "string" || typeof item.sha256 !== "string" || typeof item.installedAt !== "string" || !(SKILL_HOSTS as readonly string[]).includes(String(item.host)) || !["global", "project"].includes(String(item.scope)) || !["account", "api-key"].includes(String(authMode))) {
     throw new ManagedSkillError("local_state_invalid", "Installed Frely Skill metadata is invalid.");
   }
-  return Object.freeze({ ...item, authMode }) as unknown as ManagedSkillRecord;
+  return Object.freeze({ ...item, authMode, links: parseLinks(item.links) }) as unknown as ManagedSkillRecord;
 }
 
 /** The installed Agent whose install name is `installName`, or null; records written before names existed never match. */
@@ -110,6 +115,7 @@ export async function managedSkillState(record: ManagedSkillRecord): Promise<"ma
 export async function removeManagedSkill(record: ManagedSkillRecord, home = homedir()): Promise<void> {
   const state = await managedSkillState(record);
   if (state === "modified") throw new ManagedSkillError("managed_skill_modified", "Managed Skill was modified; refusing to remove it.");
+  await unlinkSkill(record.links, dirname(record.skillPath), { "SKILL.md": record.sha256 });
   await unlink(record.skillPath).catch(ignoreAbsent);
   await rmdir(dirname(record.skillPath)).catch(() => undefined);
   await unlink(recordPath(home, record.distributionId)).catch(ignoreAbsent);
@@ -149,6 +155,14 @@ async function atomicWrite(path: string, value: string): Promise<void> {
   let renamed = false;
   try { await assertManagedSkillPath(path); await rename(temporary, path); renamed = true; }
   finally { if (!renamed) await unlink(temporary).catch(() => undefined); }
+}
+
+export function parseLinks(value: unknown): LinkRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const link = recordValue(entry);
+    return link && typeof link.path === "string" && (link.mode === "symlink" || link.mode === "junction" || link.mode === "copy") ? [{ path: link.path, mode: link.mode as LinkRecord["mode"] }] : [];
+  });
 }
 
 function recordPath(home: string, distributionId: string): string { return join(home, ".config", "frely", "skills", `${distributionId}.json`); }

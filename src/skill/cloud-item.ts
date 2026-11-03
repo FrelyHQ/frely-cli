@@ -5,7 +5,8 @@ import { homedir } from "node:os";
 import { dirname, join, posix, resolve, win32 } from "node:path";
 import { assertManagedSkillPath, installDirName, managedSkillRoot, type SkillHost, type SkillScope } from "./managed.js";
 import { loadOrCreateDeviceSealKey, parseLease, stubFor, type SealedLease } from "./sealed.js";
-import { filesDigest, readInstall, untouched, writeInstall, type InstallRecord } from "./registry.js";
+import { filesDigest, deleteInstall, readInstall, untouched, writeInstall, type InstallRecord } from "./registry.js";
+import { canonicalFolder, copyIntoCopies, linkSkill, type LinkOutcome } from "./agent-links.js";
 
 /** New ids are `skill_<24 hex>`; `cloud_skill_…` ids from before the prefix was shortened still work. */
 export const CLOUD_SKILL_ID = /^(?:cloud_)?skill_[0-9a-f]{24}$/u;
@@ -86,6 +87,8 @@ export interface CloudItemInstallResult {
   readonly needsReview: boolean;
   /** True when Frely's automated scan passed for exactly this version, so the item is already marked reviewed. */
   readonly scanned: boolean;
+  /** Where the Skill was also linked (or copied) for other agents, and what was skipped. */
+  readonly links: readonly LinkOutcome[];
 }
 
 /**
@@ -137,18 +140,22 @@ export async function installCloudItem(input: {
   // An item keeps the name its creator gave it, exactly like a Skill copied there by hand.
   // The folder carries the owner too (`username-name`), so two items with the same name from different owners can both be installed. An id-only install has no owner to name.
   const folder = input.name !== undefined ? installDirName(input.name) : manifest.slug;
-  const target = input.target !== undefined ? resolve(input.target) : manifest.kind === "skill"
+  // A Skill installed straight into an agent's folder by an older version is updated in `.agents/skills`; the old folder becomes a link.
+  const target = input.target !== undefined ? (manifest.kind === "skill" ? canonicalFolder(input.target, home) : resolve(input.target)) : manifest.kind === "skill"
     ? join(managedSkillRoot(input.host ?? "generic", input.scope ?? "global", resolve(cwd, input.scope === "project" ? input.dir ?? "." : "."), home), folder)
     : join(resolve(cwd, input.dir ?? "."), folder);
   const placed = placeSealedScripts(files);
-  const written = await writeItemFolder(target, manifest.id, manifest.kind, placed.files, home, manifest.version);
-  if (lease !== null && placed.sealed > 0) await writeLease(target, { skillId: manifest.id, version: manifest.version, lease });
+  const { linkOutcomes, ...written } = await writeItemFolder(target, manifest.id, manifest.kind, placed.files, home, manifest.version, input.host ? { host: input.host } : {});
+  if (lease !== null && placed.sealed > 0) {
+    await writeLease(target, { skillId: manifest.id, version: manifest.version, lease });
+    await copyIntoCopies(written.links ?? [], target, SEALED_LEASE_FILE);
+  }
   // A passing scan is bound to this version's files on the server, so the local review is already done.
   const scanned = manifest.kind === "skill" && manifest.scanned;
   if (scanned) await writeInstall({ ...written, trustedDigest: filesDigest(written.files) }, home);
   return Object.freeze({
     id: manifest.id, kind: manifest.kind, name: manifest.displayName, version: manifest.version,
-    path: target, files: files.length, premium, hasScripts: manifest.hasScripts, sealedScripts: placed.sealed, needsReview: manifest.kind === "skill" && !scanned, scanned,
+    path: target, files: files.length, premium, hasScripts: manifest.hasScripts, sealedScripts: placed.sealed, needsReview: manifest.kind === "skill" && !scanned, scanned, links: linkOutcomes,
   });
 }
 
@@ -234,11 +241,11 @@ export function safeRelativePath(path: string): string {
  * exists is replaced only when Frely wrote it for this same item and nothing in
  * it was edited since.
  */
-export async function writeItemFolder(target: string, itemId: string, kind: InstallRecord["kind"], files: readonly ItemFile[], home: string, itemVersion?: number): Promise<InstallRecord> {
+export async function writeItemFolder(target: string, itemId: string, kind: InstallRecord["kind"], files: readonly ItemFile[], home: string, itemVersion?: number, options: { readonly host?: SkillHost } = {}): Promise<InstallRecord & { readonly linkOutcomes: readonly LinkOutcome[] }> {
   await assertManagedSkillPath(join(target, "SKILL.md"));
   const exists = await lstat(target).then(() => true, (error: unknown) => { if (isAbsent(error)) return false; throw error; });
+  const previous = exists ? await readInstall(target, home) : null;
   if (exists) {
-    const previous = await readInstall(target, home);
     if (!previous || previous.itemId !== itemId) {
       throw new CloudItemError("unmanaged_item_exists", `A folder Frely did not install for this item already exists at ${target}. Move it away or install somewhere else.`);
     }
@@ -253,9 +260,22 @@ export async function writeItemFolder(target: string, itemId: string, kind: Inst
     await atomicWrite(join(target, file.path), content);
     written[file.path] = hash(content);
   }
-  const record: InstallRecord = { version: 1, kind, itemId, ...(itemVersion === undefined ? {} : { itemVersion }), path: resolve(target), files: written };
+  // A Skill's one copy stays here; agents that do not read this folder get a link to it. Prompts are not Skills and are never linked.
+  const linked = kind === "prompt" ? { links: [], outcomes: [] } : await linkSkill({
+    canonical: target, home, ...(options.host ? { host: options.host } : {}),
+    ...(previous?.links ? { previous: previous.links } : {}),
+    ...(previous ? { previousFiles: previous.files } : {}),
+    // The same Skill installed the way older versions did (straight into an agent's folder), untouched, gives way to the link.
+    adopt: async (path) => {
+      const old = await readInstall(path, home).catch(() => null);
+      if (!old || old.itemId !== itemId || !await untouched(old)) return false;
+      await deleteInstall(path, home);
+      return true;
+    },
+  });
+  const record: InstallRecord = { version: 1, kind, itemId, ...(itemVersion === undefined ? {} : { itemVersion }), path: resolve(target), files: written, ...(linked.links.length > 0 ? { links: linked.links } : {}) };
   await writeInstall(record, home);
-  return record;
+  return Object.freeze({ ...record, linkOutcomes: linked.outcomes });
 }
 
 async function atomicWrite(path: string, value: Buffer): Promise<void> {

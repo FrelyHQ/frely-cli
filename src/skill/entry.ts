@@ -1,6 +1,7 @@
 import { rmdir, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { unlinkSkill, type LinkOutcome } from "./agent-links.js";
 import { CloudItemError, writeItemFolder } from "./cloud-item.js";
 import { managedSkillRoot, type SkillHost, type SkillScope } from "./managed.js";
 import { deleteInstall, listInstalls, readInstall, untouched } from "./registry.js";
@@ -46,6 +47,7 @@ Never put keys or tokens on a command line or in a file; use \`--api-key-stdin\`
 export interface EntrySkillInstallResult {
   readonly name: "frely";
   readonly path: string;
+  readonly links: readonly LinkOutcome[];
 }
 
 /**
@@ -80,8 +82,8 @@ export async function installEntrySkill(input: {
   const home = input.home ?? homedir();
   const project = resolve(input.cwd ?? process.cwd(), input.dir ?? ".");
   const path = join(managedSkillRoot(input.host ?? "generic", input.scope ?? "global", project, home), "frely");
-  await writeItemFolder(path, ENTRY_SKILL_ID, "entry", [{ path: "SKILL.md", contentBase64: Buffer.from(ENTRY_SKILL).toString("base64"), isScript: false }], home);
-  return Object.freeze({ name: "frely", path });
+  const written = await writeItemFolder(path, ENTRY_SKILL_ID, "entry", [{ path: "SKILL.md", contentBase64: Buffer.from(ENTRY_SKILL).toString("base64"), isScript: false }], home, undefined, input.host ? { host: input.host } : {});
+  return Object.freeze({ name: "frely", path, links: written.linkOutcomes });
 }
 
 /** Every entry Skill Frely wrote, in any host and scope, that is still exactly as written. */
@@ -94,6 +96,7 @@ export async function untouchedEntrySkills(home = homedir()): Promise<string[]> 
 export async function removeEntrySkill(folder: string, home = homedir()): Promise<void> {
   const record = await readInstall(folder, home);
   if (!record || record.kind !== "entry" || !await untouched(record)) throw new Error("the Skill was modified; left in place");
+  await unlinkSkill(record.links, folder, record.files);
   for (const path of Object.keys(record.files)) await unlink(join(folder, path));
   await rmdir(folder).catch(() => undefined);
   await deleteInstall(folder, home);

@@ -90,7 +90,7 @@ test("installs a Skill folder that uses the MCP through frely item", async () =>
   const home = await realpath(await mkdtemp(join(tmpdir(), "frely-mcp-")));
   try {
     const result = await installRemoteMcpSkill({ ref: "alice/crm", call: connector(), store: memoryStore(), fetchImpl: server(() => "key-1"), host: "claude-code", scope: "global", home });
-    assert.equal(result.path, join(home, ".claude", "skills", "alice-crm"));
+    assert.equal(result.path, join(home, ".agents", "skills", "alice-crm"));
     assert.equal(result.tools, 1);
     const skill = await readFile(join(result.path, "SKILL.md"), "utf8");
     assert.match(skill, /^---\nname: alice-crm\ndescription: Use the Frely MCP alice\/crm \(tools: crm_find_contacts\)/u);

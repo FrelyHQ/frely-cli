@@ -1,4 +1,5 @@
 import { installDirName, managedSkillRoot, type SkillHost, type SkillScope } from "./managed.js";
+import type { LinkOutcome } from "./agent-links.js";
 import { CloudItemError, safeRelativePath, writeItemFolder, type ItemFile } from "./cloud-item.js";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -25,6 +26,7 @@ export interface GithubItemInstallResult {
   readonly hasScripts: boolean;
   /** Always true: Frely does not scan files it does not hold. */
   readonly needsReview: true;
+  readonly links: readonly LinkOutcome[];
 }
 
 /**
@@ -68,6 +70,6 @@ export async function installGithubItem(input: {
   const name = `github-${login.toLowerCase()}/${repo.toLowerCase()}`;
   const target = join(managedSkillRoot(input.host ?? "generic", input.scope ?? "global", resolve(cwd, input.scope === "project" ? input.dir ?? "." : "."), home), installDirName(name));
   const itemId = `github:${login.toLowerCase()}/${repo.toLowerCase()}`;
-  await writeItemFolder(target, itemId, "skill", files, home);
-  return Object.freeze({ id: itemId, name, commit: commitSha, license: input.license, path: target, files: files.length, hasScripts: input.hasScripts, needsReview: true });
+  const written = await writeItemFolder(target, itemId, "skill", files, home, undefined, input.host ? { host: input.host } : {});
+  return Object.freeze({ id: itemId, name, commit: commitSha, license: input.license, path: target, files: files.length, hasScripts: input.hasScripts, needsReview: true as const, links: written.linkOutcomes });
 }

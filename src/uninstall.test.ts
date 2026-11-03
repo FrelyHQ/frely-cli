@@ -229,7 +229,7 @@ test("the frely entry Skill is removed with the program unless the user edited i
   const f = await fixture();
   const home = await realpath(f.home);
   const mine = await installEntrySkill({ host: "claude-code", home });
-  const edited = await installEntrySkill({ host: "pi", home });
+  const edited = await installEntrySkill({ host: "pi", scope: "project", dir: join(home, "work"), home });
   await writeFile(join(edited.path, "SKILL.md"), "mine");
   assert.equal(await runUninstall(["--yes"], io().value, f.deps), 0);
   assert.equal(await exists(mine.path), false);

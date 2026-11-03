@@ -51,7 +51,7 @@ npm install --global --ignore-scripts frely-cli@latest
 
 ```sh
 frely login --email <you@example.com>   # 再运行：frely login --code <6 位验证码>
-frely skill install --host <claude-code|codex|pi|generic>
+frely skill install --host <claude-code|codex|pi|workbuddy|codebuddy|generic>
 ```
 
 ## 常用命令
