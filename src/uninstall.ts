@@ -255,6 +255,10 @@ $ErrorActionPreference = 'SilentlyContinue'
 $file = $env:FRELY_UNINSTALL_FILE
 Wait-Process -Id ([int]$env:FRELY_UNINSTALL_PID) -Timeout 60
 for ($i = 0; $i -lt 50 -and (Test-Path -LiteralPath $file); $i++) { Remove-Item -LiteralPath $file -Force; if (Test-Path -LiteralPath $file) { Start-Sleep -Milliseconds 200 } }
+foreach ($entry in ($env:PATH -split ';' | Where-Object { $_ })) {
+  $shim = Join-Path ([Environment]::ExpandEnvironmentVariables($entry)) 'frely.cmd'
+  if ((Test-Path -LiteralPath $shim) -and ((Get-Content -LiteralPath $shim -Raw) -match 'frely-shim')) { Remove-Item -LiteralPath $shim -Force }
+}
 $dir = Split-Path -Parent $file
 if ((Test-Path -LiteralPath $dir) -and -not (Get-ChildItem -LiteralPath $dir -Force | Where-Object { $_.Name -notlike '.frely-*' })) {
   Get-ChildItem -LiteralPath $dir -Force | Remove-Item -Recurse -Force
