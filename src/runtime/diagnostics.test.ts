@@ -23,3 +23,17 @@ test("diagnostics exclude untrusted messages, nested data and stack headers", ()
   assert.equal(diagnosticError(new Error("Frely request failed with HTTP 502.")).message, "HTTP 502.");
   assert.doesNotThrow(() => diagnostic(() => { throw new Error("sink failed"); }, "mcp.request_started"));
 });
+
+test("socket close diagnostics keep only numbers and allow-listed error codes", () => {
+  const lines: string[] = [];
+  diagnostic((line) => lines.push(line), "relay.socket_closed", {
+    closeCode: 1006, socketErrorCode: "ECONNRESET", ageMs: 600_123.4, sinceLastPingMs: 14_000, sinceLastPongMs: 29_000, sinceLastFrameMs: 31_000, inflight: 2,
+  });
+  diagnostic((line) => lines.push(line), "relay.socket_closed", { socketErrorCode: "private-value" });
+  const [first, second] = lines.map((line) => JSON.parse(line));
+  assert.deepEqual(
+    { c: first.closeCode, e: first.socketErrorCode, a: first.ageMs, p: first.sinceLastPingMs, o: first.sinceLastPongMs, f: first.sinceLastFrameMs, i: first.inflight },
+    { c: 1006, e: "ECONNRESET", a: 600_123, p: 14_000, o: 29_000, f: 31_000, i: 2 },
+  );
+  assert.equal(second.socketErrorCode, undefined);
+});

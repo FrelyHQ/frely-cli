@@ -249,6 +249,11 @@ export async function serveConnection(
     let finished = false;
     const connectedAt = Date.now();
     let heartbeatNonce: Buffer | undefined;
+    // Timestamps and the socket error code let a disconnect be attributed (relay timeout, network reset, device stall).
+    let lastPingAt = connectedAt;
+    let lastPongAt = connectedAt;
+    let lastFrameAt = connectedAt;
+    let socketErrorCode: string | undefined;
     const ping = () => {
       if (socket.readyState === WebSocket.OPEN) { heartbeatNonce = randomBytes(16); socket.ping(heartbeatNonce); }
     };
@@ -262,6 +267,15 @@ export async function serveConnection(
       if (finished) return;
       finished = true;
       if (!error) diagnostic(log, "relay.closed", { durationMs: Date.now() - connectedAt });
+      else if (!signal.aborted) {
+        const at = Date.now();
+        diagnostic(log, "relay.socket_closed", {
+          ...(error instanceof DeviceTransportConnectionError && error.closeCode !== undefined ? { closeCode: error.closeCode } : {}),
+          ...(socketErrorCode ? { socketErrorCode } : {}),
+          ageMs: at - connectedAt, sinceLastPingMs: at - lastPingAt, sinceLastPongMs: at - lastPongAt, sinceLastFrameMs: at - lastFrameAt,
+          inflight: inflight.size,
+        });
+      }
       unregisterOutput?.();
       clearInterval(heartbeat);
       if (capabilityTimer) clearInterval(capabilityTimer);
@@ -290,15 +304,22 @@ export async function serveConnection(
       void sendCapabilities(socket, capabilities);
       ping();
     });
+    socket.on("ping", () => { lastPingAt = Date.now(); });
     socket.on("pong", (data: Buffer) => {
+      lastPongAt = Date.now();
       if (heartbeatNonce && data.equals(heartbeatNonce)) { heartbeatNonce = undefined; report({ type: "heartbeat" }); }
     });
-    socket.once("error", () => finish(new DeviceTransportConnectionError("Device transport WebSocket failed.", true)));
+    socket.once("error", (socketError: unknown) => {
+      const code = socketError instanceof Error && "code" in socketError && typeof socketError.code === "string" ? socketError.code : undefined;
+      socketErrorCode = code;
+      finish(new DeviceTransportConnectionError("Device transport WebSocket failed.", true));
+    });
     socket.once("close", (code, reason) => {
       if (signal.aborted) finish();
       else finish(closedTransportError(code, reason));
     });
     socket.on("message", (data) => {
+      lastFrameAt = Date.now();
       // WebSocket peers may deliver the same JSON envelope as either a text
       // or a binary frame. `rawDataBuffer` normalizes both forms before the
       // protocol validator parses the JSON.
