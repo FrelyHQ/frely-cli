@@ -142,14 +142,29 @@ try {
   & $download --version | Out-Null
   if ($LASTEXITCODE -ne 0) { throw 'The downloaded executable could not run.' }
   $target = Join-Path $directory 'frely.exe'
+  # Windows cannot replace a running binary. Stop a running background service first (`mcp service stop` is accepted by every
+  # released version; a failed stop, e.g. no service, is ignored) and resume it on whichever binary ends up installed.
+  $serviceStopped = $false
   if (Test-Path -LiteralPath $target) {
     if (((Get-Item -LiteralPath $target -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Existing executable must not be a reparse point.' }
+    try { & $target mcp service stop *> $null; $serviceStopped = ($LASTEXITCODE -eq 0) } catch { $serviceStopped = $false }
     $install = { [IO.File]::Replace($download, $target, $null) }
   } else { $install = { [IO.File]::Move($download, $target) } }
   # A just-written executable can stay locked for a moment (antivirus scan after the archive was decompressed): retry briefly.
+  $installError = $null
   for ($attempt = 1; ; $attempt++) {
-    try { & $install; break } catch { if ($attempt -ge 20) { throw }; Start-Sleep -Milliseconds 500 }
+    try { & $install; break } catch { if ($attempt -ge 20) { $installError = $_; break }; Start-Sleep -Milliseconds 500 }
   }
+  if ($installError) {
+    # Keep the verified download instead of deleting it with the stage directory.
+    $kept = Join-Path $directory ($asset -replace '\.exe$','.new.exe')
+    $keptOk = $false
+    try { Move-Item -LiteralPath $download -Destination $kept -Force; $keptOk = $true } catch { }
+    if ($serviceStopped) { try { & $target mcp service start *> $null } catch { } }
+    if ($keptOk) { throw "Could not replace $target ($($installError.Exception.Message)). It is probably still running: close every terminal or agent using frely, then run: Move-Item -Force `"$kept`" `"$target`"  (the verified download was kept at $kept)." }
+    throw "Could not replace $target ($($installError.Exception.Message)). Close every program using frely and run the installer again."
+  }
+  if ($serviceStopped) { try { & $target mcp service start *> $null } catch { } }
   $pathPersisted = $true
   if ($env:FRELY_INSTALL_NO_PROFILE -ne '1') {
     try {
@@ -199,6 +214,14 @@ try {
   if (($env:PATH -split ';') -notcontains $directory) { $env:PATH = "$directory;$env:PATH" }
   $installedVersion = & $target --version
   Write-Output "Installed Frely $installedVersion at $target"
+  # Another frely earlier on PATH (an old install elsewhere) would still win; warn when it is older than what was just installed.
+  $first = Find-Frely $env:PATH
+  if ($first -and ($first.Trim() -ne $target)) {
+    $firstVersion = try { & $first.Trim() --version } catch { $null }
+    if ($firstVersion -and ([string]$firstVersion).Trim() -ne ([string]$installedVersion).Trim()) {
+      Write-Warning "'frely' on PATH resolves to $($first.Trim()) (version $firstVersion), not the one just installed ($installedVersion). Remove it or put $directory first on PATH, or run: `"$target`" <command>"
+    }
+  }
   if ($env:FRELY_INSTALL_NO_PROFILE -ne '1') {
     if ($freshOk -and $inheritedOk) { Write-Output "Verified: 'frely' resolves from a new terminal and from this process." }
     elseif ($freshOk -and $shim) { Write-Output "Verified: 'frely' resolves from a new terminal; this process' PATH was stale, so a forwarder was added at $shim (open a new terminal if 'frely' is still not found)." }

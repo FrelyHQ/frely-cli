@@ -161,5 +161,13 @@ if [ "$install_dir" = "$HOME/.local/bin" ] && [ "${FRELY_INSTALL_NO_PROFILE:-0}"
   ;; esac
 fi
 printf 'Installed Frely %s at %s\n' "$("$install_dir/frely" --version)" "$install_dir/frely"
+first_frely="$(command -v frely 2>/dev/null || true)"
+if [ -n "$first_frely" ] && [ "$first_frely" != "$install_dir/frely" ]; then
+  first_version="$("$first_frely" --version 2>/dev/null || true)"
+  new_version="$("$install_dir/frely" --version 2>/dev/null || true)"
+  if [ -n "$first_version" ] && [ "$first_version" != "$new_version" ]; then
+    printf "Frely: warning: 'frely' on PATH resolves to %s (version %s), not the one just installed (%s). Remove it, put %s first on PATH, or run %s.\n" "$first_frely" "$first_version" "$new_version" "$install_dir" "$install_dir/frely" >&2
+  fi
+fi
 printf '%s\n' 'Basic commands require no keyring setup. MCP authorization begins with frely link on.'
 case ":${PATH:-}:" in *":$install_dir:"*) ;; *) printf 'This terminal can use %s; new shells use frely.\n' "$install_dir/frely" ;; esac
