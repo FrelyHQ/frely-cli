@@ -41,3 +41,46 @@ test("find and search skip node_modules", async () => {
   assert.equal(results.length, 1);
   assert.equal(results[0]?.path, "src/main.ts");
 });
+
+test("search gives the same hits with ripgrep and with the fallback walk", async () => {
+  const root = await mkdtemp(join(tmpdir(), "frely-cli-workspace-"));
+  await mkdir(join(root, "src"), { recursive: true });
+  await mkdir(join(root, ".github"), { recursive: true });
+  await writeFile(join(root, "src/a.ts"), "one\nNeedle here\nthree\n");
+  await writeFile(join(root, ".github/ci.yml"), "needle: true\n");
+  await writeFile(join(root, "src/bin.dat"), Buffer.from([0x6e, 0x65, 0x65, 0x64, 0x6c, 0x65, 0, 1]));
+  const workspace = await Workspace.open(root);
+  const run = () => workspace.searchFiles(".", "needle", { regex: false, caseSensitive: false, maxResults: 10, contextLines: 1 });
+  const fast = await run();
+  process.env.FRELY_DISABLE_RIPGREP = "1";
+  try {
+    const slow = await run();
+    const key = (hits: typeof fast) => hits.map((hit) => JSON.stringify(hit)).sort();
+    assert.deepEqual(key(fast), key(slow));
+  } finally {
+    delete process.env.FRELY_DISABLE_RIPGREP;
+  }
+  assert.deepEqual(fast.find((hit) => hit.path === "src/a.ts"), { path: "src/a.ts", line: 2, text: "Needle here", before: ["one"], after: ["three"] });
+  assert.ok(fast.some((hit) => hit.path === ".github/ci.yml"));
+  assert.ok(!fast.some((hit) => hit.path === "src/bin.dat"));
+});
+
+test("a pattern ripgrep cannot parse falls back to JavaScript regex", async () => {
+  const root = await mkdtemp(join(tmpdir(), "frely-cli-workspace-"));
+  await writeFile(join(root, "a.txt"), "foobar\nfoobaz\n");
+  const workspace = await Workspace.open(root);
+  const hits = await workspace.searchFiles(".", "foo(?=bar)", { regex: true, caseSensitive: true, maxResults: 10, contextLines: 0 });
+  assert.deepEqual(hits.map((hit) => hit.line), [1]);
+});
+
+test("findDefinition matches declarations across languages and not plain calls", async () => {
+  const root = await mkdtemp(join(tmpdir(), "frely-cli-workspace-"));
+  await writeFile(join(root, "a.ts"), "export async function load() {}\nconst x = load();\nclass Store {\n  async load(id: string): Promise<void> {\n  }\n}\nexport const load2 = 1;\n");
+  await writeFile(join(root, "b.py"), "def load(self):\n    pass\nload()\n");
+  await writeFile(join(root, "c.go"), "func (s *Store) load() error {\n}\n");
+  await writeFile(join(root, "d.rs"), "pub fn load() {}\n");
+  const workspace = await Workspace.open(root);
+  const hits = await workspace.findDefinition(".", "load", { maxResults: 20, contextLines: 0 });
+  assert.deepEqual(hits.map((hit) => `${hit.path}:${hit.line}`).sort(), ["a.ts:1", "a.ts:4", "b.py:1", "c.go:1", "d.rs:1"]);
+  await assert.rejects(() => workspace.findDefinition(".", "a.b", { maxResults: 5, contextLines: 0 }), /identifier/);
+});

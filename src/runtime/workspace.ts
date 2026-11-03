@@ -2,6 +2,7 @@ import { CommandFailedError, runShellCommand } from "./process-tree.js";
 import { checkRememberedGitConfigs, GitConfigGuard, guardNote, joinNotes, LEFTOVERS_NOTE, rememberGitConfigs } from "./git-config-guard.js";
 import { sandboxCommandDetailed, sandboxDenialHint, sandboxViolationLines, sshConfigReadable } from "./sandbox.js";
 import { pathProtection, type PathProtection } from "./protected-paths.js";
+import { definitionPattern, RipgrepUnavailableError, ripgrepSearch } from "./ripgrep.js";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, type FileHandle } from "node:fs/promises";
@@ -20,6 +21,23 @@ export function sniffMimeType(data: Uint8Array): string {
   if (at(0, [0x52, 0x49, 0x46, 0x46]) && at(8, [0x57, 0x45, 0x42, 0x50])) return "image/webp";
   return "application/octet-stream";
 }
+export interface SearchOptions {
+  readonly regex: boolean;
+  readonly caseSensitive: boolean;
+  readonly maxResults: number;
+  readonly contextLines: number;
+  /** Skip files ignored by .gitignore. Applies to the ripgrep path; the fallback walk ignores it and the caller filters. */
+  readonly gitignore?: boolean;
+}
+
+export interface SearchHit {
+  path: string;
+  line: number;
+  text: string;
+  before: string[];
+  after: string[];
+}
+
 const PROTECTED_MESSAGE = "This path holds credentials or shell start-up files and is protected from file tools. To read a credential store, call request_permission for it (the owner approves on the web), then read it with run_command, for example `cat ~/.ssh/config`.";
 
 export class Workspace {
@@ -80,12 +98,59 @@ export class Workspace {
     return results;
   }
 
-  async searchFiles(input: string, query: string, options: { regex: boolean; caseSensitive: boolean; maxResults: number; contextLines: number }) {
+  async searchFiles(input: string, query: string, options: SearchOptions) {
     const base = await this.existingPath(input || ".", "directory");
     if (!query) throw new Error("query is required.");
+    try {
+      return await this.searchWithRipgrep(base, query, options);
+    } catch (error) {
+      if (!(error instanceof RipgrepUnavailableError)) throw error;
+    }
+    return this.searchByWalk(base, query, options);
+  }
+
+  /** Definitions of an identifier (function, class, type, method…) as search hits, via the same search path. */
+  async findDefinition(input: string, name: string, options: { maxResults: number; contextLines: number; gitignore?: boolean }) {
+    return this.searchFiles(input, definitionPattern(name), { regex: true, caseSensitive: true, ...options });
+  }
+
+  private async searchWithRipgrep(base: string, query: string, options: SearchOptions): Promise<SearchHit[]> {
+    const found: Array<{ full: string; line: number; text: string }> = [];
+    await ripgrepSearch(base, query, {
+      regex: options.regex,
+      caseSensitive: options.caseSensitive,
+      gitignore: options.gitignore === true,
+      maxFileBytes: MAX_FILE_BYTES,
+      accept: (hit) => {
+        const full = resolve(base, hit.path);
+        if (!isInside(this.root, full) || this.protection.readBlocked(full)) return true;
+        found.push({ full, line: hit.line, text: hit.text });
+        return found.length < options.maxResults;
+      },
+    });
+    const contents = new Map<string, string[] | null>();
+    const results: SearchHit[] = [];
+    for (const hit of found) {
+      let before: string[] = [];
+      let after: string[] = [];
+      if (options.contextLines > 0) {
+        if (!contents.has(hit.full)) contents.set(hit.full, await readFile(hit.full, "utf8").then((text) => text.split(/\r?\n/u), () => null));
+        const lines = contents.get(hit.full);
+        if (lines) {
+          const index = hit.line - 1;
+          before = lines.slice(Math.max(0, index - options.contextLines), index);
+          after = lines.slice(index + 1, index + 1 + options.contextLines);
+        }
+      }
+      results.push({ path: portableRelative(this.root, hit.full), line: hit.line, text: hit.text, before, after });
+    }
+    return results;
+  }
+
+  private async searchByWalk(base: string, query: string, options: SearchOptions): Promise<SearchHit[]> {
     const matcher = options.regex ? new RegExp(query, options.caseSensitive ? "u" : "iu") : null;
     const needle = options.caseSensitive ? query : query.toLocaleLowerCase();
-    const results: Array<{ path: string; line: number; text: string; before: string[]; after: string[] }> = [];
+    const results: SearchHit[] = [];
     await this.walkFiles(base, async (full) => {
       const stat = await lstat(full);
       if (stat.size > MAX_FILE_BYTES) return true;
@@ -406,6 +471,11 @@ function truncate(value: string): string {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function isInside(root: string, path: string): boolean {
+  const rel = relative(root, path);
+  return rel === "" || (!rel.startsWith("..") && !rel.startsWith(sep) && !/^[A-Za-z]:/u.test(rel));
 }
 
 function portableRelative(from: string, to: string): string {
