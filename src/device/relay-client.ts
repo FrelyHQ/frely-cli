@@ -247,6 +247,7 @@ export async function serveConnection(
     const inflight = new Map<string, InflightRequest>();
     const cancelled = new Set<string>();
     let finished = false;
+    const connectedAt = Date.now();
     let heartbeatNonce: Buffer | undefined;
     const ping = () => {
       if (socket.readyState === WebSocket.OPEN) { heartbeatNonce = randomBytes(16); socket.ping(heartbeatNonce); }
@@ -260,9 +261,12 @@ export async function serveConnection(
     const finish = (error?: unknown) => {
       if (finished) return;
       finished = true;
+      if (!error) diagnostic(log, "relay.closed", { durationMs: Date.now() - connectedAt });
       unregisterOutput?.();
       clearInterval(heartbeat);
       if (capabilityTimer) clearInterval(capabilityTimer);
+      // The relay answers these callers with "cancelled"; a retry here could repeat a mutation, so only record them.
+      if (inflight.size > 0) diagnostic(log, "relay.inflight_cancelled", { inflight: inflight.size, durationMs: Date.now() - connectedAt }, error);
       for (const [id, item] of inflight) {
         cancelled.add(id);
         item.controller.abort();

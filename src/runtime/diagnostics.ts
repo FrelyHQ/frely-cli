@@ -6,6 +6,7 @@ export interface DiagnosticContext {
   method?: string;
   tool?: string;
   durationMs?: number;
+  inflight?: number;
   rpcErrorCode?: number;
   outcome?: "ok" | "tool_error" | "protocol_error";
 }
@@ -23,6 +24,7 @@ const messages = new Set([
   "MCP command timed out; mutation outcome may be unknown.", "MCP command output limit exceeded.",
   "MCP command could not be started.", "No Frely login is stored. Run `frely login`.",
   "Frely login expired. Run `frely login`.", "Frely login refresh is temporarily unavailable; retrying later.", "Frely request timed out.",
+  "Device transport WebSocket failed.",
   "MCP_AUTHORIZATION_EXPIRED", "The operation was aborted", "fetch failed",
 ]);
 
@@ -37,6 +39,7 @@ export function diagnostic(log: DiagnosticLog | undefined, event: string, contex
       ...(context.method ? { method: methods.has(context.method) ? context.method : "unknown" } : {}),
       ...(context.tool ? { tool: tools.has(context.tool) ? context.tool : "unknown" } : {}),
       ...(context.durationMs !== undefined ? { durationMs: Math.max(0, Math.round(context.durationMs)) } : {}),
+      ...(context.inflight !== undefined ? { inflight: Math.max(0, Math.min(1_000, Math.round(context.inflight))) } : {}),
       ...(Number.isSafeInteger(context.rpcErrorCode) ? { rpcErrorCode: context.rpcErrorCode } : {}),
       ...(context.outcome ? { outcome: context.outcome } : {}),
       ...(error !== undefined ? { error: diagnosticError(error) } : {}),
@@ -53,9 +56,11 @@ export function diagnosticError(error: unknown): { name: string; message: string
   if (exited) message = exited[1]!;
   const http = /^(?:Frely request failed with HTTP|Unexpected server response:) (\d{3})\.?$/u.exec(error.message);
   if (http) message = `HTTP ${http[1]}.`;
-  const websocket = /^WebSocket closed \((\d{4})(?:: ([a-z_]+))?\)$/u.exec(error.message);
+  // The close code and reason come from the relay, not from user data. Keep them (bounded, printable) so a
+  // disconnect can be attributed; anything else in the reason is replaced.
+  const websocket = /^WebSocket closed \((\d{4})(?:: ([^\r\n]{1,64}))?\)$/u.exec(error.message);
   if (websocket) {
-    const reason = websocket[2] && ["hard_lifetime", "device_revoked", "revocation_check_failed", "connection_replaced", "frame_invalid"].includes(websocket[2]) ? `: ${websocket[2]}` : "";
+    const reason = websocket[2] ? `: ${websocket[2].replace(/[^A-Za-z0-9 _.,:-]/gu, "?")}` : "";
     message = `WebSocket closed (${websocket[1]}${reason}).`;
   }
   const stack = (error.stack ?? "").split("\n").filter((line) => /^\s+at /u.test(line)).slice(0, 20).map((line) => {
