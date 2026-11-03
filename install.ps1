@@ -6,7 +6,8 @@ $version = if ($env:FRELY_CLI_VERSION) { $env:FRELY_CLI_VERSION } else { 'latest
 if ($version -notmatch '^[0-9A-Za-z._-]+$') { throw 'Invalid release version.' }
 $github = 'https://github.com/FrelyHQ/frely-cli/releases'
 # GitHub first; mainland China and other networks without GitHub fall back to the same build published as an npm package,
-# downloaded from npmmirror (China CDN) and then npmjs. FRELY_INSTALL_SOURCES narrows or reorders the list.
+# downloaded from npmmirror (China CDN) and then npmjs. FRELY_INSTALL_SOURCES narrows or reorders the list; unless it (or
+# FRELY_RELEASE_DIR) is set, github and npmmirror are probed in parallel and the faster one goes first (Rank-Sources).
 $package = "@frelyhq/cli-windows-$architecture"
 $sources = if ($env:FRELY_INSTALL_SOURCES) { $env:FRELY_INSTALL_SOURCES -split '\s+' | Where-Object { $_ } } else { @('github', 'npmmirror', 'npmjs') }
 $directory = if ($env:FRELY_INSTALL_DIR) { $env:FRELY_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Frely\bin' }
@@ -61,6 +62,43 @@ try {
     Move-Item -LiteralPath $binary -Destination (Join-Path $stage $asset) -Force
     return $true
   }
+  # Start-Probe: curl.exe fetches the first ~2 MB of the real download for at most 4 s; the result is the bytes and bytes/second it reported.
+  function Start-Probe([string]$url, [string]$name) {
+    $curl = Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $curl) { return $null }
+    $out = Join-Path $stage "probe.$name"
+    $arguments = @('--silent', '--fail', '--location', '--proto', '=https', '--proto-redir', '=https', '--tlsv1.2', '--connect-timeout', '4', '--max-time', '4',
+      '--range', '0-1999999', '-o', 'NUL', '-w', '%{size_download} %{speed_download}', $url)
+    $process = Start-Process -FilePath $curl.Source -ArgumentList $arguments -NoNewWindow -PassThru -RedirectStandardOutput $out
+    return @{ Process = $process; Out = $out; Start = Get-Date }
+  }
+  function Get-ProbeSpeed($probe) {
+    if (-not $probe) { return 0 }
+    if (-not $probe.Process.WaitForExit(4500)) { try { $probe.Process.Kill() } catch { } return 0 }
+    try {
+      $parts = (Get-Content -LiteralPath $probe.Out -Raw -ErrorAction Stop).Trim() -split '\s+'
+      if ($parts.Count -lt 2 -or [double]$parts[0] -le 0) { return 0 }
+      return [double]$parts[1]
+    } catch { return 0 }
+  }
+  function Rank-Sources([string[]]$ordered) {
+    $base = if ($version -eq 'latest') { "$github/latest/download" } else { "$github/download/v$($version.TrimStart('v'))" }
+    $githubProbe = Start-Probe "$base/$asset" 'github'
+    $npmProbe = $null
+    try {
+      $wanted = $version.TrimStart('v')
+      if ($version -eq 'latest') {
+        $meta = Invoke-RestMethod -Uri "https://registry.npmmirror.com/$package/latest" -TimeoutSec 4 -UseBasicParsing
+        $wanted = [string]$meta.version
+      }
+      if ($wanted -match '^[0-9.]+$') { $npmProbe = Start-Probe "https://registry.npmmirror.com/$package/-/$(($package -split '/')[-1])-$wanted.tgz" 'npmmirror' }
+    } catch { }
+    $githubSpeed = Get-ProbeSpeed $githubProbe
+    $npmSpeed = Get-ProbeSpeed $npmProbe
+    if ($npmSpeed -gt $githubSpeed) { return @('npmmirror', 'github', 'npmjs') }
+    return $ordered
+  }
+  if (-not $env:FRELY_INSTALL_SOURCES -and -not $env:FRELY_RELEASE_DIR) { $sources = Rank-Sources $sources }
   $downloaded = $false
   foreach ($source in $sources) {
     try {
@@ -71,11 +109,12 @@ try {
         default { throw "Unknown install source: $source (use github, npmmirror, npmjs)." }
       }
     } catch { if ($_.Exception.Message -like 'Unknown install source*') { throw }; $downloaded = $false }
-    if ($downloaded -eq $true) { break }
+    if ($downloaded -eq $true) { $usedSource = $source; break }
     foreach ($leftover in @($asset, "$asset.sha256", 'npm', 'package.tgz', 'latest')) { Remove-Item -LiteralPath (Join-Path $stage $leftover) -Recurse -Force -ErrorAction SilentlyContinue }
     [Console]::Error.WriteLine("Frely: $source unavailable or failed verification; trying the next source.")
   }
   if ($downloaded -ne $true) { throw 'No source supplied a verified release (checksum mismatch or no connection); installation was not changed.' }
+  [Console]::Error.WriteLine("Frely: using $usedSource")
   $download = Join-Path $stage $asset
   & $download --version | Out-Null
   if ($LASTEXITCODE -ne 0) { throw 'The downloaded executable could not run.' }

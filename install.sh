@@ -14,7 +14,8 @@ version="${FRELY_CLI_VERSION:-latest}"
 case "$version" in *[!0-9A-Za-z._-]*|'') fail "Invalid release version." ;; esac
 github="https://github.com/FrelyHQ/frely-cli/releases"
 # GitHub first; mainland China and other networks without GitHub fall back to the same build published as an npm package,
-# downloaded from npmmirror (China CDN) and then npmjs. FRELY_INSTALL_SOURCES narrows or reorders the list.
+# downloaded from npmmirror (China CDN) and then npmjs. FRELY_INSTALL_SOURCES narrows or reorders the list; unless it (or
+# FRELY_RELEASE_DIR) is set, github and npmmirror are probed in parallel and the faster one goes first (see probe_sources).
 package="@frelyhq/cli-$os-$arch$libc"
 sources="${FRELY_INSTALL_SOURCES:-github npmmirror npmjs}"
 install_dir="${FRELY_INSTALL_DIR:-$HOME/.local/bin}"
@@ -63,6 +64,43 @@ from_npm() {
   verify "$stage/npm/package/frely" "$stage/npm/package/frely.sha256" || return 1
   mv -f "$stage/npm/package/frely" "$stage/$asset"
 }
+# probe_sources: rank github and npmmirror by the speed of the first ~2 MB of the real download (4 s for the whole probe).
+# A source that delivered nothing counts as failed; both failing keeps the default order. npmjs is never probed and stays last.
+probe_one() { # probe_one URL -> "<bytes> <bytes-per-second>"
+  curl --silent --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 4 --max-time "${2:-4}" \
+    --range 0-1999999 -o /dev/null -w '%{size_download} %{speed_download}' "$1" 2>/dev/null || true
+}
+probe_speed() { # probe_speed "<bytes> <speed>" -> integer speed, 0 when nothing arrived
+  case "$1" in *[!0-9.\ ]*|'') echo 0; return ;; esac
+  size="${1%% *}" speed="${1#* }"; size="${size%%.*}" speed="${speed%%.*}"
+  case "$size$speed" in *[!0-9]*|'') echo 0; return ;; esac
+  if [ "$size" -gt 0 ]; then echo "$speed"; else echo 0; fi
+}
+probe_github() {
+  if [ "$version" = latest ]; then base="$github/latest/download"; else base="$github/download/v${version#v}"; fi
+  probe_speed "$(probe_one "$base/$asset")" > "$stage/probe.github"
+}
+probe_npmmirror() {
+  registry=https://registry.npmmirror.com wanted="${version#v}" started="$(date +%s)"
+  if [ "$version" = latest ]; then
+    curl --silent --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 4 --max-time 4 "$registry/$package/latest" \
+      -o "$stage/probe.meta" 2>/dev/null || { echo 0 > "$stage/probe.npmmirror"; return 0; }
+    wanted="$(sed -n 's/.*"version": *"\([0-9][0-9.]*\)".*/\1/p' "$stage/probe.meta" | head -n 1)"
+  fi
+  case "$wanted" in *[!0-9.]*|'') echo 0 > "$stage/probe.npmmirror"; return 0 ;; esac
+  left=$((4 - $(date +%s) + started)); [ "$left" -ge 1 ] || left=1
+  probe_speed "$(probe_one "$registry/$package/-/${package##*/}-$wanted.tgz" "$left")" > "$stage/probe.npmmirror"
+}
+probe_sources() {
+  [ -z "${FRELY_INSTALL_SOURCES:-}" ] && [ -z "${FRELY_RELEASE_DIR:-}" ] || return 0
+  command -v curl >/dev/null 2>&1 || return 0
+  probe_github & probe_npmmirror &
+  wait
+  github_speed="$(cat "$stage/probe.github" 2>/dev/null || echo 0)" npmmirror_speed="$(cat "$stage/probe.npmmirror" 2>/dev/null || echo 0)"
+  case "$github_speed$npmmirror_speed" in *[!0-9]*|'') return 0 ;; esac
+  if [ "$npmmirror_speed" -gt "$github_speed" ]; then sources="npmmirror github npmjs"; fi
+}
+probe_sources
 downloaded=
 for source in $sources; do
   case "$source" in
@@ -76,6 +114,7 @@ for source in $sources; do
   printf 'Frely: %s unavailable or failed verification; trying the next source.\n' "$source" >&2
 done
 [ -n "$downloaded" ] || fail "No source supplied a verified release (checksum mismatch or no connection); installation was not changed."
+printf 'Frely: using %s\n' "$downloaded" >&2
 chmod 755 "$stage/$asset"
 "$stage/$asset" --version >/dev/null || fail "The downloaded executable could not run."
 [ ! -L "$install_dir/frely" ] || fail "Existing frely is a symbolic link; choose another FRELY_INSTALL_DIR."
