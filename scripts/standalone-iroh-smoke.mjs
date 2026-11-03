@@ -26,6 +26,8 @@ const key = holder.exports.SecretKey.generate();
 console.log(typeof key.public().toString() === "string" ? "dlopen-ok" : "dlopen-bad");
 `);
   await run("bun", ["build", source, "--compile", "--outfile", output], { timeout: 120000 });
+  // bun's compiled darwin executables carry an invalid ad-hoc signature that Apple Silicon kills; build-standalone.mjs re-signs the real ones.
+  if (process.platform === "darwin") await run("codesign", ["--force", "--sign", "-", output]);
   const { stdout } = await run(output, [module_], { timeout: 30000 });
   assert.equal(stdout.trim(), "dlopen-ok");
   console.log(`Compiled executable loaded the iroh native module from disk (${process.platform}/${process.arch}).`);
