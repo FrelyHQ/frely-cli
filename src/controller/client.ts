@@ -60,7 +60,9 @@ export function mcpFetch(initial: LoginMcpSession, options: { refresh?: (session
   const send = async (input: string | URL | Request, init: RequestInit | undefined) => {
     const headers = new Headers(init?.headers);
     headers.set("authorization", `Bearer ${session.mcpToken}`);
-    return fetch(input, { ...init, headers, redirect: "error", signal: AbortSignal.timeout(holdsForWait(init?.body) ? MCP_WAIT_TIMEOUT_MS : MCP_TIMEOUT_MS) });
+    // The transport's own signal (aborted when the connection is closed) must still reach the request, or a stream it left open keeps the process alive until the timeout.
+    const timeout = AbortSignal.timeout(holdsForWait(init?.body) ? MCP_WAIT_TIMEOUT_MS : MCP_TIMEOUT_MS);
+    return fetch(input, { ...init, headers, redirect: "error", signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout });
   };
   return {
     session: () => session,

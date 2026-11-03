@@ -57,3 +57,17 @@ test("only a permission_status with wait=true gets the long timeout", () => {
   assert.equal(holdsForWait(call("list_devices", { wait: true })), false);
   assert.equal(holdsForWait(undefined), false);
 });
+
+test("the transport's own abort signal still cancels a request, so closing the connection does not leave the process waiting for the timeout", async () => {
+  const signed = mcpFetch(session());
+  const closing = new AbortController();
+  let sent: AbortSignal | null | undefined;
+  await withFetch(() => new Response("{}"), async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => { sent = init?.signal; return new Response("{}"); }) as typeof fetch;
+    try { await signed.fetch("https://mcp.test/mcp", { method: "GET", signal: closing.signal }); } finally { globalThis.fetch = original; }
+  });
+  assert.equal(sent?.aborted, false);
+  closing.abort();
+  assert.equal(sent?.aborted, true);
+});
