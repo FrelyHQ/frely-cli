@@ -743,6 +743,8 @@ async function main(): Promise<void> {
           sandbox: detectSandboxBackend(),
           // The relay sends the Web switch for automatic updates only to a CLI that says it understands it.
           autoUpdate: true,
+          // The relay keeps a caller waiting after a disconnect when results can arrive on the next connection.
+          resumable: true,
           workspaces: providerOnly ? [] : await reportedWorkspaces(workspace),
           ...(localMcp ? { localMcp: localMcp.capabilities() } : {}),
         };

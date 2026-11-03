@@ -55,6 +55,119 @@ interface InflightRequest {
   controller: AbortController;
 }
 
+/** A response is kept for the next connection this long; the relay holds its caller for 60 s, so later is useless. */
+export const RELAY_OUTBOX_TTL_MS = 130_000;
+
+/**
+ * State that survives a dropped connection: MCP commands keep running and report on the next one.
+ * `socket` is the current connection (looked up when a response is sent, never captured by a request).
+ */
+export interface RelayCarry {
+  readonly inflight: Map<string, InflightRequest>;
+  readonly cancelled: Set<string>;
+  readonly outbox: Map<string, { envelope: DeviceRelayResponse; at: number }>;
+  /** Responses already written to a socket whose delivery no pong has proven yet; sent again on the next connection. */
+  readonly unacked: Map<string, { envelope: DeviceRelayResponse; at: number }>;
+  /** Ids written since the last ping; the next ping takes them. */
+  readonly unpinged: Set<string>;
+  socket?: WebSocket | undefined;
+}
+
+export function createRelayCarry(): RelayCarry {
+  return { inflight: new Map(), cancelled: new Set(), outbox: new Map(), unacked: new Map(), unpinged: new Set() };
+}
+
+function hasCarriedMcp(carry: RelayCarry): boolean {
+  for (const item of carry.inflight.values()) if (item.request.method === "mcp" && !item.controller.signal.aborted) return true;
+  return false;
+}
+
+/** Aborts carried commands and forgets their results; nothing is re-executed. */
+function abortCarried(carry: RelayCarry, session: RelaySession | null, log: DiagnosticLog, reason: string): void {
+  if (carry.inflight.size > 0 || carry.outbox.size > 0 || carry.unacked.size > 0) diagnostic(log, `relay.carried_aborted.${reason}`, { inflight: carry.inflight.size });
+  for (const [id, item] of carry.inflight) {
+    carry.cancelled.add(id);
+    item.controller.abort();
+    if (item.request.method === "mcp") session?.cancel(id);
+  }
+  carry.outbox.clear();
+  carry.unacked.clear();
+  carry.unpinged.clear();
+}
+
+export interface HeldMcp { session: RelaySession; lease: McpLease }
+
+/**
+ * Commands that outlived a connection keep their session only for the same MCP authorization (and a live lease).
+ * Anything else aborts them, drops their results and closes the session.
+ */
+export async function resumeOrRelease(carry: RelayCarry, held: HeldMcp | undefined, authorizationId: string | undefined, log: DiagnosticLog, reason: string): Promise<HeldMcp | undefined> {
+  if (!held) return undefined;
+  if (authorizationId !== undefined && held.lease.authorizationId === authorizationId && !held.lease.controller.signal.aborted && hasCarriedMcp(carry)) return held;
+  abortCarried(carry, held.session, log, reason);
+  held.lease.close();
+  await held.session.close();
+  return undefined;
+}
+
+type Parked = Map<string, { envelope: DeviceRelayResponse; at: number }>;
+
+function prune(entries: Parked, log: DiagnosticLog): void {
+  const now = Date.now();
+  for (const [id, entry] of entries) {
+    if (now - entry.at <= RELAY_OUTBOX_TTL_MS) continue;
+    entries.delete(id);
+    diagnostic(log, "relay.outbox_dropped.expired", { requestId: id });
+  }
+}
+
+function bound(entries: Parked, log: DiagnosticLog): void {
+  while (entries.size > DEVICE_RELAY_DEFAULT_MAX_INFLIGHT) {
+    const oldest = entries.keys().next().value as string;
+    entries.delete(oldest);
+    diagnostic(log, "relay.outbox_dropped.limit", { requestId: oldest });
+  }
+}
+
+/** Writes a response and remembers it until a pong proves the relay got it (a dead socket can swallow the write). */
+function writeTracked(carry: RelayCarry, socket: WebSocket, entry: { envelope: DeviceRelayResponse; at: number }, log: DiagnosticLog): void {
+  if (!send(socket, entry.envelope, log)) return; // too large: the small error that replaced it is not worth repeating
+  prune(carry.unacked, log);
+  carry.unacked.delete(entry.envelope.id);
+  carry.unacked.set(entry.envelope.id, entry);
+  carry.unpinged.add(entry.envelope.id);
+  bound(carry.unacked, log);
+}
+
+/** Sends on the current connection, or keeps the response (bounded) for the next one. */
+export function deliverResponse(carry: RelayCarry, envelope: DeviceRelayResponse, log: DiagnosticLog): void {
+  const socket = carry.socket;
+  if (socket && socket.readyState === WebSocket.OPEN) { writeTracked(carry, socket, { envelope, at: Date.now() }, log); return; }
+  let kept = envelope;
+  try { encodeDeviceRelayEnvelope(envelope); }
+  catch (error) {
+    diagnostic(log, "relay.response_failed", { requestId: envelope.id }, error);
+    kept = errorResponse(envelope.id, "response_too_large", "Device Relay response exceeds the frame limit.");
+  }
+  prune(carry.outbox, log);
+  carry.outbox.delete(kept.id);
+  carry.outbox.set(kept.id, { envelope: kept, at: Date.now() });
+  bound(carry.outbox, log);
+}
+
+/** Parked responses first, then those the previous connection never proved delivered. The relay ignores ids it no longer waits for. */
+function flushOutbox(carry: RelayCarry, socket: WebSocket, log: DiagnosticLog): void {
+  prune(carry.outbox, log);
+  prune(carry.unacked, log);
+  const again = [...carry.unacked.values()];
+  carry.unpinged.clear();
+  for (const [id, entry] of carry.outbox) {
+    carry.outbox.delete(id);
+    writeTracked(carry, socket, entry, log);
+  }
+  for (const entry of again) if (carry.unacked.get(entry.envelope.id) === entry && !carry.unpinged.has(entry.envelope.id)) writeTracked(carry, socket, entry, log);
+}
+
 export async function serveDeviceRelay(options: RelayServeOptions): Promise<void> {
   const log = options.log ?? (() => undefined);
   diagnostic(log, "relay.started");
@@ -74,6 +187,11 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
   let delayMs = 1000;
   let restartSince: number | undefined;
   let preferredTransport: DeviceTransportKind | undefined;
+  // MCP commands that outlive a connection keep their session and lease here until they finish.
+  const carry = createRelayCarry();
+  let held: HeldMcp | undefined;
+  let carryAuthorization: string | undefined;
+  const releaseHeld = async (reason: string) => { const previous = held; held = undefined; await resumeOrRelease(carry, previous, undefined, log, reason); };
   try {
     while (!options.signal.aborted) {
       let session: RelaySession | null = null;
@@ -87,6 +205,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
           // Injected session (e.g. Pi Node). No MCP authorization is required;
           // the relay bridges frames to this session and the owning runtime
           // enforces pairing/access control.
+          await releaseHeld("session_replaced");
           try {
             session = await options.session();
           } catch (error) {
@@ -98,15 +217,27 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
           try {
             authorization = await requireLocalMcpAuthorization(options.workspace);
             if (authorization.grant.deviceId !== device.deviceId) throw new Error("MCP device differs from the connected device.");
-            lease = new McpLease(authorization.grant.id, Date.parse(authorization.grant.expiresAt!));
-            const guard = lease;
-            session = await RelayMcpSession.create(options.workspace, {
-              assertAuthorized: () => guard.assert(), signal: guard.controller.signal, log, ...(maintenance ? { maintenance } : {}),
-              ...(options.localMcp ? { localMcp: options.localMcp } : {}),
-              ...(options.localModels ? { localModels: options.localModels } : {}),
-            });
-            const activeSession = session;
-            guard.controller.signal.addEventListener("abort", () => { void activeSession.close(); }, { once: true });
+            const previous = held;
+            held = undefined;
+            const resumed = await resumeOrRelease(carry, previous, authorization.grant.id, log, "authorization_changed");
+            if (resumed) {
+              // Same authorization: the commands still running keep their session.
+              ({ session, lease } = resumed);
+            } else {
+              lease = new McpLease(authorization.grant.id, Date.parse(authorization.grant.expiresAt!));
+              const guard = lease;
+              session = await RelayMcpSession.create(options.workspace, {
+                assertAuthorized: () => guard.assert(), signal: guard.controller.signal, log, ...(maintenance ? { maintenance } : {}),
+                ...(options.localMcp ? { localMcp: options.localMcp } : {}),
+                ...(options.localModels ? { localModels: options.localModels } : {}),
+              });
+              const activeSession = session;
+              guard.controller.signal.addEventListener("abort", () => {
+                // While disconnected nobody would notice; connected, the closing session fails its requests.
+                if (!carry.socket) abortCarried(carry, activeSession, log, "lease_aborted");
+                void activeSession.close();
+              }, { once: true });
+            }
           } catch (error) {
             diagnostic(log, "relay.authorization_unavailable", {}, error);
             reporter.report({ type: "authorization_unavailable", error });
@@ -114,8 +245,13 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
             lease?.close();
             await session?.close();
             session = null; lease = null;
+            await releaseHeld("authorization_unavailable");
           }
+        } else {
+          await releaseHeld("workspace_removed");
         }
+        // Results kept for resending belong to one authorization; a different one never sees them.
+        if (carryAuthorization !== authorization?.grant.id) { carry.outbox.clear(); carry.unacked.clear(); carry.unpinged.clear(); carryAuthorization = authorization?.grant.id; }
         const grant = await obtainGrant(device, authorization, lease, options.workspace, log);
         transports = grant.transports;
         selectedTransport = selectDeviceTransport(transports, preferredTransport);
@@ -136,6 +272,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
           },
           maintenance,
           options.capabilities,
+          carry,
         );
         preferredTransport = undefined;
         delayMs = 1000;
@@ -162,13 +299,13 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
           await wait(next.delayMs, options.signal);
         }
       } finally {
-        lease?.close();
-        await session?.close();
+        if (session && lease && !options.signal.aborted && !lease.controller.signal.aborted && hasCarriedMcp(carry)) held = { session, lease };
+        else { lease?.close(); await session?.close(); }
       }
     }
     reporter.report({ type: "stopped" });
     await reporter.flush();
-  } finally { closeAutoUpdate(); (await closeRefresh)(); await closeMaintenance?.(); }
+  } finally { await releaseHeld("stopped"); closeAutoUpdate(); (await closeRefresh)(); await closeMaintenance?.(); }
 }
 
 class DeviceTransportConnectionError extends Error {
@@ -203,8 +340,9 @@ export function isRelayRestartClose(error: unknown): boolean {
 
 export const RELAY_RESTART_RETRY_WINDOW_MS = 10 * 60_000;
 const MAX_BACKOFF_MS = 15_000;
-/** The relay pings every 15 s. Nothing at all from it for this long means the socket is dead even if it still looks open. */
-export const RELAY_SILENCE_LIMIT_MS = 45_000;
+/** The relay pings every 15 s and so do we. Nothing at all from it (no ping, pong or frame) for this long means the socket is dead even if it still looks open. */
+export const RELAY_SILENCE_LIMIT_MS = 35_000;
+const RELAY_PING_MS = 15_000;
 const RELAY_SILENCE_CHECK_MS = 5_000;
 
 /**
@@ -236,6 +374,7 @@ export async function serveConnection(
   report: (event: ConnectionEvent) => void = () => undefined,
   maintenance?: MaintenanceGate,
   capabilities?: () => Record<string, unknown> | Promise<Record<string, unknown>> | undefined,
+  carry: RelayCarry = createRelayCarry(),
 ): Promise<void> {
   if (signal.aborted) return;
   await new Promise<void>((resolve, reject) => {
@@ -247,8 +386,7 @@ export async function serveConnection(
     });
     // Do not switch while completed responses are still buffered for the relay.
     const unregisterOutput = maintenance?.registerProcesses(() => socket.bufferedAmount);
-    const inflight = new Map<string, InflightRequest>();
-    const cancelled = new Set<string>();
+    const { inflight, cancelled } = carry;
     let finished = false;
     const connectedAt = Date.now();
     let heartbeatNonce: Buffer | undefined;
@@ -258,14 +396,21 @@ export async function serveConnection(
     let lastFrameAt = connectedAt;
     let lastInboundAt = connectedAt;
     let socketErrorCode: string | undefined;
+    // Responses written before a ping are delivered once its pong returns (TCP keeps order); then they are no longer kept.
+    const pinged = new Map<string, string[]>();
     const ping = () => {
-      if (socket.readyState === WebSocket.OPEN) { heartbeatNonce = randomBytes(16); socket.ping(heartbeatNonce); }
+      if (socket.readyState !== WebSocket.OPEN) return;
+      heartbeatNonce = randomBytes(16);
+      if (carry.unpinged.size > 0) { pinged.set(heartbeatNonce.toString("hex"), [...carry.unpinged]); carry.unpinged.clear(); }
+      socket.ping(heartbeatNonce);
     };
-    const heartbeat = setInterval(ping, 30_000);
+    const heartbeat = setInterval(ping, RELAY_PING_MS);
     heartbeat.unref?.();
     // Detects a dead connection (no ping, pong or frame from the relay) instead of waiting for the OS to notice.
     const silenceWatch = setInterval(() => {
-      if (Date.now() - lastInboundAt > RELAY_SILENCE_LIMIT_MS) finish(new DeviceTransportConnectionError("Device transport heartbeat timed out.", true));
+      if (Date.now() - lastInboundAt <= RELAY_SILENCE_LIMIT_MS) return;
+      diagnostic(log, "relay.heartbeat_timeout", { ageMs: Date.now() - connectedAt, sinceLastPongMs: Date.now() - lastPongAt, sinceLastFrameMs: Date.now() - lastFrameAt, inflight: inflight.size });
+      finish(new DeviceTransportConnectionError("Device transport heartbeat timed out.", true));
     }, RELAY_SILENCE_CHECK_MS);
     silenceWatch.unref?.();
     // Device-local MCP servers come and go, so the report is refreshed while connected.
@@ -289,9 +434,15 @@ export async function serveConnection(
       clearInterval(heartbeat);
       clearInterval(silenceWatch);
       if (capabilityTimer) clearInterval(capabilityTimer);
+      if (carry.socket === socket) carry.socket = undefined;
+      // MCP commands keep running when only the connection dropped (same lease, not stopping); their results go out on the next one.
+      const keepMcp = !signal.aborted && session !== null && lease !== null && !lease.controller.signal.aborted;
+      const carried = keepMcp ? [...inflight.values()].filter((item) => item.request.method === "mcp" && !item.controller.signal.aborted).length : 0;
+      if (carried > 0) diagnostic(log, "relay.inflight_carried", { inflight: carried, durationMs: Date.now() - connectedAt });
       // The relay answers these callers with "cancelled"; a retry here could repeat a mutation, so only record them.
-      if (inflight.size > 0) diagnostic(log, "relay.inflight_cancelled", { inflight: inflight.size, durationMs: Date.now() - connectedAt }, error);
+      if (inflight.size > carried) diagnostic(log, "relay.inflight_cancelled", { inflight: inflight.size - carried, durationMs: Date.now() - connectedAt }, error);
       for (const [id, item] of inflight) {
+        if (keepMcp && item.request.method === "mcp") continue;
         cancelled.add(id);
         item.controller.abort();
         if (item.request.method === "mcp") session?.cancel(id);
@@ -308,6 +459,8 @@ export async function serveConnection(
     const onLeaseAbort = () => report({ type: "mcp_disabled" });
     lease?.controller.signal.addEventListener("abort", onLeaseAbort, { once: true });
     socket.once("open", () => {
+      carry.socket = socket;
+      flushOutbox(carry, socket, log);
       diagnostic(log, "relay.connected");
       report({ type: "connected" });
       if (lease?.controller.signal.aborted) report({ type: "mcp_disabled" });
@@ -317,6 +470,8 @@ export async function serveConnection(
     socket.on("ping", () => { lastPingAt = lastInboundAt = Date.now(); });
     socket.on("pong", (data: Buffer) => {
       lastPongAt = lastInboundAt = Date.now();
+      const acknowledged = pinged.get(data.toString("hex"));
+      if (acknowledged) { pinged.delete(data.toString("hex")); for (const id of acknowledged) carry.unacked.delete(id); }
       if (heartbeatNonce && data.equals(heartbeatNonce)) { heartbeatNonce = undefined; report({ type: "heartbeat" }); }
     });
     socket.once("error", (socketError: unknown) => {
@@ -333,7 +488,7 @@ export async function serveConnection(
       // WebSocket peers may deliver the same JSON envelope as either a text
       // or a binary frame. `rawDataBuffer` normalizes both forms before the
       // protocol validator parses the JSON.
-      void handleFrame(rawDataBuffer(data), socket, inflight, cancelled, session, lease, log, maintenance).catch((error) => { diagnostic(log, "relay.frame_failed", {}, error); finish(error); });
+      void handleFrame(rawDataBuffer(data), socket, carry, session, lease, log, maintenance).catch((error) => { diagnostic(log, "relay.frame_failed", {}, error); finish(error); });
     });
   });
 }
@@ -341,19 +496,21 @@ export async function serveConnection(
 async function handleFrame(
   data: Buffer,
   socket: WebSocket,
-  inflight: Map<string, InflightRequest>,
-  cancelled: Set<string>,
+  carry: RelayCarry,
   session: RelaySession | null,
   lease: McpLease | null,
   log: DiagnosticLog,
   maintenance?: MaintenanceGate,
 ): Promise<void> {
+  const { inflight, cancelled } = carry;
   const envelope = decodeDeviceRelayEnvelope(data);
   if (envelope.type === "mcp_disabled") {
     if (lease?.authorizationId === envelope.id) { lease.close(); await session?.close(); }
     return;
   }
   if (envelope.type === "cancel") {
+    carry.outbox.delete(envelope.id);
+    carry.unacked.delete(envelope.id);
     const item = inflight.get(envelope.id);
     if (item) {
       cancelled.add(envelope.id);
@@ -373,11 +530,14 @@ async function handleFrame(
   const operation = envelope.method === "provider"
     ? executeProviderRequest(envelope, socket, controller.signal, cancelled, log)
     : executeMcpRequest(envelope, session, lease, log).then((payload) => {
-        if (!cancelled.has(envelope.id)) send(socket, { protocol: DEVICE_RELAY_PROTOCOL, type: "response", id: envelope.id, ok: true, payload }, log);
+        if (!cancelled.has(envelope.id)) deliverResponse(carry, { protocol: DEVICE_RELAY_PROTOCOL, type: "response", id: envelope.id, ok: true, payload }, log);
       });
   void operation.catch((error) => {
     diagnostic(log, "relay.request_failed", { requestId: envelope.id, ...(envelope.method === "mcp" ? mcpDiagnosticContext(envelope.payload) : {}) }, error);
-    if (!cancelled.has(envelope.id)) send(socket, errorResponse(envelope.id, relayErrorCode(envelope.method), safeMessage(error)), log);
+    if (!cancelled.has(envelope.id)) {
+      const failure = errorResponse(envelope.id, relayErrorCode(envelope.method), safeMessage(error));
+      if (envelope.method === "mcp") deliverResponse(carry, failure, log); else send(socket, failure, log);
+    }
   }).finally(() => {
     release?.();
     inflight.delete(envelope.id);
@@ -440,14 +600,16 @@ async function forwardProviderResponse(opened: Awaited<ReturnType<typeof openLoc
   }
 }
 
-function send(socket: WebSocket, envelope: DeviceRelayEnvelope, log: DiagnosticLog): void {
-  if (socket.readyState !== WebSocket.OPEN) return;
-  try { socket.send(encodeDeviceRelayEnvelope(envelope)); }
+/** True when the envelope itself went out; false when the socket was not open or only the too-large fallback was sent. */
+function send(socket: WebSocket, envelope: DeviceRelayEnvelope, log: DiagnosticLog): boolean {
+  if (socket.readyState !== WebSocket.OPEN) return false;
+  try { socket.send(encodeDeviceRelayEnvelope(envelope)); return true; }
   catch (error) {
     diagnostic(log, "relay.response_failed", { requestId: envelope.id }, error);
-    if (envelope.type !== "response") return;
+    if (envelope.type !== "response") return false;
     const fallback = errorResponse(envelope.id, "response_too_large", "Device Relay response exceeds the frame limit.");
     socket.send(encodeDeviceRelayEnvelope(fallback));
+    return false;
   }
 }
 
