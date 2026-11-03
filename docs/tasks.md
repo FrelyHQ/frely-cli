@@ -24,3 +24,13 @@ frely task runs [<name>] | logs [<runId>|--last] [--lines <n>] [--follow]
 ## Schedules
 
 Five cron fields in an IANA time zone (default: this computer's). When both day-of-month and day-of-week are restricted, either matching is enough. The background service (`frely link on`) holds the clock. A slot missed while the computer was off or asleep runs once when the service is back, if it is at most a day old. A task still running from the last slot is skipped (a `skipped` run is recorded), not doubled.
+
+## Models
+
+`--model <name>` gives the program a model through a local proxy: `OPENAI_BASE_URL`, `OPENAI_API_KEY` (a placeholder) and `FRELY_MODEL`. The program never holds a real key.
+
+- **Registered here first.** `frely provider add --url http://192.168.1.20:3000/v1 --key-stdin` registers a model endpoint for this computer only (loopback, or a private network IP address; a network address is confirmed by typing yes in a terminal). Nothing is created on Frely's servers and no Provider slot is used. A task that asks for one of its models calls it directly: no relay, no Credit, and it works without Frely being reachable. The endpoint's key lives in this computer's secure storage.
+- **Otherwise Frely.** Any other model goes to the Frely gateway with your API key (`frely agent local key --api-key-stdin`), billed as usual.
+- **Fallback.** `--fallback-model` names models to try, in order, only when the first cannot be started: unreachable, not offered there, or key rejected. A slow or poor answer never switches the model, and a model is never switched in the middle of a run.
+- **Limits.** Each endpoint serves a limited number of calls at once, shared with callers that use a shared Provider: 1 for a model served on this computer, 6 for a network address or the gateway (`frely provider add --max-concurrent <n>` changes it). A task waits for a free slot; a remote buyer is told the endpoint is busy, so your own tasks go first.
+- **Records.** A run records how many model calls it made and how many failed, on this computer only. Nothing is reported or billed for them.

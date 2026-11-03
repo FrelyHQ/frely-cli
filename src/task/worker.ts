@@ -4,6 +4,7 @@ import { mkdir } from "node:fs/promises";
 import { terminateProcessTree } from "../runtime/process-tree.js";
 import { restrictSandboxNetwork, sandboxCommandDetailed, sandboxViolationLines, shutdownSandbox } from "../runtime/sandbox.js";
 import { logTail, LOG_LIMIT_BYTES, readTaskRun, runsDir, taskLogPath, writeTaskRun, type TaskRunRecord } from "./run-store.js";
+import { openTaskModel, type ModelStats, type OpenedModel } from "./model-route.js";
 import { scriptRunner, type Runner, type RunnerContext } from "./runner.js";
 
 /** Runners the worker can run. `pi` is registered by `registerRunner` when the Pi capsule support is present. */
@@ -13,11 +14,11 @@ export function registerRunner(runner: Runner): void { runners.set(runner.id, ru
 /** What a worker needs beyond the run record. Tests stand in for these. */
 export interface WorkerDeps {
   /** Model proxy for runs that have a model; set by the model route (step 2). Returns what the program should call and how to stop it. */
-  readonly openModel?: (record: TaskRunRecord, log: (text: string) => void) => Promise<{ baseUrl: string; name: string; close(): Promise<void>; allowedDomains: readonly string[]; mitmProxy?: { socketPath: string; domains: readonly string[] } } | undefined>;
+  readonly openModel?: (record: TaskRunRecord, log: (text: string) => void) => Promise<OpenedModel | undefined>;
 }
 
 /** The worker side of one run: runs the program in the sandbox, keeps its log, records the end. Saved after every step. */
-export async function executeTaskRun(runId: string, signal: AbortSignal = new AbortController().signal, deps: WorkerDeps = {}): Promise<void> {
+export async function executeTaskRun(runId: string, signal: AbortSignal = new AbortController().signal, deps: WorkerDeps = { openModel: openTaskModel }): Promise<void> {
   const loaded = await readTaskRun(runId);
   if (loaded === null || (loaded.status !== "running" && loaded.status !== "queued")) return;
   let record = await writeTaskRun({ ...loaded, status: "running", workerPid: process.pid, startedAt: new Date().toISOString() });
@@ -34,6 +35,7 @@ export async function executeTaskRun(runId: string, signal: AbortSignal = new Ab
   };
   const note = (text: string): void => write(`[frely] ${text}\n`);
   let closeModel: (() => Promise<void>) | undefined;
+  let modelStats: (() => ModelStats) | undefined;
   try {
     const runner = runners.get(record.snapshot.runner);
     if (!runner) { await save({ status: "failed", endedAt: new Date().toISOString(), error: { code: "runner_unavailable", message: `The ${record.snapshot.runner} runner is not available in this version.` } }); return; }
@@ -45,6 +47,7 @@ export async function executeTaskRun(runId: string, signal: AbortSignal = new Ab
       if (opened) {
         model = { baseUrl: opened.baseUrl, name: opened.name };
         closeModel = opened.close;
+        modelStats = opened.stats;
         domains = [...domains, ...opened.allowedDomains];
         mitm = opened.mitmProxy;
         await save({ modelUsed: opened.name });
@@ -73,10 +76,10 @@ export async function executeTaskRun(runId: string, signal: AbortSignal = new Ab
     const output = await logTail(runId);
     const extra = runner.finish ? await runner.finish(context, { code, output }).catch((error: unknown) => ({ error: { code: "finish_failed", message: error instanceof Error ? error.message : String(error) } })) : {};
     const status = signal.aborted ? "cancelled" : timedOut ? "timeout" : code === 0 ? "completed" : "failed";
-    await save({ ...extra, status, exitCode: code, endedAt: new Date().toISOString(), ...(blocked.length > 0 ? { blocked } : {}), ...(status === "failed" && !("error" in extra) ? { error: { code: "exit", message: `The program exited with code ${code ?? "unknown"}.` } } : {}) });
+    await save({ ...extra, ...(modelStats ? { modelStats: modelStats() } : {}), status, exitCode: code, endedAt: new Date().toISOString(), ...(blocked.length > 0 ? { blocked } : {}), ...(status === "failed" && !("error" in extra) ? { error: { code: "exit", message: `The program exited with code ${code ?? "unknown"}.` } } : {}) });
   } catch (error) {
     if (!logStream.closed) await new Promise<void>((done) => logStream.end(done));
-    await save({ status: signal.aborted ? "cancelled" : "failed", endedAt: new Date().toISOString(), error: { code: "start_failed", message: error instanceof Error ? error.message : String(error) } });
+    await save({ ...(modelStats ? { modelStats: modelStats() } : {}), status: signal.aborted ? "cancelled" : "failed", endedAt: new Date().toISOString(), error: { code: "start_failed", message: error instanceof Error ? error.message : String(error) } });
   } finally {
     await closeModel?.().catch(() => undefined);
     await shutdownSandbox().catch(() => undefined);
@@ -84,7 +87,7 @@ export async function executeTaskRun(runId: string, signal: AbortSignal = new Ab
 }
 
 /** Entry of `frely task __worker <runId>`: cancel on SIGTERM, ignore the terminal hang-up. */
-export async function taskWorkerMain(runId: string, deps: WorkerDeps = {}): Promise<void> {
+export async function taskWorkerMain(runId: string, deps: WorkerDeps = { openModel: openTaskModel }): Promise<void> {
   const controller = new AbortController();
   process.on("SIGTERM", () => controller.abort());
   process.on("SIGHUP", () => undefined);

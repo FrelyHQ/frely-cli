@@ -15,7 +15,7 @@ export interface TaskIo {
 }
 
 export const TASK_USAGE = `Usage:
-  frely task add <name> [--cwd <dir>] [--net <site>]... [--env K=V]... [--timeout <seconds>] [--cron "<m h dom mon dow>" [--tz <zone>]] [--replace] -- <command...>
+  frely task add <name> [--cwd <dir>] [--net <site>]... [--env K=V]... [--timeout <seconds>] [--model <name> [--fallback-model <name>]...] [--cron "<m h dom mon dow>" [--tz <zone>]] [--replace] -- <command...>
   frely task list [--json]
   frely task show <name> [--json]
   frely task remove <name>
@@ -44,7 +44,7 @@ function values(args: readonly string[], name: string): string[] {
 }
 const value = (args: readonly string[], name: string): string | undefined => values(args, name).at(-1);
 
-const FLAGS_WITH_VALUE = new Set(["--cwd", "--net", "--env", "--timeout", "--cron", "--tz", "--wait-sec", "--lines", "--task"]);
+const FLAGS_WITH_VALUE = new Set(["--cwd", "--net", "--env", "--timeout", "--cron", "--tz", "--wait-sec", "--lines", "--task", "--model", "--fallback-model"]);
 function positional(args: readonly string[]): string[] {
   const out: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -118,14 +118,19 @@ async function add(args: string[], io: TaskIo): Promise<number> {
   if (previous && !has(options, "--replace")) return fail(`A task named ${name} exists. Use --replace to change it (a changed task needs its sites approved again).`);
   const timeout = value(options, "--timeout");
   const command = commandWords.length === 1 ? commandWords[0]! : commandWords.map(shellQuote).join(" ");
+  const model = value(options, "--model");
+  const fallbacks = values(options, "--fallback-model");
+  if (fallbacks.length > 0 && model === undefined) return fail("--fallback-model needs --model.");
   let definition = buildDefinition({
     name, command, cwd, network: values(options, "--net"), env: parseEnv(values(options, "--env")),
     ...(timeout === undefined ? {} : { timeoutSec: Number(timeout) }),
+    ...(model === undefined ? {} : { model }), ...(fallbacks.length > 0 ? { fallbackModels: fallbacks } : {}),
   }, previous);
   const cron = value(options, "--cron");
   if (cron !== undefined) { const zone = value(options, "--tz"); definition = { ...definition, schedule: buildSchedule(cron, zone) }; }
   await saveDefinition(definition);
   io.out(`${previous ? "Updated" : "Added"} task ${name}.\n  runs: ${definition.command}\n  folder: ${definition.cwd} (the only place it can write besides the temp folder)\n`);
+  if (definition.model) io.out(`  model: ${definition.model}${definition.fallbackModels?.length ? ` (if it cannot be started: ${definition.fallbackModels.join(", ")})` : ""}. The program calls $OPENAI_BASE_URL with any key; Frely adds the real one.\n`);
   io.out(`  can reach: ${definition.network.length ? `${definition.network.join(", ")} after your approval (frely task approve ${name})` : "nothing outside this computer"}\n`);
   if (definition.schedule) io.out(`  schedule: ${definition.schedule.cron} (${definition.schedule.timezone}). The background service starts it; run frely link on if it is not running.\n`);
   io.out(`Start it with: frely task start ${name}\n`);
@@ -153,7 +158,7 @@ async function list(args: string[], io: TaskIo): Promise<number> {
 async function show(args: string[], io: TaskIo): Promise<number> {
   const definition = await requireDefinition(positional(args)[0]);
   if (has(args, "--json")) { io.out(`${JSON.stringify({ ...definition, approved: approvedSites(definition) }, null, 2)}\n`); return EXIT.ok; }
-  io.out(`${definition.name} (${definition.runner})\n  runs: ${definition.command}\n  folder: ${definition.cwd}\n  timeout: ${definition.timeoutSec}s\n  sites: ${definition.network.join(", ") || "none"}${definition.network.length ? ` (approved now: ${approvedSites(definition).join(", ") || "none"})` : ""}\n  schedule: ${scheduleText(definition)}\n  definition hash: ${definition.hash.slice(0, 16)}\n`);
+  io.out(`${definition.name} (${definition.runner})${definition.model ? `\n  model: ${definition.model}${definition.fallbackModels?.length ? ` -> ${definition.fallbackModels.join(" -> ")}` : ""}` : ""}\n  runs: ${definition.command}\n  folder: ${definition.cwd}\n  timeout: ${definition.timeoutSec}s\n  sites: ${definition.network.join(", ") || "none"}${definition.network.length ? ` (approved now: ${approvedSites(definition).join(", ") || "none"})` : ""}\n  schedule: ${scheduleText(definition)}\n  definition hash: ${definition.hash.slice(0, 16)}\n`);
   return EXIT.ok;
 }
 

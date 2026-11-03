@@ -23,6 +23,8 @@ import { startStdioMcp } from "./runtime/mcp.js";
 import { installDeviceRelayService, serviceStatus, trimServiceLog, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
 import { createLocalModelsHub } from "./provider/local-models.js";
 import { shareLocalProvider } from "./provider/share.js";
+import { confirmLanEndpoint, registerLocalOnlyProvider, removeLocalOnlyProvider, setProviderKey, type RegisterIo } from "./provider/register.js";
+import { isLanBaseUrl, normalizeLocalOpenAiBaseUrl } from "./provider/state.js";
 import { probeLoopback, runShareCommand, shareUsage, spawnFrpcProcess } from "./share/run.js";
 import { runServiceCommand, superviseServices } from "./share/service-run.js";
 import { accountServiceControl } from "./share/service-control.js";
@@ -98,6 +100,10 @@ async function installStandbyService(): Promise<void> {
   } catch (error) {
     process.stderr.write(`Could not start the standby service (${error instanceof Error ? error.message : String(error)}). Remote control stays off; run frely link on to enable it on this computer.\n`);
   }
+}
+
+function providerIo(): RegisterIo {
+  return { err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY) };
 }
 
 async function main(): Promise<void> {
@@ -585,20 +591,55 @@ async function main(): Promise<void> {
     const models = option(args, "--models")?.split(",").map((value) => value.trim()).filter(Boolean);
     const slot = option(args, "--slot");
     const name = option(args, "--name");
+    const io = providerIo();
+    const key = args.includes("--key-stdin") ? await readStdinSecret(8192) : undefined;
+    // A private network address is confirmed here by the owner; the share itself then runs with that confirmation.
+    const lan = url !== undefined && isLanBaseUrl(normalizeLocalOpenAiBaseUrl(url));
+    if (lan) await confirmLanEndpoint(normalizeLocalOpenAiBaseUrl(url!), io);
+    const maxConcurrent = option(args, "--max-concurrent");
     await shareLocalProvider({
       driver: driver === "openai-compatible" ? "openai-compatible" : "ollama",
       ...(url ? { url } : {}), ...(models ? { models } : {}), ...(slot ? { slot } : {}), ...(name ? { name } : {}),
+      ...(lan ? { lan: true } : {}), ...(key ? { key } : {}), ...(maxConcurrent ? { maxConcurrent: Number(maxConcurrent) } : {}),
       creator: args.includes("--creator"),
     }, (text) => { stdout.write(text); });
     return;
   }
 
+  if (command === "provider" && args[1] === "add") {
+    // Registers a model endpoint for this computer's own tasks only: nothing is created on Frely's servers.
+    const driver = args[2] ?? "openai-compatible";
+    if (driver !== "ollama" && driver !== "openai-compatible") throw new Error("Provider driver must be `ollama` or `openai-compatible`.");
+    const models = option(args, "--models")?.split(",").map((value) => value.trim()).filter(Boolean);
+    const key = args.includes("--key-stdin") ? await readStdinSecret(8192) : undefined;
+    const url = option(args, "--url");
+    const name = option(args, "--name");
+    const maxConcurrent = option(args, "--max-concurrent");
+    const binding = await registerLocalOnlyProvider({ driver, ...(url ? { url } : {}), ...(models ? { models } : {}), ...(name ? { name } : {}), ...(key ? { key } : {}), ...(maxConcurrent ? { maxConcurrent: Number(maxConcurrent) } : {}) }, providerIo());
+    stdout.write(`Registered ${binding.providerId} (${binding.name}) at ${binding.baseUrl}\nModels: ${binding.models.join(", ")}\nIt is used by tasks on this computer only (frely task add --model <name>); it is not shared and takes no Provider slot.\n`);
+    return;
+  }
+
+  if (command === "provider" && args[1] === "remove") {
+    if (!args[2]) throw new Error("Usage: frely provider remove <id>");
+    await removeLocalOnlyProvider(args[2]);
+    stdout.write(`Removed ${args[2]}.\n`);
+    return;
+  }
+
+  if (command === "provider" && args[1] === "key") {
+    if (!args[2] || !(args.includes("--key-stdin") || args.includes("--clear"))) throw new Error("Usage: frely provider key <id> --key-stdin | --clear");
+    await setProviderKey(args[2], args.includes("--clear") ? undefined : await readStdinSecret(8192));
+    stdout.write(args.includes("--clear") ? "The upstream key was removed.\n" : "The upstream key was saved in this computer's secure storage.\n");
+    return;
+  }
+
   if (command === "provider" && args[1] === "list") {
-    await requireLogin();
     const providers = await listLocalProviders();
-    if (args.includes("--json")) stdout.write(`${JSON.stringify({ providers }, null, 2)}\n`);
+    const row = (provider: (typeof providers)[number]) => ({ ...provider, where: provider.localOnly ? "this computer only" : provider.pending ? "pending" : "shared" });
+    if (args.includes("--json")) stdout.write(`${JSON.stringify({ providers: providers.map(row) }, null, 2)}\n`);
     else if (providers.length === 0) stdout.write("No local Providers are configured on this device.\n");
-    else for (const provider of providers) stdout.write(`${provider.providerId}  ${provider.driver}  ${provider.name}  ${provider.models.join(", ")}${provider.pending ? "  (pending: run frely provider share)" : ""}\n`);
+    else for (const provider of providers) stdout.write(`${provider.providerId}  ${provider.driver}  ${provider.name}  ${provider.baseUrl}  ${provider.models.join(", ")}  [${row(provider).where}${provider.hasKey ? ", key" : ""}]${provider.pending ? "  (pending: run frely provider share)" : ""}\n`);
     return;
   }
 

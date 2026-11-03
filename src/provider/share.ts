@@ -5,7 +5,8 @@ import { installDeviceRelayService } from "../service.js";
 import { relayAllowanceLines } from "../share/allowance.js";
 import { fetchRelayUsage, finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider, waitForLocalProviderRelay } from "./control.js";
 import { discoverLocalModels } from "./local.js";
-import { isSupportedLocalModelName, listLocalProviders, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider, type LocalProviderBinding } from "./state.js";
+import { saveProviderKey } from "./key.js";
+import { isSupportedLocalModelName, listLocalProviders, normalizeLocalOpenAiBaseUrl, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider, type LocalProviderBinding } from "./state.js";
 
 export interface ShareLocalProviderInput {
   driver: "ollama" | "openai-compatible";
@@ -18,6 +19,11 @@ export interface ShareLocalProviderInput {
   /** Skip the personal slot and publish as a Creator Provider. */
   creator?: boolean;
   name?: string;
+  /** The endpoint may be a private network address. Set only by the CLI after the owner confirmed it at the terminal, never from a remote request. */
+  lan?: boolean;
+  /** The upstream key of the endpoint; saved in the credential store, never in the Provider file. */
+  key?: string;
+  maxConcurrent?: number;
   /** False inside the running daemon: reinstalling its own service would restart the process serving this call. */
   installService?: boolean;
 }
@@ -52,9 +58,9 @@ async function shareOnce(input: ShareLocalProviderInput, log: Log): Promise<Shar
   }
   const driver = input.driver;
   const defaultUrl = driver === "ollama" ? "http://127.0.0.1:11434/v1" : "http://127.0.0.1:8080/v1";
-  const baseUrl = normalizeLoopbackOpenAiBaseUrl(input.url ?? defaultUrl);
+  const baseUrl = input.lan === true ? normalizeLocalOpenAiBaseUrl(input.url ?? defaultUrl) : normalizeLoopbackOpenAiBaseUrl(input.url ?? defaultUrl);
   const selected = input.models?.map((value) => value.trim()).filter(Boolean);
-  const models = selected?.length ? [...new Set(selected)] : await discoverLocalModels(baseUrl);
+  const models = selected?.length ? [...new Set(selected)] : await discoverLocalModels(baseUrl, { lan: input.lan === true, ...(input.key ? { key: input.key } : {}) });
   if (models.length < 1 || models.length > 256 || models.some((model) => !isSupportedLocalModelName(model))) throw new Error("At least one valid model is required; model names cannot contain whitespace, start or end with `/`, or contain `//`.");
   if (input.creator && input.slot) throw new Error("Use either --slot or --creator, not both.");
   const slots = input.creator ? [] : await listPersonalProviderSlots();
@@ -66,7 +72,11 @@ async function shareOnce(input: ShareLocalProviderInput, log: Log): Promise<Shar
   const prepared = await prepareLocalProvider(slot ? { deviceId: device.deviceId, slotId: slot.id, name, models } : { deviceId: device.deviceId, source: "creator", name, models });
   if (!slot) log("Created as a Creator Provider. Pick these models when you create a Frely Agent; buyers call the Agent, and this device must stay online.\n");
   const kind = slot ? "personal" : "creator";
-  const provider = { providerId: prepared.providerId, name, driver, baseUrl, providerBaseUrl: prepared.providerBaseUrl, models, createdAt: new Date().toISOString(), slot: kind, pending: true } as const;
+  const provider: LocalProviderBinding = {
+    providerId: prepared.providerId, name, driver, baseUrl, providerBaseUrl: prepared.providerBaseUrl, models, createdAt: new Date().toISOString(), slot: kind, pending: true,
+    ...(input.key ? { hasKey: true } : {}), ...(input.maxConcurrent === undefined ? {} : { maxConcurrent: input.maxConcurrent }),
+  };
+  if (input.key) await saveProviderKey(prepared.providerId, input.key);
   await saveLocalProvider(provider);
   const ready = await activateLocalProvider(auth, device.deviceId, provider, log, installService);
   return { provider: ready, slot: kind, resumed: false };

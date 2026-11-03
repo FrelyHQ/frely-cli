@@ -368,6 +368,10 @@ function relayErrorCode(method: string): string {
 
 async function executeProviderRequest(request: DeviceRelayRequest, socket: WebSocket, signal: AbortSignal, cancelled: Set<string>, log: DiagnosticLog): Promise<void> {
   const opened = await openLocalProviderRequest(request.payload, signal);
+  try { await forwardProviderResponse(opened, request, socket, signal, cancelled, log); } finally { await opened.release?.(); }
+}
+
+async function forwardProviderResponse(opened: Awaited<ReturnType<typeof openLocalProviderRequest>>, request: DeviceRelayRequest, socket: WebSocket, signal: AbortSignal, cancelled: Set<string>, log: DiagnosticLog): Promise<void> {
   if (opened.contentType !== "text/event-stream") {
     const body = await readLocalProviderBody(opened.response);
     if (!cancelled.has(request.id)) send(socket, {

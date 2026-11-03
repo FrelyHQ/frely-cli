@@ -98,6 +98,7 @@ export async function describeRun(record: TaskRunRecord, options: { tail?: boole
     ...(record.scheduledFor ? { scheduledFor: record.scheduledFor } : {}),
     ...(finished && record.exitCode !== undefined ? { exitCode: record.exitCode } : {}),
     ...(record.modelUsed ? { model: record.modelUsed } : {}),
+    ...(record.modelStats ? { modelCalls: record.modelStats } : {}),
     ...(record.error ? { error: record.error } : {}),
     ...(record.blocked ? { blocked: record.blocked } : {}),
     ...(finished && record.answer !== undefined ? { answer: record.answer } : {}),

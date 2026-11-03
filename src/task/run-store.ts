@@ -45,6 +45,8 @@ export interface TaskRunRecord {
   readonly scheduledFor?: string;
   /** Model actually used (after any start-failure fallback). */
   readonly modelUsed?: string;
+  /** Model calls this run made, counted on this computer only (nothing is reported anywhere). */
+  readonly modelStats?: Readonly<{ requests: number; failures: number; byRoute: Readonly<Record<string, number>> }>;
   /** Pi: the last answer. */
   readonly answer?: string;
   /** Worktree runs: where the work is and what it changed. */
