@@ -45,6 +45,19 @@ export function selectTag(tag) {
   if (!artifact || !semver.test(version)) fail("Unsupported release tag: " + tag);
   return { artifact, version };
 }
+// The install/start scripts are served from the landing site, not from the CLI release: a change to them only reaches users
+// when a landing/v* tag is published. Remind the releaser when such a change is newer than the latest landing tag.
+export const INSTALL_SCRIPTS = ["install.sh", "install.ps1", "start.sh", "start.ps1"];
+export function landingReminder(gitRun = git) {
+  try {
+    const tags = gitRun("tag", "--list", "landing/v*", "--sort=-v:refname").split("\n").filter(Boolean);
+    if (!tags.length) return null;
+    const changed = gitRun("diff", "--name-only", tags[0], "HEAD", "--", ...INSTALL_SCRIPTS).split("\n").filter(Boolean);
+    if (!changed.length) return null;
+    return `Reminder: ${changed.join(", ")} changed since ${tags[0]}. These scripts are served by the landing site, so users only get the change after ./scripts/release-landing (a landing/v* tag).`;
+  } catch { return null; }
+}
+
 function help(entryArtifact) {
   const command = entryArtifact === catalog.defaultArtifact ? "./scripts/release" : "./scripts/release-" + entryArtifact;
   console.log("Usage: " + command + " [--executor local|actions] [--version <semver>] [--dry-run] [--detach]");
@@ -153,6 +166,7 @@ export function main(args = process.argv.slice(2), entryArtifact = catalog.defau
   const artifact = catalog.artifacts.find(item => item.id === entryArtifact);
   if (!artifact) fail("Unknown artifact; use --list");
   const executor = options.executor || artifact.defaultExecutor;
+  if (artifact.id === "cli") { const reminder = landingReminder(); if (reminder) console.error(reminder); }
   if (!artifact.executors.includes(executor)) fail("Unsupported executor for " + artifact.id + ": " + executor);
   if (options["purge-cache"] && !(catalog.project === "frely" && artifact.id === "landing" && executor === "local"))
     fail("--purge-cache requires the local Frely landing executor");

@@ -173,3 +173,10 @@ test("--detach is a plain flag and cannot be repeated", () => {
   assert.equal(parseArguments(["--detach"]).detach, true);
   assert.throws(() => parseArguments(["--detach", "--detach"]));
 });
+
+test("landingReminder flags install script changes newer than the latest landing tag", async () => {
+  const { landingReminder } = await import("./release-entry.mjs");
+  const fake = (changed) => (...args) => args[0] === "tag" ? "landing/v0.2.0\nlanding/v0.1.0" : changed;
+  assert.match(landingReminder(fake("install.ps1\nstart.sh")), /install\.ps1, start\.sh changed since landing\/v0\.2\.0.*release-landing/);
+  assert.equal(landingReminder(fake("")), null);
+});
