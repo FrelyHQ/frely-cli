@@ -44,7 +44,7 @@ function values(args: readonly string[], name: string): string[] {
 }
 const value = (args: readonly string[], name: string): string | undefined => values(args, name).at(-1);
 
-const FLAGS_WITH_VALUE = new Set(["--cwd", "--net", "--env", "--timeout", "--cron", "--tz", "--wait-sec", "--lines", "--task", "--model", "--fallback-model"]);
+const FLAGS_WITH_VALUE = new Set(["--workspace", "--description", "--cwd", "--net", "--env", "--timeout", "--cron", "--tz", "--wait-sec", "--lines", "--task", "--model", "--fallback-model"]);
 function positional(args: readonly string[]): string[] {
   const out: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -92,6 +92,9 @@ export async function runTaskCommand(args: readonly string[], io: TaskIo, deps: 
       case "cancel": return await cancel(rest, io);
       case "runs": return await runs(rest, io);
       case "logs": return await logs(rest, io);
+      case "share": return await shareCommand(rest, io);
+      case "unshare": return await unshareCommand(rest, io);
+      case "handled": return await handledCommand(rest, io);
       default: io.out(TASK_USAGE); return action === undefined || action === "help" || action === "--help" ? EXIT.ok : EXIT.cli;
     }
   } catch (error) {
@@ -99,6 +102,32 @@ export async function runTaskCommand(args: readonly string[], io: TaskIo, deps: 
     io.err(`${error instanceof Error ? error.message : String(error)}\n`);
     return error instanceof TaskError && error.code === "busy" ? EXIT.tool : EXIT.cli;
   }
+}
+
+async function shareCommand(args: readonly string[], io: TaskIo): Promise<number> {
+  const options = args;
+  const [name] = positional(options);
+  if (!name) return fail("Usage: frely task share <name> [--workspace none|read|worktree] [--description <text>] [--charge-my-credit]");
+  const { shareTask } = await import("./share.js");
+  const workspace = (value(options, "--workspace") ?? "none") as "none" | "read" | "worktree";
+  await shareTask(name, { workspace, description: value(options, "--description") ?? "", chargeMyCredit: has(options, "--charge-my-credit"), interactive: io.interactive }, (text) => io.out(text));
+  return EXIT.ok;
+}
+
+async function unshareCommand(args: readonly string[], io: TaskIo): Promise<number> {
+  const [name] = positional(args);
+  if (!name) return fail("Usage: frely task unshare <name>");
+  const { unshareTask } = await import("./share.js");
+  io.out(await unshareTask(name) ? `Stopped sharing ${name}. The service stays registered on Frely, disconnected.\n` : `${name} is not shared.\n`);
+  return EXIT.ok;
+}
+
+async function handledCommand(args: readonly string[], io: TaskIo): Promise<number> {
+  const [runId] = positional(args);
+  if (!runId) return fail("Usage: frely task handled <runId>");
+  const { markHandled } = await import("./share.js");
+  io.out(await markHandled(runId) ? "Marked as handled.\n" : "No such remote call.\n");
+  return EXIT.ok;
 }
 
 async function requireDefinition(name: string | undefined): Promise<TaskDefinition> {

@@ -37,6 +37,7 @@ import { runAgentLocal } from "./agent/local/command.js";
 import { runTaskCommand } from "./task/command.js";
 import { taskWorkerMain } from "./task/worker.js";
 import { superviseTasks } from "./task/scheduler.js";
+import { superviseTaskShares } from "./task/share.js";
 import { cancelRun, listRunSummaries, resumeRun, runOutcome, runSummary, startRun, waitForRun, workerMain } from "./agent/run.js";
 import { effectiveStatus, isRunId, readRun, resolveRun } from "./agent/run-store.js";
 import { DEFAULT_READ_LIMITS, defaultReadRoot } from "./agent/workspace-read.js";
@@ -717,6 +718,7 @@ async function main(): Promise<void> {
     // Services saved with `frely service share --background` stay connected for as long as the daemon runs.
     const services = superviseServices({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Services stopped: ${error instanceof Error ? error.message : String(error)}`));
     // Scheduled tasks (`frely task add --cron`): the clock lives here; each run is a detached worker that does not depend on this connection.
+    const taskShares = providerOnly ? Promise.resolve() : superviseTaskShares({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Shared tasks stopped: ${error instanceof Error ? error.message : String(error)}`));
     const tasks = providerOnly ? Promise.resolve() : superviseTasks({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Tasks stopped: ${error instanceof Error ? error.message : String(error)}`));
     try {
       const capabilities = async () => {
@@ -738,6 +740,7 @@ async function main(): Promise<void> {
       controller.abort();
       await services;
       await tasks;
+      await taskShares;
       await piNode?.stop(); // the node keeps running; a restarted service adopts it
       await localMcp?.close();
     }

@@ -43,3 +43,15 @@ Five cron fields in an IANA time zone (default: this computer's). When both day-
 - The background service (`frely link on`) keeps the Pi Node running. `frely pi status` shows its state.
 - With `--model`, the agent's model calls go through the same model route as other tasks (a local Provider first, else the Frely gateway). The Pi Node is not inside the command sandbox, so this route listens on `127.0.0.1` for the length of the run.
 - A cancelled or timed-out run stops waiting; its Pi thread may keep running inside the Pi Node.
+
+## Sharing a task as an A2A service
+
+`frely task share <name> [--workspace none|read|worktree] [--description <text>] [--charge-my-credit]` registers the task as an A2A service (`task-<name>`) that the background service serves on `127.0.0.1` and connects to Frely through the same path as `frely service share --type a2a`.
+
+- A caller sends only a text request (`message/send`). The runner, instructions, command, folder and workspace mode come from the approved definition; the Agent Card is generated from it.
+- You approve the exact definition at a terminal on this computer. Any change to the task (or removing it) delists the share until you share it again.
+- Pi tasks, `--workspace`: `none` (default) works in a one-time empty folder; `read` answers about the task folder without changing it; `worktree` uses a git worktree per call (nothing is committed to your main branch or pushed) and returns the answer plus a diff summary. After 10 calls whose changes you have not dealt with (`frely task handled <runId>`), new worktree calls are answered busy.
+- Only a model registered on this computer (`frely provider add`) is allowed. A task that uses a gateway model needs `--charge-my-credit`: each call then deducts model fees from your Credit.
+- One call runs at a time and three wait; further calls get a busy answer and nothing is charged. A call that takes longer than 50 seconds returns a task id; poll it with `tasks/get`. Local tasks start first when the computer is full.
+- A script task gets the request as `$FRELY_TASK_INPUT`.
+- `frely task unshare <name>` stops sharing.

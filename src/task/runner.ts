@@ -55,6 +55,6 @@ export function taskEnv(cwd: string, extra: Readonly<Record<string, string>>, mo
 export const scriptRunner: Runner = {
   id: "script",
   async prepare(context) {
-    return { command: context.snapshot.command, cwd: context.cwd, env: taskEnv(context.cwd, context.snapshot.env, context.model) };
+    return { command: context.snapshot.command, cwd: context.cwd, env: taskEnv(context.cwd, { ...context.snapshot.env, ...(context.snapshot.input === undefined ? {} : { FRELY_TASK_INPUT: context.snapshot.input }) }, context.model) };
   },
 };

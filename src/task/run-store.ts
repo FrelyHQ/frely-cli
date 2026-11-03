@@ -26,7 +26,12 @@ export interface TaskRunSnapshot {
   readonly model?: string;
   readonly fallbackModels?: readonly string[];
   readonly worktree?: boolean;
+  /** A remote caller's request text (a shared task): the script gets it as FRELY_TASK_INPUT, the pi agent as the request after its fixed instructions. */
+  readonly input?: string;
+  /** Shared pi tasks: `none` (a one-time empty folder), `read` (answer only, the project is not changed) or `worktree` (a worktree per call). */
+  readonly workspace?: TaskWorkspace;
 }
+export type TaskWorkspace = "none" | "read" | "worktree";
 
 export interface TaskRunRecord {
   readonly version: 1;
@@ -53,6 +58,8 @@ export interface TaskRunRecord {
   readonly worktreePath?: string;
   readonly branch?: string;
   readonly diffSummary?: string;
+  /** The owner dealt with the worktree changes of a remote call (`frely task handled`); until then they count toward the unhandled limit. */
+  readonly handledAt?: string;
   readonly error?: Readonly<{ code: string; message: string }>;
   /** The sandbox blocked these (a site the task needs but was not approved for). */
   readonly blocked?: readonly string[];
@@ -65,8 +72,9 @@ export const runsDir = (): string => join(tasksDir(), "runs");
 const recordPath = (runId: string): string => { if (!isTaskRunId(runId)) throw new Error("Invalid run id."); return join(runsDir(), `${runId}.json`); };
 export const taskLogPath = (runId: string): string => { if (!isTaskRunId(runId)) throw new Error("Invalid run id."); return join(runsDir(), `${runId}.log`); };
 
-export function snapshotOf(definition: TaskDefinition, sites: readonly string[]): TaskRunSnapshot {
+export function snapshotOf(definition: TaskDefinition, sites: readonly string[], extra: { input?: string; workspace?: TaskWorkspace } = {}): TaskRunSnapshot {
   return {
+    ...(extra.input === undefined ? {} : { input: extra.input }), ...(extra.workspace === undefined ? {} : { workspace: extra.workspace }),
     name: definition.name, runner: definition.runner, command: definition.command, cwd: definition.cwd, env: definition.env,
     timeoutSec: definition.timeoutSec, hash: definition.hash, sites: [...sites],
     ...(definition.model === undefined ? {} : { model: definition.model }),

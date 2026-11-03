@@ -4,7 +4,7 @@ import { isSandboxDisabled, sandboxUnavailableReason } from "../runtime/sandbox.
 import { approvedSites, getDefinition, type TaskDefinition } from "./definition.js";
 import {
   createTaskRun, effectiveTaskStatus, isActive, listTaskRuns, logTail, processAlive, readTaskRun, resolveTaskRun, snapshotOf, writeTaskRun,
-  type TaskRunRecord, type TaskTrigger,
+  type TaskRunRecord, type TaskTrigger, type TaskWorkspace,
 } from "./run-store.js";
 
 export class TaskError extends Error {
@@ -39,7 +39,7 @@ export const defaultManagerDeps: ManagerDeps = {
  * Starts one run of a defined task and returns its record at once. The run belongs to its own detached worker process, so it keeps going
  * when whoever started it (a terminal, a remote session, the background service's connection) goes away or reconnects.
  */
-export async function startTask(name: string, options: { trigger?: TaskTrigger; scheduledFor?: string } = {}, deps: ManagerDeps = defaultManagerDeps): Promise<TaskRunRecord> {
+export async function startTask(name: string, options: { trigger?: TaskTrigger; scheduledFor?: string; input?: string; workspace?: TaskWorkspace } = {}, deps: ManagerDeps = defaultManagerDeps): Promise<TaskRunRecord> {
   const trigger = options.trigger ?? "manual";
   const definition = await getDefinition(name);
   if (!definition) throw new TaskError("unknown_task", `No task named ${name}. See frely task list.`);
@@ -52,7 +52,7 @@ export async function startTask(name: string, options: { trigger?: TaskTrigger; 
   if (active.length >= maxConcurrent()) throw new TaskError("busy", `${active.length} tasks are running (the limit is ${maxConcurrent()}). Try again when one has finished.`);
   const refusal = await deps.gate?.(definition);
   if (refusal) throw new TaskError("busy", refusal);
-  const record = await createTaskRun({ snapshot: snapshotOf(definition, approvedSites(definition)), trigger, ...(options.scheduledFor === undefined ? {} : { scheduledFor: options.scheduledFor }) });
+  const record = await createTaskRun({ snapshot: snapshotOf(definition, approvedSites(definition), { ...(options.input === undefined ? {} : { input: options.input }), ...(options.workspace === undefined ? {} : { workspace: options.workspace }) }), trigger, ...(options.scheduledFor === undefined ? {} : { scheduledFor: options.scheduledFor }) });
   deps.spawnWorker(record.runId);
   return record;
 }

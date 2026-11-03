@@ -1,4 +1,6 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { readAnyInstall } from "../agent/capsule-install.js";
@@ -50,6 +52,20 @@ export function summarizeDiff(diff: string): string {
   return `${files.length} file${files.length === 1 ? "" : "s"} changed\n${shown.join("\n")}${files.length > 30 ? `\n… and ${files.length - 30} more` : ""}`;
 }
 
+function git(cwd: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile("git", ["-c", "user.name=frely", "-c", "user.email=frely@localhost", ...args], { cwd, windowsHide: true }, (error) => (error ? reject(error) : resolve()));
+  });
+}
+
+/** An empty one-commit repository: the folder a `none` workspace run works in. */
+async function emptyRepository(): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), "frely-pi-empty-"));
+  await git(directory, ["init", "-q"]);
+  await git(directory, ["commit", "-q", "--allow-empty", "-m", "start"]);
+  return directory;
+}
+
 async function call(endpoint: Endpoint, fetchFn: typeof fetch, name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const response = await fetchFn(endpoint.url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${endpoint.token}` },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) });
@@ -77,7 +93,10 @@ export function createPiRunner(deps: PiRunnerDeps = {}): Runner {
       if (!install || !endpoint) return { code: 1, patch: { error: { code: "pi_unavailable", message: "The Pi Node is not running. Install it with `frely pi install` and keep the background service on (`frely link on`)." } } };
       const fetchFn = deps.fetchFn ?? fetch;
       const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-      const project = snapshot.cwd;
+      const workspace = snapshot.workspace;
+      const scratch = workspace === "none" ? await emptyRepository() : undefined;
+      const project = scratch ?? snapshot.cwd;
+      const goal = snapshot.input === undefined ? snapshot.command : `${snapshot.command}\n\nRequest from the caller:\n${snapshot.input}`;
 
       const projects = await readJson<string[]>(install.projectsFile, []);
       const addedProject = !projects.includes(project);
@@ -91,7 +110,7 @@ export function createPiRunner(deps: PiRunnerDeps = {}): Runner {
         model = `${providerId}/${context.model.name}`;
       }
       try {
-        const created = await call(endpoint, fetchFn, "create_thread", { project, goal: snapshot.command, title: snapshot.name, ...(model ? { model } : {}) });
+        const created = await call(endpoint, fetchFn, "create_thread", { project, goal, title: snapshot.name, ...(model ? { model } : {}) });
         const threadId = String(created.id);
         context.log(`Pi thread ${threadId} started${model ? ` with ${context.model!.name}` : ""}.`);
         const deadline = Date.now() + snapshot.timeoutSec * 1000;
@@ -100,13 +119,14 @@ export function createPiRunner(deps: PiRunnerDeps = {}): Runner {
           if (Date.now() > deadline) return { code: 1, patch: { error: { code: "timeout", message: `Timed out after ${snapshot.timeoutSec} seconds; the Pi thread may still be running in the Pi Node.` } } };
           const shown = await call(endpoint, fetchFn, "get_thread", { project, threadId });
           if (DONE.has(String(shown.status))) {
-            const patch: Partial<TaskRunRecord> = { answer: String(shown.answer ?? ""), diffSummary: summarizeDiff(String(shown.diff ?? "")) };
+            const patch: Partial<TaskRunRecord> = { answer: String(shown.answer ?? ""), ...(workspace === "none" || workspace === "read" ? {} : { diffSummary: summarizeDiff(String(shown.diff ?? "")) }) };
             if (shown.status === "failed" || shown.status === "cancelled") return { code: 1, patch: { ...patch, error: { code: "thread_" + String(shown.status), message: String(shown.error ?? `The Pi thread ${String(shown.status)}.`) } } };
             return { code: 0, patch };
           }
           await sleep(POLL_MS);
         }
       } finally {
+        if (scratch) await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
         if (addedProject) await atomicJson(install.projectsFile, projects).catch(() => undefined);
         if (context.model) {
           const models = await readJson<{ providers?: Record<string, unknown> }>(modelsFile, {});
