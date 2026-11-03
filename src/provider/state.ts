@@ -12,7 +12,7 @@ export interface LocalProviderBinding {
   createdAt: string;
   /** Where the Provider counts: a personal Provider slot or the Creator Plan Provider limit. Absent on bindings saved by older versions. */
   slot?: "personal" | "creator";
-  /** Prepared on the server but not finalized yet; `frely provider share` resumes it. */
+  /** Prepared on the server but not finalized yet; `frely service share model` resumes it. */
   pending?: boolean;
   /** Registered on this computer only: nothing on Frely's servers, so nobody else can reach it and it takes no Provider slot. The id is `lcl_…`. */
   localOnly?: boolean;

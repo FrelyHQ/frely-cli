@@ -3,7 +3,7 @@ import { ensureDevice } from "../device/control.js";
 import { createLocalProviderToken, loadOrCreateDeviceIdentity } from "../device/identity.js";
 import { installDeviceRelayService } from "../service.js";
 import { relayAllowanceLines } from "../share/allowance.js";
-import { fetchRelayUsage, finalizeLocalProvider, listPersonalProviderSlots, prepareLocalProvider, waitForLocalProviderRelay } from "./control.js";
+import { fetchRelayUsage, finalizeLocalProvider, type FinalizeResult, listPersonalProviderSlots, prepareLocalProvider, waitForLocalProviderRelay } from "./control.js";
 import { discoverLocalModels } from "./local.js";
 import { saveProviderKey } from "./key.js";
 import { isSupportedLocalModelName, listLocalProviders, normalizeLocalOpenAiBaseUrl, normalizeLoopbackOpenAiBaseUrl, saveLocalProvider, type LocalProviderBinding } from "./state.js";
@@ -24,6 +24,8 @@ export interface ShareLocalProviderInput {
   /** The upstream key of the endpoint; saved in the credential store, never in the Provider file. */
   key?: string;
   maxConcurrent?: number;
+  /** Also make the AccessPoints the models are sold and planned through (`frely service share model`). */
+  accessPoints?: boolean;
   /** False inside the running daemon: reinstalling its own service would restart the process serving this call. */
   installService?: boolean;
 }
@@ -33,6 +35,9 @@ export interface ShareLocalProviderResult {
   slot: "personal" | "creator";
   /** True when a Provider prepared earlier was finished instead of preparing a new one. */
   resumed: boolean;
+  /** The AccessPoints made for the models; empty when none were asked for or the account may not create them (see `accessPointNote`). */
+  accessPoints: FinalizeResult["accessPoints"];
+  accessPointNote?: string;
 }
 
 type Log = (text: string) => void;
@@ -53,8 +58,8 @@ async function shareOnce(input: ShareLocalProviderInput, log: Log): Promise<Shar
   const pending = (await listLocalProviders()).find((provider) => provider.pending);
   if (pending) {
     log(`Resuming prepared Provider ${pending.providerId}.\n`);
-    const ready = await activateLocalProvider(auth, device.deviceId, pending, log, installService);
-    return { provider: ready, slot: pending.slot ?? "personal", resumed: true };
+    const ready = await activateLocalProvider(auth, device.deviceId, pending, log, installService, input.accessPoints === true);
+    return { provider: ready.provider, slot: pending.slot ?? "personal", resumed: true, accessPoints: ready.result.accessPoints, ...(ready.result.accessPointNote ? { accessPointNote: ready.result.accessPointNote } : {}) };
   }
   const driver = input.driver;
   const defaultUrl = driver === "ollama" ? "http://127.0.0.1:11434/v1" : "http://127.0.0.1:8080/v1";
@@ -78,26 +83,27 @@ async function shareOnce(input: ShareLocalProviderInput, log: Log): Promise<Shar
   };
   if (input.key) await saveProviderKey(prepared.providerId, input.key);
   await saveLocalProvider(provider);
-  const ready = await activateLocalProvider(auth, device.deviceId, provider, log, installService);
-  return { provider: ready, slot: kind, resumed: false };
+  const ready = await activateLocalProvider(auth, device.deviceId, provider, log, installService, input.accessPoints === true);
+  return { provider: ready.provider, slot: kind, resumed: false, accessPoints: ready.result.accessPoints, ...(ready.result.accessPointNote ? { accessPointNote: ready.result.accessPointNote } : {}) };
 }
 
-async function activateLocalProvider(auth: Awaited<ReturnType<typeof requireLogin>>, deviceId: string, provider: LocalProviderBinding, log: Log, installService: boolean): Promise<LocalProviderBinding> {
+async function activateLocalProvider(auth: Awaited<ReturnType<typeof requireLogin>>, deviceId: string, provider: LocalProviderBinding, log: Log, installService: boolean, accessPoints: boolean): Promise<{ provider: LocalProviderBinding; result: FinalizeResult }> {
   const service = installService ? await installDeviceRelayService() : null;
   const identity = await loadOrCreateDeviceIdentity(auth.config.relayUrl, auth.user.id);
   const token = createLocalProviderToken(identity, deviceId, auth.user.id, provider.providerId);
+  let result: FinalizeResult;
   try {
     await waitForLocalProviderRelay(provider.providerBaseUrl, token);
-    await finalizeLocalProvider({ providerId: provider.providerId, token });
+    result = await finalizeLocalProvider({ providerId: provider.providerId, token, ...(accessPoints ? { accessPoints: true } : {}) });
   } catch (error) {
-    throw new Error(`Provider ${provider.providerId} is prepared but not ready. Run \`frely provider share\` again to resume. ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`The model share ${provider.providerId} is prepared but not ready. Run \`frely service share model\` again to resume. ${error instanceof Error ? error.message : String(error)}`);
   }
   const { pending: _pending, ...ready } = provider;
   await saveLocalProvider(ready);
-  log(`Provider: ${provider.providerId}\n`);
+  log(`Share: ${provider.providerId}\n`);
   log(`Models: ${provider.models.join(", ")}\n`);
   log(`Device Relay: ${service ? (service.active ? "running" : "installed") : "running"}\n`);
-  log("The Provider is ready for Access Point creation in Frely.\n");
+  log(accessPoints ? "The models are shared.\n" : "The Provider is ready for Access Point creation in Frely.\n");
   for (const line of await relayAllowanceLines(async () => (await fetchRelayUsage()).remainingBytes)) log(`${line}\n`);
-  return ready;
+  return { provider: ready, result };
 }

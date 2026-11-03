@@ -24,7 +24,6 @@ import { installDeviceRelayService, serviceStatus, trimServiceLog, startMcpServi
 import { createLocalModelsHub } from "./provider/local-models.js";
 import { shareLocalProvider } from "./provider/share.js";
 import { confirmLanEndpoint, registerLocalOnlyProvider, removeLocalOnlyProvider, setProviderKey, type RegisterIo } from "./provider/register.js";
-import { isLanBaseUrl, normalizeLocalOpenAiBaseUrl } from "./provider/state.js";
 import { probeLoopback, runShareCommand, shareUsage, spawnFrpcProcess } from "./share/run.js";
 import { runServiceCommand, superviseServices } from "./share/service-run.js";
 import { accountServiceControl } from "./share/service-control.js";
@@ -569,6 +568,7 @@ async function main(): Promise<void> {
       process.exitCode = await runServiceCommand(args.slice(1), { write: (text) => { stdout.write(text); } }, {
         control: accountServiceControl, probe: probeLoopback, ensureFrpc: () => ensureFrpc({ log: (text) => { stdout.write(text); } }), spawnFrpc: spawnFrpcProcess, signal: controller.signal,
         installDaemon: async () => { await installDeviceRelayService(); },
+        model: { share: shareLocalProvider, confirmLan: (baseUrl) => confirmLanEndpoint(baseUrl, providerIo()), readSecret: () => readStdinSecret(8192) },
       });
     } finally { process.off("SIGINT", onSignal); process.off("SIGTERM", onSignal); }
     return;
@@ -583,29 +583,6 @@ async function main(): Promise<void> {
   }
 
   if (command === "provider" && args[1] === undefined) { stdout.write(subcommandUsage("provider")); return; }
-  if (command === "provider" && args[1] === "share") {
-    const driver = args[2] ?? "ollama";
-    // A prepared Provider resumes without any other option, so the driver is only checked when a new one is prepared.
-    if (driver !== "ollama" && driver !== "openai-compatible" && !(await listLocalProviders()).some((provider) => provider.pending)) throw new Error("Provider driver must be `ollama` or `openai-compatible`.");
-    const url = option(args, "--url");
-    const models = option(args, "--models")?.split(",").map((value) => value.trim()).filter(Boolean);
-    const slot = option(args, "--slot");
-    const name = option(args, "--name");
-    const io = providerIo();
-    const key = args.includes("--key-stdin") ? await readStdinSecret(8192) : undefined;
-    // A private network address is confirmed here by the owner; the share itself then runs with that confirmation.
-    const lan = url !== undefined && isLanBaseUrl(normalizeLocalOpenAiBaseUrl(url));
-    if (lan) await confirmLanEndpoint(normalizeLocalOpenAiBaseUrl(url!), io);
-    const maxConcurrent = option(args, "--max-concurrent");
-    await shareLocalProvider({
-      driver: driver === "openai-compatible" ? "openai-compatible" : "ollama",
-      ...(url ? { url } : {}), ...(models ? { models } : {}), ...(slot ? { slot } : {}), ...(name ? { name } : {}),
-      ...(lan ? { lan: true } : {}), ...(key ? { key } : {}), ...(maxConcurrent ? { maxConcurrent: Number(maxConcurrent) } : {}),
-      creator: args.includes("--creator"),
-    }, (text) => { stdout.write(text); });
-    return;
-  }
-
   if (command === "provider" && args[1] === "add") {
     // Registers a model endpoint for this computer's own tasks only: nothing is created on Frely's servers.
     const driver = args[2] ?? "openai-compatible";
@@ -639,7 +616,7 @@ async function main(): Promise<void> {
     const row = (provider: (typeof providers)[number]) => ({ ...provider, where: provider.localOnly ? "this computer only" : provider.pending ? "pending" : "shared" });
     if (args.includes("--json")) stdout.write(`${JSON.stringify({ providers: providers.map(row) }, null, 2)}\n`);
     else if (providers.length === 0) stdout.write("No local Providers are configured on this device.\n");
-    else for (const provider of providers) stdout.write(`${provider.providerId}  ${provider.driver}  ${provider.name}  ${provider.baseUrl}  ${provider.models.join(", ")}  [${row(provider).where}${provider.hasKey ? ", key" : ""}]${provider.pending ? "  (pending: run frely provider share)" : ""}\n`);
+    else for (const provider of providers) stdout.write(`${provider.providerId}  ${provider.driver}  ${provider.name}  ${provider.baseUrl}  ${provider.models.join(", ")}  [${row(provider).where}${provider.hasKey ? ", key" : ""}]${provider.pending ? "  (pending: run frely service share model)" : ""}\n`);
     return;
   }
 
