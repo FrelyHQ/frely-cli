@@ -8,6 +8,14 @@ export interface DiagnosticContext {
   durationMs?: number;
   inflight?: number;
   rpcErrorCode?: number;
+  /** WebSocket close code received from the relay; absent when the connection dropped without a close frame. */
+  closeCode?: number;
+  /** Network error code of the socket (for example ECONNRESET), only values in the allow-list. */
+  socketErrorCode?: string;
+  ageMs?: number;
+  sinceLastPingMs?: number;
+  sinceLastPongMs?: number;
+  sinceLastFrameMs?: number;
   outcome?: "ok" | "tool_error" | "protocol_error";
 }
 
@@ -41,6 +49,12 @@ export function diagnostic(log: DiagnosticLog | undefined, event: string, contex
       ...(context.durationMs !== undefined ? { durationMs: Math.max(0, Math.round(context.durationMs)) } : {}),
       ...(context.inflight !== undefined ? { inflight: Math.max(0, Math.min(1_000, Math.round(context.inflight))) } : {}),
       ...(Number.isSafeInteger(context.rpcErrorCode) ? { rpcErrorCode: context.rpcErrorCode } : {}),
+      ...(Number.isSafeInteger(context.closeCode) ? { closeCode: context.closeCode } : {}),
+      ...(context.socketErrorCode && codes.has(context.socketErrorCode) ? { socketErrorCode: context.socketErrorCode } : {}),
+      ...(context.ageMs !== undefined ? { ageMs: Math.max(0, Math.round(context.ageMs)) } : {}),
+      ...(context.sinceLastPingMs !== undefined ? { sinceLastPingMs: Math.max(0, Math.round(context.sinceLastPingMs)) } : {}),
+      ...(context.sinceLastPongMs !== undefined ? { sinceLastPongMs: Math.max(0, Math.round(context.sinceLastPongMs)) } : {}),
+      ...(context.sinceLastFrameMs !== undefined ? { sinceLastFrameMs: Math.max(0, Math.round(context.sinceLastFrameMs)) } : {}),
       ...(context.outcome ? { outcome: context.outcome } : {}),
       ...(error !== undefined ? { error: diagnosticError(error) } : {}),
     }));
