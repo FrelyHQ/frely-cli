@@ -25,7 +25,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          cache: npm
+          # Not on the maintainer's Mac: its persistent ~/.npm is several GB and the post step would upload all of it.
+          cache: ${{ (matrix.os == 'macos-latest' && !github.event.pull_request.head.repo.fork) && ' ' || 'npm' }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
