@@ -58,12 +58,13 @@ import { runNetwork, publicNetworkError } from "./network.js";
 import { runComputerCommand } from "./computer/command.js";
 import { runComputerMcpServer } from "./computer/server.js";
 import { agentManifestUrl, installSkillAdapter, publicSkillAccessError, removeSkillAdapter, resolveAgentTarget, SkillAccessError, skillAdapterStatus } from "./skill/access.js";
-import type { SkillHost, SkillScope } from "./skill/managed.js";
+import { SKILL_HOSTS, type SkillHost, type SkillScope } from "./skill/managed.js";
 import { CloudItemError, CloudToolError, installCloudItem, parseItemRef, trustCloudItem } from "./skill/cloud-item.js";
 import { installGithubItem } from "./skill/github-item.js";
 import { checkItemUpdates, updateCloudItem } from "./skill/item-update.js";
 import { runSealedScript } from "./skill/sealed-run.js";
 import { installEntrySkill, ensureEntrySkill } from "./skill/entry.js";
+import { linkLines } from "./skill/agent-links.js";
 import { redeemGift } from "./skill/gift.js";
 import { callRemoteTool, connectRemoteMcp, installRemoteMcpSkill, isNotASkill, listRemoteTools, mcpClientConfig, parseMcpName, RemoteMcpError } from "./skill/remote-mcp.js";
 import { callCloudTool, callCloudToolAwaiting } from "./cloud.js";
@@ -74,7 +75,7 @@ import { runUninstall } from "./uninstall.js";
 
 
 
-const ITEM_INSTALL_USAGE = "Usage: frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|generic] [--scope global|project] [--dir <path>] [--gift <code>] [--replace] [--api-key-stdin] [--json]";
+const ITEM_INSTALL_USAGE = "Usage: frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|workbuddy|codebuddy|generic] [--scope global|project] [--dir <path>] [--gift <code>] [--replace] [--api-key-stdin] [--json]";
 
 /** Installs a published Agent as a local trigger Skill, from `username/name[@version]` (or the distribution id older scripts use). */
 async function installAgent(target: string, args: string[], resolved: { manifest?: unknown; extra?: Record<string, unknown>; accountLine?: string } = {}): Promise<void> {
@@ -86,7 +87,7 @@ async function installAgent(target: string, args: string[], resolved: { manifest
   const value = await installSkillAdapter({ manifestUrl: agentManifestUrl(target, relayUrl), ...(resolved.manifest === undefined ? {} : { manifest: resolved.manifest }), host, scope, ...(projectDir ? { cwd: resolve(projectDir) } : {}), ...(apiKey ? { apiKey } : {}) });
   const entry = await ensureEntrySkill({ host, scope, ...(projectDir ? { dir: projectDir } : {}) });
   if (args.includes("--json")) stdout.write(`${JSON.stringify({ ...value, ...resolved.extra, ...(entry ? { entrySkill: entry.path } : {}) })}\n`);
-  else stdout.write(`${resolved.accountLine ?? ""}Agent: ${value.name}\nSkill: ${value.skillPath}\nAuth: ${value.authMode}\nState: ${value.state}\n${value.hostAction ? `Host action: ${value.hostAction}\n` : ""}${entry ? `Frely Skill: ${entry.path}\n` : ""}`);
+  else stdout.write(`${resolved.accountLine ?? ""}Agent: ${value.name}\nSkill: ${value.skillPath}\n${linkLines(value.links)}Auth: ${value.authMode}\nState: ${value.state}\n${value.hostAction ? `Host action: ${value.hostAction}\n` : ""}${entry ? `Frely Skill: ${entry.path}\n` : ""}`);
 }
 
 /**
@@ -311,7 +312,7 @@ async function main(): Promise<void> {
     const dir = option(args, "--dir");
     const value = await installEntrySkill({ host, scope, ...(dir ? { dir } : {}) });
     if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
-    stdout.write(`Skill: frely\nPath: ${value.path}\nRestart or reload the agent session so it rescans Skills.\n`);
+    stdout.write(`Skill: frely\nPath: ${value.path}\n${linkLines(value.links)}Restart or reload the agent session so it rescans Skills.\n`);
     return;
   }
 
@@ -346,7 +347,7 @@ async function main(): Promise<void> {
       }
       const value = await updateCloudItem({ folder, call: callCloudTool });
       if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
-      stdout.write(`${value.kind === "prompt" ? "Prompt" : "Skill"}: ${value.name} (v${value.version})\nPath: ${value.path}\nFiles: ${value.files}\n`);
+      stdout.write(`${value.kind === "prompt" ? "Prompt" : "Skill"}: ${value.name} (v${value.version})\nPath: ${value.path}\n${linkLines(value.links)}Files: ${value.files}\n`);
       if (value.premium === "pass_required") stdout.write("Paid part: not updated. Your access has ended, or this version is newer than your buy-out. Subscribe or buy again, then run this command again.\n");
       if (value.needsReview) stdout.write(`Frely has not scanned this version. Read every file in it, including scripts, before you use it. If it is safe, run: frely item trust ${value.path}\n`);
       if (value.kind === "skill") stdout.write("Restart or reload the agent session so it rescans Skills.\n");
@@ -436,7 +437,7 @@ async function main(): Promise<void> {
       const installed = await installGithubItem({ ...resolved.github, commitSha: resolved.github.commitSha, host, scope, ...(dir ? { dir } : {}) });
       const entry = await ensureEntrySkill({ host, scope, ...(dir ? { dir } : {}) });
       if (json) { stdout.write(`${JSON.stringify({ ...installed, ...extra, ...(entry ? { entrySkill: entry.path } : {}) })}\n`); return; }
-      stdout.write(`${accountLine}GitHub Skill: ${installed.name} (commit ${installed.commit.slice(0, 7)}, license ${installed.license ?? "none declared"})\nPath: ${installed.path}\nFiles: ${installed.files}\n${entry ? `Frely Skill: ${entry.path}\n` : ""}`);
+      stdout.write(`${accountLine}GitHub Skill: ${installed.name} (commit ${installed.commit.slice(0, 7)}, license ${installed.license ?? "none declared"})\nPath: ${installed.path}\n${linkLines(installed.links)}Files: ${installed.files}\n${entry ? `Frely Skill: ${entry.path}\n` : ""}`);
       stdout.write(`Frely did not scan this Skill and does not host it; the files came straight from GitHub at that commit and were saved without execute permission.${installed.hasScripts ? " It contains scripts." : ""} Read every file in it before you use it (look for deleting files, reading credentials, unrelated network calls, obfuscated code, or instructions to hide actions from the user). If it is safe, run: frely item trust ${installed.path}\nRestart or reload the agent session so it rescans Skills.\n`);
       return;
     }
@@ -452,11 +453,11 @@ async function main(): Promise<void> {
     const entry = await ensureEntrySkill({ host, scope, ...(dir ? { dir } : {}) });
     if ("tools" in value) {
       if (args.includes("--json")) { stdout.write(`${JSON.stringify({ ...value, ...extra, ...(entry ? { entrySkill: entry.path } : {}) })}\n`); return; }
-      stdout.write(`${accountLine}MCP: ${value.name}\nPath: ${value.path}\nTools: ${value.tools}\nThe Skill calls this MCP through frely item tools|call; no MCP client configuration is needed. Restart or reload the agent session so it rescans Skills.\n`);
+      stdout.write(`${accountLine}MCP: ${value.name}\nPath: ${value.path}\n${linkLines(value.links)}Tools: ${value.tools}\nThe Skill calls this MCP through frely item tools|call; no MCP client configuration is needed. Restart or reload the agent session so it rescans Skills.\n`);
       return;
     }
     if (args.includes("--json")) { stdout.write(`${JSON.stringify({ ...value, ...extra, ...(entry ? { entrySkill: entry.path } : {}) })}\n`); return; }
-    stdout.write(`${accountLine}${value.kind === "prompt" ? "Prompt" : "Skill"}: ${value.name} (v${value.version})\nPath: ${value.path}\nFiles: ${value.files}\n${entry ? `Frely Skill: ${entry.path}\n` : ""}`);
+    stdout.write(`${accountLine}${value.kind === "prompt" ? "Prompt" : "Skill"}: ${value.name} (v${value.version})\nPath: ${value.path}\n${linkLines(value.links)}Files: ${value.files}\n${entry ? `Frely Skill: ${entry.path}\n` : ""}`);
     if (value.premium === "installed") stdout.write("Paid part: installed\n");
     if (value.premium === "pass_required") stdout.write(`Paid part: not installed. Buy a pass in the marketplace or with frely api call passes.buy --json '{"productKind":"cloud_skill","productId":"${value.id}","duration":"monthly"}', then run this command again.\n`);
     if (value.sealedScripts > 0) stdout.write(`${value.sealedScripts} paid script${value.sealedScripts === 1 ? " is" : "s are"} encrypted on this device. They run through frely item run (the placeholder files do that for you) inside the Frely command sandbox, and stop working when your pass ends. Frely cannot show you their source.\n`);
@@ -881,8 +882,8 @@ function option(args: string[], name: string): string | undefined {
 }
 
 function skillHost(value: string): SkillHost {
-  if (["chatgpt", "codex", "claude-code", "pi", "generic"].includes(value)) return value as SkillHost;
-  throw new Error("--host must be chatgpt, codex, claude-code, pi, or generic.");
+  if ((SKILL_HOSTS as readonly string[]).includes(value)) return value as SkillHost;
+  throw new Error("--host must be chatgpt, codex, claude-code, pi, workbuddy, codebuddy, or generic.");
 }
 
 function skillScope(value: string): SkillScope {

@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { canonicalFolder } from "./agent-links.js";
 import { LOGIN_REFRESH_UNAVAILABLE, requireLogin } from "../auth.js";
 import { credentialStore as secureCredentialStore, type CredentialStore } from "../credential-store.js";
 import { remoteAgentMcpInvoker, remoteAgentTaskClient, SkillInvocationError, type AgentTurnResult, type CallerItem, type CallerToolDefinition, type RemoteAgentMcpInvoker, type RemoteAgentTaskClient, type SkillInvocationResult } from "./router.js";
@@ -96,7 +97,8 @@ export async function installSkillAdapter(input: {
   const existing = await readManagedSkill(manifest.id, home);
   const slug = existing?.slug ?? (manifest.installName === undefined ? skillSlug(manifest.name) : installDirName(manifest.installName));
   const root = managedSkillRoot(input.host, input.scope, input.cwd, home);
-  const skillPath = existing?.skillPath ?? join(root, slug, "SKILL.md");
+  // An Agent installed straight into an agent's own folder by an older version moves to `.agents/skills`; the old folder becomes a link.
+  const skillPath = existing ? join(canonicalFolder(dirname(existing.skillPath), home), "SKILL.md") : join(root, slug, "SKILL.md");
   const content = renderSkill(manifest, slug);
   const authMode = input.apiKey !== undefined ? "api-key" as const : existing?.authMode ?? "account" as const;
   const recordInput = {
@@ -147,6 +149,7 @@ export async function installSkillAdapter(input: {
     scope: record.scope,
     authMode: record.authMode,
     skillPath: record.skillPath,
+    links: record.linkOutcomes,
     state: "host_reload_needed" as const,
     hostAction: hostAction(record.host),
   });

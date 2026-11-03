@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { credentialStore, type CredentialStore } from "../credential-store.js";
 import { CloudItemError, CloudToolError, writeItemFolder, type CloudToolCaller } from "./cloud-item.js";
+import type { LinkOutcome } from "./agent-links.js";
 import { installDirName, managedSkillRoot, type SkillHost, type SkillScope } from "./managed.js";
 
 /** `username/name` of a remote MCP product: the same name the marketplace shows and `frely item install` takes. */
@@ -216,6 +217,7 @@ export interface RemoteMcpInstallResult {
   readonly name: string;
   readonly path: string;
   readonly tools: number;
+  readonly links: readonly LinkOutcome[];
 }
 
 /** Writes a Skill folder for the MCP: how to use it through `frely item tools|call`, plus its tool list. */
@@ -239,8 +241,8 @@ export async function installRemoteMcpSkill(input: {
   const cwd = input.cwd ?? process.cwd();
   const target = join(managedSkillRoot(input.host ?? "generic", input.scope ?? "global", resolve(cwd, input.scope === "project" ? input.dir ?? "." : "."), home), installDirName(parseMcpName(connection.name).name));
   const file = (path: string, text: string) => ({ path, contentBase64: Buffer.from(text).toString("base64"), isScript: false });
-  await writeItemFolder(target, connection.id, "mcp", [file("SKILL.md", skill), file("tools.md", toolsDoc)], home);
-  return Object.freeze({ id: connection.id, name: connection.name, path: target, tools: tools.length });
+  const written = await writeItemFolder(target, connection.id, "mcp", [file("SKILL.md", skill), file("tools.md", toolsDoc)], home, undefined, input.host ? { host: input.host } : {});
+  return Object.freeze({ id: connection.id, name: connection.name, path: target, tools: tools.length, links: written.linkOutcomes });
 }
 
 /** True for the not-found a Skill lookup gives when the name is not a Skill, so the caller may try a remote MCP. */

@@ -3,6 +3,8 @@ import { constants } from "node:fs";
 import { mkdir, open, readdir, readFile, rename, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import type { LinkRecord } from "./agent-links.js";
+import { parseLinks } from "./managed.js";
 
 /**
  * What Frely knows about a Skill or Prompt folder it wrote. It lives under the
@@ -20,6 +22,8 @@ export interface InstallRecord {
   readonly files: Readonly<Record<string, string>>;
   /** Digest of `files` the user (or their agent) reviewed, if any. */
   readonly trustedDigest?: string;
+  /** Links (or copies) of this folder in other agents' Skill folders. */
+  readonly links?: readonly LinkRecord[];
 }
 
 export function installsDir(home = homedir()): string { return join(home, ".config", "frely", "installs"); }
@@ -79,5 +83,5 @@ function parse(text: string, expectedPath: string | null): InstallRecord | null 
   if (!item || !files || item.version !== 1 || !["skill", "prompt", "entry", "mcp"].includes(String(item.kind)) || typeof item.itemId !== "string" || typeof item.path !== "string") return null;
   if (expectedPath !== null && item.path !== expectedPath) return null;
   if (!Object.values(files).every((entry) => typeof entry === "string")) return null;
-  return Object.freeze({ version: 1, kind: item.kind as InstallRecord["kind"], itemId: item.itemId, path: item.path, files: files as Record<string, string>, ...(Number.isSafeInteger(item.itemVersion) ? { itemVersion: item.itemVersion as number } : {}), ...(typeof item.trustedDigest === "string" ? { trustedDigest: item.trustedDigest } : {}) });
+  return Object.freeze({ version: 1, kind: item.kind as InstallRecord["kind"], itemId: item.itemId, path: item.path, files: files as Record<string, string>, ...(Number.isSafeInteger(item.itemVersion) ? { itemVersion: item.itemVersion as number } : {}), ...(typeof item.trustedDigest === "string" ? { trustedDigest: item.trustedDigest } : {}), ...(parseLinks(item.links).length > 0 ? { links: parseLinks(item.links) } : {}) });
 }

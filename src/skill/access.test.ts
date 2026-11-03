@@ -64,7 +64,7 @@ test("installs a managed trigger Skill without installing the remote Agent", asy
   try {
     const result = await installSkillAdapter({ manifestUrl, host: "pi", scope: "global", home: root, fetchFn: fetchManifest() });
     assert.equal(result.distributionId, distributionId);
-    assert.equal(result.skillPath, join(root, ".pi", "agent", "skills", "tripready", "SKILL.md"));
+    assert.equal(result.skillPath, join(root, ".agents", "skills", "tripready", "SKILL.md"));
     const text = await readFile(result.skillPath, "utf8");
     assert.match(text, /frely agent run creator_distribution_/u);
     assert.doesNotMatch(text, /api\.frely\.cloud\/mcp/u);

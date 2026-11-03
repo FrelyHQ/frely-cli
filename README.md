@@ -51,7 +51,7 @@ Then sign in and install the Skill for your agent host:
 
 ```sh
 frely login --email <you@example.com>   # then: frely login --code <6-digit code>
-frely skill install --host <claude-code|codex|pi|generic>
+frely skill install --host <claude-code|codex|pi|workbuddy|codebuddy|generic>
 ```
 
 ## Common commands

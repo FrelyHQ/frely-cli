@@ -28,7 +28,7 @@ test("installs a Skill with its paid part into the host Skill folder without exe
   const home = await realpath(await mkdtemp(join(tmpdir(), "frely-item-")));
   try {
     const result = await installCloudItem({ skillId, call: caller({ premium: "ok" }), host: "claude-code", scope: "global", home });
-    assert.equal(result.path, join(home, ".claude", "skills", "review"));
+    assert.equal(result.path, join(home, ".agents", "skills", "review"));
     assert.equal(result.premium, "installed");
     assert.equal(result.files, 3);
     assert.equal(await readFile(join(result.path, "premium", "extra.md"), "utf8"), "paid");
@@ -67,7 +67,7 @@ test("tracks review per version and leaves the Skill folder as it was delivered"
     const result = await installCloudItem({ skillId, call: caller(), host: "claude-code", scope: "global", home });
     assert.equal(result.needsReview, true);
     assert.deepEqual((await readdir(result.path)).sort(), ["SKILL.md", "scripts"]);
-    await assert.rejects(readFile(join(home, ".claude", "skills", "frely-item-guard", "SKILL.md"), "utf8"));
+    await assert.rejects(readFile(join(home, ".agents", "skills", "frely-item-guard", "SKILL.md"), "utf8"));
     assert.deepEqual(await trustCloudItem(result.path, { check: true, home }), { trusted: false });
     await trustCloudItem(result.path, { home });
     assert.deepEqual(await trustCloudItem(result.path, { check: true, home }), { trusted: true });
@@ -122,7 +122,7 @@ test("a project install goes under --dir and is recorded", async () => {
   const project = join(home, "work");
   try {
     const result = await installCloudItem({ skillId, call: caller(), host: "claude-code", scope: "project", dir: project, home });
-    assert.equal(result.path, join(project, ".claude", "skills", "review"));
+    assert.equal(result.path, join(project, ".agents", "skills", "review"));
     assert.deepEqual(await trustCloudItem(result.path, { check: true, home }), { trusted: false });
   } finally { await rm(home, { recursive: true, force: true }); }
 });
