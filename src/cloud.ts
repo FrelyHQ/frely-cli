@@ -8,8 +8,11 @@ import { openCloudReader, type CloudReader, type DirectResult } from "./cloud/di
 
 const SERVICE = "frely-cli-cloud-v1";
 
-/** The server's `permission_required` or `confirmation_required` tool failure as a one-line hint, or null for any other result. */
-export function permissionHint(result: object): string | null {
+/**
+ * The server's `permission_required` or `confirmation_required` tool failure as a hint, or null for any other result. `style` "api" is for
+ * `frely api call`, which has --wait; "install" is for commands that wait by themselves or take no --wait, so it never mentions one.
+ */
+export function permissionHint(result: object, style: "api" | "install" = "api"): string | null {
   const { isError, content } = result as { isError?: unknown; content?: unknown };
   if (isError !== true || !Array.isArray(content)) return null;
   for (const part of content) {
@@ -23,9 +26,12 @@ export function permissionHint(result: object): string | null {
       if (url.protocol !== "https:" && url.hostname !== "127.0.0.1" && url.hostname !== "localhost") continue;
       if (error.code === "confirmation_required") {
         if (typeof error.approvalCode !== "string" || !/^[A-HJ-NP-Z]{8}$/.test(error.approvalCode)) continue;
-        return `${typeof error.summary === "string" ? error.summary + "\n" : ""}Approve this in your browser:\n${url.toString()}\nCode: ${error.approvalCode.slice(0, 4)}-${error.approvalCode.slice(4)}\nThen run the same call again with "approvalCode":"${error.approvalCode}" added to the input, or add --wait to let the CLI wait and run it once. To wait in the background: frely permission wait ${error.approvalCode}`;
+        const lead = `${typeof error.summary === "string" ? error.summary + "\n" : ""}Approve this in your browser:\n${url.toString()}\nCode: ${error.approvalCode.slice(0, 4)}-${error.approvalCode.slice(4)}`;
+        if (style === "install") return `${lead}\nKeep the command running: it continues by itself once the owner approves. If it has already ended, run the same command again.`;
+        return `${lead}\nThen run the same call again with "approvalCode":"${error.approvalCode}" added to the input, or add --wait to let the CLI wait and run it once. To wait in the background: frely permission wait ${error.approvalCode}`;
       }
-      const waiting = typeof error.shortCode === "string" && /^[A-Za-z]{8}$/.test(error.shortCode) ? `\nTo wait in the background: frely permission wait ${error.shortCode}, then run the call again (or use --wait).` : "";
+      const waiting = style === "install" ? "\nAfter the owner grants it, run the same command again."
+        : typeof error.shortCode === "string" && /^[A-Za-z]{8}$/.test(error.shortCode) ? `\nTo wait in the background: frely permission wait ${error.shortCode}, then run the call again (or use --wait).` : "";
       return `This device needs ${need}${typeof error.group === "string" ? " to " + error.group : ""}. Grant it in your browser (passkey or authenticator code required):\n${url.toString()}${waiting}`;
     } catch { /* Not a permission failure. */ }
   }
@@ -33,7 +39,9 @@ export function permissionHint(result: object): string | null {
 }
 
 type CallResult = { isError?: boolean; content?: unknown; [key: string]: unknown };
-const WAIT_DEFAULT_MS = 5 * 60_000, WAIT_MAX_MS = 10 * 60_000;
+/** How long a command that waits for the owner keeps waiting. The server holds a claim confirmation for the same 30 minutes; other approvals expire sooner and cut the wait short. */
+export const WAIT_MAX_MS = 30 * 60_000;
+const WAIT_DEFAULT_MS = 5 * 60_000;
 
 /** The error object of a failed tool result, or null when the result is not a JSON error. */
 function toolError(result: object): { code?: unknown; url?: unknown; approvalCode?: unknown; shortCode?: unknown; expiresAt?: unknown; approval?: unknown; summary?: unknown } | null {
@@ -67,7 +75,9 @@ export function approvalOf(error: { code?: unknown; url?: unknown; approvalCode?
  * so a write whose outcome was lost is not replayed (it is reported as it came back).
  */
 export async function rerunAfterApproval(first: CallResult, call: (input: Record<string, unknown>) => Promise<CallResult>, input: Record<string, unknown>,
-  wait: (ref: ApprovalRef, timeoutMs: number) => Promise<ApprovalOutcome>, now: () => number = Date.now): Promise<CallResult> {
+  wait: (ref: ApprovalRef, timeoutMs: number) => Promise<ApprovalOutcome>, now: () => number = Date.now,
+  /** What to say when the owner has not answered by the end of the wait; a command that takes no --wait says to run it again. */
+  stillWaiting = "Still waiting for the owner. Run the same command with --wait to keep waiting."): Promise<CallResult> {
   const start = toolError(first);
   if (!start || (start.code !== "permission_required" && start.code !== "confirmation_required")) return first;
   const approvalCode = start.code === "confirmation_required" && typeof start.approvalCode === "string" ? start.approvalCode : undefined;
@@ -79,7 +89,7 @@ export async function rerunAfterApproval(first: CallResult, call: (input: Record
   const outcome = await wait({ code }, Math.max(budget, 0));
   if (outcome.status !== "approved") {
     process.stderr.write(outcome.status === "used" ? "This approval was already used for a call; not repeating it. Check that call's result.\n"
-      : outcome.status === "pending" ? "Still waiting for the owner. Run the same command with --wait to keep waiting.\n"
+      : outcome.status === "pending" ? stillWaiting + "\n"
       : outcome.status === "error" ? outcome.message + "\n" : `The request was ${outcome.status}.\n`);
     return first;
   }
@@ -269,31 +279,37 @@ export async function callCloudTool(name: string, input: Record<string, unknown>
 
 /**
  * Like callCloudTool, for a command that should not hand the owner's approval back to the caller: a write that needs approval prints the
- * link at once, then waits for the owner here (up to 10 minutes) and runs the call once when it is approved. Not approved in time: the same
+ * link at once, then waits for the owner here (up to 30 minutes) and runs the call once when it is approved. Not approved in time: the same
  * ApprovalRequiredError, so the caller can exit with 3 and say what to run again.
  */
+/** Tools the read-only reader can never see, so a command that calls one goes straight to the FrelyMCP connection and saves a handshake. */
+const KNOWN_WRITE_TOOLS = new Set(["items.claim_install", "share_links.redeem", "mcps.connect"]);
+
 export async function callCloudToolAwaiting(name: string, input: Record<string, unknown>, deps: CloudCallDeps = { openReader: openCloudReader, openControllerConnection },
   wait: (controller: { call(name: string, args: Record<string, unknown>): Promise<DirectResult> }, ref: ApprovalRef, timeoutMs: number) => Promise<ApprovalOutcome> = (controller, ref, timeoutMs) => waitForApproval(controller as never, ref, timeoutMs),
   /** Called with the approval as soon as the server asks for it, before this command starts to wait: a host that only reads the first lines of output can show it. */
   onApproval?: (approval: Approval) => void): Promise<Record<string, unknown>> {
-  const reader = await deps.openReader();
-  try {
-    return cloudToolResult(await reader.call(name, input));
-  } catch (error) {
-    if (!(error instanceof CloudToolError && error.code === "tool_unavailable_or_forbidden")) throw error;
-  } finally { await reader.close().catch(() => undefined); }
+  if (!KNOWN_WRITE_TOOLS.has(name)) {
+    const reader = await deps.openReader();
+    try {
+      return cloudToolResult(await reader.call(name, input));
+    } catch (error) {
+      if (!(error instanceof CloudToolError && error.code === "tool_unavailable_or_forbidden")) throw error;
+    } finally { await reader.close().catch(() => undefined); }
+  }
   const controller = await deps.openControllerConnection();
   try {
     const call = (arguments_: Record<string, unknown>) => controller.call("frely_call", { tool: name, arguments: arguments_ }) as Promise<CallResult>;
     let result = await call(input);
-    const hint = permissionHint(result);
+    const hint = permissionHint(result, "install");
     if (hint) {
       const approval = approvalOf(toolError(result) ?? {});
       if (approval) onApproval?.(approval);
       // This command waits for the owner itself, so the generic hint's "run the call again" does not apply: say to keep it running.
       process.stderr.write((approval ? `${approval.summary ? approval.summary + "\n" : ""}Approve this in your browser:\n${approval.url}\nCode: ${approval.code.slice(0, 4)}-${approval.code.slice(4)}\n` : hint + "\n")
-        + "Keep this command running (up to 10 minutes): it continues by itself once the owner approves.\n");
-      result = await rerunAfterApproval(result, call, input, (ref, timeoutMs) => wait(controller, ref, timeoutMs));
+        + `Keep this command running (up to ${WAIT_MAX_MS / 60_000} minutes): it continues by itself once the owner approves. If it has already ended, run the same command again.\n`);
+      result = await rerunAfterApproval(result, call, input, (ref, timeoutMs) => wait(controller, ref, timeoutMs), Date.now,
+        "The owner has not answered yet. Run the same command again to keep waiting.");
     }
     return cloudToolResult(result, true);
   } finally { await controller.close().catch(() => undefined); }
@@ -318,7 +334,7 @@ export async function callCloudToolWith(name: string, input: Record<string, unkn
 
 /** One tool result as the calling command needs it: the JSON object on success, CloudToolError(code) on failure. Permission hints go to stderr either way. */
 function cloudToolResult(result: DirectResult, hintShown = false): Record<string, unknown> {
-  const hint = permissionHint(result);
+  const hint = permissionHint(result, "install");
   if (hint && !hintShown) process.stderr.write(hint + "\n");
   const text = Array.isArray(result.content) ? (result.content as Array<{ type?: unknown; text?: unknown }>).find(part => part.type === "text")?.text : undefined;
   if (result.isError === true) {

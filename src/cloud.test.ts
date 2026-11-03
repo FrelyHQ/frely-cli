@@ -84,12 +84,12 @@ test("an approved permission_required is waited for by its short code, then the 
   assert.equal(final, ok);
 });
 
-test("an approved confirmation is repeated once with the same approvalCode, within the 10 minute cap", async () => {
+test("an approved confirmation is repeated once with the same approvalCode, within the 30 minute cap", async () => {
   const first = refusal({ code: "confirmation_required", approvalCode: "CDEFGHJK", url: "https://frely.cloud/c/c_1", expiresAt: 3_600_000 });
   const { refs, wait } = waiter("approved");
   const inputs: Array<Record<string, unknown>> = [];
   await rerunAfterApproval(first, async input => { inputs.push(input); return ok; }, { a: 1 }, wait, () => 0);
-  assert.deepEqual(refs, [{ ref: { code: "CDEFGHJK" }, timeoutMs: 600_000 }]);
+  assert.deepEqual(refs, [{ ref: { code: "CDEFGHJK" }, timeoutMs: 1_800_000 }]);
   assert.deepEqual(inputs, [{ a: 1, approvalCode: "CDEFGHJK" }]);
 });
 
@@ -171,4 +171,33 @@ test("callCloudToolAwaiting hands the approval to the caller before it waits, an
   assert.deepEqual(order, ["approval:ABCDEFGH:https://frely.cloud/device?g=ABCDEFGH", "wait"]);
   assert.match(written.join(""), /Keep this command running/);
   assert.doesNotMatch(written.join(""), /run the same call again/i);
+});
+
+test("the install-style hint never mentions --wait or a wait command", () => {
+  const confirmation = permissionHint(failure({ code: "confirmation_required", approvalCode: "CDEFGHJK", summary: "Install frely/gpt800.", url: "https://frely.cloud/device?g=CDEFGHJK" }), "install")!;
+  assert.match(confirmation, /Approve this in your browser:\nhttps:\/\/frely.cloud\/device\?g=CDEFGHJK\nCode: CDEF-GHJK/);
+  assert.match(confirmation, /run the same command again/);
+  const permission = permissionHint(failure({ code: "permission_required", need: "write", group: "agents", shortCode: "ABCDEFGH", url: "https://frely.cloud/device?g=ABCDEFGH" }), "install")!;
+  for (const text of [confirmation, permission]) assert.doesNotMatch(text, /--wait|permission wait/);
+});
+
+test("a pending outcome of a command that waits by itself says to run it again, not to add --wait", async () => {
+  const first = refusal({ code: "confirmation_required", approvalCode: "CDEFGHJK", url: "https://frely.cloud/c/c_1", expiresAt: 5000 });
+  const written: string[] = [];
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: string | Uint8Array) => { written.push(String(chunk)); return true; }) as typeof process.stderr.write;
+  try { await rerunAfterApproval(first, async () => ok, {}, waiter("pending").wait, () => 0, "The owner has not answered yet. Run the same command again to keep waiting."); }
+  finally { process.stderr.write = original; }
+  assert.deepEqual(written, ["The owner has not answered yet. Run the same command again to keep waiting.\n"]);
+});
+
+test("a known write tool goes straight to the FrelyMCP connection without opening the read-only one", async () => {
+  const { callCloudToolAwaiting } = await import("./cloud.js");
+  let readers = 0;
+  const deps = {
+    openReader: async () => { readers++; throw new Error("the reader must not be opened"); },
+    openControllerConnection: async () => ({ call: async () => ({ content: [{ type: "text", text: JSON.stringify({ kind: "skill", id: "s", name: "a/b" }) }], structuredContent: { kind: "skill", id: "s", name: "a/b" } }), close: async () => undefined }),
+  };
+  assert.equal((await callCloudToolAwaiting("items.claim_install", { name: "a/b" }, deps as never)).kind, "skill");
+  assert.equal(readers, 0);
 });

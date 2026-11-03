@@ -291,3 +291,26 @@ test("a rejected refresh token reports an expired login without retrying", async
   await assert.rejects(requireLogin(), /Frely login expired\. Run `frely login`\./);
   assert.equal(login.refreshCalls(), 1);
 });
+
+test("an email sign-in that names an install sends it when the code is sent and again when it is entered", async (t) => {
+  const { initEmailDeviceLogin, completeEmailDeviceLogin } = await import("./auth.js");
+  const restore = useMemoryCredentialStore();
+  const oldFetch = globalThis.fetch;
+  const bodies: Record<string, Record<string, unknown>> = {};
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/api/auth/device/code")) return Response.json({ device_code: "dev", user_code: "ABCDEFGH", verification_uri: "https://frely.cloud/device", verification_uri_complete: "https://frely.cloud/device?g=ABCDEFGH", expires_in: 600, interval: 5 });
+    bodies[new URL(url).pathname] = JSON.parse(String(init?.body));
+    return url.endsWith("/email/start") ? Response.json({ state: "code_sent", email: "t***@x.test", challengeId: "c1", reference: "K7" }) : Response.json({ state: "signed_in", user: { id: "u1", email: "t@x.test" } });
+  }) as typeof fetch;
+  t.after(() => { restore(); globalThis.fetch = oldFetch; });
+  const install = { name: "frely/gpt800", gift: `fsl_${"a".repeat(32)}` };
+  const challenge = await initEmailDeviceLogin("https://frely.cloud", "t@x.test", undefined, install);
+  assert.deepEqual(challenge.install, install);
+  assert.deepEqual(bodies["/api/auth/device/email/start"]?.install, install);
+  await completeEmailDeviceLogin("https://frely.cloud", challenge, "123456");
+  assert.deepEqual(bodies["/api/auth/device/email/verify"]?.install, install);
+  const plain = await initEmailDeviceLogin("https://frely.cloud", "t@x.test");
+  assert.equal("install" in plain, false);
+  assert.equal("install" in (bodies["/api/auth/device/email/start"] ?? {}), false);
+});

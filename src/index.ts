@@ -13,7 +13,7 @@ import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
 import { join, resolve } from "node:path";
 import { stdin, stdout } from "node:process";
-import { inspectAuth, loginDevice, logout, normalizeRelayUrl, requireLogin, initEmailDeviceLogin, completeEmailDeviceLogin, savePendingEmailChallenge, readPendingEmailChallenge, deletePendingEmailChallenge, localDeviceId, finishDeviceLogin, readConfig, resumeDeviceLogin } from "./auth.js";
+import { inspectAuth, loginDevice, logout, normalizeRelayUrl, requireLogin, initEmailDeviceLogin, completeEmailDeviceLogin, savePendingEmailChallenge, readPendingEmailChallenge, deletePendingEmailChallenge, localDeviceId, finishDeviceLogin, readConfig, resumeDeviceLogin, openVerificationUrl } from "./auth.js";
 import { basicCredentialStore as credentialStore } from "./credential-basic.js";
 import { doctor, formatDoctor } from "./diagnostics.js";
 import { ensureDevice } from "./device/control.js";
@@ -76,7 +76,7 @@ import { runUninstall } from "./uninstall.js";
 
 
 
-const ITEM_INSTALL_USAGE = "Usage: frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|workbuddy|codebuddy|generic] [--scope global|project] [--dir <path>] [--gift <code>] [--replace] [--api-key-stdin] [--json]";
+const ITEM_INSTALL_USAGE = "Usage: frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|workbuddy|codebuddy|generic] [--scope global|project] [--dir <path>] [--gift <code>] [--email <address>] [--no-browser] [--replace] [--api-key-stdin] [--json]";
 
 /** Installs a published Agent as a local trigger Skill, from `username/name[@version]` (or the distribution id older scripts use). */
 async function installAgent(target: string, args: string[], resolved: { manifest?: unknown; extra?: Record<string, unknown>; accountLine?: string } = {}): Promise<void> {
@@ -428,7 +428,7 @@ async function main(): Promise<void> {
     const itemRef = args[2];
     if (!itemRef || itemRef.startsWith("-")) throw new Error(ITEM_INSTALL_USAGE);
     // An option this command does not know is an error, not a silent no-op (a host that adds --wait would otherwise think it waited).
-    const valueFlags = new Set(["--host", "--scope", "--dir", "--gift"]), plainFlags = new Set(["--api-key-stdin", "--json", "--replace"]);
+    const valueFlags = new Set(["--host", "--scope", "--dir", "--gift", "--email"]), plainFlags = new Set(["--api-key-stdin", "--json", "--replace", "--no-browser"]);
     for (let i = 3; i < args.length; i++) {
       const arg = args[i]!;
       if (valueFlags.has(arg)) { i++; continue; }
@@ -441,6 +441,23 @@ async function main(): Promise<void> {
     const scope = skillScope(option(args, "--scope") ?? "global");
     const dir = option(args, "--dir");
     const byId = /^creator_distribution_/u.test(itemRef) || /^cloud_skill_|^skill_/u.test(itemRef) || args.includes("--api-key-stdin");
+    const noBrowser = args.includes("--no-browser") || process.env.FRELY_NO_BROWSER === "1";
+    // Not signed in and given an address: the sign-in code mail names this install, so entering the code is also the owner's approval of it
+    // (one verification, no second page). The code is entered with `frely login --code`; then this same command is run again.
+    const installEmail = option(args, "--email");
+    if (!byId && installEmail !== undefined && !(await readConfig().then(() => true, () => false))) {
+      const relayUrl = normalizeRelayUrl(undefined);
+      const challenge = await initEmailDeviceLogin(relayUrl, installEmail, undefined, { name: itemRef, ...(gift === undefined ? {} : { gift }) });
+      await savePendingEmailChallenge(relayUrl, challenge);
+      if (json) stdout.write(`${JSON.stringify({ state: "code_sent", email: challenge.email, expiresIn: challenge.expiresIn, ...(challenge.reference ? { reference: challenge.reference } : {}),
+        confirms: { install: itemRef, gift: gift !== undefined }, next: "Ask the user for the 6-digit code from the email, run `frely login --code <code>`, then run this same install command again (without --email)." })}\n`);
+      else {
+        stdout.write(`Verification code sent to ${challenge.email}. It also confirms installing ${itemRef}${gift === undefined ? "" : " and claiming its gift"}.\n`);
+        if (challenge.reference) stdout.write(`Mail reference: ${challenge.reference} (use the newest mail with this reference; enter only the 6 digits)\n`);
+        stdout.write("Next: ask the user for the 6-digit code, run `frely login --code <code>`, then run this same install command again (without --email).\n");
+      }
+      return;
+    }
     // One command does the whole install. The server says what the name is for this account; when a gift is present or an MCP needs its key,
     // the owner confirms once on the web (account, item and gift shown) and this command waits for it, then claims and installs. No fallback on failure.
     let resolved: ResolvedItem | null = null;
@@ -450,7 +467,11 @@ async function main(): Promise<void> {
       resolved = gift === undefined && signedIn ? await resolveItem(itemRef, callCloudTool) : null;
       if (gift !== undefined || resolved?.kind === "remote_mcp") {
         // With --json the approval is printed as its own line at once, before the command waits (the final result is the last line).
-        const announce = (approval: Approval) => { if (json) stdout.write(`${JSON.stringify({ state: "waiting", approval })}\n`); };
+        // The page opens by itself on a desktop (a claim needs one click and no sign-in); a host that wants the link only passes --no-browser.
+        const announce = (approval: Approval) => {
+          if (json) stdout.write(`${JSON.stringify({ state: "waiting", approval })}\n`);
+          if (!noBrowser) openVerificationUrl(approval.url);
+        };
         const claimed = await claimInstall(itemRef, gift, (name, input) => callCloudToolAwaiting(name, input, undefined, undefined, announce));
         if (claimed !== null) resolved = claimed;
         else if (gift !== undefined) { await redeemGift(gift, callCloudTool, json ? process.stderr : stdout); resolved = null; }
@@ -539,6 +560,7 @@ async function main(): Promise<void> {
           const { user } = await finishDeviceLogin(relayUrl, pendingChallenge, deviceId);
           await deletePendingEmailChallenge(relayUrl);
           stdout.write(`Logged in as ${user.email}.\n`);
+          if (pendingChallenge.install) stdout.write(`This code also confirmed installing ${pendingChallenge.install.name}${pendingChallenge.install.gift ? " and claiming its gift" : ""}. Run the same install command again; it needs no other confirmation.\n`);
           await installStandbyService();
           stdout.write("Run `frely link on` on the computer you want to control, then connect your MCP client with OAuth.\n");
         } catch (error) {
