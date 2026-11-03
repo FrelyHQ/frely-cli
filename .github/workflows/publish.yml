@@ -44,7 +44,8 @@ jobs:
   release-assets:
     needs: [verify, standalone]
     name: Release asset (${{ matrix.target }})
-    runs-on: ubuntu-24.04
+    # darwin binaries are re-signed by scripts/build-standalone.mjs, which needs codesign (bun's embedded signature is invalid and macOS kills the binary).
+    runs-on: ${{ startsWith(matrix.target, 'darwin') && 'macos-latest' || 'ubuntu-24.04' }}
     permissions:
       contents: read
     strategy:
