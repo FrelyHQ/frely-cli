@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -24,7 +24,7 @@ function fake(blobs: Record<string, string>, over: { mode?: Record<string, strin
 }
 
 test("installs the pinned commit without execute permission and reports it as unscanned", async () => {
-  const home = await mkdtemp(join(tmpdir(), "frely-gh-"));
+  const home = await realpath(await mkdtemp(join(tmpdir(), "frely-gh-")));
   const { fetcher, calls } = fake({ "SKILL.md": "---\nname: x\n---", "scripts/run.sh": "echo hi", ".github/ci.yml": "no", "link": "../x" }, { mode: { link: "120000" } });
   const result = await installGithubItem({ ...base, home, cwd: home, fetch: fetcher });
   assert.equal(result.needsReview, true);
@@ -37,7 +37,7 @@ test("installs the pinned commit without execute permission and reports it as un
 });
 
 test("refuses a repository without SKILL.md, a truncated or oversized listing, and an unsafe path, before downloading", async () => {
-  const home = await mkdtemp(join(tmpdir(), "frely-gh-"));
+  const home = await realpath(await mkdtemp(join(tmpdir(), "frely-gh-")));
   const cases: Array<ReturnType<typeof fake>> = [
     fake({ "readme.md": "x" }),
     fake({ "SKILL.md": "x" }, { truncated: true }),
@@ -56,6 +56,6 @@ test("refuses a commit id or names that are not what Frely would return", async 
 });
 
 test("a repository GitHub no longer has gives a clear error", async () => {
-  const home = await mkdtemp(join(tmpdir(), "frely-gh-"));
+  const home = await realpath(await mkdtemp(join(tmpdir(), "frely-gh-")));
   await assert.rejects(installGithubItem({ ...base, home, cwd: home, fetch: async () => new Response("", { status: 404 }) }), /deleted or made private/u);
 });
