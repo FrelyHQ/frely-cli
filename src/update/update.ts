@@ -9,9 +9,11 @@ import { readDeviceBinding } from "../device/state.js";
 import { connectionIsLive, readConnectionStatus } from "../device/connection-status.js";
 import { serviceCommand, serviceStatus, startMcpService, stopMcpService } from "../service.js";
 import { inspectInstallation, manualUpdateCommand, packageArguments, type Installation } from "./installation.js";
-import { compareVersions, latestRelease, NPM_REGISTRIES, standaloneAsset, type Release, type ReleaseSource } from "./release.js";
+import { compareVersions, latestRelease, standaloneAsset, type Release, type ReleaseSource } from "./release.js";
 import { acquireMaintenance, MaintenanceBusyError } from "./maintenance.js";
 import { checkReleaseSignature } from "./release-signature.js";
+import { openRelease } from "./fetch-release.js";
+import { rankSources } from "./source-probe.js";
 
 const execFile = promisify(execFileCallback);
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -39,22 +41,8 @@ export async function installedVersion(installation: Installation): Promise<stri
   return (await execFile(file, args, { cwd: homedir(), timeout: 10000, maxBuffer: 65536 })).stdout.trim();
 }
 
-const DOWNLOAD_HOSTS = ["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com", ...NPM_REGISTRIES.map((url) => new URL(url).hostname), "cdn.npmmirror.com"];
-
 async function download(url: string, destination: string, maxBytes: number): Promise<void> {
-  const signal = AbortSignal.timeout(60000);
-  let response: Response | undefined;
-  for (let redirects = 0; redirects < 5; redirects++) {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "https:" || parsed.username || parsed.password || !DOWNLOAD_HOSTS.includes(parsed.hostname)) throw new Error("Unsupported release download location.");
-    response = await fetch(url, { signal, redirect: "manual" });
-    if ([301, 302, 303, 307, 308].includes(response.status)) {
-      const location = response.headers.get("location");
-      await response.body?.cancel();
-      if (!location) throw new Error("Missing release redirect.");
-      url = new URL(location, url).toString();
-    } else break;
-  }
+  const response = await openRelease(url, { signal: AbortSignal.timeout(60000) });
   if (!response?.ok || !response.body) throw new Error("Release download failed.");
   const file = await open(destination, "wx", 0o600);
   let bytes = 0;
@@ -84,7 +72,9 @@ async function systemUnpack(tarball: string, directory: string): Promise<void> {
 }
 
 export async function prepareStandalone(installation: Installation, release: Release,
-  fetchFile = download, execute = installedVersion, unpack = systemUnpack, signing?: { keys?: readonly string[]; required?: boolean }): Promise<PreparedUpdate> {
+  fetchFile = download, execute = installedVersion, unpack = systemUnpack, signing?: { keys?: readonly string[]; required?: boolean },
+  /** Probes github and npmmirror and tries the faster first; only for real downloads (an injected fetchFile keeps the given order) and skipped when FRELY_INSTALL_SOURCES is set. */
+  rank: typeof rankSources | null = fetchFile === download && !process.env.FRELY_INSTALL_SOURCES ? rankSources : null): Promise<PreparedUpdate> {
   const target = installation.entry;
   if (!(await lstat(target)).isFile()) throw new Error("The installation is not a regular file.");
   const stage = await mkdtemp(join(dirname(target), ".frely-update-"));
@@ -115,7 +105,7 @@ export async function prepareStandalone(installation: Installation, release: Rel
     };
     let lastError: unknown = new Error("No release source is available.");
     let prepared = false;
-    for (const source of release.sources ?? []) {
+    for (const source of rank ? await rank(release.sources ?? [], asset) : release.sources ?? []) {
       try { await fromSource(source); prepared = true; break; } catch (error) { lastError = error; }
     }
     if (!prepared) throw lastError;

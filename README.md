@@ -45,7 +45,7 @@ Or with npm:
 npm install --global --ignore-scripts frely-cli@latest
 ```
 
-The installers check the SHA-256 and download from GitHub Releases first, then npmmirror and npmjs. [More](https://cli.frely.cloud/docs/help/install-only/)
+The installers check the SHA-256 and measure GitHub Releases and npmmirror in parallel and download from the faster one first (npmjs is the last fallback; set `FRELY_INSTALL_SOURCES` to pin an order). [More](https://cli.frely.cloud/docs/help/install-only/)
 
 Then sign in and install the Skill for your agent host:
 
