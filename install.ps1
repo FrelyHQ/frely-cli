@@ -144,8 +144,12 @@ try {
   $target = Join-Path $directory 'frely.exe'
   if (Test-Path -LiteralPath $target) {
     if (((Get-Item -LiteralPath $target -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Existing executable must not be a reparse point.' }
-    [IO.File]::Replace($download, $target, $null)
-  } else { [IO.File]::Move($download, $target) }
+    $install = { [IO.File]::Replace($download, $target, $null) }
+  } else { $install = { [IO.File]::Move($download, $target) } }
+  # A just-written executable can stay locked for a moment (antivirus scan after the archive was decompressed): retry briefly.
+  for ($attempt = 1; ; $attempt++) {
+    try { & $install; break } catch { if ($attempt -ge 20) { throw }; Start-Sleep -Milliseconds 500 }
+  }
   $pathPersisted = $true
   if ($env:FRELY_INSTALL_NO_PROFILE -ne '1') {
     try {
