@@ -122,7 +122,7 @@ curl -fsSL https://frely.cloud/start.sh | FRELY_INSTALL_TOKEN=fit_... sh
 
 - **Frely 托管的 Agent**：`frely item install <username/name> --host claude-code` 安装为本地 Skill，`frely agent run <username/name>` 调用。[详情](https://cli.frely.cloud/docs/help/install-agents-and-items/)
 - **市场里的 Prompt 和 Skill**：`frely item install <username/name> --host claude-code`（Agent 也用同一条命令，加 `@3` 指定版本 3），付费部分需要账号持有通行证。[详情](https://cli.frely.cloud/docs/help/install-agents-and-items/)
-- **本地模型共享**：`frely provider share ollama` 把本机模型服务发布为你的个人 Frely Provider。[详情](https://cli.frely.cloud/docs/help/share-local-model/)
+- **本地模型共享**：`frely service share model ollama` 把本机模型服务发布为你的个人 Frely Provider。[详情](https://cli.frely.cloud/docs/help/share-local-model/)
 - **在终端管理账号**：`frely api list|describe|call`。[详情](https://cli.frely.cloud/docs/help/manage-account-from-cli/)
 
 ## 安全

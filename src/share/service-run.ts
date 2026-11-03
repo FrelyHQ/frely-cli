@@ -5,6 +5,7 @@ import { serviceFrpcConfigToml, SERVICE_SHARE_ID, type ServiceGrant, type Servic
 import { accountServiceControl, type ServiceControl } from "./service-control.js";
 import { listLocalServices, removeLocalService, saveLocalService, type LocalService } from "./service-state.js";
 import { ensureFrpc } from "./frpc.js";
+import { modelShareArguments, parseModelShareArguments, shareModel, MODEL_SHARE_USAGE, type ModelShareDeps } from "./model-share.js";
 import { ALLOWANCE_NOTE, remainingAllowanceLine } from "./allowance.js";
 import { probeLoopback, spawnFrpcProcess, type FrpcProcess } from "./run.js";
 
@@ -21,6 +22,7 @@ export interface ServiceShareOptions { readonly type: ServiceType; readonly port
 export function serviceUsage(): string {
   return [
     "frely service share --type mcp|a2a --port <n> [--label <text>] [--background] [--json]",
+    MODEL_SHARE_USAGE,
     "frely service list [--json]",
     "frely service stop <id|label>",
     "frely service remove <id|label>",
@@ -185,12 +187,21 @@ export interface ServiceCommandDeps {
   readonly signal: AbortSignal;
   /** Installs / restarts the background service so it picks the service up. */
   readonly installDaemon: () => Promise<void>;
+  /** Model shares (`frely service share model`): the sharing, the owner's confirmation of a network address and the key from stdin. */
+  readonly model?: ModelShareDeps;
 }
 
 export async function runServiceCommand(args: readonly string[], io: ServiceCommandIo, deps: ServiceCommandDeps): Promise<number> {
   const [action, ...rest] = args;
   if (action === undefined || action === "help" || action === "--help") { io.write(`Usage:\n${serviceUsage().split("\n").map((line) => `  ${line}`).join("\n")}\n`); return 0; }
-  if (action === "share") return shareService(parseServiceShareArguments(rest), io, deps);
+  if (action === "share") {
+    const model = modelShareArguments(rest);
+    if (model !== undefined) {
+      if (!deps.model) throw new Error("Model sharing is not available here.");
+      return shareModel(parseModelShareArguments(model), io, deps.model);
+    }
+    return shareService(parseServiceShareArguments(rest), io, deps);
+  }
   if (action === "list") {
     if (rest.some((arg) => arg !== "--json")) throw new Error(`Usage: frely service list [--json]`);
     const control = await deps.control();

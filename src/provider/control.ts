@@ -57,11 +57,22 @@ export async function prepareLocalProvider(input: PrepareLocalProviderInput): Pr
   return { providerId: record.providerId, providerBaseUrl };
 }
 
-export async function finalizeLocalProvider(input: { providerId: string; token: string }): Promise<void> {
+/** An AccessPoint the share made for one of its models. */
+export interface SharedAccessPoint { readonly id: string; readonly name: string; readonly model: string }
+export interface FinalizeResult { readonly accessPoints: readonly SharedAccessPoint[]; readonly accessPointNote?: string }
+
+/** Finishes a prepared Provider. With `accessPoints` Frely also makes one AccessPoint per model and returns them (an older server returns none). */
+export async function finalizeLocalProvider(input: { providerId: string; token: string; accessPoints?: boolean }): Promise<FinalizeResult> {
   const auth = await requireLogin();
   const response = await relayFetch(auth.config.relayUrl, auth.credential, "/api/user/local-providers/finalize", { method: "POST", body: JSON.stringify(input) });
   const payload = await responseJson(response);
   if (!response.ok) throw new Error(publicError(payload, response.status));
+  const root = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
+  const accessPoints = Array.isArray(root.accessPoints) ? root.accessPoints.flatMap((item): SharedAccessPoint[] => {
+    const record = item && typeof item === "object" ? item as Record<string, unknown> : {};
+    return typeof record.id === "string" && typeof record.name === "string" && typeof record.model === "string" ? [{ id: record.id, name: record.name, model: record.model }] : [];
+  }) : [];
+  return { accessPoints, ...(typeof root.accessPointNote === "string" ? { accessPointNote: root.accessPointNote } : {}) };
 }
 
 export async function waitForLocalProviderRelay(providerBaseUrlInput: string, token: string, timeoutMs = 15_000): Promise<void> {

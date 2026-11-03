@@ -12,9 +12,18 @@ export interface LocalProviderBinding {
   createdAt: string;
   /** Where the Provider counts: a personal Provider slot or the Creator Plan Provider limit. Absent on bindings saved by older versions. */
   slot?: "personal" | "creator";
-  /** Prepared on the server but not finalized yet; `frely provider share` resumes it. */
+  /** Prepared on the server but not finalized yet; `frely service share model` resumes it. */
   pending?: boolean;
+  /** Registered on this computer only: nothing on Frely's servers, so nobody else can reach it and it takes no Provider slot. The id is `lcl_…`. */
+  localOnly?: boolean;
+  /** The endpoint wants a key (kept in the credential store, never in this file). */
+  hasKey?: boolean;
+  /** Calls the endpoint may serve at once, for local tasks and remote buyers together. Default: 1 on loopback, 6 elsewhere. */
+  maxConcurrent?: number;
 }
+
+export const LOCAL_ONLY_PROVIDER_ID = /^lcl_[0-9a-f]{24}$/u;
+export const SHARED_PROVIDER_ID = /^prv_[0-9a-f]{24}$/u;
 
 interface LocalProviderState { version: 1; providers: LocalProviderBinding[] }
 
@@ -51,6 +60,53 @@ export function normalizeLoopbackOpenAiBaseUrl(value: string): string {
   const url = new URL(value);
   if (url.protocol !== "http:") throw new Error("Local Provider URL must use HTTP on loopback.");
   if (!["127.0.0.1", "localhost", "::1", "[::1]"].includes(url.hostname)) throw new Error("Local Provider URL must target loopback.");
+  if (url.username || url.password || url.search || url.hash) throw new Error("Local Provider URL cannot contain credentials, query parameters, or a fragment.");
+  url.pathname = url.pathname.replace(/\/+$/u, "") || "/v1";
+  if (url.pathname === "/") url.pathname = "/v1";
+  if (url.pathname !== "/v1") throw new Error("Local Provider URL must point to an OpenAI-compatible /v1 endpoint.");
+  return url.toString().replace(/\/$/u, "");
+}
+
+const LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "::1", "[::1]"];
+
+/** Whether `host` (as `URL.hostname` prints it) is a loopback name or address. */
+export function isLoopbackHost(host: string): boolean {
+  return LOOPBACK_HOSTS.includes(host) || /^127\.\d+\.\d+\.\d+$/u.test(host);
+}
+
+/** An IP literal in a private range: 10/8, 172.16/12, 192.168/16, fd00::/8. Names never qualify, so the address cannot change under the registration. */
+export function isPrivateLanHost(host: string): boolean {
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/u.exec(host);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    if ([1, 2, 3, 4].some((index) => Number(v4[index]) > 255)) return false;
+    return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  }
+  return /^\[fd[0-9a-f]{2}:[0-9a-f:]+\]$/u.test(host);
+}
+
+/**
+ * The OpenAI-compatible `/v1` endpoint of a local Provider: plain http on this computer or an IP literal in a private network range
+ * (a model gateway on the home or office LAN). The owner confirms a LAN address when registering it, and it is the only address that
+ * remote callers can ever reach through this Provider.
+ */
+export function normalizeLocalOpenAiBaseUrl(value: string): string {
+  const url = new URL(value);
+  if (url.protocol !== "http:") throw new Error("Local Provider URL must use HTTP on this computer or a private network address.");
+  if (!isLoopbackHost(url.hostname) && !isPrivateLanHost(url.hostname)) throw new Error("Local Provider URL must be loopback or a private network IP address (10.x, 172.16-31.x, 192.168.x, fd00::), not a host name.");
+  return normalizeOpenAiPath(url);
+}
+
+export function isLanBaseUrl(value: string): boolean {
+  return !isLoopbackHost(new URL(value).hostname);
+}
+
+/** Whether calls to this endpoint are limited by default to one at a time: a model served by this very computer. */
+export function defaultEndpointLimit(baseUrl: string): number {
+  return isLanBaseUrl(baseUrl) ? 6 : 1;
+}
+
+function normalizeOpenAiPath(url: URL): string {
   if (url.username || url.password || url.search || url.hash) throw new Error("Local Provider URL cannot contain credentials, query parameters, or a fragment.");
   url.pathname = url.pathname.replace(/\/+$/u, "") || "/v1";
   if (url.pathname === "/") url.pathname = "/v1";
@@ -100,16 +156,24 @@ function parseProvider(value: unknown): LocalProviderBinding {
     createdAt: String(record.createdAt ?? ""),
     ...(record.slot === "personal" || record.slot === "creator" ? { slot: record.slot } : {}),
     ...(record.pending === true ? { pending: true } : {}),
+    ...(record.localOnly === true ? { localOnly: true } : {}),
+    ...(record.hasKey === true ? { hasKey: true } : {}),
+    ...(typeof record.maxConcurrent === "number" ? { maxConcurrent: record.maxConcurrent } : {}),
   };
   validateProvider(provider);
   return provider;
 }
 
 function validateProvider(provider: LocalProviderBinding): void {
-  if (!/^prv_[0-9a-f]{24}$/u.test(provider.providerId)) throw new Error("Frely local Provider ID is invalid.");
+  if (provider.localOnly) {
+    if (!LOCAL_ONLY_PROVIDER_ID.test(provider.providerId) || provider.providerBaseUrl !== "") throw new Error("Frely local Provider ID is invalid.");
+  } else {
+    if (!SHARED_PROVIDER_ID.test(provider.providerId)) throw new Error("Frely local Provider ID is invalid.");
+    normalizeRelayProviderBaseUrl(provider.providerBaseUrl);
+  }
   if (!provider.name || provider.name.length > 128) throw new Error("Frely local Provider name is invalid.");
-  normalizeLoopbackOpenAiBaseUrl(provider.baseUrl);
-  normalizeRelayProviderBaseUrl(provider.providerBaseUrl);
+  normalizeLocalOpenAiBaseUrl(provider.baseUrl);
+  if (provider.maxConcurrent !== undefined && (!Number.isInteger(provider.maxConcurrent) || provider.maxConcurrent < 1 || provider.maxConcurrent > 64)) throw new Error("Frely local Provider concurrency limit is invalid.");
   if (provider.models.length < 1 || provider.models.length > 256 || provider.models.some((model) => !isSupportedLocalModelName(model))) throw new Error("Frely local Provider models are invalid.");
   if (!Number.isFinite(Date.parse(provider.createdAt))) throw new Error("Frely local Provider creation time is invalid.");
 }

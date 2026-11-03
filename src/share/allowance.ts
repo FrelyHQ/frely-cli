@@ -8,7 +8,7 @@ export function remainingAllowanceLine(remainingBytes: number): string {
 }
 
 /**
- * The two lines `frely service share` and `frely provider share` print: what is left of this week's relay allowance, then the note.
+ * The two lines `frely service share` (any type, models included) prints: what is left of this week's relay allowance, then the note.
  * When the amount cannot be fetched only the note is printed; the share itself never fails because of it.
  */
 export async function relayAllowanceLines(fetchRemainingBytes: () => Promise<number>): Promise<string[]> {

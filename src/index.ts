@@ -23,6 +23,7 @@ import { startStdioMcp } from "./runtime/mcp.js";
 import { installDeviceRelayService, serviceStatus, trimServiceLog, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
 import { createLocalModelsHub } from "./provider/local-models.js";
 import { shareLocalProvider } from "./provider/share.js";
+import { confirmLanEndpoint, registerLocalOnlyProvider, removeLocalOnlyProvider, setProviderKey, type RegisterIo } from "./provider/register.js";
 import { probeLoopback, runShareCommand, shareUsage, spawnFrpcProcess } from "./share/run.js";
 import { runServiceCommand, superviseServices } from "./share/service-run.js";
 import { accountServiceControl } from "./share/service-control.js";
@@ -33,11 +34,16 @@ import { API_USAGE, logoutCloud, runApi } from "./cloud.js";
 import { CONTROLLER_COMMANDS, runControllerCommand } from "./controller/commands.js";
 import { ControllerError } from "./controller/client.js";
 import { runAgentLocal } from "./agent/local/command.js";
+import { runTaskCommand } from "./task/command.js";
+import { taskWorkerMain } from "./task/worker.js";
+import { superviseTasks } from "./task/scheduler.js";
+import { superviseTaskShares } from "./task/share.js";
 import { cancelRun, listRunSummaries, resumeRun, runOutcome, runSummary, startRun, waitForRun, workerMain } from "./agent/run.js";
 import { effectiveStatus, isRunId, readRun, resolveRun } from "./agent/run-store.js";
 import { DEFAULT_READ_LIMITS, defaultReadRoot } from "./agent/workspace-read.js";
 import { PiNodeSupervisor } from "./agent/pi-node-supervisor.js";
 import { readAppInstall } from "./agent/app-install.js";
+import { installCapsule, readAnyInstall } from "./agent/capsule-install.js";
 import { appInstallStatus, installApp, openApp, uninstallApp, updateApp } from "./app-manager.js";
 import { detectSandboxBackend } from "./runtime/sandbox.js";
 import { LocalMcpHub, loadManualEntries } from "./runtime/local-mcp.js";
@@ -95,6 +101,10 @@ async function installStandbyService(): Promise<void> {
   } catch (error) {
     process.stderr.write(`Could not start the standby service (${error instanceof Error ? error.message : String(error)}). Remote control stays off; run frely link on to enable it on this computer.\n`);
   }
+}
+
+function providerIo(): RegisterIo {
+  return { err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY) };
 }
 
 async function main(): Promise<void> {
@@ -167,6 +177,34 @@ async function main(): Promise<void> {
     const value = await runNetwork(args);
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
     else stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+    return;
+  }
+
+  if (command === "pi") {
+    if (args[1] === "install") {
+      const result = await installCapsule();
+      stdout.write(args.includes("--json") ? `${JSON.stringify(result)}\n` : `Pi Node ${result.tag} ${result.changed ? "installed" : "is up to date"} at ${result.capsulePath}.\nThe background service starts it (run frely link on if it is not running).\n`);
+      return;
+    }
+    if (args[1] === "status") {
+      const install = await readAnyInstall().catch(() => null);
+      const endpoint = install ? await readFile(join(install.agentDir, "frely", "headless.json"), "utf8").then(() => true, () => false) : false;
+      stdout.write(args.includes("--json") ? `${JSON.stringify({ installed: install !== null, running: endpoint, ...(install ? { version: install.appVersion, path: install.capsulePath } : {}) })}\n` : !install ? "The Pi Node is not installed. Run `frely pi install`.\n" : `Pi Node ${install.appVersion} at ${install.capsulePath}\nState: ${endpoint ? "running" : "not running"}\n`);
+      return;
+    }
+    stdout.write(subcommandUsage("pi"));
+    return;
+  }
+
+  if (command === "task") {
+    if (args[1] === "__worker") {
+      const runId = args[2];
+      if (!runId) throw new Error("Usage: frely task __worker <runId>");
+      await taskWorkerMain(runId);
+      return;
+    }
+    if (args[1] === undefined) { stdout.write(subcommandUsage("task")); return; }
+    process.exitCode = await runTaskCommand(args.slice(1), { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY) });
     return;
   }
 
@@ -550,6 +588,7 @@ async function main(): Promise<void> {
       process.exitCode = await runServiceCommand(args.slice(1), { write: (text) => { stdout.write(text); } }, {
         control: accountServiceControl, probe: probeLoopback, ensureFrpc: () => ensureFrpc({ log: (text) => { stdout.write(text); } }), spawnFrpc: spawnFrpcProcess, signal: controller.signal,
         installDaemon: async () => { await installDeviceRelayService(); },
+        model: { share: shareLocalProvider, confirmLan: (baseUrl) => confirmLanEndpoint(baseUrl, providerIo()), readSecret: () => readStdinSecret(8192) },
       });
     } finally { process.off("SIGINT", onSignal); process.off("SIGTERM", onSignal); }
     return;
@@ -564,28 +603,40 @@ async function main(): Promise<void> {
   }
 
   if (command === "provider" && args[1] === undefined) { stdout.write(subcommandUsage("provider")); return; }
-  if (command === "provider" && args[1] === "share") {
-    const driver = args[2] ?? "ollama";
-    // A prepared Provider resumes without any other option, so the driver is only checked when a new one is prepared.
-    if (driver !== "ollama" && driver !== "openai-compatible" && !(await listLocalProviders()).some((provider) => provider.pending)) throw new Error("Provider driver must be `ollama` or `openai-compatible`.");
-    const url = option(args, "--url");
+  if (command === "provider" && args[1] === "add") {
+    // Registers a model endpoint for this computer's own tasks only: nothing is created on Frely's servers.
+    const driver = args[2] ?? "openai-compatible";
+    if (driver !== "ollama" && driver !== "openai-compatible") throw new Error("Provider driver must be `ollama` or `openai-compatible`.");
     const models = option(args, "--models")?.split(",").map((value) => value.trim()).filter(Boolean);
-    const slot = option(args, "--slot");
+    const key = args.includes("--key-stdin") ? await readStdinSecret(8192) : undefined;
+    const url = option(args, "--url");
     const name = option(args, "--name");
-    await shareLocalProvider({
-      driver: driver === "openai-compatible" ? "openai-compatible" : "ollama",
-      ...(url ? { url } : {}), ...(models ? { models } : {}), ...(slot ? { slot } : {}), ...(name ? { name } : {}),
-      creator: args.includes("--creator"),
-    }, (text) => { stdout.write(text); });
+    const maxConcurrent = option(args, "--max-concurrent");
+    const binding = await registerLocalOnlyProvider({ driver, ...(url ? { url } : {}), ...(models ? { models } : {}), ...(name ? { name } : {}), ...(key ? { key } : {}), ...(maxConcurrent ? { maxConcurrent: Number(maxConcurrent) } : {}) }, providerIo());
+    stdout.write(`Registered ${binding.providerId} (${binding.name}) at ${binding.baseUrl}\nModels: ${binding.models.join(", ")}\nIt is used by tasks on this computer only (frely task add --model <name>); it is not shared and takes no Provider slot.\n`);
+    return;
+  }
+
+  if (command === "provider" && args[1] === "remove") {
+    if (!args[2]) throw new Error("Usage: frely provider remove <id>");
+    await removeLocalOnlyProvider(args[2]);
+    stdout.write(`Removed ${args[2]}.\n`);
+    return;
+  }
+
+  if (command === "provider" && args[1] === "key") {
+    if (!args[2] || !(args.includes("--key-stdin") || args.includes("--clear"))) throw new Error("Usage: frely provider key <id> --key-stdin | --clear");
+    await setProviderKey(args[2], args.includes("--clear") ? undefined : await readStdinSecret(8192));
+    stdout.write(args.includes("--clear") ? "The upstream key was removed.\n" : "The upstream key was saved in this computer's secure storage.\n");
     return;
   }
 
   if (command === "provider" && args[1] === "list") {
-    await requireLogin();
     const providers = await listLocalProviders();
-    if (args.includes("--json")) stdout.write(`${JSON.stringify({ providers }, null, 2)}\n`);
+    const row = (provider: (typeof providers)[number]) => ({ ...provider, where: provider.localOnly ? "this computer only" : provider.pending ? "pending" : "shared" });
+    if (args.includes("--json")) stdout.write(`${JSON.stringify({ providers: providers.map(row) }, null, 2)}\n`);
     else if (providers.length === 0) stdout.write("No local Providers are configured on this device.\n");
-    else for (const provider of providers) stdout.write(`${provider.providerId}  ${provider.driver}  ${provider.name}  ${provider.models.join(", ")}${provider.pending ? "  (pending: run frely provider share)" : ""}\n`);
+    else for (const provider of providers) stdout.write(`${provider.providerId}  ${provider.driver}  ${provider.name}  ${provider.baseUrl}  ${provider.models.join(", ")}  [${row(provider).where}${provider.hasKey ? ", key" : ""}]${provider.pending ? "  (pending: run frely service share model)" : ""}\n`);
     return;
   }
 
@@ -668,6 +719,9 @@ async function main(): Promise<void> {
     void watchLinkClaim({ signal: controller.signal, log: nodeLog, onClaimed: stop, onLocked: stop });
     // Services saved with `frely service share --background` stay connected for as long as the daemon runs.
     const services = superviseServices({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Services stopped: ${error instanceof Error ? error.message : String(error)}`));
+    // Scheduled tasks (`frely task add --cron`): the clock lives here; each run is a detached worker that does not depend on this connection.
+    const taskShares = providerOnly ? Promise.resolve() : superviseTaskShares({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Shared tasks stopped: ${error instanceof Error ? error.message : String(error)}`));
+    const tasks = providerOnly ? Promise.resolve() : superviseTasks({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Tasks stopped: ${error instanceof Error ? error.message : String(error)}`));
     try {
       const capabilities = async () => {
         const install = await readAppInstall().then((value) => value, () => null);
@@ -687,6 +741,8 @@ async function main(): Promise<void> {
       process.off("SIGTERM", stop);
       controller.abort();
       await services;
+      await tasks;
+      await taskShares;
       await piNode?.stop(); // the node keeps running; a restarted service adopts it
       await localMcp?.close();
     }

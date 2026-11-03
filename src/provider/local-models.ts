@@ -47,11 +47,13 @@ export function createLocalModelsHub(options: LocalModelsHubOptions = {}): Local
       signal.throwIfAborted();
       const invalid = input.models?.find((model) => !isSupportedLocalModelName(model));
       if (invalid !== undefined) throw new Error(`Model name "${invalid}" is not supported: no whitespace, no leading or trailing "/", no "//".`);
-      const result = await shareLocalProvider({ driver: "openai-compatible", url: input.url, ...(input.models?.length ? { models: input.models } : {}), ...(input.name ? { name: input.name } : {}), installService: false }, () => undefined);
+      const result = await shareLocalProvider({ driver: "openai-compatible", url: input.url, ...(input.models?.length ? { models: input.models } : {}), ...(input.name ? { name: input.name } : {}), installService: false, accessPoints: true }, () => undefined);
       const username = await (options.username ?? configUsername)().catch(() => null);
       const callNames = username ? [...new Set(result.provider.models.flatMap((model) => localCallName(model) ?? []))].map((name) => `${username}/${name}`) : null;
       return {
         providerId: result.provider.providerId, slot: result.slot, models: result.provider.models, ...(result.resumed ? { resumed: true } : {}),
+        ...(result.accessPoints.length > 0 ? { accessPoints: result.accessPoints.map((item) => item.name) } : {}),
+        ...(result.accessPointNote ? { accessPointNote: result.accessPointNote } : {}),
         ...(callNames ? { callNames } : { note: "The call names are <your Frely username>/<model>; call models_list (look for local: true) to find them." }),
         notice: SHARE_NOTICE,
       };
