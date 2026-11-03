@@ -1,5 +1,5 @@
 import { IS_STANDALONE } from "../cli-launch.js";
-import { loadEmbeddedIroh } from "./iroh-native.js";
+import { BUILT_IROH_NATIVE, loadDownloadedIroh } from "./iroh-download.js";
 import { TRANSFER_MAX_BYTES } from "./transfer.js";
 import type { Workspace } from "./workspace.js";
 import { createHash, randomBytes } from "node:crypto";
@@ -23,13 +23,15 @@ export interface P2pInfo { supported: true; id: string }
 export interface P2pJob { address?: P2pAddress; jobId: string; status: "running" | "done" | "failed"; role: "send" | "receive"; bytes: number; relayBytes?: number; viaRelay?: boolean; path?: string; error?: string }
 
 /** The module, or null on a platform that has no iroh build (Intel Macs) or when it cannot be loaded (for example glibc older than the module needs). */
+let loading: Promise<Iroh | null> | null = null;
 async function loadIroh(): Promise<Iroh | null> {
   const unwrap = (module: unknown) => ((module as { default?: Iroh })?.default ?? module) as Iroh;
-  if (loadEmbeddedIroh) {
-    try { return unwrap(loadEmbeddedIroh()); } catch { return null; }
+  if (IS_STANDALONE) {
+    // The single file does not embed iroh: its native module is downloaded and verified on the first transfer (see iroh-download.ts).
+    // Only a success is kept, so a transfer after a failed download tries again.
+    loading ??= loadDownloadedIroh(BUILT_IROH_NATIVE, { log: (text) => void process.stderr.write(text) }).then((module) => module ? unwrap(module) : null).then((module) => { if (!module) loading = null; return module; });
+    return loading;
   }
-  // The single file embeds the module or has none; only the npm package resolves it from node_modules (not bundled).
-  if (IS_STANDALONE) return null;
   const name = "@number0/iroh";
   try { return unwrap(await import(name)); } catch { return null; }
 }

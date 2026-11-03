@@ -45,6 +45,7 @@
     "test:install": "node scripts/install-smoke.mjs",
     "build:standalone": "node scripts/build-standalone.mjs",
     "test:standalone": "node scripts/standalone-smoke.mjs",
+    "test:standalone-iroh": "node scripts/standalone-iroh-smoke.mjs",
     "test:installer": "node scripts/installer-smoke.mjs"
   },
   "engines": {

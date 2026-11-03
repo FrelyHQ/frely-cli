@@ -39,5 +39,7 @@ jobs:
         run: npm run build:standalone
       - name: Run without Node or a configured secure store
         run: npm run test:standalone
+      - name: Compiled executable can load iroh from disk
+        run: npm run test:standalone-iroh
       - name: Verify offline installer and checksum rejection
         run: npm run test:installer
