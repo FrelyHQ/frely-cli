@@ -218,8 +218,17 @@ async function openInstalledAgent(input: InstalledAgentInput) {
 function remoteCallError(error: unknown, authMode: "account" | "api-key"): SkillAccessError {
   if (error instanceof SkillInvocationError && error.code === "entitlement_required") return new SkillAccessError("entitlement_required", "This Frely Agent is not available to the configured credential.");
   if (error instanceof SkillInvocationError && error.code === "payment_required") return new SkillAccessError("payment_required", "Not enough Frely Credit. Run `frely api call credit_products.list` and `frely api call payment_checkout.create` (pass useImmediately:true) to get a payment link for the user, then retry once they have paid.");
-  if (error instanceof SkillInvocationError && error.code === "remote_authorization_failed") return new SkillAccessError("remote_authorization_failed", authMode === "api-key" ? "The model-scoped API key was rejected. Reinstall with frely item install <username/name> --api-key-stdin." : "Frely authorization failed. Run `frely login` again.");
-  return new SkillAccessError("remote_call_failed", error instanceof SkillInvocationError && error.details.remoteCode ? `The remote Frely Agent call failed (${error.details.remoteCode}).` : "The remote Frely Agent call failed.");
+  if (error instanceof SkillInvocationError && error.code === "remote_authorization_failed") return new SkillAccessError("remote_authorization_failed", authMode === "api-key" ? "The model-scoped API key was rejected. Reinstall with frely item install <username/name> --api-key-stdin." : "Frely authorization failed (HTTP 401). Run `frely login` again.");
+  if (error instanceof SkillInvocationError) {
+    // Say what actually failed (HTTP status, remote code, empty answer) so a service problem is not read as a login problem.
+    const facts = [
+      error.details.httpStatus === undefined ? "" : `HTTP ${error.details.httpStatus}`,
+      error.details.remoteCode ?? "",
+      error.details.reason === "empty_result" ? "the Agent returned no text" : error.details.reason === "tool_error" ? "the Agent returned an error" : error.details.reason === "invalid_response" ? "the response was not a valid MCP result" : "",
+    ].filter((part) => part.length > 0);
+    if (facts.length > 0) return new SkillAccessError("remote_call_failed", `The remote Frely Agent call failed (${facts.join(", ")}).`);
+  }
+  return new SkillAccessError("remote_call_failed", "The remote Frely Agent call failed.");
 }
 
 export async function invokeInstalledAgent(input: InstalledAgentInput & {

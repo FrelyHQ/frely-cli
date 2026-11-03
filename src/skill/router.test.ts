@@ -141,6 +141,51 @@ test("remote MCP errors pass their error.data.code on and only unknown ones lose
   }
 });
 
+test("only a 401 reads as a login problem; other failures keep their HTTP status, remote code or reason", async () => {
+  const oldFetch = globalThis.fetch;
+  const call = (respond: () => Response, kind: "invoke" | "status" = "invoke") => {
+    globalThis.fetch = (async () => respond()) as typeof fetch;
+    const attempt = kind === "invoke"
+      ? remoteAgentMcpInvoker.invoke({ relayUrl, modelId: "user/vm-agent/v1", token: "token", task: "task" })
+      : remoteAgentTaskClient.status({ relayUrl, modelId: "user/vm-agent/v1", token: "token", taskId: "t1", wait: false });
+    return attempt.then(() => assert.fail("must reject"), (error: unknown) => error as SkillInvocationError);
+  };
+  const result = (body: Record<string, unknown>) => Response.json({ jsonrpc: "2.0", id: "skill-invoke", result: body });
+  try {
+    const unauthorized = await call(() => new Response("no", { status: 401 }));
+    assert.equal(unauthorized.code, "remote_authorization_failed");
+    assert.equal(unauthorized.details.httpStatus, 401);
+
+    const gateway = await call(() => new Response("bad gateway", { status: 502 }));
+    assert.equal(gateway.code, "remote_call_failed");
+    assert.equal(gateway.details.httpStatus, 502);
+
+    const refused = await call(() => Response.json({ jsonrpc: "2.0", error: { code: -1, message: "x", data: { code: "abuse_guard_unavailable" } } }, { status: 503 }));
+    assert.equal(refused.code, "remote_call_failed");
+    assert.equal(refused.details.httpStatus, 503);
+    assert.equal(refused.details.remoteCode, "abuse_guard_unavailable");
+
+    const notMcp = await call(() => new Response("<html>", { status: 200 }));
+    assert.equal(notMcp.code, "remote_call_failed");
+    assert.equal(notMcp.details.reason, "invalid_response");
+
+    const toolError = await call(() => result({ isError: true, content: [{ type: "text", text: "failed" }], structuredContent: { code: "agent_unavailable" } }));
+    assert.equal(toolError.code, "remote_call_failed");
+    assert.equal(toolError.details.reason, "tool_error");
+    assert.equal(toolError.details.remoteCode, "agent_unavailable");
+
+    const empty = await call(() => result({ content: [{ type: "text", text: "" }] }));
+    assert.equal(empty.code, "remote_call_failed");
+    assert.equal(empty.details.reason, "empty_result");
+
+    const statusEmpty = await call(() => result({ content: [] }), "status");
+    assert.equal(statusEmpty.code, "remote_call_failed");
+    assert.equal(statusEmpty.details.reason, "empty_result");
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
 test("remote invokeTurn sends tools and items and reads a tool_calls result and a final answer", async () => {
   const oldFetch = globalThis.fetch;
   const bodies: Record<string, unknown>[] = [];

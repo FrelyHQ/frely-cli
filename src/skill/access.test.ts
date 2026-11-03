@@ -368,6 +368,21 @@ test("a remote payment_required becomes a payment hint and an unknown remote cod
       assert.doesNotMatch(error.message, /login/u);
       return true;
     });
+    await assert.rejects(invoke(new SkillInvocationError("remote_call_failed", { httpStatus: 502 })), (error: Error) => {
+      assert.equal((error as { code?: string }).code, "remote_call_failed");
+      assert.match(error.message, /HTTP 502/u);
+      assert.doesNotMatch(error.message, /login/u);
+      return true;
+    });
+    await assert.rejects(invoke(new SkillInvocationError("remote_call_failed", { reason: "empty_result" })), (error: Error) => {
+      assert.match(error.message, /no text/u);
+      return true;
+    });
+    await assert.rejects(invoke(new SkillInvocationError("remote_authorization_failed", { httpStatus: 401 })), (error: Error) => {
+      assert.equal((error as { code?: string }).code, "remote_authorization_failed");
+      assert.match(error.message, /API key was rejected/u);
+      return true;
+    });
     await assert.rejects(invoke(new SkillInvocationError("remote_call_failed", { remoteCode: "agent_unavailable" })), (error: Error) => {
       assert.equal((error as { code?: string }).code, "remote_call_failed");
       assert.match(error.message, /agent_unavailable/u);

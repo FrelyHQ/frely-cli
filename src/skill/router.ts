@@ -34,6 +34,10 @@ export class SkillInvocationError extends Error {
       /** The remote `error.data.code` when this client does not know it. */
       readonly remoteCode?: string;
       readonly registrationUrl?: string;
+      /** The HTTP status of a refused call, so a failure is not mistaken for a login problem. */
+      readonly httpStatus?: number;
+      /** What was wrong with a call that got a response: a tool error, no answer text, or a body that is not an MCP result. */
+      readonly reason?: "tool_error" | "empty_result" | "invalid_response";
     }> = {},
   ) {
     super(code);
@@ -182,7 +186,8 @@ export const remoteAgentMcpInvoker: RemoteAgentMcpInvoker = {
 
   async invokeTurn(input) {
     const result = await postInvoke(input, { input: input.task, tools: input.tools, ...(input.items.length === 0 ? {} : { items: input.items }) });
-    if (result === undefined || result.isError === true) throw new SkillInvocationError("remote_authorization_failed");
+    if (result === undefined) throw new SkillInvocationError("remote_call_failed", { reason: "invalid_response" });
+    if (result.isError === true) throw new SkillInvocationError("remote_call_failed", toolErrorDetails(result));
     const structured = isRecord(result.structuredContent) ? result.structuredContent : {};
     const requestId = typeof structured.request_id === "string" ? { requestId: structured.request_id.slice(0, 128) } : {};
     const usage = turnUsage(structured.usage);
@@ -200,7 +205,7 @@ export const remoteAgentMcpInvoker: RemoteAgentMcpInvoker = {
       return Object.freeze({ status: "tool_calls" as const, calls, items, ...extra });
     }
     const text = resultText(result);
-    if (text.length === 0) throw new SkillInvocationError("remote_authorization_failed");
+    if (text.length === 0) throw new SkillInvocationError("remote_call_failed", { reason: "empty_result" });
     return Object.freeze({ status: "completed" as const, text, ...extra });
   },
 };
@@ -214,12 +219,19 @@ export const remoteAgentTaskClient: RemoteAgentTaskClient = {
   },
 };
 
+/** A tool result with `isError`: keep the remote error code when it carries one. */
+function toolErrorDetails(result: Record<string, unknown>): { reason: "tool_error"; remoteCode?: string } {
+  const structured = isRecord(result.structuredContent) ? result.structuredContent : {};
+  const code = [structured.code, isRecord(structured.error) ? structured.error.code : undefined, structured.error].find((value): value is string => typeof value === "string" && /^[A-Za-z0-9_.-]{1,64}$/u.test(value));
+  return { reason: "tool_error", ...(code === undefined ? {} : { remoteCode: code }) };
+}
+
 /** The text and, for an Agent task, its state, task id and newest progress line. */
 function taskResult(result: Record<string, unknown> | undefined): SkillInvocationResult {
   const text = resultText(result);
-  if (result === undefined || result.isError === true || text.length === 0) {
-    throw new SkillInvocationError("remote_authorization_failed");
-  }
+  if (result === undefined) throw new SkillInvocationError("remote_call_failed", { reason: "invalid_response" });
+  if (result.isError === true) throw new SkillInvocationError("remote_call_failed", toolErrorDetails(result));
+  if (text.length === 0) throw new SkillInvocationError("remote_call_failed", { reason: "empty_result" });
   const structured = isRecord(result.structuredContent) ? result.structuredContent : {};
   const state = structured.state === "running" || structured.state === "completed" || structured.state === "failed" || structured.state === "canceled" ? structured.state : undefined;
   const taskId = typeof structured.taskId === "string" && /^[A-Za-z0-9_-]{1,128}$/u.test(structured.taskId) ? structured.taskId : undefined;
@@ -257,9 +269,13 @@ async function postInvoke(
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   const payload = await response.json().catch(() => null) as unknown;
-  if (!response.ok || !isRecord(payload)) {
-    throw new SkillInvocationError("remote_authorization_failed");
+  // Only a 401 means the login was refused; every other failure keeps its real status so it is not reported as a login problem.
+  if (response.status === 401) throw new SkillInvocationError("remote_authorization_failed", { httpStatus: 401 });
+  if (!response.ok) {
+    const code = isRecord(payload) && isRecord(payload.error) && isRecord(payload.error.data) && typeof payload.error.data.code === "string" ? payload.error.data.code.slice(0, 64) : undefined;
+    throw new SkillInvocationError("remote_call_failed", { httpStatus: response.status, ...(code === undefined ? {} : { remoteCode: code }) });
   }
+  if (!isRecord(payload)) throw new SkillInvocationError("remote_call_failed", { httpStatus: response.status, reason: "invalid_response" });
   if (isRecord(payload.error)) {
     const data = isRecord(payload.error.data) ? payload.error.data : {};
     // Any other code is passed on as is; only a failed HTTP call or an empty result means the login was refused.
