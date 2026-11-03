@@ -62,9 +62,10 @@ import { SKILL_HOSTS, type SkillHost, type SkillScope } from "./skill/managed.js
 import { CloudItemError, CloudToolError, installCloudItem, parseItemRef, trustCloudItem } from "./skill/cloud-item.js";
 import { installGithubItem } from "./skill/github-item.js";
 import { checkItemUpdates, updateCloudItem } from "./skill/item-update.js";
+import { linkSyncNotice, syncAgentLinks } from "./skill/link-sync.js";
 import { runSealedScript } from "./skill/sealed-run.js";
 import { installEntrySkill, ensureEntrySkill } from "./skill/entry.js";
-import { linkLines } from "./skill/agent-links.js";
+import { isLinkAgent, LINK_AGENTS, linkLines } from "./skill/agent-links.js";
 import { redeemGift } from "./skill/gift.js";
 import { callRemoteTool, connectRemoteMcp, installRemoteMcpSkill, isNotASkill, listRemoteTools, mcpClientConfig, parseMcpName, RemoteMcpError } from "./skill/remote-mcp.js";
 import { callCloudTool, callCloudToolAwaiting } from "./cloud.js";
@@ -109,9 +110,28 @@ function providerIo(): RegisterIo {
   return { err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY) };
 }
 
+/** Commands that run often or inside other tools, where even a quick check of the agent folders is not worth it. */
+function skipsLinkSync(args: readonly string[]): boolean {
+  const [command, sub] = args;
+  if (command === undefined || ["ssh-proxy", "tunnel", "--version", "-v", "version", "help", "--help", "-h", "uninstall"].includes(command)) return true;
+  if (command === "mcp" && (sub === "stdio" || sub === "serve")) return true;
+  if (command === "sandbox" || (command === "item" && sub === "run")) return true;
+  return command === "skill" && sub === "sync";
+}
+
+/** Links Skills into agents installed since the last pass. Installs and updates always rescan; other commands only when an agent folder appeared or went. Never fails the command. */
+async function autoSyncAgentLinks(args: readonly string[]): Promise<void> {
+  if (skipsLinkSync(args)) return;
+  const full = (args[0] === "item" && (args[1] === "install" || args[1] === "update")) || (args[0] === "skill" && args[1] === "install");
+  const result = await syncAgentLinks({ mode: full ? "full" : "check" }).catch(() => null);
+  if (result === null || result.added.length === 0 || args.includes("--json")) return;
+  process.stderr.write(linkSyncNotice(result));
+}
+
 async function main(): Promise<void> {
   const args = normalizeLinkArgs(applyDataDir(process.argv.slice(2)));
   const command = args[0];
+  await autoSyncAgentLinks(args);
   if (command === "update") {
     if (args.length !== 1) throw new Error("Usage: frely update. Version checks are available in frely doctor.");
     const result = await update((message) => process.stderr.write(message));
@@ -305,6 +325,18 @@ async function main(): Promise<void> {
     throw new Error(`Unknown agent command.\n${subcommandUsage("agent")}`);
   }
 
+  if (command === "skill" && args[1] === "sync" && !args.includes("--help") && !args.includes("-h")) {
+    const host = option(args, "--host");
+    if (host !== undefined && !isLinkAgent(host)) throw new Error(`--host must be one of: ${Object.keys(LINK_AGENTS).join(", ")}`);
+    const value = await syncAgentLinks({ mode: "full", ...(host ? { force: host } : {}), dryRun: args.includes("--dry-run") });
+    if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
+    const verb = args.includes("--dry-run") ? "Would link" : "Linked";
+    stdout.write(value.added.map((change) => `${verb}: ${change.path} (${change.agent})\n`).join("")
+      + value.skipped.map((change) => `Skipped link: ${change.path} (${change.reason})\n`).join("")
+      + value.dismissed.map((change) => `Not linking ${change.path}: you removed it. To link it again: frely skill sync --host ${change.agent}\n`).join("")
+      + (value.added.length === 0 && value.skipped.length === 0 && value.dismissed.length === 0 ? (value.scanned ? "All Skill links are in place.\n" : "Another link sync is running; try again in a minute.\n") : value.added.length > 0 && !args.includes("--dry-run") ? "Restart or reload those agents so they rescan Skills.\n" : ""));
+    return;
+  }
   if (command === "skill") {
     if (args[1] !== "install" || args.includes("--help") || args.includes("-h")) { stdout.write(subcommandUsage("skill")); return; }
     const host = skillHost(option(args, "--host") ?? "generic");

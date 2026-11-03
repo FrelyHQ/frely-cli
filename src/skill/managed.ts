@@ -29,6 +29,8 @@ export interface ManagedSkillRecord {
   readonly pendingSha256?: string;
   /** Links (or copies) of this Skill folder in other agents' Skill folders. */
   readonly links?: readonly LinkRecord[];
+  /** Link paths the person deleted; automatic link sync does not put them back (an install, update or `frely skill sync --host` does). */
+  readonly dismissedLinks?: readonly string[];
 }
 
 export class ManagedSkillError extends Error {
@@ -54,7 +56,7 @@ export function installDirName(installName: string): string {
 }
 
 export async function writeManagedSkill(input: {
-  readonly record: Omit<ManagedSkillRecord, "sha256" | "installedAt" | "pendingSha256" | "links">;
+  readonly record: Omit<ManagedSkillRecord, "sha256" | "installedAt" | "pendingSha256" | "links" | "dismissedLinks">;
   readonly content: string;
   readonly home?: string;
 }): Promise<ManagedSkillRecord & { readonly linkOutcomes: readonly LinkOutcome[] }> {
@@ -82,6 +84,24 @@ export async function writeManagedSkill(input: {
   return Object.freeze({ ...record, linkOutcomes: linked.outcomes });
 }
 
+/** Every Agent Skill record Frely wrote; unreadable ones are left out. */
+export async function listManagedSkills(home = homedir()): Promise<ManagedSkillRecord[]> {
+  const names = await readdir(join(home, ".config", "frely", "skills")).catch(() => [] as string[]);
+  const records: ManagedSkillRecord[] = [];
+  for (const name of names.filter((entry) => entry.endsWith(".json")).sort()) {
+    const record = await readManagedSkill(name.slice(0, -".json".length), home).catch(() => null);
+    if (record) records.push(record);
+  }
+  return records;
+}
+
+/** Rewrites only the link fields of an Agent Skill record (automatic link sync). */
+export async function writeManagedLinks(record: ManagedSkillRecord, links: readonly LinkRecord[], dismissedLinks: readonly string[], home = homedir()): Promise<void> {
+  const { links: _links, dismissedLinks: _dismissed, ...rest } = record;
+  const next = { ...rest, ...(links.length > 0 ? { links } : {}), ...(dismissedLinks.length > 0 ? { dismissedLinks } : {}) };
+  await atomicWrite(recordPath(home, record.distributionId), `${JSON.stringify(next, null, 2)}\n`);
+}
+
 export async function readManagedSkill(distributionId: string, home = homedir()): Promise<ManagedSkillRecord | null> {
   const text = await readOwnedFile(recordPath(home, distributionId), 64 * 1024);
   if (text === null) return null;
@@ -92,7 +112,9 @@ export async function readManagedSkill(distributionId: string, home = homedir())
   if (!item || item.version !== 1 || item.distributionId !== distributionId || typeof item.manifestUrl !== "string" || typeof item.modelId !== "string" || typeof item.mcpUrl !== "string" || typeof item.name !== "string" || typeof item.slug !== "string" || typeof item.skillPath !== "string" || typeof item.sha256 !== "string" || typeof item.installedAt !== "string" || !(SKILL_HOSTS as readonly string[]).includes(String(item.host)) || !["global", "project"].includes(String(item.scope)) || !["account", "api-key"].includes(String(authMode))) {
     throw new ManagedSkillError("local_state_invalid", "Installed Frely Skill metadata is invalid.");
   }
-  return Object.freeze({ ...item, authMode, links: parseLinks(item.links) }) as unknown as ManagedSkillRecord;
+  const dismissedLinks = parseDismissed(item.dismissedLinks);
+  const { dismissedLinks: _dismissed, ...rest } = item;
+  return Object.freeze({ ...rest, authMode, links: parseLinks(item.links), ...(dismissedLinks.length > 0 ? { dismissedLinks } : {}) }) as unknown as ManagedSkillRecord;
 }
 
 /** The installed Agent whose install name is `installName`, or null; records written before names existed never match. */
@@ -163,6 +185,10 @@ export function parseLinks(value: unknown): LinkRecord[] {
     const link = recordValue(entry);
     return link && typeof link.path === "string" && (link.mode === "symlink" || link.mode === "junction" || link.mode === "copy") ? [{ path: link.path, mode: link.mode as LinkRecord["mode"] }] : [];
   });
+}
+
+export function parseDismissed(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
 }
 
 function recordPath(home: string, distributionId: string): string { return join(home, ".config", "frely", "skills", `${distributionId}.json`); }
