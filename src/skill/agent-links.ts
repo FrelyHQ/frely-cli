@@ -67,7 +67,7 @@ export function canonicalFolder(folder: string, home = homedir()): string {
   return skillContext(folder, home)?.canonical ?? resolve(folder);
 }
 
-type SymlinkFn = (target: string, path: string, type: "dir" | "junction") => Promise<void>;
+export type SymlinkFn = (target: string, path: string, type: "dir" | "junction") => Promise<void>;
 
 export interface LinkInput {
   /** The Skill folder under `.agents/skills`. */
@@ -141,6 +141,11 @@ async function placeLink(args: { path: string; canonical: string; previous: Link
       return skip(`could not link or copy (${(error as NodeJS.ErrnoException).code ?? "error"})`);
     }
   }
+}
+
+/** Places one new link (or copy) at `path`; an existing folder or a link elsewhere is left alone and reported as skipped. */
+export async function placeNewLink(path: string, canonical: string, agent: LinkAgent | null, options: { readonly platform?: NodeJS.Platform; readonly symlinkFn?: SymlinkFn } = {}): Promise<LinkOutcome> {
+  return placeLink({ path, canonical: resolve(canonical), previous: undefined, input: { canonical, home: "", ...options }, agent });
 }
 
 /** Removes what `linkSkill` made. Call before the Skill folder itself goes. A link is removed itself, never through; a copy only while untouched. */

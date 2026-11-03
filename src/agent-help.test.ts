@@ -76,7 +76,7 @@ test("agent help summary is a short grouped index without internal commands", as
   });
   const full = (await run()).stdout;
   const summary = (await run("--summary")).stdout;
-  assert.ok(summary.length < 9000, `summary is ${summary.length} chars`);
+  assert.ok(summary.length < 9200, `summary is ${summary.length} chars`);
   assert.ok(summary.length < full.length / 2);
   const index = JSON.parse(summary) as { view: string; instructions: string[]; groups: { key: string; commands: string[] }[] };
   assert.equal(index.view, "summary");

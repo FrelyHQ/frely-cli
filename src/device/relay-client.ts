@@ -1,3 +1,4 @@
+import { watchAgentLinks } from "../skill/link-sync.js";
 import { remoteLocked } from "../remote-lock.js";
 import { watchServiceInstallation } from "../update/service-refresh.js";
 import { readEffectiveAutoUpdate, watchAutoUpdate } from "../update/auto-update.js";
@@ -184,6 +185,8 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
     : Promise.resolve(() => {});
   // Off unless the owner switched it on; the swap happens while idle and the watcher above restarts the service.
   const closeAutoUpdate = maintenance && options.restartForUpdate ? watchAutoUpdate({ gate: maintenance, signal: options.signal, enabled: () => readEffectiveAutoUpdate(), log }) : () => {};
+  // Agents installed after a Skill get its link without another frely command (see skill/link-sync.ts).
+  const closeLinkSync = options.managedService ? watchAgentLinks({ log }) : () => {};
   let delayMs = 1000;
   let restartSince: number | undefined;
   let preferredTransport: DeviceTransportKind | undefined;
@@ -305,7 +308,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
     }
     reporter.report({ type: "stopped" });
     await reporter.flush();
-  } finally { await releaseHeld("stopped"); closeAutoUpdate(); (await closeRefresh)(); await closeMaintenance?.(); }
+  } finally { await releaseHeld("stopped"); closeAutoUpdate(); closeLinkSync(); (await closeRefresh)(); await closeMaintenance?.(); }
 }
 
 class DeviceTransportConnectionError extends Error {

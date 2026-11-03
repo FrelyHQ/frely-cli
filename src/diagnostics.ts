@@ -1,3 +1,4 @@
+import { syncAgentLinks } from "./skill/link-sync.js";
 import { inspectUpdate } from "./update/update.js";
 import { authConfigPath, inspectAuth, probeCredentialStore, whoami, type AuthSnapshot } from "./auth.js";
 import { clearMcpAuthorization, inspectMcpMetadata, McpAuthorizationError, McpConfigInvalidError, mcpMetadataPath, requireMcpAuthorization } from "./mcp-authorization.js";
@@ -19,9 +20,11 @@ const defaultDependencies = { inspectAuth, probeCredentialStore, whoami, inspect
     await clearMcpAuthorization(metadata);
     if (code === "device_not_found" || code === "device_revoked") await resetDeviceRegistration();
   },
-  readDeviceBinding, readConnectionStatus, serviceStatus, inspectUpdate, sandboxUnavailableReason };
-type DoctorDependencies = Omit<typeof defaultDependencies, "reconcileMcpAuthorization"> & {
+  readDeviceBinding, readConnectionStatus, serviceStatus, inspectUpdate, sandboxUnavailableReason,
+  pendingSkillLinks: () => syncAgentLinks({ mode: "full", dryRun: true }) };
+type DoctorDependencies = Omit<typeof defaultDependencies, "reconcileMcpAuthorization" | "pendingSkillLinks"> & {
   reconcileMcpAuthorization?: typeof defaultDependencies.reconcileMcpAuthorization;
+  pendingSkillLinks?: typeof defaultDependencies.pendingSkillLinks;
 };
 
 export async function statusSnapshot() {
@@ -116,6 +119,10 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
     isSandboxDisabled() ? "Command sandbox disabled by environment (FRELY_SANDBOX=off)."
       : sandboxGap ? `Command sandbox unavailable (${sandboxGap}); remote commands are refused unless the owner approves running them unsandboxed. On Linux install bubblewrap, socat and ripgrep.`
       : "Command sandbox active (workspace + temp writes only).");
+  if (dependencies.pendingSkillLinks) {
+    const pending = await dependencies.pendingSkillLinks().catch(() => null);
+    if (pending && pending.added.length > 0) add("skill_links", "info", `${pending.added.length} Skill link${pending.added.length === 1 ? "" : "s"} missing in ${[...new Set(pending.added.map((change) => change.agent))].join(", ")}. Run frely skill sync.`);
+  }
   const refreshGuidance = connection?.autoRefresh && connection.pid === service?.pid
     ? "The service will switch after active work finishes and the installation passes its startup check."
     : "Finish running tasks and restart the service from a local terminal.";
