@@ -82,6 +82,20 @@ jobs:
       - name: Build standalone target
         run: npm run build:standalone -- "${{ matrix.target }}"
 
+      # macOS kills a binary with an invalid signature (v0.23.23 to v0.23.26 shipped that way), so run the artifact before it is uploaded.
+      - name: Verify darwin executable
+        if: startsWith(matrix.target, 'darwin')
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="artifacts/frely-${{ matrix.target }}"
+          codesign --verify --strict "$binary"
+          if [[ "${{ matrix.target }}" == "darwin-arm64" ]]; then
+            version="$("$binary" --version)"
+            expected="$(node -p "require('./package.json').version")"
+            test "$version" = "$expected" || { echo "darwin-arm64 reported '$version', expected '$expected'" >&2; exit 1; }
+          fi
+
       - name: Upload release target
         uses: actions/upload-artifact@v7
         with:
