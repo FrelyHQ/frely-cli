@@ -55,7 +55,7 @@ const io = { err: () => undefined, interactive: false };
 /** The program: one chat call through $OPENAI_BASE_URL with the key it was given. */
 const CALL = `node -e 'fetch(process.env.OPENAI_BASE_URL + "/chat/completions", { method: "POST", headers: { authorization: "Bearer " + process.env.OPENAI_API_KEY, "content-type": "application/json" }, body: JSON.stringify({ model: process.env.FRELY_MODEL, messages: [] }) }).then((r) => r.json()).then((j) => console.log("GOT " + j.choices[0].message.content))'`;
 
-test("a task calls a model endpoint registered on this computer directly: the real key is added outside the program", async () => {
+test("a task calls a model endpoint registered on this computer directly: the real key is added outside the program", { skip: process.platform === "win32" && "These tasks run POSIX shell commands; tasks need the Unix sandbox." }, async () => {
   const server = await endpoint(["glm-5.3-flash"], "sk-lan");
   try {
     await registerLocalOnlyProvider({ driver: "openai-compatible", url: server.baseUrl, key: "sk-lan" }, io);

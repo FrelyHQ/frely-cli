@@ -39,7 +39,7 @@ async function define(name: string, command: string, extra: Partial<Parameters<t
   return definition;
 }
 
-test("a task runs, logs its output and records the result", async () => {
+test("a task runs, logs its output and records the result", { skip: process.platform === "win32" && "These tasks run POSIX shell commands; tasks need the Unix sandbox." }, async () => {
   await define("hello", "echo hello-out; echo hello-err >&2; echo data > made.txt");
   const deps = inProcess();
   const record = await startTask("hello", {}, deps);
@@ -53,7 +53,7 @@ test("a task runs, logs its output and records the result", async () => {
   await Promise.all(deps.jobs);
 });
 
-test("a failing command is failed with its exit code; a timeout is a timeout", async () => {
+test("a failing command is failed with its exit code; a timeout is a timeout", { skip: process.platform === "win32" && "These tasks run POSIX shell commands; tasks need the Unix sandbox." }, async () => {
   await define("bad", "echo nope; exit 3");
   const deps = inProcess();
   const bad = await waitForTaskRun((await startTask("bad", {}, deps)).runId, 20_000);
