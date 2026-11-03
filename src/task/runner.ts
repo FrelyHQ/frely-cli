@@ -24,6 +24,10 @@ export interface Runner {
   /** Runs before the sandboxed program starts: set up a worktree, say. */
   prepare(context: RunnerContext): Promise<RunnerPlan & { readonly patch?: Partial<TaskRunRecord> }>;
   /** Runs after it ended: collect the answer and the diff. */
+  /** A runner that works through something other than a sandboxed command (pi: the Pi Node) does it here instead of the sandbox step. */
+  execute?(context: RunnerContext, signal: AbortSignal): Promise<{ readonly code: number; readonly patch?: Partial<TaskRunRecord> }>;
+  /** The model endpoint must listen on loopback TCP because the program is not inside the sandbox. */
+  readonly loopbackModel?: boolean;
   finish?(context: RunnerContext, exit: { readonly code: number | null; readonly output: string }): Promise<Partial<TaskRunRecord>>;
 }
 

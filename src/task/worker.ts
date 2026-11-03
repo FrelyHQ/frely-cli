@@ -5,20 +5,23 @@ import { terminateProcessTree } from "../runtime/process-tree.js";
 import { restrictSandboxNetwork, sandboxCommandDetailed, sandboxViolationLines, shutdownSandbox } from "../runtime/sandbox.js";
 import { logTail, LOG_LIMIT_BYTES, readTaskRun, runsDir, taskLogPath, writeTaskRun, type TaskRunRecord } from "./run-store.js";
 import { openTaskModel, type ModelStats, type OpenedModel } from "./model-route.js";
+import { createPiRunner } from "./pi-runner.js";
 import { scriptRunner, type Runner, type RunnerContext } from "./runner.js";
 
-/** Runners the worker can run. `pi` is registered by `registerRunner` when the Pi capsule support is present. */
-const runners = new Map<string, Runner>([["script", scriptRunner]]);
+/** Runners the worker can run. `registerRunner` replaces one (tests). */
+const runners = new Map<string, Runner>([["script", scriptRunner], ["pi", createPiRunner()]]);
 export function registerRunner(runner: Runner): void { runners.set(runner.id, runner); }
 
 /** What a worker needs beyond the run record. Tests stand in for these. */
+const defaultWorkerDeps = { openModel: (record: TaskRunRecord, log: (text: string) => void, options?: { tcp?: boolean }) => openTaskModel(record, log, options?.tcp ? { tcp: true } : {}) };
+
 export interface WorkerDeps {
   /** Model proxy for runs that have a model; set by the model route (step 2). Returns what the program should call and how to stop it. */
-  readonly openModel?: (record: TaskRunRecord, log: (text: string) => void) => Promise<OpenedModel | undefined>;
+  readonly openModel?: (record: TaskRunRecord, log: (text: string) => void, options?: { tcp?: boolean }) => Promise<OpenedModel | undefined>;
 }
 
 /** The worker side of one run: runs the program in the sandbox, keeps its log, records the end. Saved after every step. */
-export async function executeTaskRun(runId: string, signal: AbortSignal = new AbortController().signal, deps: WorkerDeps = { openModel: openTaskModel }): Promise<void> {
+export async function executeTaskRun(runId: string, signal: AbortSignal = new AbortController().signal, deps: WorkerDeps = defaultWorkerDeps): Promise<void> {
   const loaded = await readTaskRun(runId);
   if (loaded === null || (loaded.status !== "running" && loaded.status !== "queued")) return;
   let record = await writeTaskRun({ ...loaded, status: "running", workerPid: process.pid, startedAt: new Date().toISOString() });
@@ -43,7 +46,7 @@ export async function executeTaskRun(runId: string, signal: AbortSignal = new Ab
     let domains: string[] = [...record.snapshot.sites];
     let mitm: { socketPath: string; domains: readonly string[] } | undefined;
     if (record.snapshot.model !== undefined && deps.openModel) {
-      const opened = await deps.openModel(record, note);
+      const opened = await deps.openModel(record, note, runner.loopbackModel ? { tcp: true } : {});
       if (opened) {
         model = { baseUrl: opened.baseUrl, name: opened.name };
         closeModel = opened.close;
@@ -54,6 +57,14 @@ export async function executeTaskRun(runId: string, signal: AbortSignal = new Ab
       }
     }
     const context: RunnerContext = { record, snapshot: record.snapshot, cwd: record.snapshot.cwd, ...(model ? { model } : {}), log: note };
+    if (runner.execute) {
+      note(`${record.snapshot.name} started (${record.snapshot.runner}).`);
+      const executed = await runner.execute(context, signal).catch((error: unknown) => ({ code: 1, patch: { error: { code: "execute_failed", message: error instanceof Error ? error.message : String(error) } } as Partial<TaskRunRecord> }));
+      await new Promise<void>((done) => logStream.end(done));
+      const status = signal.aborted ? "cancelled" : executed.code === 0 ? "completed" : "failed";
+      await save({ ...(executed.patch ?? {}), ...(modelStats ? { modelStats: modelStats() } : {}), status, exitCode: executed.code, endedAt: new Date().toISOString() });
+      return;
+    }
     const plan = await runner.prepare(context);
     if (plan.patch) await save(plan.patch);
     restrictSandboxNetwork({ allowedDomains: domains, ...(mitm ? { mitmProxy: mitm } : {}) });
@@ -87,7 +98,7 @@ export async function executeTaskRun(runId: string, signal: AbortSignal = new Ab
 }
 
 /** Entry of `frely task __worker <runId>`: cancel on SIGTERM, ignore the terminal hang-up. */
-export async function taskWorkerMain(runId: string, deps: WorkerDeps = { openModel: openTaskModel }): Promise<void> {
+export async function taskWorkerMain(runId: string, deps: WorkerDeps = defaultWorkerDeps): Promise<void> {
   const controller = new AbortController();
   process.on("SIGTERM", () => controller.abort());
   process.on("SIGHUP", () => undefined);

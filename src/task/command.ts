@@ -15,7 +15,7 @@ export interface TaskIo {
 }
 
 export const TASK_USAGE = `Usage:
-  frely task add <name> [--cwd <dir>] [--net <site>]... [--env K=V]... [--timeout <seconds>] [--model <name> [--fallback-model <name>]...] [--cron "<m h dom mon dow>" [--tz <zone>]] [--replace] -- <command...>
+  frely task add <name> [--cwd <dir>] [--net <site>]... [--env K=V]... [--timeout <seconds>] [--model <name> [--fallback-model <name>]...] [--cron "<m h dom mon dow>" [--tz <zone>]] [--replace] [--pi] -- <command...>
   frely task list [--json]
   frely task show <name> [--json]
   frely task remove <name>
@@ -122,7 +122,7 @@ async function add(args: string[], io: TaskIo): Promise<number> {
   const fallbacks = values(options, "--fallback-model");
   if (fallbacks.length > 0 && model === undefined) return fail("--fallback-model needs --model.");
   let definition = buildDefinition({
-    name, command, cwd, network: values(options, "--net"), env: parseEnv(values(options, "--env")),
+    name, command, cwd, network: values(options, "--net"), ...(has(options, "--pi") ? { runner: "pi" as const, worktree: true } : {}), env: parseEnv(values(options, "--env")),
     ...(timeout === undefined ? {} : { timeoutSec: Number(timeout) }),
     ...(model === undefined ? {} : { model }), ...(fallbacks.length > 0 ? { fallbackModels: fallbacks } : {}),
   }, previous);

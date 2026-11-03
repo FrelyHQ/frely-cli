@@ -34,3 +34,12 @@ Five cron fields in an IANA time zone (default: this computer's). When both day-
 - **Fallback.** `--fallback-model` names models to try, in order, only when the first cannot be started: unreachable, not offered there, or key rejected. A slow or poor answer never switches the model, and a model is never switched in the middle of a run.
 - **Limits.** Each endpoint serves a limited number of calls at once, shared with callers that use a shared Provider: 1 for a model served on this computer, 6 for a network address or the gateway (`frely provider add --max-concurrent <n>` changes it). A task waits for a free slot; a remote buyer is told the endpoint is busy, so your own tasks go first.
 - **Records.** A run records how many model calls it made and how many failed, on this computer only. Nothing is reported or billed for them.
+
+## Pi tasks (`--pi`)
+
+`frely task add <name> --pi [--model <name>] [--cwd <git-folder>] -- <prompt>` defines a task whose prompt is run by the Pi Node, an agent that edits files. The task folder must be a clean git repository: the Pi Node works in its own git worktree of it, so nothing is committed to your main branch or pushed. The result holds the agent's last answer and a short summary of the changes (`frely task result`).
+
+- `frely pi install` downloads the Pi Node (the Capsule the Frely App publishes as a release asset), checks its SHA-256 and every file in it, and keeps it under `~/.config/frely/pi-node`. The Frely App is not needed; if the App is installed, its Pi Node is used instead. Run it again to update.
+- The background service (`frely link on`) keeps the Pi Node running. `frely pi status` shows its state.
+- With `--model`, the agent's model calls go through the same model route as other tasks (a local Provider first, else the Frely gateway). The Pi Node is not inside the command sandbox, so this route listens on `127.0.0.1` for the length of the run.
+- A cancelled or timed-out run stops waiting; its Pi thread may keep running inside the Pi Node.

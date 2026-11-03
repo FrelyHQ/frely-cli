@@ -34,6 +34,8 @@ export interface RouteDeps {
   /** The gateway origin and API key, or the reason there is none. */
   readonly gateway?: () => Promise<{ origin: string; key: string } | { reason: string }>;
   readonly socketDir?: string;
+  /** Listen on loopback TCP: the program is not inside the sandbox. */
+  readonly tcp?: boolean;
 }
 
 async function defaultGateway(): Promise<{ origin: string; key: string } | { reason: string }> {
@@ -137,7 +139,7 @@ export async function openTaskModel(record: TaskRunRecord, log: (text: string) =
   };
   const socketPath = join(deps.socketDir ?? process.env.XDG_RUNTIME_DIR ?? tasksDir(), `t-${createHash("sha256").update(record.runId).digest("hex").slice(0, 10)}.sock`);
   // With the sandbox on, the sandbox proxy hands the model host's requests to the socket. With it off there is no such proxy: listen on loopback.
-  const direct = isSandboxDisabled();
+  const direct = deps.tcp === true || isSandboxDisabled();
   const proxy = await startModelProxy({ socketPath, route, onCall, ...(direct ? { tcp: true } : {}), ...(deps.fetchFn ? { fetchFn: deps.fetchFn } : {}) });
   return {
     baseUrl: proxy.baseUrl ?? `http://${MODEL_HOST}/v1`,

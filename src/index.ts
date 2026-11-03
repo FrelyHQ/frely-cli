@@ -42,6 +42,7 @@ import { effectiveStatus, isRunId, readRun, resolveRun } from "./agent/run-store
 import { DEFAULT_READ_LIMITS, defaultReadRoot } from "./agent/workspace-read.js";
 import { PiNodeSupervisor } from "./agent/pi-node-supervisor.js";
 import { readAppInstall } from "./agent/app-install.js";
+import { installCapsule, readAnyInstall } from "./agent/capsule-install.js";
 import { appInstallStatus, installApp, openApp, uninstallApp, updateApp } from "./app-manager.js";
 import { detectSandboxBackend } from "./runtime/sandbox.js";
 import { LocalMcpHub, loadManualEntries } from "./runtime/local-mcp.js";
@@ -175,6 +176,22 @@ async function main(): Promise<void> {
     const value = await runNetwork(args);
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
     else stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+    return;
+  }
+
+  if (command === "pi") {
+    if (args[1] === "install") {
+      const result = await installCapsule();
+      stdout.write(args.includes("--json") ? `${JSON.stringify(result)}\n` : `Pi Node ${result.tag} ${result.changed ? "installed" : "is up to date"} at ${result.capsulePath}.\nThe background service starts it (run frely link on if it is not running).\n`);
+      return;
+    }
+    if (args[1] === "status") {
+      const install = await readAnyInstall().catch(() => null);
+      const endpoint = install ? await readFile(join(install.agentDir, "frely", "headless.json"), "utf8").then(() => true, () => false) : false;
+      stdout.write(args.includes("--json") ? `${JSON.stringify({ installed: install !== null, running: endpoint, ...(install ? { version: install.appVersion, path: install.capsulePath } : {}) })}\n` : !install ? "The Pi Node is not installed. Run `frely pi install`.\n" : `Pi Node ${install.appVersion} at ${install.capsulePath}\nState: ${endpoint ? "running" : "not running"}\n`);
+      return;
+    }
+    stdout.write(subcommandUsage("pi"));
     return;
   }
 
