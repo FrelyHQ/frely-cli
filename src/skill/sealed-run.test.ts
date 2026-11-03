@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createCipheriv, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from "node:crypto";
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -93,6 +93,26 @@ test("runs a sealed script from its decrypted copy and leaves no copy behind", a
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
+test("runs a plain script of an installed item in place, inside the sandbox, and refuses files the item does not own", async () => {
+  const { home, env, remote, result, out } = await setup();
+  try {
+    const { writeInstall, readInstall } = await import("./registry.js");
+    const plain = join(result.path, "tools", "echo.sh");
+    await mkdir(join(result.path, "tools"), { recursive: true });
+    await writeFile(plain, 'printf "%s" "$1" > "$2"\n');
+    const record = (await readInstall(result.path, home))!;
+    await writeInstall({ ...record, files: { ...record.files, "tools/echo.sh": "x" } }, home);
+    const commands: string[] = [];
+    const code = await runSealedScript({ target: plain, args: ["hello", out], call: remote.call, env, home, sandbox: async (command) => { commands.push(command); return command; } });
+    assert.equal(code, 0);
+    assert.equal(await readFile(out, "utf8"), "hello");
+    assert.match(commands[0]!, /^bash '?[^ ]*tools[\\/]echo\.sh'? hello /u);
+    assert.equal(remote.calls.filter((input) => input.leaseOnly === true).length, 0);
+    await writeFile(join(result.path, "stray.sh"), "echo no\n");
+    await assert.rejects(runSealedScript({ target: join(result.path, "stray.sh"), args: [], call: remote.call, env, home, sandbox: async (command) => command }), /not a script of this item/u);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
 test("renews a lease that is near its end", async () => {
   const { home, env, remote, result, out } = await setup({ expiresIn: 60_000 });
   try {
@@ -146,10 +166,10 @@ test("a copy of the folder does not open on another device", async () => {
   } finally { await rm(home, { recursive: true, force: true }); await rm(other, { recursive: true, force: true }); }
 });
 
-test("refuses a script that is not sealed", async () => {
+test("refuses a file the item did not install", async () => {
   const { home, env, remote, result } = await setup();
   try {
     await writeFile(join(result.path, "premium", "plain.sh"), "echo hi\n");
-    await assert.rejects(runSealedScript({ target: join(result.path, "premium", "plain.sh"), args: [], call: remote.call, env, home, sandbox: async (command) => command }), /not a sealed script/u);
+    await assert.rejects(runSealedScript({ target: join(result.path, "premium", "plain.sh"), args: [], call: remote.call, env, home, sandbox: async (command) => command }), /not a script of this item/u);
   } finally { await rm(home, { recursive: true, force: true }); }
 });

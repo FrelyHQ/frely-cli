@@ -28,9 +28,9 @@ export interface RunSealedScriptInput {
 const quote = (value: string): string => /^[\w./:@%+=,-]+$/u.test(value) ? value : `'${value.replace(/'/gu, `'\\''`)}'`;
 
 /**
- * Runs one sealed script of an installed item inside the Frely command sandbox and returns its exit code.
+ * Runs one script of an installed item inside the Frely command sandbox and returns its exit code.
  * The item's files are copied to a private temporary folder with every sealed script decrypted, so scripts that import
- * or read their neighbours work; the folder is removed when the script ends. A script that cannot be run in the sandbox
+ * or read their neighbours work; the folder is removed when the script ends. A plain (unsealed) script runs in place. A script that cannot be run in the sandbox
  * (no sandbox on this device) is refused, never run without it.
  */
 export async function runSealedScript(input: RunSealedScriptInput): Promise<number> {
@@ -40,7 +40,12 @@ export async function runSealedScript(input: RunSealedScriptInput): Promise<numb
   const interpreter = interpreterFor(relativePath);
   if (!interpreter) throw new CloudItemError("input_invalid", `Frely cannot run ${relativePath}: its script type has no known interpreter.`);
   const sealedPaths = Object.keys(marker.files).filter((path) => path.startsWith(`${SEALED_DIR}/files/`) && path.endsWith(".sealed"));
-  if (!sealedPaths.includes(sealedFilePath(relativePath))) throw new CloudItemError("input_invalid", `${relativePath} is not a sealed script of this item.`);
+  if (!sealedPaths.includes(sealedFilePath(relativePath))) {
+    // A plain script the item was installed with (free, or from GitHub): run it where it is, but inside the command sandbox.
+    if (relativePath.startsWith(`${SEALED_DIR}/`) || !Object.hasOwn(marker.files, relativePath)) throw new CloudItemError("input_invalid", `${relativePath} is not a script of this item.`);
+    const command = [...interpreter, join(root, ...relativePath.split("/")), ...input.args].map(quote).join(" ");
+    return runInSandbox(command, cwd, input);
+  }
 
   const device = await loadOrCreateDeviceSealKey(input.env, input.home);
   const record = await currentLease({ root, marker, device, call: input.call, now });
@@ -59,15 +64,19 @@ export async function runSealedScript(input: RunSealedScriptInput): Promise<numb
     }
     const script = join(workDir, ...relativePath.split("/"));
     const command = [...interpreter, script, ...input.args].map(quote).join(" ");
-    const wrapped = await (input.sandbox ?? sandboxCommand)(command, cwd);
-    return await new Promise<number>((done, fail) => {
-      const child = spawn(wrapped, { shell: true, cwd, stdio: "inherit", env: input.env ?? process.env });
-      child.once("error", fail);
-      child.once("close", (code, signal) => done(code ?? (signal ? 128 : 1)));
-    });
+    return await runInSandbox(command, cwd, input);
   } finally {
     await rm(workDir, { recursive: true, force: true });
   }
+}
+
+async function runInSandbox(command: string, cwd: string, input: Pick<RunSealedScriptInput, "env" | "sandbox">): Promise<number> {
+  const wrapped = await (input.sandbox ?? sandboxCommand)(command, cwd);
+  return new Promise<number>((done, fail) => {
+    const child = spawn(wrapped, { shell: true, cwd, stdio: "inherit", env: input.env ?? process.env });
+    child.once("error", fail);
+    child.once("close", (code, signal) => done(code ?? (signal ? 128 : 1)));
+  });
 }
 
 async function put(workDir: string, path: string, content: Buffer): Promise<void> {
