@@ -4,6 +4,16 @@ import { waitForApproval } from "../../controller/approval-wait.js";
 import { ControllerError, EXIT } from "../../controller/client.js";
 import { approvedHosts, type LocalAgentRecord } from "./store.js";
 
+/** Who is asking for sites: a local Agent (the default wording) or something else, such as a task, that supplies its own words. */
+export type ApprovalSubject = Pick<LocalAgentRecord, "slug" | "network" | "approvals"> & {
+  /** Names the asker in the owner's prompt: "The local Agent x" by default. */
+  readonly who?: string;
+  /** Why the site is wanted, shown to the owner. */
+  readonly why?: (host: string) => string;
+  /** The command that carries on after approval. */
+  readonly command?: string;
+};
+
 /** The shape of FrelyMCP's request_permission / permission_status answers that this file reads. */
 export interface ApprovalIo {
   err(text: string): void;
@@ -31,7 +41,7 @@ export const siteResource = (host: string): string => `net:${host}`;
  * device permission. Returns the approvals gained (site -> end time). A site the owner declines is left out and the Agent starts without it.
  * Without a person at the terminal a pending request ends the command with exit code 3 and the link; run the command again after approving.
  */
-export async function approveSites(record: LocalAgentRecord, io: ApprovalIo, deps: ApprovalDeps = {}): Promise<Record<string, string>> {
+export async function approveSites(record: ApprovalSubject, io: ApprovalIo, deps: ApprovalDeps = {}): Promise<Record<string, string>> {
   const now = deps.now ?? Date.now;
   const open = deps.open ?? (() => openController());
   const missing = record.network.filter((host) => !approvedHosts(record, now()).includes(host));
@@ -50,12 +60,12 @@ export async function approveSites(record: LocalAgentRecord, io: ApprovalIo, dep
   return gained;
 }
 
-async function approveSite(controller: Controller, device: string, record: LocalAgentRecord, host: string, io: ApprovalIo, deps: ApprovalDeps): Promise<string | undefined> {
+async function approveSite(controller: Controller, device: string, record: ApprovalSubject, host: string, io: ApprovalIo, deps: ApprovalDeps): Promise<string | undefined> {
   const now = deps.now ?? Date.now;
   const result = await controller.call("request_permission", {
     device, resource: siteResource(host), mode: "window",
-    reason: `The local Agent ${record.slug} lists ${host} in its frely.yaml.`.slice(0, 300),
-    command: `frely agent local start ${record.slug}`,
+    reason: (record.why ? record.why(host) : `The local Agent ${record.slug} lists ${host} in its frely.yaml.`).slice(0, 300),
+    command: record.command ?? `frely agent local start ${record.slug}`,
   });
   const data = resultData(result);
   if (result.isError === true || !data) throw new ControllerError(`Could not ask for approval of ${host}: ${resultText(result) || "no answer"}`, EXIT.tool);
@@ -65,7 +75,7 @@ async function approveSite(controller: Controller, device: string, record: Local
   const code = typeof data.shortCode === "string" ? data.shortCode : undefined;
   const link = typeof data.approveUrl === "string" ? data.approveUrl : undefined;
   if (status !== "pending" || !code) throw new ControllerError(`Could not ask for approval of ${host}: ${resultText(result) || String(status)}`, EXIT.tool);
-  io.err(`${record.slug} wants to connect to ${host}. Approve it here (you choose how long): ${link ?? "Frely > Device MCP"}\n`);
+  io.err(`${record.who ?? record.slug} wants to connect to ${host}. Approve it here (you choose how long): ${link ?? "Frely > Device MCP"}\n`);
   if (!io.interactive) {
     throw new ControllerError(`Approval needed for ${host}. Open the link above, approve it, then run the same command again.`, EXIT.approval);
   }

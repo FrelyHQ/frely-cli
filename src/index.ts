@@ -33,6 +33,9 @@ import { API_USAGE, logoutCloud, runApi } from "./cloud.js";
 import { CONTROLLER_COMMANDS, runControllerCommand } from "./controller/commands.js";
 import { ControllerError } from "./controller/client.js";
 import { runAgentLocal } from "./agent/local/command.js";
+import { runTaskCommand } from "./task/command.js";
+import { taskWorkerMain } from "./task/worker.js";
+import { superviseTasks } from "./task/scheduler.js";
 import { cancelRun, listRunSummaries, resumeRun, runOutcome, runSummary, startRun, waitForRun, workerMain } from "./agent/run.js";
 import { effectiveStatus, isRunId, readRun, resolveRun } from "./agent/run-store.js";
 import { DEFAULT_READ_LIMITS, defaultReadRoot } from "./agent/workspace-read.js";
@@ -167,6 +170,18 @@ async function main(): Promise<void> {
     const value = await runNetwork(args);
     if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
     else stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+    return;
+  }
+
+  if (command === "task") {
+    if (args[1] === "__worker") {
+      const runId = args[2];
+      if (!runId) throw new Error("Usage: frely task __worker <runId>");
+      await taskWorkerMain(runId);
+      return;
+    }
+    if (args[1] === undefined) { stdout.write(subcommandUsage("task")); return; }
+    process.exitCode = await runTaskCommand(args.slice(1), { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY) });
     return;
   }
 
@@ -666,6 +681,8 @@ async function main(): Promise<void> {
     void watchLinkClaim({ signal: controller.signal, log: nodeLog, onClaimed: stop, onLocked: stop });
     // Services saved with `frely service share --background` stay connected for as long as the daemon runs.
     const services = superviseServices({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Services stopped: ${error instanceof Error ? error.message : String(error)}`));
+    // Scheduled tasks (`frely task add --cron`): the clock lives here; each run is a detached worker that does not depend on this connection.
+    const tasks = providerOnly ? Promise.resolve() : superviseTasks({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Tasks stopped: ${error instanceof Error ? error.message : String(error)}`));
     try {
       const capabilities = async () => {
         const install = await readAppInstall().then((value) => value, () => null);
@@ -685,6 +702,7 @@ async function main(): Promise<void> {
       process.off("SIGTERM", stop);
       controller.abort();
       await services;
+      await tasks;
       await piNode?.stop(); // the node keeps running; a restarted service adopts it
       await localMcp?.close();
     }
