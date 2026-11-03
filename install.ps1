@@ -103,14 +103,45 @@ try {
       Write-Warning "Frely was installed, but the user PATH could not be updated: $($_.Exception.Message)"
     }
   }
+  # A long-running local agent (or IDE) keeps the PATH it started with, so the registry update above never reaches
+  # the shells it spawns. When the install directory is missing from this process' PATH, also drop a tiny
+  # frely.cmd forwarder into a user-writable directory that is already on it; it is removed by `frely uninstall`.
+  $inheritedPath = $env:PATH
+  $shim = $null
+  if ($env:FRELY_INSTALL_NO_PROFILE -ne '1' -and (($inheritedPath -split ';' | ForEach-Object { $_.TrimEnd('\') }) -notcontains $directory.TrimEnd('\'))) {
+    $onPath = @($inheritedPath -split ';' | Where-Object { $_ } | ForEach-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') })
+    $candidates = @((Join-Path $env:APPDATA 'npm'), (Join-Path $env:USERPROFILE '.local\bin'), (Join-Path $env:USERPROFILE 'bin'), (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'))
+    foreach ($candidate in $candidates) {
+      if (-not $candidate -or $onPath -notcontains $candidate.TrimEnd('\') -or -not (Test-Path -LiteralPath $candidate -PathType Container)) { continue }
+      $file = Join-Path $candidate 'frely.cmd'
+      try {
+        if ((Test-Path -LiteralPath $file) -and -not ((Get-Content -LiteralPath $file -Raw) -match 'frely-shim')) { continue }
+        [IO.File]::WriteAllText($file, "@echo off`r`nREM frely-shim: forwards to the Frely install directory; removed by frely uninstall`r`n`"$target`" %*`r`n")
+        $shim = $file; break
+      } catch { continue }
+    }
+  }
+  # Verify from the outside: would a new login shell, and the shell this agent/process spawns, find `frely`?
+  function Find-Frely([string]$path) {
+    $saved = $env:PATH
+    try { $env:PATH = $path; $found = & $env:ComSpec /d /c '%SystemRoot%\System32\where.exe frely 2>nul' | Select-Object -First 1 } finally { $env:PATH = $saved }
+    return $found
+  }
+  $freshPath = ([Environment]::GetEnvironmentVariable('PATH', 'Machine'), [Environment]::GetEnvironmentVariable('PATH', 'User') | Where-Object { $_ }) -join ';'
+  $freshOk = $pathPersisted -and [bool](Find-Frely $freshPath)
+  $inheritedOk = [bool](Find-Frely $inheritedPath)
   if (($env:PATH -split ';') -notcontains $directory) { $env:PATH = "$directory;$env:PATH" }
   $installedVersion = & $target --version
   Write-Output "Installed Frely $installedVersion at $target"
   if ($env:FRELY_INSTALL_NO_PROFILE -ne '1') {
-    # A terminal that was already open keeps its old PATH: give the user both ways out.
-    Write-Output "To use 'frely' now, open a new terminal window, or run this in the current one:"
-    Write-Output "  `$env:PATH = `"$directory;`$env:PATH`""
-    if (-not $pathPersisted) { Write-Output "(The user PATH was not updated, so new terminals will need the full path $target, or add $directory to PATH manually.)" }
+    if ($freshOk -and $inheritedOk) { Write-Output "Verified: 'frely' resolves from a new terminal and from this process." }
+    elseif ($freshOk -and $shim) { Write-Output "Verified: 'frely' resolves from a new terminal; this process' PATH was stale, so a forwarder was added at $shim (open a new terminal if 'frely' is still not found)." }
+    else {
+      Write-Warning "'frely' does not resolve from every shell yet."
+      Write-Output "Run it by full path: `"$target`" <command>  (agents: use this path, do not reinstall)."
+      Write-Output "Or fix PATH in this terminal:  `$env:PATH = `"$directory;`$env:PATH`""
+      if (-not $pathPersisted) { Write-Output "The user PATH was not updated; add $directory to PATH manually." }
+    }
   }
   Write-Output 'Basic commands require no keyring setup. MCP authorization begins with frely link on.'
 } finally { Remove-Item -LiteralPath $stage -Recurse -Force }
