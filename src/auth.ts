@@ -143,6 +143,8 @@ export interface EmailDeviceChallenge {
   expiresIn: number;
   /** Short tag shown in the code mail, so the user can pick the right (latest) mail. Not part of the code. */
   reference?: string;
+  /** The install this sign-in also confirms: the code mail names it, and entering the code is the owner's approval of exactly that install. */
+  install?: { name: string; gift?: string };
 }
 
 /** Device MCP request prepared before an install token is redeemed; `privateKeyPem` never leaves this machine. */
@@ -152,6 +154,7 @@ export async function initEmailDeviceLogin(
   relayInput: string,
   email: string,
   invite?: string,
+  install?: { name: string; gift?: string },
 ): Promise<EmailDeviceChallenge> {
   const relayUrl = normalizeRelayUrl(relayInput);
   await probeCredentialStore();
@@ -165,7 +168,7 @@ export async function initEmailDeviceLogin(
   const response = await fetch(`${relayUrl}/api/auth/device/email/start`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email, userCode, ...(invite ? { invite } : {}) }),
+    body: JSON.stringify({ email, userCode, ...(invite ? { invite } : {}), ...(install ? { install } : {}) }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
@@ -187,6 +190,7 @@ export async function initEmailDeviceLogin(
     email: typeof data.email === "string" ? data.email : email,
     expiresIn: expiresIn,
     ...(typeof data.reference === "string" ? { reference: data.reference } : {}),
+    ...(install ? { install } : {}),
   };
 }
 
@@ -204,6 +208,7 @@ export async function completeEmailDeviceLogin(
       userCode: challenge.userCode,
       challengeId: challenge.challengeId,
       code,
+      ...(challenge.install ? { install: challenge.install } : {}),
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
