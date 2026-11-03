@@ -66,11 +66,15 @@ export interface RelayCarry {
   readonly inflight: Map<string, InflightRequest>;
   readonly cancelled: Set<string>;
   readonly outbox: Map<string, { envelope: DeviceRelayResponse; at: number }>;
+  /** Responses already written to a socket whose delivery no pong has proven yet; sent again on the next connection. */
+  readonly unacked: Map<string, { envelope: DeviceRelayResponse; at: number }>;
+  /** Ids written since the last ping; the next ping takes them. */
+  readonly unpinged: Set<string>;
   socket?: WebSocket | undefined;
 }
 
 export function createRelayCarry(): RelayCarry {
-  return { inflight: new Map(), cancelled: new Set(), outbox: new Map() };
+  return { inflight: new Map(), cancelled: new Set(), outbox: new Map(), unacked: new Map(), unpinged: new Set() };
 }
 
 function hasCarriedMcp(carry: RelayCarry): boolean {
@@ -80,13 +84,15 @@ function hasCarriedMcp(carry: RelayCarry): boolean {
 
 /** Aborts carried commands and forgets their results; nothing is re-executed. */
 function abortCarried(carry: RelayCarry, session: RelaySession | null, log: DiagnosticLog, reason: string): void {
-  if (carry.inflight.size > 0 || carry.outbox.size > 0) diagnostic(log, `relay.carried_aborted.${reason}`, { inflight: carry.inflight.size });
+  if (carry.inflight.size > 0 || carry.outbox.size > 0 || carry.unacked.size > 0) diagnostic(log, `relay.carried_aborted.${reason}`, { inflight: carry.inflight.size });
   for (const [id, item] of carry.inflight) {
     carry.cancelled.add(id);
     item.controller.abort();
     if (item.request.method === "mcp") session?.cancel(id);
   }
   carry.outbox.clear();
+  carry.unacked.clear();
+  carry.unpinged.clear();
 }
 
 export interface HeldMcp { session: RelaySession; lease: McpLease }
@@ -104,41 +110,62 @@ export async function resumeOrRelease(carry: RelayCarry, held: HeldMcp | undefin
   return undefined;
 }
 
-function pruneOutbox(carry: RelayCarry, log: DiagnosticLog): void {
+type Parked = Map<string, { envelope: DeviceRelayResponse; at: number }>;
+
+function prune(entries: Parked, log: DiagnosticLog): void {
   const now = Date.now();
-  for (const [id, entry] of carry.outbox) {
+  for (const [id, entry] of entries) {
     if (now - entry.at <= RELAY_OUTBOX_TTL_MS) continue;
-    carry.outbox.delete(id);
+    entries.delete(id);
     diagnostic(log, "relay.outbox_dropped.expired", { requestId: id });
   }
+}
+
+function bound(entries: Parked, log: DiagnosticLog): void {
+  while (entries.size > DEVICE_RELAY_DEFAULT_MAX_INFLIGHT) {
+    const oldest = entries.keys().next().value as string;
+    entries.delete(oldest);
+    diagnostic(log, "relay.outbox_dropped.limit", { requestId: oldest });
+  }
+}
+
+/** Writes a response and remembers it until a pong proves the relay got it (a dead socket can swallow the write). */
+function writeTracked(carry: RelayCarry, socket: WebSocket, entry: { envelope: DeviceRelayResponse; at: number }, log: DiagnosticLog): void {
+  if (!send(socket, entry.envelope, log)) return; // too large: the small error that replaced it is not worth repeating
+  prune(carry.unacked, log);
+  carry.unacked.delete(entry.envelope.id);
+  carry.unacked.set(entry.envelope.id, entry);
+  carry.unpinged.add(entry.envelope.id);
+  bound(carry.unacked, log);
 }
 
 /** Sends on the current connection, or keeps the response (bounded) for the next one. */
 export function deliverResponse(carry: RelayCarry, envelope: DeviceRelayResponse, log: DiagnosticLog): void {
   const socket = carry.socket;
-  if (socket && socket.readyState === WebSocket.OPEN) { send(socket, envelope, log); return; }
+  if (socket && socket.readyState === WebSocket.OPEN) { writeTracked(carry, socket, { envelope, at: Date.now() }, log); return; }
   let kept = envelope;
   try { encodeDeviceRelayEnvelope(envelope); }
   catch (error) {
     diagnostic(log, "relay.response_failed", { requestId: envelope.id }, error);
     kept = errorResponse(envelope.id, "response_too_large", "Device Relay response exceeds the frame limit.");
   }
-  pruneOutbox(carry, log);
+  prune(carry.outbox, log);
   carry.outbox.delete(kept.id);
   carry.outbox.set(kept.id, { envelope: kept, at: Date.now() });
-  while (carry.outbox.size > DEVICE_RELAY_DEFAULT_MAX_INFLIGHT) {
-    const oldest = carry.outbox.keys().next().value as string;
-    carry.outbox.delete(oldest);
-    diagnostic(log, "relay.outbox_dropped.limit", { requestId: oldest });
-  }
+  bound(carry.outbox, log);
 }
 
+/** Parked responses first, then those the previous connection never proved delivered. The relay ignores ids it no longer waits for. */
 function flushOutbox(carry: RelayCarry, socket: WebSocket, log: DiagnosticLog): void {
-  pruneOutbox(carry, log);
+  prune(carry.outbox, log);
+  prune(carry.unacked, log);
+  const again = [...carry.unacked.values()];
+  carry.unpinged.clear();
   for (const [id, entry] of carry.outbox) {
     carry.outbox.delete(id);
-    send(socket, entry.envelope, log);
+    writeTracked(carry, socket, entry, log);
   }
+  for (const entry of again) if (carry.unacked.get(entry.envelope.id) === entry && !carry.unpinged.has(entry.envelope.id)) writeTracked(carry, socket, entry, log);
 }
 
 export async function serveDeviceRelay(options: RelayServeOptions): Promise<void> {
@@ -163,6 +190,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
   // MCP commands that outlive a connection keep their session and lease here until they finish.
   const carry = createRelayCarry();
   let held: HeldMcp | undefined;
+  let carryAuthorization: string | undefined;
   const releaseHeld = async (reason: string) => { const previous = held; held = undefined; await resumeOrRelease(carry, previous, undefined, log, reason); };
   try {
     while (!options.signal.aborted) {
@@ -222,6 +250,8 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
         } else {
           await releaseHeld("workspace_removed");
         }
+        // Results kept for resending belong to one authorization; a different one never sees them.
+        if (carryAuthorization !== authorization?.grant.id) { carry.outbox.clear(); carry.unacked.clear(); carry.unpinged.clear(); carryAuthorization = authorization?.grant.id; }
         const grant = await obtainGrant(device, authorization, lease, options.workspace, log);
         transports = grant.transports;
         selectedTransport = selectDeviceTransport(transports, preferredTransport);
@@ -366,8 +396,13 @@ export async function serveConnection(
     let lastFrameAt = connectedAt;
     let lastInboundAt = connectedAt;
     let socketErrorCode: string | undefined;
+    // Responses written before a ping are delivered once its pong returns (TCP keeps order); then they are no longer kept.
+    const pinged = new Map<string, string[]>();
     const ping = () => {
-      if (socket.readyState === WebSocket.OPEN) { heartbeatNonce = randomBytes(16); socket.ping(heartbeatNonce); }
+      if (socket.readyState !== WebSocket.OPEN) return;
+      heartbeatNonce = randomBytes(16);
+      if (carry.unpinged.size > 0) { pinged.set(heartbeatNonce.toString("hex"), [...carry.unpinged]); carry.unpinged.clear(); }
+      socket.ping(heartbeatNonce);
     };
     const heartbeat = setInterval(ping, RELAY_PING_MS);
     heartbeat.unref?.();
@@ -435,6 +470,8 @@ export async function serveConnection(
     socket.on("ping", () => { lastPingAt = lastInboundAt = Date.now(); });
     socket.on("pong", (data: Buffer) => {
       lastPongAt = lastInboundAt = Date.now();
+      const acknowledged = pinged.get(data.toString("hex"));
+      if (acknowledged) { pinged.delete(data.toString("hex")); for (const id of acknowledged) carry.unacked.delete(id); }
       if (heartbeatNonce && data.equals(heartbeatNonce)) { heartbeatNonce = undefined; report({ type: "heartbeat" }); }
     });
     socket.once("error", (socketError: unknown) => {
@@ -473,6 +510,7 @@ async function handleFrame(
   }
   if (envelope.type === "cancel") {
     carry.outbox.delete(envelope.id);
+    carry.unacked.delete(envelope.id);
     const item = inflight.get(envelope.id);
     if (item) {
       cancelled.add(envelope.id);
@@ -562,14 +600,16 @@ async function forwardProviderResponse(opened: Awaited<ReturnType<typeof openLoc
   }
 }
 
-function send(socket: WebSocket, envelope: DeviceRelayEnvelope, log: DiagnosticLog): void {
-  if (socket.readyState !== WebSocket.OPEN) return;
-  try { socket.send(encodeDeviceRelayEnvelope(envelope)); }
+/** True when the envelope itself went out; false when the socket was not open or only the too-large fallback was sent. */
+function send(socket: WebSocket, envelope: DeviceRelayEnvelope, log: DiagnosticLog): boolean {
+  if (socket.readyState !== WebSocket.OPEN) return false;
+  try { socket.send(encodeDeviceRelayEnvelope(envelope)); return true; }
   catch (error) {
     diagnostic(log, "relay.response_failed", { requestId: envelope.id }, error);
-    if (envelope.type !== "response") return;
+    if (envelope.type !== "response") return false;
     const fallback = errorResponse(envelope.id, "response_too_large", "Device Relay response exceeds the frame limit.");
     socket.send(encodeDeviceRelayEnvelope(fallback));
+    return false;
   }
 }
 

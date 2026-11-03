@@ -317,3 +317,51 @@ test("a silent connection is terminated with relay.heartbeat_timeout so the loop
     await relayServer.close();
   }
 });
+
+for (const acknowledged of [false, true]) {
+  test(acknowledged
+    ? "a response proven delivered by a later pong is not sent again on the next connection"
+    : "a response written into a socket that dies before any pong is sent again on the next connection", async () => {
+    const relayServer = await relay();
+    const fake = fakeSession();
+    const lease = new McpLease(authorizationId, Date.now() + 60_000);
+    const carry = createRelayCarry();
+    const abort = new AbortController();
+    if (acknowledged) mock.timers.enable({ apis: ["setInterval", "Date"] });
+    try {
+      const first = relayServer.next();
+      const run1 = settled(serveConnection(relayServer.url, "t", deviceId, fake.session, lease, abort.signal, () => undefined, undefined, undefined, undefined, carry));
+      const one = await first;
+      await until(() => carry.socket !== undefined);
+      one.peer.send(encodeDeviceRelayEnvelope(request("relay-request-0010")));
+      await until(() => fake.executed.length === 1);
+      fake.finish("relay-request-0010");
+      await until(() => responses(one.frames).length === 1);
+      assert.equal(carry.unacked.size, 1, "kept until a pong proves delivery");
+      if (acknowledged) {
+        mock.timers.tick(15_000); // the next ping is sent after the response
+        await until(() => carry.unacked.size === 0);
+      }
+      one.peer.terminate();
+      await run1;
+      mock.timers.reset();
+
+      const second = relayServer.next();
+      const run2 = settled(serveConnection(relayServer.url, "t", deviceId, fake.session, lease, abort.signal, () => undefined, undefined, undefined, undefined, carry));
+      const two = await second;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      if (acknowledged) assert.equal(responses(two.frames).length, 0);
+      else {
+        assert.deepEqual(responses(two.frames).map((frame) => frame.id), ["relay-request-0010"]);
+        assert.deepEqual(fake.executed, ["relay-request-0010"]);
+      }
+      abort.abort();
+      await run2;
+    } finally {
+      mock.timers.reset();
+      abort.abort();
+      lease.close();
+      await relayServer.close();
+    }
+  });
+}
