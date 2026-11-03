@@ -22,3 +22,9 @@ test("claimInstall sends the gift with the name and says the gift was not claime
   assert.equal(done?.claimedBy?.email, "a@x.test");
   await assert.rejects(claimInstall("a/b", gift, async () => { throw new CloudToolError("item_not_found"); }), /The gift was not claimed/u);
 });
+
+test("claimInstall does not say the gift was not claimed when the server claimed it and the lookup then failed", async () => {
+  const gift = `fsl_${"a".repeat(32)}`;
+  await assert.rejects(claimInstall("a/b", gift, async () => { throw new CloudToolError("item_not_found_after_claim"); }),
+    (error: unknown) => error instanceof ItemNotFoundError && /gift was claimed/u.test((error as Error).message) && !/not claimed/u.test((error as Error).message));
+});

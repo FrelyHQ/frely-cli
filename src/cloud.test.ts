@@ -147,3 +147,28 @@ test("callCloudToolAwaiting waits for the owner's approval inside the call, then
   await assert.rejects(callCloudToolAwaiting("items.claim_install", { name: "a/b" }, deps as never, async () => ({ status: "pending" }) as ApprovalOutcome), (error: unknown) => error instanceof ApprovalRequiredError && error.approval.code === "ABCDEFGH");
   assert.equal(calls.length, 1);
 });
+
+test("callCloudToolAwaiting hands the approval to the caller before it waits, and tells the owner to keep the command running", async () => {
+  const { callCloudToolAwaiting } = await import("./cloud.js");
+  const { CloudToolError } = await import("./skill/cloud-item.js");
+  const refusal = failure({ code: "confirmation_required", approvalCode: "ABCDEFGH", url: "https://frely.cloud/device?g=ABCDEFGH", expiresAt: new Date(Date.now() + 60_000).toISOString(), summary: "Install" });
+  const order: string[] = [];
+  const deps = {
+    openReader: async () => ({ tools: async () => [], call: async () => { throw new CloudToolError("tool_unavailable_or_forbidden"); }, close: async () => undefined }),
+    openControllerConnection: async () => ({
+      call: async (_name: string, args: Record<string, unknown>) => (args.arguments as Record<string, unknown>).approvalCode
+        ? { content: [{ type: "text", text: JSON.stringify({ kind: "skill", id: "s", name: "a/b" }) }], structuredContent: { kind: "skill", id: "s", name: "a/b" } } : refusal,
+      close: async () => undefined,
+    }),
+  };
+  const written: string[] = [];
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((text: string) => { written.push(String(text)); return true; }) as typeof process.stderr.write;
+  try {
+    await callCloudToolAwaiting("items.claim_install", { name: "a/b" }, deps as never, async () => { order.push("wait"); return { status: "approved" } as ApprovalOutcome; },
+      (approval) => { order.push(`approval:${approval.code}:${approval.url}`); });
+  } finally { process.stderr.write = original; }
+  assert.deepEqual(order, ["approval:ABCDEFGH:https://frely.cloud/device?g=ABCDEFGH", "wait"]);
+  assert.match(written.join(""), /Keep this command running/);
+  assert.doesNotMatch(written.join(""), /run the same call again/i);
+});

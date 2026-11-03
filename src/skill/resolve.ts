@@ -46,13 +46,15 @@ export async function claimInstall(name: string, gift: string | undefined, call:
   catch (error) {
     if (unavailable(error)) return null;
     if (error instanceof CloudToolError && error.code === "item_not_found") throw new ItemNotFoundError(name, gift !== undefined);
+    // The server claimed the gift first and the lookup still failed: the gift is spent, so do not say it was not claimed.
+    if (error instanceof CloudToolError && error.code === "item_not_found_after_claim") throw new ItemNotFoundError(name, true, true);
     throw error;
   }
 }
 
 export class ItemNotFoundError extends Error {
-  constructor(name: string, readonly hadGift: boolean) {
-    super(`This account sees no Skill, Prompt, Agent or MCP named ${name}.${hadGift ? " The gift was not claimed." : " If you have a gift code, run the command again with --gift <code>."}`);
+  constructor(name: string, readonly hadGift: boolean, readonly giftClaimed = false) {
+    super(`This account sees no Skill, Prompt, Agent or MCP named ${name}.${giftClaimed ? " The gift was claimed; run the command again to install it." : hadGift ? " The gift was not claimed." : " If you have a gift code, run the command again with --gift <code>."}`);
     this.name = "ItemNotFoundError";
   }
 }

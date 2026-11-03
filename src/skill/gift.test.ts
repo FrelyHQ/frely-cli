@@ -25,3 +25,9 @@ test("redeemGift refuses a malformed code before any call", async () => {
   await assert.rejects(redeemGift("nope", async () => { called = true; return {}; }, sink()), /fsl_/);
   assert.equal(called, false);
 });
+
+test("redeemGift shows the Credit as dollars, not raw units", async () => {
+  const out = sink();
+  await redeemGift(code, async () => ({ giftUnits: 2_000_000 }), out);
+  assert.match(out.lines.join(""), /\(\$2\.00 Credit added\)/);
+});
