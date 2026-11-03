@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Local command entry and tag admission. Deployment remains owned by each
 // project's existing executor; this module never accepts hosts or commands.
-import { execFileSync } from "node:child_process";
-import { readFileSync, appendFileSync, realpathSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { execFileSync, spawn } from "node:child_process";
+import { readFileSync, appendFileSync, realpathSync, openSync, closeSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { catalog } from "./release-catalog.mjs";
 
@@ -14,10 +15,14 @@ const run = (command, args, capture = false) => execFileSync(command, args, {
 });
 const git = (...args) => run("git", args, true).trim();
 function fail(message) { throw new Error(message); }
+// Set in the background child of `--detach`; its output goes to this log, which ends with a RELEASE_EXIT line.
+const DETACHED_LOG_ENV = "FRELY_CLI_RELEASE_DETACHED_LOG";
+// The background child runs this file directly, so the artifact the wrapper script chose (release-landing, ...) travels in the environment.
+const DETACHED_ARTIFACT_ENV = "FRELY_CLI_RELEASE_DETACHED_ARTIFACT";
 
 export function parseArguments(args) {
   const options = {};
-  const flags = new Set(["dry-run", "purge-cache", "no-wait", "help", "list"]);
+  const flags = new Set(["dry-run", "purge-cache", "no-wait", "help", "list", "detach"]);
   const values = new Set(["executor", "version", "validate-tag"]);
   for (let i = 0; i < args.length; i++) {
     const key = args[i] === "-h" ? "help" : args[i].replace(/^--/, "");
@@ -42,12 +47,30 @@ export function selectTag(tag) {
 }
 function help(entryArtifact) {
   const command = entryArtifact === catalog.defaultArtifact ? "./scripts/release" : "./scripts/release-" + entryArtifact;
-  console.log("Usage: " + command + " [--executor local|actions] [--version <semver>] [--dry-run]");
+  console.log("Usage: " + command + " [--executor local|actions] [--version <semver>] [--dry-run] [--detach]");
   console.log("       ./scripts/release --list");
   console.log("       ./scripts/release --validate-tag <tag>");
   console.log("Command\tDefault executor\tActions tag\tContents");
   for (const item of catalog.artifacts) console.log([item.id === catalog.defaultArtifact ? "./scripts/release" : "./scripts/release-" + item.id, item.defaultExecutor, item.tagPrefix + "X.Y.Z", item.description].join("\t"));
   console.log("Command invocation and execution location are separate. The CLI defaults to full local publishing; --executor actions submits tags to Actions, Landing submits tags to Actions.");
+}
+// Runs this command again in its own session with output in a log file and returns at once. A release started from a
+// remote tool (FrelyMCP) otherwise dies when that tool disconnects, for example when a Frely release restarts the Device Relay.
+export function detachRelease(args, entryArtifact = catalog.defaultArtifact, { log = join(tmpdir(), `frely-cli-release-${new Date().toISOString().replace(/[:.]/gu, "-")}.log`), environment = process.env } = {}) {
+  const descriptor = openSync(log, "a");
+  try {
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...args.filter(arg => arg !== "--detach")], {
+      cwd: process.cwd(), detached: true, stdio: ["ignore", descriptor, descriptor],
+      env: { ...environment, [DETACHED_LOG_ENV]: log, [DETACHED_ARTIFACT_ENV]: entryArtifact },
+    });
+    child.unref();
+    console.log(`Release running in the background (pid ${child.pid}).`);
+    console.log(`log: ${log}`);
+    console.log(`Follow it with: tail -f ${log}   (it ends with a RELEASE_EXIT line)`);
+    return { pid: child.pid, log };
+  } finally {
+    closeSync(descriptor);
+  }
 }
 function assertClean() {
   if (git("status", "--porcelain", "--untracked-files=all")) fail("Release requires a clean worktree");
@@ -121,6 +144,7 @@ function legacyCommand(artifact, executor, options) {
 export function main(args = process.argv.slice(2), entryArtifact = catalog.defaultArtifact) {
   const options = parseArguments(args);
   if (options.help || options.list) return help(entryArtifact);
+  if (options.detach) return detachRelease(args, entryArtifact);
   const tagInput = options["validate-tag"];
   if (tagInput) {
     validateTag(tagInput);
@@ -165,5 +189,6 @@ export function main(args = process.argv.slice(2), entryArtifact = catalog.defau
   console.log("Actions submitted: " + artifact.workflow + " at " + tag + ". Deployment is pending workflow verification.");
 }
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; }
+  try { main(undefined, process.env[DETACHED_ARTIFACT_ENV] || undefined); } catch (error) { console.error(error.message); process.exitCode = 1; }
+  if (process.env[DETACHED_LOG_ENV]) console.log(`RELEASE_EXIT status=${process.exitCode ?? 0}`);
 }

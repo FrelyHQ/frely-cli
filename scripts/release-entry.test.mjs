@@ -168,3 +168,8 @@ test("push admission binds an explicit tag checkout to the triggering commit", t
     assert.match(invalid.stderr, /Release tag must match the triggering commit/);
   }
 });
+
+test("--detach is a plain flag and cannot be repeated", () => {
+  assert.equal(parseArguments(["--detach"]).detach, true);
+  assert.throws(() => parseArguments(["--detach", "--detach"]));
+});
