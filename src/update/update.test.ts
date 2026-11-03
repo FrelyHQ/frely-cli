@@ -11,7 +11,8 @@ import { VERSION } from "../version.js";
 import { inspectInstallation, manualUpdateCommand } from "./installation.js";
 import { compareVersions, latestRelease, standaloneAsset } from "./release.js";
 import { acquireMaintenance, MaintenanceBusyError, MaintenanceGate, serveMaintenance } from "./maintenance.js";
-import { prepareStandalone, update, validateStandalone, type UpdateDependencies } from "./update.js";
+import { gzipSync } from "node:zlib";
+import { gunzipLimited, prepareStandalone, update, validateStandalone, type UpdateDependencies } from "./update.js";
 
 const execFile = promisify(execFileCallback);
 const NEW = "999.0.0";
@@ -84,7 +85,7 @@ test("standalone preparation leaves original intact; replacement and recovery us
   const entry = join(root, "frely"); await writeFile(entry, "old");
   const hash = createHash("sha256").update("new").digest("hex");
   const prepared = await prepareStandalone({ method: "standalone", entry, platform: "linux" }, { version: "1.2.3", sources: [{ kind: "github", baseUrl: "https://example.invalid" }] },
-    async (url, path) => { await writeFile(path, url.endsWith(".sha256") ? `${hash}  frely\n` : "new"); }, async () => "1.2.3");
+    async (url, path) => { await writeFile(path, url.endsWith(".sha256") ? `${hash}  frely\n` : url.endsWith(".gz") ? gzipSync("new") : "new"); }, async () => "1.2.3");
   assert.equal(await readFile(entry, "utf8"), "old");
   await prepared.apply(); assert.equal(await readFile(entry, "utf8"), "new");
   await prepared.restore(); assert.equal(await readFile(entry, "utf8"), "old");
@@ -264,4 +265,44 @@ test("standalone lookup falls back to npmmirror when GitHub is unreachable, and 
   assert.deepEqual(seen, ["https://github.com/x/v1.2.3/" + standaloneAsset() + ".sha256", "https://registry.npmmirror.com/p/-/p-1.2.3.tgz"]);
   await prepared.apply(); assert.equal(await readFile(entry, "utf8"), "new");
   await prepared.cleanup();
+});
+
+test("GitHub downloads the gzip asset, falls back to the plain executable, and rejects bad archives", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "frely-gz-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const sources = [{ kind: "github" as const, baseUrl: "https://github.com/x/v1.2.3" }];
+  const prepare = async (name: string, body: string, serve: (url: string, path: string) => Promise<void>, expectedBody = body) => {
+    const entry = join(root, name); await writeFile(entry, "old");
+    const hash = createHash("sha256").update(expectedBody).digest("hex");
+    const seen: string[] = [];
+    const prepared = await prepareStandalone({ method: "standalone", entry, platform: "linux" }, { version: "1.2.3", sources }, async (url, path) => {
+      seen.push(url.slice(url.lastIndexOf("/") + 1));
+      if (url.endsWith(".sha256")) await writeFile(path, `${hash}  frely\n`); else await serve(url, path);
+    }, async () => "1.2.3");
+    return { entry, prepared, seen };
+  };
+  const asset = standaloneAsset();
+  // .gz served: decompressed, checksum is of the decompressed bytes, the plain file is never requested.
+  const gz = await prepare("a", "binary", async (_url, path) => { await writeFile(path, gzipSync("binary")); });
+  await gz.prepared.apply(); assert.equal(await readFile(gz.entry, "utf8"), "binary");
+  assert.ok(!gz.seen.includes(asset), "no plain download when the .gz is available");
+  // .gz missing (release from before gzip assets): the plain executable is used.
+  const plain = await prepare("b", "plain", async (url, path) => { if (url.endsWith(".gz")) throw new Error("404"); await writeFile(path, "plain"); });
+  await plain.prepared.apply(); assert.equal(await readFile(plain.entry, "utf8"), "plain");
+  assert.deepEqual(plain.seen.filter((name) => !name.endsWith(".sig")), [`${asset}.sha256`, `${asset}.gz`, asset]);
+  // Hash of the decompressed bytes does not match: rejected, installation untouched.
+  await assert.rejects(prepare("c", "other", async (_url, path) => { await writeFile(path, gzipSync("binary")); }, "other"), /checksum mismatch/);
+  assert.equal(await readFile(join(root, "c"), "utf8"), "old");
+  // Not a gzip stream: rejected.
+  await assert.rejects(prepare("d", "x", async (_url, path) => { await writeFile(path, "plain text, not gzip"); }));
+});
+
+test("gunzipLimited stops at the output limit", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "frely-bomb-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(join(root, "bomb.gz"), gzipSync(Buffer.alloc(5 * 1024 * 1024)));
+  await assert.rejects(gunzipLimited(join(root, "bomb.gz"), join(root, "out"), 1024 * 1024), /size limit/);
+  await assert.rejects(readFile(join(root, "out")), "a partial output must not be left behind");
+  await gunzipLimited(join(root, "bomb.gz"), join(root, "ok"), 6 * 1024 * 1024);
+  assert.equal((await readFile(join(root, "ok"))).length, 5 * 1024 * 1024);
 });

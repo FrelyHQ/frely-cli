@@ -5,6 +5,7 @@ import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } fr
 import { tmpdir } from "node:os";
 import { join, resolve, win32 } from "node:path";
 import { promisify } from "node:util";
+import { gzipSync } from "node:zlib";
 
 const run = promisify(execFile);
 const directory = await mkdtemp(join(tmpdir(), "frely-installer-smoke-"));
@@ -73,6 +74,8 @@ try {
   await mkdir(releases);
   await copyFile(join("artifacts", asset), join(releases, asset));
   await copyFile(join("artifacts", `${asset}.sha256`), join(releases, `${asset}.sha256`));
+  // GitHub carries the executable as <asset>.gz; the main flow installs from that. Releases from before gzip assets have only the raw file.
+  await writeFile(join(releases, `${asset}.gz`), gzipSync(await readFile(join("artifacts", asset)), { level: 9 }));
   const env = { ...process.env, HOME: directory, USERPROFILE: directory, LOCALAPPDATA: directory,
     FRELY_RELEASE_DIR: releases, FRELY_INSTALL_DIR: destination, FRELY_INSTALL_NO_PROFILE: "1",
     FRELY_CLI_VERSION: "latest", FRELY_CREDENTIAL_STORE: "invalid-basic-test", XDG_CONFIG_HOME: join(directory, "config") };
@@ -97,6 +100,19 @@ try {
     assert.equal(await readFile(protectedProfile, "utf8"), "keep\n", "profile symlinks must not be followed or turn a successful install into a failure");
   }
   if (process.platform !== "win32") await probeCases();
+  // gzip-only and raw-only releases both install; a corrupt archive is rejected and leaves the installation alone.
+  for (const [name, files] of [["gz-only", [`${asset}.gz`]], ["raw-only", [asset]]]) {
+    const dir = join(directory, name), target = join(directory, `bin-${name}`);
+    await mkdir(dir);
+    for (const file of [...files, `${asset}.sha256`]) await copyFile(join(releases, file), join(dir, file));
+    await run(executable, args, { env: { ...env, FRELY_RELEASE_DIR: dir, FRELY_INSTALL_DIR: target }, timeout: 30000 });
+    assert.equal(await hash(join(target, process.platform === "win32" ? "frely.exe" : "frely")), await hash(join("artifacts", asset)), name);
+  }
+  const corrupt = join(directory, "corrupt");
+  await mkdir(corrupt);
+  await copyFile(join(releases, `${asset}.sha256`), join(corrupt, `${asset}.sha256`));
+  await writeFile(join(corrupt, `${asset}.gz`), "not gzip");
+  await assert.rejects(run(executable, args, { env: { ...env, FRELY_RELEASE_DIR: corrupt, FRELY_INSTALL_DIR: join(directory, "bin-corrupt") }, timeout: 30000 }), /No source supplied a verified release/);
   const original = await hash(installed);
   await writeFile(join(releases, `${asset}.sha256`), `${"0".repeat(64)}  ${asset}\n`);
   await assert.rejects(run(executable, args, { env, timeout: 30000 }), /checksum mismatch/i);

@@ -4,6 +4,10 @@ import { chmod, copyFile, lstat, mkdir, mkdtemp, open, readFile, realpath, renam
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
+import { createReadStream, createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
+import { Transform } from "node:stream";
+import { createGunzip } from "node:zlib";
 import { VERSION } from "../version.js";
 import { readDeviceBinding } from "../device/state.js";
 import { connectionIsLive, readConnectionStatus } from "../device/connection-status.js";
@@ -56,6 +60,19 @@ async function download(url: string, destination: string, maxBytes: number): Pro
   } finally { await file.close(); }
 }
 
+const MAX_ARCHIVE_BYTES = 80 * 1024 * 1024;
+const MAX_EXECUTABLE_BYTES = 200 * 1024 * 1024;
+/** Decompress `archive` into `destination`, refusing more than `maxBytes` of output (a decompression bomb). */
+export async function gunzipLimited(archive: string, destination: string, maxBytes: number): Promise<void> {
+  let bytes = 0;
+  const limit = new Transform({ transform(chunk: Buffer, _encoding, callback) {
+    bytes += chunk.byteLength;
+    callback(bytes > maxBytes ? new Error("Decompressed release exceeds its size limit.") : null, chunk);
+  } });
+  try { await pipeline(createReadStream(archive), createGunzip(), limit, createWriteStream(destination, { flags: "wx", mode: 0o600 })); }
+  catch (error) { await rm(destination, { force: true }); throw error; }
+}
+
 export async function validateStandalone(path: string, checksum: string, version: string, execute = installedVersion): Promise<void> {
   const match = /^([a-fA-F0-9]{64})(?:\s|$)/u.exec(checksum);
   if (!match) throw new Error("Invalid release checksum.");
@@ -88,7 +105,12 @@ export async function prepareStandalone(installation: Installation, release: Rel
         await fetchFile(`${source.baseUrl}/${asset}.sha256`, join(stage, "checksum"), 1024);
         // The signature is optional while signing is record-only; a missing file is not an error, a wrong one is.
         await fetchFile(`${source.baseUrl}/${asset}.sha256.sig`, join(stage, "checksum.sig"), 1024).catch(() => rm(join(stage, "checksum.sig"), { force: true }));
-        await fetchFile(`${source.baseUrl}/${asset}`, next, 200 * 1024 * 1024);
+        // GitHub carries the executable gzip-compressed; releases from before that have only the plain file.
+        const archive = join(stage, "asset.gz");
+        await rm(archive, { force: true });
+        const compressed = await fetchFile(`${source.baseUrl}/${asset}.gz`, archive, MAX_ARCHIVE_BYTES).then(() => true, () => false);
+        if (compressed) { await gunzipLimited(archive, next, MAX_EXECUTABLE_BYTES); await rm(archive, { force: true }); }
+        else await fetchFile(`${source.baseUrl}/${asset}`, next, MAX_EXECUTABLE_BYTES);
       } else {
         const tarball = join(stage, "package.tgz"), unpacked = join(stage, "npm");
         await rm(tarball, { force: true });

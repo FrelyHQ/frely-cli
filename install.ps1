@@ -37,11 +37,34 @@ try {
     } finally { $sha256.Dispose() }
     return $expected.ToLowerInvariant() -eq ([BitConverter]::ToString($actualBytes)).Replace('-', '').ToLowerInvariant()
   }
+  # GitHub carries each executable gzip-compressed (<asset>.gz); the .sha256 beside it is the checksum of the decompressed file.
+  # Releases published before gzip assets existed have only the plain executable, so a missing .gz falls back to it.
   function Get-FromGitHub {
     $base = if ($version -eq 'latest') { "$github/latest/download" } else { "$github/download/v$($version.TrimStart('v'))" }
-    Get-File "$base/$asset" (Join-Path $stage $asset)
     Get-File "$base/$asset.sha256" (Join-Path $stage "$asset.sha256")
-    return Test-Checksum (Join-Path $stage $asset) (Join-Path $stage "$asset.sha256")
+    $target = Join-Path $stage $asset
+    $archive = Join-Path $stage "$asset.gz"
+    $compressed = $true
+    try { Get-File "$base/$asset.gz" $archive } catch { $compressed = $false }
+    if ($compressed) {
+      $source = [IO.File]::OpenRead($archive)
+      try {
+        $gzip = New-Object IO.Compression.GzipStream($source, [IO.Compression.CompressionMode]::Decompress)
+        $output = [IO.File]::Create($target)
+        try {
+          # Cap the decompressed size (200 MB); a truncated file fails the checksum below.
+          $buffer = New-Object byte[] 1048576
+          $total = 0
+          while (($read = $gzip.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $total += $read
+            if ($total -gt 209715200) { throw 'Decompressed release is too large.' }
+            $output.Write($buffer, 0, $read)
+          }
+        } finally { $output.Dispose(); $gzip.Dispose() }
+      } finally { $source.Dispose() }
+      Remove-Item -LiteralPath $archive -Force
+    } else { Get-File "$base/$asset" $target }
+    return Test-Checksum $target (Join-Path $stage "$asset.sha256")
   }
   # The package tarball holds package/frely.exe and package/frely.exe.sha256; Windows 10 1803+ ships tar.exe.
   function Get-FromNpm([string]$registry) {
@@ -83,7 +106,7 @@ try {
   }
   function Rank-Sources([string[]]$ordered) {
     $base = if ($version -eq 'latest') { "$github/latest/download" } else { "$github/download/v$($version.TrimStart('v'))" }
-    $githubProbe = Start-Probe "$base/$asset" 'github'
+    $githubProbe = Start-Probe "$base/$asset.gz" 'github'
     $npmProbe = $null
     try {
       $wanted = $version.TrimStart('v')
@@ -110,7 +133,7 @@ try {
       }
     } catch { if ($_.Exception.Message -like 'Unknown install source*') { throw }; $downloaded = $false }
     if ($downloaded -eq $true) { $usedSource = $source; break }
-    foreach ($leftover in @($asset, "$asset.sha256", 'npm', 'package.tgz', 'latest')) { Remove-Item -LiteralPath (Join-Path $stage $leftover) -Recurse -Force -ErrorAction SilentlyContinue }
+    foreach ($leftover in @($asset, "$asset.gz", "$asset.sha256", 'npm', 'package.tgz', 'latest')) { Remove-Item -LiteralPath (Join-Path $stage $leftover) -Recurse -Force -ErrorAction SilentlyContinue }
     [Console]::Error.WriteLine("Frely: $source unavailable or failed verification; trying the next source.")
   }
   if ($downloaded -ne $true) { throw 'No source supplied a verified release (checksum mismatch or no connection); installation was not changed.' }
