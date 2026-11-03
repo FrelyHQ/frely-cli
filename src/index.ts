@@ -13,7 +13,7 @@ import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
 import { join, resolve } from "node:path";
 import { stdin, stdout } from "node:process";
-import { inspectAuth, loginDevice, logout, normalizeRelayUrl, requireLogin, initEmailDeviceLogin, completeEmailDeviceLogin, savePendingEmailChallenge, readPendingEmailChallenge, deletePendingEmailChallenge, localDeviceId, finishDeviceLogin, readConfig, resumeDeviceLogin, openVerificationUrl } from "./auth.js";
+import { inspectAuth, loginDevice, logout, normalizeRelayUrl, requireLogin, initEmailDeviceLogin, completeEmailDeviceLogin, savePendingEmailChallenge, readPendingEmailChallenge, deletePendingEmailChallenge, startOrResumeEmailLogin, waitEmailDeviceLogin, EmailLoginTimeout, localDeviceId, finishDeviceLogin, readConfig, resumeDeviceLogin, openVerificationUrl } from "./auth.js";
 import { basicCredentialStore as credentialStore } from "./credential-basic.js";
 import { doctor, formatDoctor } from "./diagnostics.js";
 import { ensureDevice } from "./device/control.js";
@@ -76,7 +76,7 @@ import { runUninstall } from "./uninstall.js";
 
 
 
-const ITEM_INSTALL_USAGE = "Usage: frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|workbuddy|codebuddy|generic] [--scope global|project] [--dir <path>] [--gift <code>] [--email <address>] [--no-browser] [--replace] [--api-key-stdin] [--json]";
+const ITEM_INSTALL_USAGE = "Usage: frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|workbuddy|codebuddy|generic] [--scope global|project] [--dir <path>] [--gift <code>] [--email <address>] [--no-wait] [--no-browser] [--replace] [--api-key-stdin] [--json]";
 
 /** Installs a published Agent as a local trigger Skill, from `username/name[@version]` (or the distribution id older scripts use). */
 async function installAgent(target: string, args: string[], resolved: { manifest?: unknown; extra?: Record<string, unknown>; accountLine?: string } = {}): Promise<void> {
@@ -428,7 +428,7 @@ async function main(): Promise<void> {
     const itemRef = args[2];
     if (!itemRef || itemRef.startsWith("-")) throw new Error(ITEM_INSTALL_USAGE);
     // An option this command does not know is an error, not a silent no-op (a host that adds --wait would otherwise think it waited).
-    const valueFlags = new Set(["--host", "--scope", "--dir", "--gift", "--email"]), plainFlags = new Set(["--api-key-stdin", "--json", "--replace", "--no-browser"]);
+    const valueFlags = new Set(["--host", "--scope", "--dir", "--gift", "--email"]), plainFlags = new Set(["--api-key-stdin", "--json", "--replace", "--no-browser", "--no-wait"]);
     for (let i = 3; i < args.length; i++) {
       const arg = args[i]!;
       if (valueFlags.has(arg)) { i++; continue; }
@@ -443,20 +443,31 @@ async function main(): Promise<void> {
     const byId = /^creator_distribution_/u.test(itemRef) || /^cloud_skill_|^skill_/u.test(itemRef) || args.includes("--api-key-stdin");
     const noBrowser = args.includes("--no-browser") || process.env.FRELY_NO_BROWSER === "1";
     // Not signed in and given an address: the sign-in code mail names this install, so entering the code is also the owner's approval of it
-    // (one verification, no second page). The code is entered with `frely login --code`; then this same command is run again.
+    // (one verification, no second page). The mail also has a link that enters the same code; this command waits for either way,
+    // then carries on with the install in the same process. `--no-wait` only sends the mail (the code is then entered with `frely login --code`).
     const installEmail = option(args, "--email");
     if (!byId && installEmail !== undefined && !(await readConfig().then(() => true, () => false))) {
       const relayUrl = normalizeRelayUrl(undefined);
-      const challenge = await initEmailDeviceLogin(relayUrl, installEmail, undefined, { name: itemRef, ...(gift === undefined ? {} : { gift }) });
-      await savePendingEmailChallenge(relayUrl, challenge);
-      if (json) stdout.write(`${JSON.stringify({ state: "code_sent", email: challenge.email, expiresIn: challenge.expiresIn, ...(challenge.reference ? { reference: challenge.reference } : {}),
-        confirms: { install: itemRef, gift: gift !== undefined }, next: "Ask the user for the 6-digit code from the email, run `frely login --code <code>`, then run this same install command again (without --email)." })}\n`);
+      const wait = !args.includes("--no-wait");
+      const { challenge, resumed } = await startOrResumeEmailLogin(relayUrl, installEmail, undefined, { name: itemRef, ...(gift === undefined ? {} : { gift }) });
+      const next = wait
+        ? "The user can click the link in the email or give you the 6-digit code. This command keeps waiting (up to 10 minutes) and finishes the install by itself after a click. If it was stopped, run the same command again: it resumes without a new email. With a code: run `frely login --code <code>`, then this command again."
+        : "Ask the user for the 6-digit code from the email, run `frely login --code <code>`, then run this same install command again (without --email).";
+      if (json) stdout.write(`${JSON.stringify({ state: "code_sent", email: challenge.email, expiresIn: challenge.expiresIn, ...(challenge.reference ? { reference: challenge.reference } : {}), ...(resumed ? { resumed: true } : {}),
+        confirms: { install: itemRef, gift: gift !== undefined }, next })}\n`);
       else {
-        stdout.write(`Verification code sent to ${challenge.email}. It also confirms installing ${itemRef}${gift === undefined ? "" : " and claiming its gift"}.\n`);
+        stdout.write(resumed ? `Still waiting for the code sent to ${challenge.email}.\n` : `Verification code sent to ${challenge.email}. It also confirms installing ${itemRef}${gift === undefined ? "" : " and claiming its gift"}.\n`);
         if (challenge.reference) stdout.write(`Mail reference: ${challenge.reference} (use the newest mail with this reference; enter only the 6 digits)\n`);
-        stdout.write("Next: ask the user for the 6-digit code, run `frely login --code <code>`, then run this same install command again (without --email).\n");
+        stdout.write(wait ? "Click the link in the email, or give the 6-digit code to the assistant (`frely login --code <code>`). Waiting for up to 10 minutes...\n" : "Next: ask the user for the 6-digit code, run `frely login --code <code>`, then run this same install command again (without --email).\n");
       }
-      return;
+      if (!wait) return;
+      try {
+        const { user } = await waitEmailDeviceLogin(relayUrl, challenge);
+        if (!json) stdout.write(`Logged in as ${user.email}. Continuing the install.\n`);
+      } catch (error) {
+        if (error instanceof EmailLoginTimeout) { stdout.write(`${error.message}\n`); process.exitCode = 3; return; }
+        throw error;
+      }
     }
     // One command does the whole install. The server says what the name is for this account; when a gift is present or an MCP needs its key,
     // the owner confirms once on the web (account, item and gift shown) and this command waits for it, then claims and installs. No fallback on failure.
@@ -555,9 +566,16 @@ async function main(): Promise<void> {
             process.exitCode = 1;
             return;
           }
-          await completeEmailDeviceLogin(relayUrl, pendingChallenge, code);
           const deviceId = localDeviceId((await readConfig().catch(() => null))?.deviceId);
-          const { user } = await finishDeviceLogin(relayUrl, pendingChallenge, deviceId);
+          let user;
+          try {
+            await completeEmailDeviceLogin(relayUrl, pendingChallenge, code);
+            ({ user } = await finishDeviceLogin(relayUrl, pendingChallenge, deviceId));
+          } catch (error) {
+            // The code may already have been entered on the page the mail links to: then the device code is approved and a token is waiting.
+            try { ({ user } = await finishDeviceLogin(relayUrl, { ...pendingChallenge, expiresIn: 1 }, deviceId)); stdout.write("This sign-in was already confirmed through the email link.\n"); }
+            catch { throw error; }
+          }
           await deletePendingEmailChallenge(relayUrl);
           stdout.write(`Logged in as ${user.email}.\n`);
           if (pendingChallenge.install) stdout.write(`This code also confirmed installing ${pendingChallenge.install.name}${pendingChallenge.install.gift ? " and claiming its gift" : ""}. Run the same install command again; it needs no other confirmation.\n`);
@@ -571,8 +589,8 @@ async function main(): Promise<void> {
       }
 
       try {
-        const challenge = await initEmailDeviceLogin(relayUrl, email!, invite);
-        await savePendingEmailChallenge(relayUrl, challenge);
+        const wait = !args.includes("--no-wait");
+        const { challenge } = await startOrResumeEmailLogin(relayUrl, email!, invite);
 
         if (json) {
           stdout.write(JSON.stringify({
@@ -586,7 +604,18 @@ async function main(): Promise<void> {
           stdout.write(`Verification code sent to ${challenge.email}\n`);
           if (challenge.reference) stdout.write(`Mail reference: ${challenge.reference} (use the newest mail with this reference; enter only the 6 digits)\n`);
           stdout.write(`Expires in: ${challenge.expiresIn} seconds\n`);
-          stdout.write(`Run: frely login --code <code>\n`);
+          stdout.write(wait ? "Click the link in the email, or run: frely login --code <code>. Waiting for up to 10 minutes...\n" : `Run: frely login --code <code>\n`);
+        }
+        if (wait) {
+          try {
+            const { user } = await waitEmailDeviceLogin(relayUrl, challenge);
+            stdout.write(`Logged in as ${user.email}.\n`);
+            await installStandbyService();
+          } catch (error) {
+            if (!(error instanceof EmailLoginTimeout)) throw error;
+            stdout.write(`${error.message}\n`);
+            process.exitCode = 3;
+          }
         }
       } catch (error) {
         stdout.write(`Failed to send verification code: ${error instanceof Error ? error.message : String(error)}\n`);

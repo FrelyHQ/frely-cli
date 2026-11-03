@@ -145,6 +145,55 @@ export interface EmailDeviceChallenge {
   reference?: string;
   /** The install this sign-in also confirms: the code mail names it, and entering the code is the owner's approval of exactly that install. */
   install?: { name: string; gift?: string };
+  /** When the code mail was sent (ms), so a later run can tell whether this challenge is still alive. */
+  savedAt?: number;
+  /** The address as typed (the server only returns it masked), to tell whether a later run asks for the same sign-in. */
+  emailInput?: string;
+}
+
+/** How long a command waits for the emailed code or its link: the mail code's lifetime. */
+export const EMAIL_WAIT_SECONDS = 600;
+
+export class EmailLoginTimeout extends Error {
+  constructor() { super("The emailed code was not used in time. Run the same command again; it sends a new email."); this.name = "EmailLoginTimeout"; }
+}
+
+function emailChallengeSecondsLeft(challenge: EmailDeviceChallenge): number {
+  const total = Math.min(EMAIL_WAIT_SECONDS, challenge.expiresIn);
+  return typeof challenge.savedAt === "number" ? total - Math.floor((Date.now() - challenge.savedAt) / 1000) : 0;
+}
+
+/**
+ * Sends a code mail, or reuses the pending one when it is still alive and asks for the same address and install
+ * (a host that kills a long foreground command can run it again without a second email).
+ */
+export async function startOrResumeEmailLogin(relayInput: string, email: string, invite?: string, install?: { name: string; gift?: string }): Promise<{ challenge: EmailDeviceChallenge; resumed: boolean }> {
+  const relayUrl = normalizeRelayUrl(relayInput);
+  const input = email.trim().toLowerCase();
+  const pending = await readPendingEmailChallenge(relayUrl);
+  if (pending && pending.emailInput === input && JSON.stringify(pending.install ?? null) === JSON.stringify(install ?? null) && emailChallengeSecondsLeft(pending) > 5) {
+    return { challenge: pending, resumed: true };
+  }
+  const challenge = await initEmailDeviceLogin(relayUrl, email, invite, install);
+  const saved = { ...challenge, savedAt: Date.now(), emailInput: input };
+  await savePendingEmailChallenge(relayUrl, saved);
+  return { challenge: saved, resumed: false };
+}
+
+/** Waits until the code was entered (here with `login --code`, or on the page the mail links to), then stores the sign-in. */
+export async function waitEmailDeviceLogin(relayInput: string, challenge: EmailDeviceChallenge): Promise<{ user: PublicUser; sessionBound: boolean }> {
+  const relayUrl = normalizeRelayUrl(relayInput);
+  const left = emailChallengeSecondsLeft(challenge);
+  if (left <= 0) throw new EmailLoginTimeout();
+  const deviceId = localDeviceId((await readConfig().catch(() => null))?.deviceId);
+  try {
+    const result = await finishDeviceLogin(relayUrl, { ...challenge, expiresIn: left }, deviceId);
+    await deletePendingEmailChallenge(relayUrl);
+    return result;
+  } catch (error) {
+    if (error instanceof Error && /expired/u.test(error.message)) throw new EmailLoginTimeout();
+    throw error;
+  }
 }
 
 /** Device MCP request prepared before an install token is redeemed; `privateKeyPem` never leaves this machine. */

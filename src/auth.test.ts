@@ -314,3 +314,43 @@ test("an email sign-in that names an install sends it when the code is sent and 
   assert.equal("install" in plain, false);
   assert.equal("install" in (bodies["/api/auth/device/email/start"] ?? {}), false);
 });
+
+test("an install sign-in resumes a live challenge without a second email, and finishes once the device code is approved by the link", async (t) => {
+  const { startOrResumeEmailLogin, waitEmailDeviceLogin, readPendingEmailChallenge } = await import("./auth.js");
+  const directory = await mkdtemp(join(tmpdir(), "frely-cli-email-wait-"));
+  const restore = useMemoryCredentialStore();
+  const oldFetch = globalThis.fetch;
+  const previous = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR };
+  process.env.XDG_CONFIG_HOME = directory; process.env.XDG_RUNTIME_DIR = directory;
+  t.after(async () => {
+    restore(); globalThis.fetch = oldFetch;
+    for (const [name, value] of Object.entries(previous)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+    await rm(directory, { recursive: true, force: true });
+  });
+  let mails = 0; let approved = false;
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const path = new URL(String(input)).pathname;
+    if (path === "/api/auth/device/code") return Response.json({ device_code: "dev", user_code: "ABCDEFGH", verification_uri: "https://test.invalid/device", verification_uri_complete: "https://test.invalid/device?g=ABCDEFGH", expires_in: 900, interval: 1 });
+    if (path === "/api/auth/device/email/start") { mails++; return Response.json({ state: "code_sent", email: "t***@x.test", challengeId: "c1" }); }
+    if (path === "/api/auth/oauth2/token") return approved ? Response.json({ access_token: "tok", token_type: "bearer", expires_in: 3600 }) : Response.json({ error: "authorization_pending" }, { status: 400 });
+    if (path === "/api/auth/me") return Response.json({ user: { id: "u1", email: "t@x.test" } });
+    throw new Error(`Unexpected ${path}`);
+  }) as typeof fetch;
+  const install = { name: "frely/gpt800" };
+  const first = await startOrResumeEmailLogin("https://test.invalid", "T@x.test", undefined, install);
+  assert.equal(first.resumed, false);
+  assert.equal((await startOrResumeEmailLogin("https://test.invalid", "t@x.test", undefined, install)).resumed, true);
+  assert.equal(mails, 1);
+  // Another address or install is a different sign-in and sends its own mail.
+  assert.equal((await startOrResumeEmailLogin("https://test.invalid", "other@x.test", undefined, install)).resumed, false);
+  assert.equal(mails, 2);
+  approved = true;
+  const { user } = await waitEmailDeviceLogin("https://test.invalid", (await readPendingEmailChallenge("https://test.invalid"))!);
+  assert.equal(user.email, "t@x.test");
+  assert.equal(await readPendingEmailChallenge("https://test.invalid"), null);
+});
+
+test("waiting for an email sign-in whose time ran out says to run the command again", async () => {
+  const { waitEmailDeviceLogin, EmailLoginTimeout } = await import("./auth.js");
+  await assert.rejects(waitEmailDeviceLogin("https://test.invalid", { challengeId: "c", userCode: "U", deviceCode: "d", email: "t***@x.test", expiresIn: 600, savedAt: Date.now() - 700_000 }), EmailLoginTimeout);
+});
