@@ -27,6 +27,7 @@ import type { LocalModelsHub } from "../provider/local-models.js";
 import type { RelaySession } from "../runtime/relay-session.js";
 import { openLocalProviderRequest, readLocalProviderBody } from "../provider/local.js";
 import { forwardCoalesced } from "./stream-coalesce.js";
+import { RelayResume, type InflightRequest } from "./relay-resume.js";
 
 export interface RelayServeOptions {
   workspace?: string;
@@ -50,11 +51,6 @@ export interface RelayServeOptions {
   localModels?: LocalModelsHub;
 }
 
-interface InflightRequest {
-  request: DeviceRelayRequest;
-  controller: AbortController;
-}
-
 export async function serveDeviceRelay(options: RelayServeOptions): Promise<void> {
   const log = options.log ?? (() => undefined);
   diagnostic(log, "relay.started");
@@ -71,6 +67,9 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
     : Promise.resolve(() => {});
   // Off unless the owner switched it on; the swap happens while idle and the watcher above restarts the service.
   const closeAutoUpdate = maintenance && options.restartForUpdate ? watchAutoUpdate({ gate: maintenance, signal: options.signal, enabled: () => readEffectiveAutoUpdate(), log }) : () => {};
+  // MCP commands that are running when the connection drops keep running; this holds them and their results for the next connection.
+  const resume = new RelayResume(true, log);
+  const reportCapabilities = async () => ({ ...(await options.capabilities?.() ?? {}), resumable: true });
   let delayMs = 1000;
   let restartSince: number | undefined;
   let preferredTransport: DeviceTransportKind | undefined;
@@ -135,7 +134,8 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
             reporter.report(event);
           },
           maintenance,
-          options.capabilities,
+          reportCapabilities,
+          resume,
         );
         preferredTransport = undefined;
         delayMs = 1000;
@@ -162,13 +162,16 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
           await wait(next.delayMs, options.signal);
         }
       } finally {
-        lease?.close();
-        await session?.close();
+        // Commands still running on this session keep it (and its lease) until they finish.
+        if (!resume.retire(session, lease)) {
+          lease?.close();
+          await session?.close();
+        }
       }
     }
     reporter.report({ type: "stopped" });
     await reporter.flush();
-  } finally { closeAutoUpdate(); (await closeRefresh)(); await closeMaintenance?.(); }
+  } finally { await resume.closeAll(); closeAutoUpdate(); (await closeRefresh)(); await closeMaintenance?.(); }
 }
 
 class DeviceTransportConnectionError extends Error {
@@ -205,6 +208,24 @@ export const RELAY_RESTART_RETRY_WINDOW_MS = 10 * 60_000;
 const MAX_BACKOFF_MS = 15_000;
 /** The relay pings every 15 s. Nothing at all from it for this long means the socket is dead even if it still looks open. */
 export const RELAY_SILENCE_LIMIT_MS = 45_000;
+/** We ping the relay every 10 s; a ping that stays unanswered this long means the path is dead, so the socket is dropped and rebuilt (commands keep running). */
+export const RELAY_PONG_TIMEOUT_MS = 30_000;
+const RELAY_PING_INTERVAL_MS = 10_000;
+
+/** Dead socket: nothing at all from the relay for too long, or our ping stayed unanswered past the pong timeout. */
+export function heartbeatExpired(now: number, lastInboundAt: number, unansweredPingSince: number | undefined): boolean {
+  return now - lastInboundAt > RELAY_SILENCE_LIMIT_MS || (unansweredPingSince !== undefined && now - unansweredPingSince > RELAY_PONG_TIMEOUT_MS);
+}
+
+/**
+ * Whether commands may keep running after this connection ended. A drop without a close code (network, timeout) and the
+ * relay's planned hourly close can be resumed; a restart (the relay forgot the requests), a replacement, a revoked device
+ * or a bad frame cannot.
+ */
+export function isResumableDisconnect(error: unknown): boolean {
+  if (!(error instanceof DeviceTransportConnectionError)) return !error;
+  return error.closeCode === undefined || error.closeCode === 1006 || error.closeCode === 4412;
+}
 const RELAY_SILENCE_CHECK_MS = 5_000;
 
 /**
@@ -236,6 +257,7 @@ export async function serveConnection(
   report: (event: ConnectionEvent) => void = () => undefined,
   maintenance?: MaintenanceGate,
   capabilities?: () => Record<string, unknown> | Promise<Record<string, unknown>> | undefined,
+  resume: RelayResume = new RelayResume(false, log),
 ): Promise<void> {
   if (signal.aborted) return;
   await new Promise<void>((resolve, reject) => {
@@ -247,8 +269,7 @@ export async function serveConnection(
     });
     // Do not switch while completed responses are still buffered for the relay.
     const unregisterOutput = maintenance?.registerProcesses(() => socket.bufferedAmount);
-    const inflight = new Map<string, InflightRequest>();
-    const cancelled = new Set<string>();
+    const inflight = resume.inflight;
     let finished = false;
     const connectedAt = Date.now();
     let heartbeatNonce: Buffer | undefined;
@@ -257,15 +278,16 @@ export async function serveConnection(
     let lastPongAt = connectedAt;
     let lastFrameAt = connectedAt;
     let lastInboundAt = connectedAt;
+    let unansweredPingSince: number | undefined;
     let socketErrorCode: string | undefined;
     const ping = () => {
-      if (socket.readyState === WebSocket.OPEN) { heartbeatNonce = randomBytes(16); socket.ping(heartbeatNonce); }
+      if (socket.readyState === WebSocket.OPEN) { heartbeatNonce = randomBytes(16); unansweredPingSince ??= Date.now(); socket.ping(heartbeatNonce); }
     };
-    const heartbeat = setInterval(ping, 30_000);
+    const heartbeat = setInterval(ping, RELAY_PING_INTERVAL_MS);
     heartbeat.unref?.();
     // Detects a dead connection (no ping, pong or frame from the relay) instead of waiting for the OS to notice.
     const silenceWatch = setInterval(() => {
-      if (Date.now() - lastInboundAt > RELAY_SILENCE_LIMIT_MS) finish(new DeviceTransportConnectionError("Device transport heartbeat timed out.", true));
+      if (heartbeatExpired(Date.now(), lastInboundAt, unansweredPingSince)) finish(new DeviceTransportConnectionError("Device transport heartbeat timed out.", true));
     }, RELAY_SILENCE_CHECK_MS);
     silenceWatch.unref?.();
     // Device-local MCP servers come and go, so the report is refreshed while connected.
@@ -285,17 +307,13 @@ export async function serveConnection(
           inflight: inflight.size,
         });
       }
+      // A drop that can be resumed keeps MCP commands running; their results go out on the next connection.
+      const keep = !signal.aborted && Boolean(error) && isResumableDisconnect(error);
+      resume.detach(socket, keep);
       unregisterOutput?.();
       clearInterval(heartbeat);
       clearInterval(silenceWatch);
       if (capabilityTimer) clearInterval(capabilityTimer);
-      // The relay answers these callers with "cancelled"; a retry here could repeat a mutation, so only record them.
-      if (inflight.size > 0) diagnostic(log, "relay.inflight_cancelled", { inflight: inflight.size, durationMs: Date.now() - connectedAt }, error);
-      for (const [id, item] of inflight) {
-        cancelled.add(id);
-        item.controller.abort();
-        if (item.request.method === "mcp") session?.cancel(id);
-      }
       signal.removeEventListener("abort", onAbort);
       lease?.controller.signal.removeEventListener("abort", onLeaseAbort);
       socket.removeAllListeners();
@@ -309,6 +327,8 @@ export async function serveConnection(
     lease?.controller.signal.addEventListener("abort", onLeaseAbort, { once: true });
     socket.once("open", () => {
       diagnostic(log, "relay.connected");
+      // Results that waited for this connection go out before anything else.
+      resume.attach(socket);
       report({ type: "connected" });
       if (lease?.controller.signal.aborted) report({ type: "mcp_disabled" });
       void sendCapabilities(socket, capabilities);
@@ -317,6 +337,7 @@ export async function serveConnection(
     socket.on("ping", () => { lastPingAt = lastInboundAt = Date.now(); });
     socket.on("pong", (data: Buffer) => {
       lastPongAt = lastInboundAt = Date.now();
+      unansweredPingSince = undefined;
       if (heartbeatNonce && data.equals(heartbeatNonce)) { heartbeatNonce = undefined; report({ type: "heartbeat" }); }
     });
     socket.once("error", (socketError: unknown) => {
@@ -333,7 +354,7 @@ export async function serveConnection(
       // WebSocket peers may deliver the same JSON envelope as either a text
       // or a binary frame. `rawDataBuffer` normalizes both forms before the
       // protocol validator parses the JSON.
-      void handleFrame(rawDataBuffer(data), socket, inflight, cancelled, session, lease, log, maintenance).catch((error) => { diagnostic(log, "relay.frame_failed", {}, error); finish(error); });
+      void handleFrame(rawDataBuffer(data), socket, resume, session, lease, log, maintenance).catch((error) => { diagnostic(log, "relay.frame_failed", {}, error); finish(error); });
     });
   });
 }
@@ -341,14 +362,14 @@ export async function serveConnection(
 async function handleFrame(
   data: Buffer,
   socket: WebSocket,
-  inflight: Map<string, InflightRequest>,
-  cancelled: Set<string>,
+  resume: RelayResume,
   session: RelaySession | null,
   lease: McpLease | null,
   log: DiagnosticLog,
   maintenance?: MaintenanceGate,
 ): Promise<void> {
   const envelope = decodeDeviceRelayEnvelope(data);
+  const { inflight, cancelled } = resume;
   if (envelope.type === "mcp_disabled") {
     if (lease?.authorizationId === envelope.id) { lease.close(); await session?.close(); }
     return;
@@ -358,8 +379,9 @@ async function handleFrame(
     if (item) {
       cancelled.add(envelope.id);
       item.controller.abort();
-      if (item.request.method === "mcp") session?.cancel(envelope.id);
+      if (item.request.method === "mcp") item.session?.cancel(envelope.id);
     }
+    resume.dropQueued(envelope.id);
     return;
   }
   if (envelope.type !== "request") return;
@@ -369,19 +391,20 @@ async function handleFrame(
   try { release = maintenance?.enter(); }
   catch { send(socket, errorResponse(envelope.id, "upgrade_in_progress", "Frely is preparing an update. Retry after it completes."), log); return; }
   const controller = new AbortController();
-  inflight.set(envelope.id, { request: envelope, controller });
+  inflight.set(envelope.id, { request: envelope, controller, session });
   const operation = envelope.method === "provider"
     ? executeProviderRequest(envelope, socket, controller.signal, cancelled, log)
     : executeMcpRequest(envelope, session, lease, log).then((payload) => {
-        if (!cancelled.has(envelope.id)) send(socket, { protocol: DEVICE_RELAY_PROTOCOL, type: "response", id: envelope.id, ok: true, payload }, log);
+        if (!cancelled.has(envelope.id)) resume.deliver({ protocol: DEVICE_RELAY_PROTOCOL, type: "response", id: envelope.id, ok: true, payload });
       });
   void operation.catch((error) => {
     diagnostic(log, "relay.request_failed", { requestId: envelope.id, ...(envelope.method === "mcp" ? mcpDiagnosticContext(envelope.payload) : {}) }, error);
-    if (!cancelled.has(envelope.id)) send(socket, errorResponse(envelope.id, relayErrorCode(envelope.method), safeMessage(error)), log);
+    if (!cancelled.has(envelope.id)) resume.deliver(errorResponse(envelope.id, relayErrorCode(envelope.method), safeMessage(error)));
   }).finally(() => {
     release?.();
     inflight.delete(envelope.id);
     cancelled.delete(envelope.id);
+    resume.settled();
   });
 }
 
