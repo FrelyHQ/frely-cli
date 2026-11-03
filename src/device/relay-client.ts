@@ -203,6 +203,9 @@ export function isRelayRestartClose(error: unknown): boolean {
 
 export const RELAY_RESTART_RETRY_WINDOW_MS = 10 * 60_000;
 const MAX_BACKOFF_MS = 15_000;
+/** The relay pings every 15 s. Nothing at all from it for this long means the socket is dead even if it still looks open. */
+export const RELAY_SILENCE_LIMIT_MS = 45_000;
+const RELAY_SILENCE_CHECK_MS = 5_000;
 
 /**
  * After the relay announced a restart, retry about every 2 seconds for ten minutes (also when attempts fail
@@ -253,12 +256,18 @@ export async function serveConnection(
     let lastPingAt = connectedAt;
     let lastPongAt = connectedAt;
     let lastFrameAt = connectedAt;
+    let lastInboundAt = connectedAt;
     let socketErrorCode: string | undefined;
     const ping = () => {
       if (socket.readyState === WebSocket.OPEN) { heartbeatNonce = randomBytes(16); socket.ping(heartbeatNonce); }
     };
     const heartbeat = setInterval(ping, 30_000);
     heartbeat.unref?.();
+    // Detects a dead connection (no ping, pong or frame from the relay) instead of waiting for the OS to notice.
+    const silenceWatch = setInterval(() => {
+      if (Date.now() - lastInboundAt > RELAY_SILENCE_LIMIT_MS) finish(new DeviceTransportConnectionError("Device transport heartbeat timed out.", true));
+    }, RELAY_SILENCE_CHECK_MS);
+    silenceWatch.unref?.();
     // Device-local MCP servers come and go, so the report is refreshed while connected.
     const capabilityTimer = capabilities ? setInterval(() => { void sendCapabilities(socket, capabilities); }, 60_000) : undefined;
     capabilityTimer?.unref?.();
@@ -278,6 +287,7 @@ export async function serveConnection(
       }
       unregisterOutput?.();
       clearInterval(heartbeat);
+      clearInterval(silenceWatch);
       if (capabilityTimer) clearInterval(capabilityTimer);
       // The relay answers these callers with "cancelled"; a retry here could repeat a mutation, so only record them.
       if (inflight.size > 0) diagnostic(log, "relay.inflight_cancelled", { inflight: inflight.size, durationMs: Date.now() - connectedAt }, error);
@@ -304,9 +314,9 @@ export async function serveConnection(
       void sendCapabilities(socket, capabilities);
       ping();
     });
-    socket.on("ping", () => { lastPingAt = Date.now(); });
+    socket.on("ping", () => { lastPingAt = lastInboundAt = Date.now(); });
     socket.on("pong", (data: Buffer) => {
-      lastPongAt = Date.now();
+      lastPongAt = lastInboundAt = Date.now();
       if (heartbeatNonce && data.equals(heartbeatNonce)) { heartbeatNonce = undefined; report({ type: "heartbeat" }); }
     });
     socket.once("error", (socketError: unknown) => {
@@ -319,7 +329,7 @@ export async function serveConnection(
       else finish(closedTransportError(code, reason));
     });
     socket.on("message", (data) => {
-      lastFrameAt = Date.now();
+      lastFrameAt = lastInboundAt = Date.now();
       // WebSocket peers may deliver the same JSON envelope as either a text
       // or a binary frame. `rawDataBuffer` normalizes both forms before the
       // protocol validator parses the JSON.
