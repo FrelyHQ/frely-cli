@@ -57,7 +57,10 @@ test("a share prints its link, gives frpc a short-lived 0600 config, and on Ctrl
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.match(f.log.join(""), /Sharing http:\/\/127\.0\.0\.1:3000\n  https:\/\/s[0-9a-f]{14}\.share\.example\.test\/\?t=abc/u);
   assert.match(f.calls.configAtStart, /localPort = 45678/u);
-  await assert.rejects(access(f.calls.configs[0]!), "the config with the token is removed shortly after frpc started");
+  // The removal is a 30 ms timer plus an async rm: wait for it (up to 5 s) instead of betting on a fixed delay, which a busy runner misses.
+  const gone = async () => access(f.calls.configs[0]!).then(() => false, () => true);
+  for (let waited = 0; !await gone() && waited < 5000; waited += 25) await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.ok(await gone(), "the config with the token is removed shortly after frpc started");
   f.controller.abort();
   assert.equal(await running, 0);
   assert.equal(f.calls.killed, 1);

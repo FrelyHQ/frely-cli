@@ -80,7 +80,8 @@ test("service share registers only type and label, prints the allowance, and rev
   await withHome(async () => {
     const f = fixture();
     const run = runServiceCommand(["share", "--type", "mcp", "--port", "8123", "--label", "docs"], f.io, f.deps);
-    await new Promise((r) => setTimeout(r, 100));
+    // Wait until the share is up (up to 5 s) instead of a fixed delay, which a busy runner misses and then aborts the startup (exit 1).
+    for (let waited = 0; !f.out.join("").includes("relay allowance left") && waited < 5000; waited += 25) await new Promise((r) => setTimeout(r, 25));
     f.controller.abort();
     assert.equal(await run, 0);
     assert.deepEqual(f.calls.registered, [{ type: "mcp", label: "docs" }]);

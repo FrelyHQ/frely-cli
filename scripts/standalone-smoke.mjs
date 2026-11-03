@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const executable = resolve(process.argv[2] ?? `artifacts/frely-${process.platform === "win32" ? "windows" : process.platform}-${process.arch}${process.platform === "win32" ? ".exe" : ""}`);
@@ -21,5 +21,9 @@ try {
   const diagnostic = JSON.parse((await run(executable, ["doctor", "--json"], { env, cwd: directory, timeout: 10000 })).stdout);
   assert.equal(diagnostic.ok, true);
   assert.ok(diagnostic.checks.some((check) => check.name === "mcp" && check.ok && /not enabled/i.test(check.detail)));
+  // iroh's native module (about 20 MB) must stay out of the executable: it is downloaded on the first transfer. --version and doctor must not fetch it.
+  await assert.rejects(stat(join(directory, ".local", "share", "frely", "native")), { code: "ENOENT" });
+  const size = (await stat(executable)).size;
+  if (process.env.GITHUB_ACTIONS && basename(executable) === "frely-linux-x64") assert.ok(size < 95 * 1024 * 1024, `frely-linux-x64 is ${size} bytes; the iroh native module must not be embedded again`);
   console.log(`Standalone smoke passed (${process.platform}/${process.arch}): no Node/npm/Bun on PATH, no keyring, no config autoload.`);
 } finally { await rm(directory, { recursive: true, force: true }); }
