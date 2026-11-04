@@ -7,16 +7,17 @@ import { diagnostic, type DiagnosticLog } from "../runtime/diagnostics.js";
 import { inspectInstallation, manualUpdateCommand, type Installation } from "./installation.js";
 import type { MaintenanceGate } from "./maintenance.js";
 import { compareVersions, latestRelease } from "./release.js";
+import { isFileInUse, stagePendingUpdate } from "./windows-pending.js";
 import { installedVersion, lockInstallation, prepareStandalone, removeStaleWindowsExecutables, type PreparedUpdate } from "./update.js";
 
-export type UpgradeOutcome = "current" | "busy" | "updated" | "manual" | "unsupported" | "failed";
+export type UpgradeOutcome = "current" | "busy" | "updated" | "pending_restart" | "manual" | "unsupported" | "failed";
 export interface UpgradeStatus { state: "idle" | "running" | UpgradeOutcome; target?: string; command?: string; at: string }
 
 let status: UpgradeStatus = { state: "idle", at: new Date(0).toISOString() };
 /** What the web console shows next to the version number; reported with the device capabilities. */
 export const upgradeStatus = (): UpgradeStatus => status;
 
-const defaults = { inspectInstallation, latestRelease, installedVersion, prepareStandalone, lockInstallation, removeStaleWindowsExecutables };
+const defaults = { stagePendingUpdate, inspectInstallation, latestRelease, installedVersion, prepareStandalone, lockInstallation, removeStaleWindowsExecutables };
 export type UpgradeDependencies = typeof defaults;
 
 /** Older versions had an automatic updater with a local switch; both are gone. Only deletes the leftover files. */
@@ -57,7 +58,15 @@ export class Upgrader {
         try {
           await prepared.apply();
           if (await d.installedVersion(installation) !== release.version) throw new Error("Installed executable did not report the target version.");
-        } catch (error) { await prepared.restore().catch(() => {}); throw error; }
+        } catch (error) {
+          // Windows: the running executable is held. Keep the verified one; the next service start (a sign-in or a restart) finishes the swap.
+          if (installation.platform === "win32" && prepared.verifiedFile && isFileInUse(error)) {
+            await d.stagePendingUpdate(installation, release.version, prepared.verifiedFile);
+            return set("pending_restart", { target: release.version });
+          }
+          await prepared.restore().catch(() => {});
+          throw error;
+        }
         finally { if (paused) gate.resume(); }
         diagnostic(log, "relay.upgrade_installed", {});
         set("updated", { target: release.version });

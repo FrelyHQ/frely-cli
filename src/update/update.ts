@@ -82,7 +82,7 @@ export async function validateStandalone(path: string, checksum: string, version
   if (await execute({ method: "standalone", platform: process.platform, entry: path }) !== version) throw new Error("Downloaded executable did not report the target version.");
 }
 
-export interface PreparedUpdate { apply(): Promise<void>; restore(): Promise<void>; cleanup(): Promise<void> }
+export interface PreparedUpdate { apply(): Promise<void>; restore(): Promise<void>; cleanup(): Promise<void>; /** Windows: the verified executable, kept so a swap that is blocked now can finish at the next start. */ verifiedFile?: string }
 /** System tar (macOS and Linux ship one; standalone updates do not run on Windows). */
 async function systemUnpack(tarball: string, directory: string): Promise<void> {
   await execFile("tar", ["-xzf", tarball, "-C", directory], { timeout: 60000, maxBuffer: 65536 });
@@ -141,6 +141,7 @@ export async function prepareStandalone(installation: Installation, release: Rel
         apply: async () => { await rename(target, aside); try { await rename(next, target); } catch (error) { await rename(aside, target).catch(() => {}); throw error; } },
         restore: async () => { await rm(target, { force: true }).catch(() => {}); await rename(aside, target); },
         cleanup: () => rm(stage, { recursive: true, force: true }),
+        verifiedFile: next,
       };
     }
     return {

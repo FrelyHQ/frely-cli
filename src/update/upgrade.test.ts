@@ -15,6 +15,7 @@ function deps(over: Partial<Record<keyof UpgradeDependencies, unknown>> = {}, ca
     prepareStandalone: async (...args: unknown[]) => { calls.push(`signing ${JSON.stringify(args[5])}`); return { apply: async () => { calls.push("apply"); }, restore: async () => { calls.push("restore"); }, cleanup: async () => { calls.push("cleanup"); } }; },
     lockInstallation: async () => async () => { calls.push("unlock"); },
     removeStaleWindowsExecutables: async () => { calls.push("stale"); },
+    stagePendingUpdate: async () => { calls.push("stage"); },
     ...over,
   } as unknown as UpgradeDependencies;
 }
@@ -68,4 +69,16 @@ test("leftover automatic-update files from older versions are deleted", async ()
   await removeLegacyAutoUpdate(directory);
   await assert.rejects(readFile(join(directory, "auto-update")));
   await assert.rejects(readFile(join(directory, "auto-update-remote")));
+});
+
+test("on Windows a blocked swap keeps the verified executable for the next start and reports pending_restart", async () => {
+  const calls: string[] = [], gate = new MaintenanceGate();
+  const win = { method: "standalone", entry: "C:\\f\\frely.exe", platform: "win32" } as never;
+  const busy = Object.assign(new Error("EBUSY"), { code: "EBUSY" });
+  const d = deps({ inspectInstallation: async () => win,
+    prepareStandalone: async () => ({ apply: async () => { throw busy; }, restore: async () => { calls.push("restore"); }, cleanup: async () => { calls.push("cleanup"); }, verifiedFile: "/stage/frely.exe" }),
+    stagePendingUpdate: async (_i: unknown, version: string, file: string) => { calls.push(`stage ${version} ${file}`); } }, calls);
+  assert.equal(await upgrader(gate, d).runOnce(), "pending_restart");
+  assert.deepEqual(calls, ["stage 2.0.0 /stage/frely.exe", "cleanup", "unlock", "stale"]);
+  gate.enter()();
 });

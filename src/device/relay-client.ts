@@ -1,7 +1,9 @@
 import { watchAgentLinks } from "../skill/link-sync.js";
 import { remoteLocked } from "../remote-lock.js";
 import { watchServiceInstallation } from "../update/service-refresh.js";
-import { removeLegacyAutoUpdate, Upgrader } from "../update/upgrade.js";
+import { removeLegacyAutoUpdate, restartWindowsService, Upgrader } from "../update/upgrade.js";
+import { applyPendingUpdate } from "../update/windows-pending.js";
+import { inspectInstallation } from "../update/installation.js";
 import { MaintenanceGate, serveMaintenance } from "../update/maintenance.js";
 import { isDefinitiveAuthorizationFailure, requireLocalMcpAuthorization, requireMcpAuthorization } from "../mcp-authorization.js";
 import { McpLease } from "../runtime/mcp-lease.js";
@@ -183,6 +185,11 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
   // The socket lets `frely update` drain the service; Windows has no unix sockets, so there the gate is only used in-process.
   const closeMaintenance = maintenance && process.platform !== "win32" ? await serveMaintenance(maintenance) : undefined;
   void removeLegacyAutoUpdate();
+  // Windows: a swap that was blocked earlier is finished now, before this process holds anything. This process keeps the old code, so restart into the new one.
+  if (process.platform === "win32" && options.managedService && options.restartForUpdate) {
+    const installation = await inspectInstallation().catch(() => null);
+    if (installation && await applyPendingUpdate(installation).catch(() => null)) { restartWindowsService(installation); options.restartForUpdate(); }
+  }
   activeUpgrader = maintenance && options.restartForUpdate ? new Upgrader({ gate: maintenance, restart: options.restartForUpdate, log }) : undefined;
   // Watch the current installation from the existing runtime, without an updater daemon.
   const closeRefresh = maintenance && options.restartForUpdate
