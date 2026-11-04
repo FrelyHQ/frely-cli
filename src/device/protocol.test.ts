@@ -62,12 +62,13 @@ test("device relay request localMcps round trip, validate and stay mcp-only", ()
   assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...good, method: "provider", authorizationId: undefined })));
 });
 
-test("device relay request autoUpdate is true-only and mcp-only", () => {
+test("the removed autoUpdate request field is rejected and upgrade is a bare envelope", () => {
   const good = { protocol: DEVICE_RELAY_PROTOCOL, type: "request" as const, id: "abcdefghijklmnop", method: "mcp" as const,
-    authorizationId: "mca_" + "a".repeat(32), autoUpdate: true, payload: { jsonrpc: "2.0", id: 1, method: "tools/list" } };
-  assert.deepEqual(decodeDeviceRelayEnvelope(encodeDeviceRelayEnvelope(good)), good);
-  for (const autoUpdate of [false, "true", 1, null]) assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...good, autoUpdate })), /frame_invalid/);
-  assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...good, method: "provider", authorizationId: undefined })));
+    authorizationId: "mca_" + "a".repeat(32), payload: { jsonrpc: "2.0", id: 1, method: "tools/list" } };
+  assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...good, autoUpdate: true })), /frame_invalid/);
+  const upgrade = { protocol: DEVICE_RELAY_PROTOCOL, type: "upgrade" as const, id: "upg_0123456789abcdef" };
+  assert.deepEqual(decodeDeviceRelayEnvelope(encodeDeviceRelayEnvelope(upgrade)), upgrade);
+  assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...upgrade, version: "9.9.9" })), /frame_invalid/);
 });
 
 test("device relay capabilities envelope round trips within 4KB", () => {

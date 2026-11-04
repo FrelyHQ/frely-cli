@@ -12,8 +12,6 @@ export type DeviceRelayRequest = {
   toolsets?: string[];
   /** Device-local MCP servers the owner enabled on the authorization (relay server -> device). Absent means none. */
   localMcps?: string[];
-  /** The owner let this computer install new versions of itself while idle (relay server -> device). Only ever true; absent means off. */
-  autoUpdate?: boolean;
   payload: unknown;
 };
 
@@ -23,6 +21,13 @@ export type DeviceRelayCapabilities = {
   type: "device_capabilities";
   id: string;
   capabilities: Record<string, unknown>;
+};
+
+/** Relay -> device: the owner pressed Upgrade in the web console. Carries no parameters: the device picks the release itself. */
+export type DeviceRelayUpgrade = {
+  protocol: typeof DEVICE_RELAY_PROTOCOL;
+  type: "upgrade";
+  id: string;
 };
 
 export type DeviceRelayResponse = {
@@ -63,7 +68,7 @@ export type DeviceRelayStreamEnd = {
 
 export type DeviceRelayMcpDisabled = { protocol: typeof DEVICE_RELAY_PROTOCOL; type: "mcp_disabled"; id: string };
 
-export type DeviceRelayEnvelope = DeviceRelayMcpDisabled | DeviceRelayRequest | DeviceRelayResponse | DeviceRelayCancel | DeviceRelayStreamStart | DeviceRelayStreamChunk | DeviceRelayStreamEnd | DeviceRelayCapabilities;
+export type DeviceRelayEnvelope = DeviceRelayMcpDisabled | DeviceRelayRequest | DeviceRelayResponse | DeviceRelayCancel | DeviceRelayStreamStart | DeviceRelayStreamChunk | DeviceRelayStreamEnd | DeviceRelayCapabilities | DeviceRelayUpgrade;
 
 export class DeviceRelayProtocolError extends Error {
   constructor(readonly code: "frame_invalid" | "frame_too_large" | "duplicate_request" | "inflight_limit") {
@@ -97,11 +102,10 @@ export function validateDeviceRelayEnvelope(value: unknown): asserts value is De
   if (record.protocol !== DEVICE_RELAY_PROTOCOL || typeof record.type !== "string" || typeof record.id !== "string") throw new DeviceRelayProtocolError("frame_invalid");
   assertRequestId(record.id);
   if (record.type === "request") {
-    exactKeys(record, ["protocol", "type", "id", "method", "payload", ...(record.authorizationId !== undefined ? ["authorizationId"] : []), ...(record.toolsets !== undefined ? ["toolsets"] : []), ...(record.autoUpdate !== undefined ? ["autoUpdate"] : []), ...(record.localMcps !== undefined ? ["localMcps"] : [])]);
+    exactKeys(record, ["protocol", "type", "id", "method", "payload", ...(record.authorizationId !== undefined ? ["authorizationId"] : []), ...(record.toolsets !== undefined ? ["toolsets"] : []), ...(record.localMcps !== undefined ? ["localMcps"] : [])]);
     if (record.authorizationId !== undefined && (record.method !== "mcp" || typeof record.authorizationId !== "string" || !/^mca_[a-f0-9]{32}$/u.test(record.authorizationId))) throw new DeviceRelayProtocolError("frame_invalid");
     if (record.toolsets !== undefined && (record.method !== "mcp" || !isToolsetList(record.toolsets))) throw new DeviceRelayProtocolError("frame_invalid");
     if (record.localMcps !== undefined && (record.method !== "mcp" || !isLocalMcpList(record.localMcps))) throw new DeviceRelayProtocolError("frame_invalid");
-    if (record.autoUpdate !== undefined && (record.method !== "mcp" || record.autoUpdate !== true)) throw new DeviceRelayProtocolError("frame_invalid");
     if (record.method !== "mcp" && record.method !== "provider") throw new DeviceRelayProtocolError("frame_invalid");
     return;
   }
@@ -109,6 +113,10 @@ export function validateDeviceRelayEnvelope(value: unknown): asserts value is De
     exactKeys(record, ["protocol", "type", "id", "capabilities"]);
     if (!record.capabilities || typeof record.capabilities !== "object" || Array.isArray(record.capabilities)) throw new DeviceRelayProtocolError("frame_invalid");
     if (Buffer.byteLength(JSON.stringify(record.capabilities)) > 4096) throw new DeviceRelayProtocolError("frame_invalid");
+    return;
+  }
+  if (record.type === "upgrade") {
+    exactKeys(record, ["protocol", "type", "id"]);
     return;
   }
   if (record.type === "mcp_disabled") {

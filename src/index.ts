@@ -8,7 +8,8 @@ import { sshProxyConnect } from "./runtime/ssh-proxy.js";
 import { parseTunnelArguments, startTunnel, tunnelUsage } from "./runtime/tunnel.js";
 import { runSandboxProxyCommand } from "./runtime/sandbox-proxy.js";
 import { runLocalMcpCommand } from "./local-mcp-command.js";
-import { readAutoUpdate, writeAutoUpdate } from "./update/auto-update.js";
+import { upgradeStatus } from "./update/upgrade.js";
+import { inspectInstallation as inspectInstall } from "./update/installation.js";
 import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
 import { join, resolve } from "node:path";
@@ -825,8 +826,8 @@ async function main(): Promise<void> {
         return {
           app: { ...(install ? { installed: true, version: install.appVersion } : { installed: false }) },
           sandbox: detectSandboxBackend(),
-          // The relay sends the Web switch for automatic updates only to a CLI that says it understands it.
-          autoUpdate: true,
+          // Lets the web console show an Upgrade button for this computer; `status` is the last result of such a request.
+          upgrade: { supported: ["standalone", "npm", "bun"].includes((await inspectInstall().catch(() => ({ method: "unknown" }))).method), version: VERSION, status: upgradeStatus() },
           // The relay keeps a caller waiting after a disconnect when results can arrive on the next connection.
           resumable: true,
           workspaces: providerOnly ? [] : await reportedWorkspaces(workspace),
@@ -844,12 +845,6 @@ async function main(): Promise<void> {
       await piNode?.stop(); // the node keeps running; a restarted service adopts it
       await localMcp?.close();
     }
-    return;
-  }
-  if (command === "link" && args[1] === "auto-update") {
-    if (args[2]) await writeAutoUpdate(args[2] === "on");
-    const on = await readAutoUpdate();
-    stdout.write(`Automatic updates are ${on ? "on" : "off"}. ${on ? "While idle, the background service installs new stable versions of this installation and restarts itself." : "Run frely link auto-update on to let the background service update itself while idle."} Windows still updates manually.\n`);
     return;
   }
   if (command === "link" && args[1] === "local") {

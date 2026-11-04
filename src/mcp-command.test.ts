@@ -35,7 +35,7 @@ test("link accepts the documented short entry and explicit subcommands", () => {
 });
 
 test("the old frely mcp commands are gone except the internal serve/stdio and service stop/start", () => {
-  for (const args of [["mcp"], ["mcp", "start"], ["mcp", "start", "--resume"], ["mcp", "stop"], ["mcp", "url"], ["mcp", "status"], ["mcp", "remove"], ["mcp", "workspace", "list"], ["mcp", "local", "list"], ["mcp", "auto-update"], ["mcp", "help"]]) {
+  for (const args of [["mcp"], ["mcp", "start"], ["mcp", "start", "--resume"], ["mcp", "stop"], ["mcp", "url"], ["mcp", "status"], ["mcp", "remove"], ["mcp", "workspace", "list"], ["mcp", "local", "list"], ["mcp", "help"]]) {
     assert.throws(() => normalizeLinkArgs(args), /frely link/, args.join(" "));
   }
   // Update scripts stop the installed service before an update and start it after.

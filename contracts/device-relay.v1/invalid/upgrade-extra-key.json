@@ -1,0 +1,10 @@
+{
+  "description": "upgrade carries no parameters",
+  "error": "frame_invalid",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "upgrade",
+    "id": "upg_0123456789abcdef",
+    "version": "9.9.9"
+  }
+}

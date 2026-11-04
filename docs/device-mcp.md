@@ -26,7 +26,7 @@
 - **true**：已确认作为被控端，授权有效期内可被远程客户端控制。授权到期后回到 null。
 - **false**：本机运行 `frely link off` 或在网页关闭后的状态。网页不能再启用，只能在这台电脑上运行 `frely link on` 重新开启。本机锁文件优先：即使服务端记录有误，这台电脑也拒绝所有远程请求。
 
-被控端命令统一在 `frely link …` 下（`on`、`off`、`status`、`stop`、`workspace`、`local`、`auto-update`）。旧的 `frely mcp start|status|stop|remove|…` 命令已移除；`frely mcp serve` 与 `frely mcp stdio` 保留给系统服务和本地 MCP 客户端使用。
+被控端命令统一在 `frely link …` 下（`on`、`off`、`status`、`stop`、`workspace`、`local`）。旧的 `frely mcp start|status|stop|remove|…` 命令已移除；`frely mcp serve` 与 `frely mcp stdio` 保留给系统服务和本地 MCP 客户端使用。
 
 ## 产品定义与入口
 

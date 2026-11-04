@@ -1,0 +1,9 @@
+{
+  "description": "Owner pressed Upgrade in the web console; no parameters",
+  "direction": "server_to_device",
+  "frame": {
+    "protocol": "frely.device-relay.v1",
+    "type": "upgrade",
+    "id": "upg_0123456789abcdef"
+  }
+}
