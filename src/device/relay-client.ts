@@ -196,6 +196,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
   let held: HeldMcp | undefined;
   let carryAuthorization: string | undefined;
   const releaseHeld = async (reason: string) => { const previous = held; held = undefined; await resumeOrRelease(carry, previous, undefined, log, reason); };
+  const retryNow = createRetryNow(options.signal);
   try {
     while (!options.signal.aborted) {
       let session: RelaySession | null = null;
@@ -303,7 +304,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
           const next = nextReconnectDelay({ backoffMs: delayMs, restartSince }, error, Date.now());
           restartSince = next.restartSince;
           delayMs = next.backoffMs;
-          await wait(next.delayMs, options.signal);
+          await wait(next.delayMs, options.signal, retryNow);
         }
       } finally {
         if (session && lease && !options.signal.aborted && !lease.controller.signal.aborted && hasCarriedMcp(carry)) held = { session, lease };
@@ -648,13 +649,28 @@ function errorResponse(id: string, code: string, message: string): DeviceRelayRe
 }
 function rawDataBuffer(data: RawData): Buffer { if (Buffer.isBuffer(data)) return data; if (data instanceof ArrayBuffer) return Buffer.from(data); return Buffer.concat(data); }
 function safeMessage(error: unknown): string { return (error instanceof Error ? error.message : String(error)).replace(/[\r\n]+/gu, " ").slice(0, 240); }
-async function wait(ms: number, signal: AbortSignal): Promise<void> {
+/** Sleeps for `ms`, ending early on abort or when `retryNow` fires (frely doctor asks a disconnected service to retry once). */
+async function wait(ms: number, signal: AbortSignal, retryNow?: RetryNow): Promise<void> {
   if (signal.aborted) return;
   await new Promise<void>((resolve) => {
     const timer = setTimeout(done, ms); const onAbort = () => done();
-    function done() { clearTimeout(timer); signal.removeEventListener("abort", onAbort); resolve(); }
+    function done() { clearTimeout(timer); signal.removeEventListener("abort", onAbort); retryNow?.cancel(done); resolve(); }
     signal.addEventListener("abort", onAbort, { once: true });
+    retryNow?.arm(done);
   });
+}
+
+/** Lets a signal cut the current reconnect delay short. It does not reset the backoff and is ignored while connected. */
+export const RETRY_NOW_SIGNAL = "SIGUSR2";
+export interface RetryNow { arm(fn: () => void): void; cancel(fn: () => void): void }
+export function createRetryNow(signal: AbortSignal, platform: NodeJS.Platform = process.platform): RetryNow {
+  let waiting: (() => void) | undefined;
+  if (platform !== "win32") {
+    const handler = () => { const fn = waiting; waiting = undefined; fn?.(); };
+    process.on(RETRY_NOW_SIGNAL, handler);
+    signal.addEventListener("abort", () => process.off(RETRY_NOW_SIGNAL, handler), { once: true });
+  }
+  return { arm: (fn) => { waiting = fn; }, cancel: (fn) => { if (waiting === fn) waiting = undefined; } };
 }
 
 /**

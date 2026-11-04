@@ -186,3 +186,37 @@ test("doctor fails the sandbox check when device MCP is on and the sandbox canno
     if (previous === undefined) delete process.env.FRELY_SANDBOX; else process.env.FRELY_SANDBOX = previous;
   }
 });
+
+test("doctor nudges a disconnected same-version service once, after reading state", async () => {
+  const { VERSION } = await import("./version.js");
+  const f = fixture();
+  f.connection.state = "disconnected"; f.connection.heartbeatAt = new Date(Date.now() - HEARTBEAT_MAX_AGE_MS - 1000).toISOString();
+  f.connection.cliVersion = VERSION;
+  f.dependencies.serviceStatus = async () => ({ installed: true, active: true, pid: f.connection.pid, platform: process.platform });
+  const pids: number[] = [];
+  f.dependencies.requestReconnect = (pid) => { pids.push(pid); return true; };
+  const report = await doctor({}, f.dependencies);
+  assert.deepEqual(pids, [process.pid]);
+  assert.match(report.summary.connection, /Disconnected/);
+  // Connected, other-version or pid-less services are never signalled.
+  for (const change of [(c: typeof f.connection) => { c.state = "connected"; c.heartbeatAt = new Date().toISOString(); }, (c: typeof f.connection) => { c.cliVersion = "0.0.0"; }]) {
+    const g = fixture(); g.connection.state = "disconnected"; g.connection.cliVersion = VERSION; change(g.connection);
+    g.dependencies.serviceStatus = async () => ({ installed: true, active: true, pid: g.connection.pid, platform: process.platform });
+    g.dependencies.requestReconnect = () => { throw new Error("must not signal"); };
+    await doctor({}, g.dependencies);
+  }
+});
+
+test("doctor also nudges a disconnected standby service (null state, no MCP lease)", async () => {
+  const { VERSION } = await import("./version.js");
+  const f = fixture();
+  f.connection.state = "disconnected"; f.connection.mcpEnabled = false; f.connection.cliVersion = VERSION;
+  f.connection.heartbeatAt = new Date(Date.now() - HEARTBEAT_MAX_AGE_MS - 1000).toISOString();
+  f.dependencies.inspectMcpMetadata = async () => null;
+  f.dependencies.serviceStatus = async () => ({ installed: true, active: true, pid: f.connection.pid, platform: process.platform });
+  const pids: number[] = [];
+  f.dependencies.requestReconnect = (pid) => { pids.push(pid); return true; };
+  const report = await doctor({}, f.dependencies);
+  assert.deepEqual(pids, [process.pid]);
+  assert.match(report.summary.connection, /Disconnected/);
+});
