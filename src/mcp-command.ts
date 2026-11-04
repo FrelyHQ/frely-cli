@@ -22,14 +22,10 @@ export function normalizeLinkArgs(input: readonly string[]): string[] {
   if (args[0] !== "link") return args;
   if (args.slice(1).some((arg) => arg === "--help" || arg === "-h") || args[1] === "help") return ["link", "help"];
   if (!args[1]) return ["link", "help"];
-  if (!["workspace", "local", "auto-update", "on", "off", "status"].includes(args[1])) throw new Error("Unknown link command. Run frely link --help.");
+  if (!["workspace", "local", "on", "off", "status"].includes(args[1])) throw new Error("Unknown link command. Run frely link --help.");
   const action = args[1]!;
   if (action === "off") {
     if (args.length > 2) throw new Error("Unsupported link option. Run frely link --help.");
-    return args;
-  }
-  if (action === "auto-update") {
-    if (args.length > 3 || (args[2] !== undefined && args[2] !== "on" && args[2] !== "off")) throw new Error("Usage: frely link auto-update [on|off]");
     return args;
   }
   if (action === "workspace") {

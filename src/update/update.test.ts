@@ -85,7 +85,7 @@ test("standalone preparation leaves original intact; replacement and recovery us
   const entry = join(root, "frely"); await writeFile(entry, "old");
   const hash = createHash("sha256").update("new").digest("hex");
   const prepared = await prepareStandalone({ method: "standalone", entry, platform: "linux" }, { version: "1.2.3", sources: [{ kind: "github", baseUrl: "https://example.invalid" }] },
-    async (url, path) => { await writeFile(path, url.endsWith(".sha256") ? `${hash}  frely\n` : url.endsWith(".gz") ? gzipSync("new") : "new"); }, async () => "1.2.3");
+    async (url, path) => { if (url.endsWith(".sig")) throw new Error("404"); await writeFile(path, url.endsWith(".sha256") ? `${hash}  frely\n` : url.endsWith(".gz") ? gzipSync("new") : "new"); }, async () => "1.2.3");
   assert.equal(await readFile(entry, "utf8"), "old");
   await prepared.apply(); assert.equal(await readFile(entry, "utf8"), "new");
   await prepared.restore(); assert.equal(await readFile(entry, "utf8"), "old");
@@ -254,7 +254,7 @@ test("standalone lookup falls back to npmmirror when GitHub is unreachable, and 
     { version: "1.2.3", sources: [{ kind: "github", baseUrl: "https://github.com/x/v1.2.3" }, { kind: "npm", registry: "https://registry.npmmirror.com", tarballUrl: "https://registry.npmmirror.com/p/-/p-1.2.3.tgz" }] },
     async (url, path) => {
       seen.push(url);
-      if (url.startsWith("https://github.com/")) throw new Error("connection reset");
+      if (url.startsWith("https://github.com/") || url.endsWith(".sig")) throw new Error("connection reset");
       await writeFile(path, "tgz");
     }, async () => "1.2.3",
     async (_tarball, directory) => {
@@ -277,6 +277,7 @@ test("GitHub downloads the gzip asset, falls back to the plain executable, and r
     const seen: string[] = [];
     const prepared = await prepareStandalone({ method: "standalone", entry, platform: "linux" }, { version: "1.2.3", sources }, async (url, path) => {
       seen.push(url.slice(url.lastIndexOf("/") + 1));
+      if (url.endsWith(".sig")) throw new Error("404");
       if (url.endsWith(".sha256")) await writeFile(path, `${hash}  frely\n`); else await serve(url, path);
     }, async () => "1.2.3");
     return { entry, prepared, seen };

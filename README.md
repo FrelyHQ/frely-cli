@@ -63,7 +63,6 @@ frely skill install --host <claude-code|codex|pi|workbuddy|codebuddy|generic>
 | `frely link off` | Turn remote control off: revoke access for every client and lock it on this computer, so only `frely link on` here turns it on again. The background service is uninstalled, or kept running for local Providers. |
 | `frely link status` | Show whether remote control is on, off or not enabled yet, with the MCP URL, workspace, expiry and service state. |
 | `frely link workspace add <path>` | Share another folder. `frely link workspace list` shows them all. |
-| `frely link auto-update [on\|off]` | Let the background service update itself while idle (macOS/Linux, off by default). |
 | `frely doctor` | Check sign-in, installation, service and connection. `-v` for details. |
 | `frely update` | Update to the latest version in place. |
 | `frely login` / `frely logout` | Sign in or out of your Frely account. `frely login --email <you@example.com>` then `--code <code>` signs in without a browser. |

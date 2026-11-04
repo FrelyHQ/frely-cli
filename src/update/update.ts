@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
-import { chmod, copyFile, lstat, mkdir, mkdtemp, open, readFile, realpath, rename, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { chmod, copyFile, lstat, mkdir, mkdtemp, open, readdir, readFile, realpath, rename, rm } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
 import { createReadStream, createWriteStream } from "node:fs";
@@ -82,7 +82,7 @@ export async function validateStandalone(path: string, checksum: string, version
   if (await execute({ method: "standalone", platform: process.platform, entry: path }) !== version) throw new Error("Downloaded executable did not report the target version.");
 }
 
-export interface PreparedUpdate { apply(): Promise<void>; restore(): Promise<void>; cleanup(): Promise<void> }
+export interface PreparedUpdate { apply(): Promise<void>; restore(): Promise<void>; cleanup(): Promise<void>; /** Windows: the verified executable, kept so a swap that is blocked now can finish at the next start. */ verifiedFile?: string }
 /** System tar (macOS and Linux ship one; standalone updates do not run on Windows). */
 async function systemUnpack(tarball: string, directory: string): Promise<void> {
   await execFile("tar", ["-xzf", tarball, "-C", directory], { timeout: 60000, maxBuffer: 65536 });
@@ -95,7 +95,8 @@ export async function prepareStandalone(installation: Installation, release: Rel
   const target = installation.entry;
   if (!(await lstat(target)).isFile()) throw new Error("The installation is not a regular file.");
   const stage = await mkdtemp(join(dirname(target), ".frely-update-"));
-  const next = join(stage, "frely"), backup = join(stage, "previous");
+  const windows = installation.platform === "win32";
+  const next = join(stage, windows ? "frely.exe" : "frely"), backup = join(stage, "previous");
   try {
     const asset = standaloneAsset();
     // Each source supplies its own checksum; any failure (connection, size, checksum, startup) moves to the next source as a whole.
@@ -117,7 +118,7 @@ export async function prepareStandalone(installation: Installation, release: Rel
         await fetchFile(source.tarballUrl, tarball, 200 * 1024 * 1024);
         await mkdir(unpacked);
         await unpack(tarball, unpacked);
-        await rename(join(unpacked, "package", "frely"), next);
+        await rename(join(unpacked, "package", windows ? "frely.exe" : "frely"), next);
         await copyFile(join(unpacked, "package", "frely.sha256"), join(stage, "checksum"));
         await copyFile(join(unpacked, "package", "frely.sha256.sig"), join(stage, "checksum.sig")).catch(() => {});
       }
@@ -132,12 +133,30 @@ export async function prepareStandalone(installation: Installation, release: Rel
     }
     if (!prepared) throw lastError;
     await copyFile(target, backup);
+    if (windows) {
+      // Windows refuses to overwrite a running executable but allows renaming it: move the old file aside, put the verified one in place.
+      // The old image keeps running for processes that already started; `removeStaleWindowsExecutables` deletes it later.
+      const aside = `${target}.old-${Date.now()}`;
+      return {
+        apply: async () => { await rename(target, aside); try { await rename(next, target); } catch (error) { await rename(aside, target).catch(() => {}); throw error; } },
+        restore: async () => { await rm(target, { force: true }).catch(() => {}); await rename(aside, target); },
+        cleanup: () => rm(stage, { recursive: true, force: true }),
+        verifiedFile: next,
+      };
+    }
     return {
       apply: () => rename(next, target),
       restore: () => rename(backup, target),
       cleanup: () => rm(stage, { recursive: true, force: true }),
     };
   } catch (error) { await rm(stage, { recursive: true, force: true }); throw error; }
+}
+
+/** Deletes executables that an earlier Windows update renamed aside; the ones still running stay until the next start. */
+export async function removeStaleWindowsExecutables(installation: Installation): Promise<void> {
+  if (installation.platform !== "win32" || installation.method !== "standalone") return;
+  const directory = dirname(installation.entry), prefix = `${basename(installation.entry)}.old-`;
+  for (const name of await readdir(directory).catch(() => [] as string[])) if (name.startsWith(prefix)) await rm(join(directory, name), { force: true }).catch(() => {});
 }
 
 export async function installPackage(installation: Installation, version: string): Promise<void> {

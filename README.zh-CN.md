@@ -63,7 +63,6 @@ frely skill install --host <claude-code|codex|pi|workbuddy|codebuddy|generic>
 | `frely link off` | 关闭远程控制：撤销所有客户端的访问，并在本机锁定，之后只有在这台电脑上运行 `frely link on` 才能重新开启。后台服务会卸载；有本地 Provider 时继续运行。 |
 | `frely link status` | 显示远程控制是开启、关闭还是尚未开启，以及 MCP URL、工作区、到期时间和服务状态。 |
 | `frely link workspace add <path>` | 共享另一个文件夹。`frely link workspace list` 列出全部。 |
-| `frely link auto-update [on\|off]` | 让后台服务在空闲时自动升级（macOS/Linux，默认关闭）。 |
 | `frely doctor` | 检查登录、安装、服务和连接。`-v` 显示详情。 |
 | `frely update` | 原地升级到最新版本。 |
 | `frely login` / `frely logout` | 登录或退出 Frely 账号。 |

@@ -4,7 +4,6 @@ import { WebSocketServer } from "ws";
 import type WebSocket from "ws";
 import { access, mkdtemp, rm } from "node:fs/promises";
 import { customWritePath, protectedWriteDenials } from "../runtime/sandbox.js";
-import { readEffectiveAutoUpdate, remoteAutoUpdatePath } from "../update/auto-update.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RelayMcpSession } from "../runtime/relay-mcp.js";
@@ -18,7 +17,7 @@ import { DEVICE_RELAY_PROTOCOL, decodeDeviceRelayEnvelope, encodeDeviceRelayEnve
  * Frames from the Relay carry no signature, so a malicious Relay can forge `_meta` grants. Tests named "KNOWN GAP" document
  * what is accepted TODAY and must be flipped to "must be refused" when signed approvals are enforced (P2).
  */
-async function withForgedRelay(run: (call: (id: string, params: Record<string, unknown>, frame?: { authorizationId?: string; autoUpdate?: true }) => Promise<DeviceRelayResponse>) => Promise<void>): Promise<void> {
+async function withForgedRelay(run: (call: (id: string, params: Record<string, unknown>, frame?: { authorizationId?: string }) => Promise<DeviceRelayResponse>) => Promise<void>): Promise<void> {
   const workspace = await mkdtemp(join(tmpdir(), "frely-forged-relay-"));
   const lease = new McpLease(`mca_${"b".repeat(32)}`, Date.now() + 60_000);
   const session = await RelayMcpSession.create(workspace, { signal: lease.controller.signal, assertAuthorized: () => lease.assert() });
@@ -45,7 +44,7 @@ async function withForgedRelay(run: (call: (id: string, params: Record<string, u
     await run((id, params, frame) => new Promise<DeviceRelayResponse>((resolve) => {
       waiters.set(id, resolve);
       socket!.send(encodeDeviceRelayEnvelope({
-        protocol: DEVICE_RELAY_PROTOCOL, type: "request", id, method: "mcp", authorizationId: frame?.authorizationId ?? lease.authorizationId, ...(frame?.autoUpdate ? { autoUpdate: true as const } : {}),
+        protocol: DEVICE_RELAY_PROTOCOL, type: "request", id, method: "mcp", authorizationId: frame?.authorizationId ?? lease.authorizationId,
         payload: { jsonrpc: "2.0", id: 0, method: "tools/call", params },
       }));
     }));
@@ -100,23 +99,6 @@ test("KNOWN GAP G5: the Relay chooses toolsets and localMcps on every frame with
     const response = await call("forged-request-0004", { name: "read", arguments: { action: "roots" } });
     assert.equal(response.ok, true);
   });
-});
-
-test("G9 (closed in P1): a forged `autoUpdate` frame field does not turn on automatic updates", async () => {
-  const config = await mkdtemp(join(tmpdir(), "frely-forged-config-"));
-  const previous = process.env.XDG_CONFIG_HOME;
-  process.env.XDG_CONFIG_HOME = config;
-  try {
-    await withForgedRelay(async (call) => {
-      const response = await call("forged-request-0005", { name: "read", arguments: { action: "roots" } }, { autoUpdate: true });
-      assert.equal(response.ok, true);
-    });
-    assert.equal(await exists(remoteAutoUpdatePath()), false);
-    assert.equal(await readEffectiveAutoUpdate(), false);
-  } finally {
-    if (previous === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = previous;
-    await rm(config, { recursive: true, force: true });
-  }
 });
 
 test("P0 precondition: the trust and policy directory cannot be written by a sandboxed process or named by a forged `path:` grant", () => {

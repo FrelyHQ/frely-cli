@@ -1,5 +1,5 @@
 {
-  "description": "MCP request with authorization, toolsets, local MCPs and autoUpdate",
+  "description": "MCP request with authorization, toolsets and local MCPs",
   "direction": "server_to_device",
   "frame": {
     "protocol": "frely.device-relay.v1",
@@ -14,7 +14,6 @@
     "localMcps": [
       "notes"
     ],
-    "autoUpdate": true,
     "payload": {
       "jsonrpc": "2.0",
       "id": 1,

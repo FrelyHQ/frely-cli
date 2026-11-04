@@ -1,7 +1,9 @@
 import { watchAgentLinks } from "../skill/link-sync.js";
 import { remoteLocked } from "../remote-lock.js";
 import { watchServiceInstallation } from "../update/service-refresh.js";
-import { readEffectiveAutoUpdate, watchAutoUpdate } from "../update/auto-update.js";
+import { removeLegacyAutoUpdate, restartWindowsService, Upgrader } from "../update/upgrade.js";
+import { applyPendingUpdate } from "../update/windows-pending.js";
+import { inspectInstallation } from "../update/installation.js";
 import { MaintenanceGate, serveMaintenance } from "../update/maintenance.js";
 import { isDefinitiveAuthorizationFailure, requireLocalMcpAuthorization, requireMcpAuthorization } from "../mcp-authorization.js";
 import { McpLease } from "../runtime/mcp-lease.js";
@@ -169,6 +171,9 @@ function flushOutbox(carry: RelayCarry, socket: WebSocket, log: DiagnosticLog): 
   for (const entry of again) if (carry.unacked.get(entry.envelope.id) === entry && !carry.unpinged.has(entry.envelope.id)) writeTracked(carry, socket, entry, log);
 }
 
+/** Set while a managed service runs; the owner's Upgrade request from the web console reaches it through the Relay. */
+let activeUpgrader: Upgrader | undefined;
+
 export async function serveDeviceRelay(options: RelayServeOptions): Promise<void> {
   const log = options.log ?? (() => undefined);
   diagnostic(log, "relay.started");
@@ -176,15 +181,21 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
   const device = await storedDevice() ?? await ensureDevice();
   setObserveIdentity({ device: device.deviceId, deviceKey: device.keyThumbprint });
   const reporter = connectionReporter(device, options.workspace);
-  const maintenance = options.managedService && process.platform !== "win32" ? new MaintenanceGate() : undefined;
-  const closeMaintenance = maintenance ? await serveMaintenance(maintenance) : undefined;
+  const maintenance = options.managedService ? new MaintenanceGate() : undefined;
+  // The socket lets `frely update` drain the service; Windows has no unix sockets, so there the gate is only used in-process.
+  const closeMaintenance = maintenance && process.platform !== "win32" ? await serveMaintenance(maintenance) : undefined;
+  void removeLegacyAutoUpdate();
+  // Windows: a swap that was blocked earlier is finished now, before this process holds anything. This process keeps the old code, so restart into the new one.
+  if (process.platform === "win32" && options.managedService && options.restartForUpdate) {
+    const installation = await inspectInstallation().catch(() => null);
+    if (installation && await applyPendingUpdate(installation).catch(() => null)) { restartWindowsService(installation); options.restartForUpdate(); }
+  }
+  activeUpgrader = maintenance && options.restartForUpdate ? new Upgrader({ gate: maintenance, restart: options.restartForUpdate, log }) : undefined;
   // Watch the current installation from the existing runtime, without an updater daemon.
   const closeRefresh = maintenance && options.restartForUpdate
     ? watchServiceInstallation({ gate: maintenance, signal: options.signal, restart: options.restartForUpdate, log, onEnabled: () => reporter.report({ type: "upgrade_watch", enabled: true }) })
       .catch((error) => { diagnostic(log, "relay.upgrade_watch_unavailable", {}, error); return () => {}; })
     : Promise.resolve(() => {});
-  // Off unless the owner switched it on; the swap happens while idle and the watcher above restarts the service.
-  const closeAutoUpdate = maintenance && options.restartForUpdate ? watchAutoUpdate({ gate: maintenance, signal: options.signal, enabled: () => readEffectiveAutoUpdate(), log }) : () => {};
   // Agents installed after a Skill get its link without another frely command (see skill/link-sync.ts).
   const closeLinkSync = options.managedService ? watchAgentLinks({ log }) : () => {};
   let delayMs = 1000;
@@ -313,7 +324,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
     }
     reporter.report({ type: "stopped" });
     await reporter.flush();
-  } finally { await releaseHeld("stopped"); closeAutoUpdate(); closeLinkSync(); (await closeRefresh)(); await closeMaintenance?.(); }
+  } finally { await releaseHeld("stopped"); closeLinkSync(); (await closeRefresh)(); await closeMaintenance?.(); }
 }
 
 class DeviceTransportConnectionError extends Error {
@@ -500,7 +511,7 @@ export async function serveConnection(
       // WebSocket peers may deliver the same JSON envelope as either a text
       // or a binary frame. `rawDataBuffer` normalizes both forms before the
       // protocol validator parses the JSON.
-      void handleFrame(rawDataBuffer(data), socket, carry, session, lease, log, maintenance).catch((error) => { diagnostic(log, "relay.frame_failed", {}, error); finish(error); });
+      void handleFrame(rawDataBuffer(data), socket, carry, session, lease, log, maintenance, capabilities).catch((error) => { diagnostic(log, "relay.frame_failed", {}, error); finish(error); });
     });
   });
 }
@@ -513,11 +524,18 @@ async function handleFrame(
   lease: McpLease | null,
   log: DiagnosticLog,
   maintenance?: MaintenanceGate,
+  capabilitiesSource?: () => Record<string, unknown> | Promise<Record<string, unknown>> | undefined,
 ): Promise<void> {
   const { inflight, cancelled } = carry;
   const envelope = decodeDeviceRelayEnvelope(data);
   if (envelope.type === "mcp_disabled") {
     if (lease?.authorizationId === envelope.id) { lease.close(); await session?.close(); }
+    return;
+  }
+  if (envelope.type === "upgrade") {
+    // The result is not a response: the console reads it from the capability report, which is refreshed here and after the run.
+    void activeUpgrader?.runOnce().finally(() => sendCapabilities(socket, capabilitiesSource));
+    void sendCapabilities(socket, capabilitiesSource);
     return;
   }
   if (envelope.type === "cancel") {
@@ -564,7 +582,6 @@ async function executeMcpRequest(request: DeviceRelayRequest, session: RelaySess
   if (await remoteLocked()) throw new Error("Remote control is turned off on this computer. Run `frely link on` on it to allow it again.");
   // Observation only (plan P1): count whether the signed approvals riding on this request verify; never blocks.
   await observeApprovals(request.payload, log);
-  // `autoUpdate` on the frame is ignored: an unsigned Relay field must not switch on automatic updates (gap G9).
   return session.execute(request.payload, request.id, request.toolsets, request.localMcps);
 }
 
