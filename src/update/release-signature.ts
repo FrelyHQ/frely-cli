@@ -4,7 +4,7 @@ import { createHash, createPublicKey, verify } from "node:crypto";
  * Ed25519 public keys (base64url SPKI) whose signatures make a release trustworthy. The private key stays offline with the owner.
  * Empty until the owner generates the key (`node scripts/release-keygen.mjs`) and adds its public half here.
  */
-export const RELEASE_PUBLIC_KEYS: readonly string[] = [];
+export const RELEASE_PUBLIC_KEYS: readonly string[] = ["MCowBQYDK2VwAyEAscGPjFjF0aLjuqYcsMNgVTQpno_wSRpewf6lhAl8nc8"];
 /** P1 (record only): an unsigned release still installs. P2 flips this so a missing signature fails the update. */
 export const RELEASE_SIGNATURE_REQUIRED = false;
 
