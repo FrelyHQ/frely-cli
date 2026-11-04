@@ -188,6 +188,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
   // Agents installed after a Skill get its link without another frely command (see skill/link-sync.ts).
   const closeLinkSync = options.managedService ? watchAgentLinks({ log }) : () => {};
   let delayMs = 1000;
+  let connectedAt: number | undefined;
   let restartSince: number | undefined;
   let preferredTransport: DeviceTransportKind | undefined;
   // MCP commands that outlive a connection keep their session and lease here until they finish.
@@ -270,7 +271,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
           options.signal,
           log,
           (event) => {
-            if (event.type === "connected") { delayMs = 1000; restartSince = undefined; }
+            if (event.type === "connected") { connectedAt = Date.now(); restartSince = undefined; }
             reporter.report(event);
           },
           maintenance,
@@ -296,6 +297,9 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
         diagnostic(log, selectedTransport ? `relay.disconnected.${selectedTransport.kind}` : "relay.disconnected", {}, error);
         reporter.report({ type: "disconnected", error });
         if (!retryWithoutDelay) {
+          // Only a connection that held resets the backoff; one that drops at once keeps growing it.
+          if (connectedAt !== undefined && Date.now() - connectedAt >= RELAY_STABLE_CONNECTION_MS) delayMs = 1000;
+          connectedAt = undefined;
           const next = nextReconnectDelay({ backoffMs: delayMs, restartSince }, error, Date.now());
           restartSince = next.restartSince;
           delayMs = next.backoffMs;
@@ -343,6 +347,10 @@ export function isRelayRestartClose(error: unknown): boolean {
 
 export const RELAY_RESTART_RETRY_WINDOW_MS = 10 * 60_000;
 const MAX_BACKOFF_MS = 15_000;
+/** A connection must stay up this long before the next reconnect starts again from the shortest delay. */
+export const RELAY_STABLE_CONNECTION_MS = 30_000;
+/** The exponential delay is spread by +-20% so devices that dropped together do not return together. */
+const BACKOFF_JITTER = 0.2;
 /** The relay pings every 15 s and so do we. Nothing at all from it (no ping, pong or frame) for this long means the socket is dead even if it still looks open. */
 export const RELAY_SILENCE_LIMIT_MS = 35_000;
 const RELAY_PING_MS = 15_000;
@@ -363,7 +371,7 @@ export function nextReconnectDelay(
   if (restartSince !== undefined && now - restartSince < RELAY_RESTART_RETRY_WINDOW_MS) {
     return { delayMs: Math.round(1600 + random() * 800), backoffMs: state.backoffMs, restartSince };
   }
-  return { delayMs: state.backoffMs, backoffMs: Math.min(state.backoffMs * 2, MAX_BACKOFF_MS) };
+  return { delayMs: Math.round(state.backoffMs * (1 - BACKOFF_JITTER + random() * 2 * BACKOFF_JITTER)), backoffMs: Math.min(state.backoffMs * 2, MAX_BACKOFF_MS) };
 }
 
 export async function serveConnection(

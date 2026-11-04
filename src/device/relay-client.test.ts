@@ -226,12 +226,17 @@ test("relay restart close codes retry about every 2 seconds for ten minutes, the
   assert.equal(during.delayMs, 1600);
   // After the window the exponential backoff resumes.
   const after = nextReconnectDelay({ backoffMs: 8000, restartSince: first.restartSince }, new Error("refused"), 1_000 + RELAY_RESTART_RETRY_WINDOW_MS, () => 0);
-  assert.equal(after.delayMs, 8000);
+  assert.equal(after.delayMs, 6400); // 8000 minus 20% jitter at random()=0
   assert.equal(after.backoffMs, 15_000);
   assert.equal(after.restartSince, undefined);
   // 1001 counts as restart too; other codes do not.
   assert.equal(nextReconnectDelay({ backoffMs: 4000 }, await closed(1001), 0, () => 0).delayMs, 1600);
-  assert.equal(nextReconnectDelay({ backoffMs: 4000 }, await closed(1011), 0, () => 0).delayMs, 4000);
+  assert.equal(nextReconnectDelay({ backoffMs: 4000 }, await closed(1011), 0, () => 0).delayMs, 3200);
+  // Backoff delays are spread by +-20%: 0.8x..1.2x of the nominal step.
+  const plain = new Error("refused");
+  assert.equal(nextReconnectDelay({ backoffMs: 4000 }, plain, 0, () => 0.5).delayMs, 4000);
+  assert.equal(nextReconnectDelay({ backoffMs: 4000 }, plain, 0, () => 1).delayMs, 4800);
+  assert.equal(nextReconnectDelay({ backoffMs: 4000 }, plain, 0, () => 0.5).backoffMs, 8000);
 });
 
 test("a relay that goes silent is detected without waiting for the OS", async () => {
