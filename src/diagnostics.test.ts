@@ -206,3 +206,17 @@ test("doctor nudges a disconnected same-version service once, after reading stat
     await doctor({}, g.dependencies);
   }
 });
+
+test("doctor also nudges a disconnected standby service (null state, no MCP lease)", async () => {
+  const { VERSION } = await import("./version.js");
+  const f = fixture();
+  f.connection.state = "disconnected"; f.connection.mcpEnabled = false; f.connection.cliVersion = VERSION;
+  f.connection.heartbeatAt = new Date(Date.now() - HEARTBEAT_MAX_AGE_MS - 1000).toISOString();
+  f.dependencies.inspectMcpMetadata = async () => null;
+  f.dependencies.serviceStatus = async () => ({ installed: true, active: true, pid: f.connection.pid, platform: process.platform });
+  const pids: number[] = [];
+  f.dependencies.requestReconnect = (pid) => { pids.push(pid); return true; };
+  const report = await doctor({}, f.dependencies);
+  assert.deepEqual(pids, [process.pid]);
+  assert.match(report.summary.connection, /Disconnected/);
+});
