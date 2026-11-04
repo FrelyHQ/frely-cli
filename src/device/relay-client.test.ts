@@ -263,3 +263,16 @@ test("a relay that goes silent is detected without waiting for the OS", async ()
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test("retry-now cuts the reconnect delay short and is removed on abort", async () => {
+  const { createRetryNow, RETRY_NOW_SIGNAL } = await import("./relay-client.js");
+  if (process.platform === "win32") return;
+  const controller = new AbortController(), before = process.listenerCount(RETRY_NOW_SIGNAL);
+  const retry = createRetryNow(controller.signal);
+  let fired = false;
+  retry.arm(() => { fired = true; });
+  process.emit(RETRY_NOW_SIGNAL);
+  assert.equal(fired, true);
+  controller.abort();
+  assert.equal(process.listenerCount(RETRY_NOW_SIGNAL), before);
+});

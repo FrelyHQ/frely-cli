@@ -14,6 +14,11 @@ import { isSandboxDisabled, sandboxUnavailableReason } from "./runtime/sandbox.j
 
 export interface DiagnosticCheck { name: string; ok: boolean; detail: string; status: "pass" | "fail" | "info" }
 export interface DoctorOptions { verbose?: boolean; }
+/** Asks the running service (same version, so it handles the signal) to skip its reconnect delay once. */
+function requestReconnect(pid: number): boolean {
+  if (process.platform === "win32") return false;
+  try { process.kill(pid, "SIGUSR2"); return true; } catch { return false; }
+}
 const defaultDependencies = { inspectAuth, probeCredentialStore, whoami, inspectMcpMetadata, requireMcpAuthorization,
   reconcileMcpAuthorization: async (metadata: Awaited<ReturnType<typeof inspectMcpMetadata>>, code: string) => {
     if (!metadata) return;
@@ -21,10 +26,11 @@ const defaultDependencies = { inspectAuth, probeCredentialStore, whoami, inspect
     if (code === "device_not_found" || code === "device_revoked") await resetDeviceRegistration();
   },
   readDeviceBinding, readConnectionStatus, serviceStatus, inspectUpdate, sandboxUnavailableReason,
-  pendingSkillLinks: () => syncAgentLinks({ mode: "full", dryRun: true }) };
-type DoctorDependencies = Omit<typeof defaultDependencies, "reconcileMcpAuthorization" | "pendingSkillLinks"> & {
+  pendingSkillLinks: () => syncAgentLinks({ mode: "full", dryRun: true }), requestReconnect };
+type DoctorDependencies = Omit<typeof defaultDependencies, "reconcileMcpAuthorization" | "pendingSkillLinks" | "requestReconnect"> & {
   reconcileMcpAuthorization?: typeof defaultDependencies.reconcileMcpAuthorization;
   pendingSkillLinks?: typeof defaultDependencies.pendingSkillLinks;
+  requestReconnect?: (pid: number) => boolean;
 };
 
 export async function statusSnapshot() {
@@ -148,6 +154,12 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
         } else add("mcp_authorization", "fail", "Secure key or server authorization could not be verified. Check connectivity, login and MCP renewal.");
       }
     } else add("mcp_authorization", "info", "Not checked: MCP configuration/authorization is unavailable.");
+  }
+
+  // After the report is built, so the diagnosis shows the state found, not the effect of this nudge.
+  if (!live && connectionState === "disconnected" && service?.active && service.pid && connection?.pid === service.pid
+    && connection.cliVersion === VERSION && (dependencies.requestReconnect ?? requestReconnect)(service.pid)) {
+    add("reconnect", "info", "Asked the running service to retry the connection now (one attempt). Run frely doctor again to see the result.");
   }
 
   return {
