@@ -663,12 +663,12 @@ async function wait(ms: number, signal: AbortSignal, retryNow?: RetryNow): Promi
 /** Lets a signal cut the current reconnect delay short. It does not reset the backoff and is ignored while connected. */
 export const RETRY_NOW_SIGNAL = "SIGUSR2";
 export interface RetryNow { arm(fn: () => void): void; cancel(fn: () => void): void }
-export function createRetryNow(signal: AbortSignal, platform: NodeJS.Platform = process.platform): RetryNow {
+export function createRetryNow(signal: AbortSignal, platform: NodeJS.Platform = process.platform, proc: Pick<NodeJS.Process, "on" | "off"> = process): RetryNow {
   let waiting: (() => void) | undefined;
   if (platform !== "win32") {
     const handler = () => { const fn = waiting; waiting = undefined; fn?.(); };
-    process.on(RETRY_NOW_SIGNAL, handler);
-    signal.addEventListener("abort", () => process.off(RETRY_NOW_SIGNAL, handler), { once: true });
+    proc.on(RETRY_NOW_SIGNAL, handler);
+    signal.addEventListener("abort", () => proc.off(RETRY_NOW_SIGNAL, handler), { once: true });
   }
   return { arm: (fn) => { waiting = fn; }, cancel: (fn) => { if (waiting === fn) waiting = undefined; } };
 }

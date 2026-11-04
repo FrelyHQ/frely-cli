@@ -271,13 +271,19 @@ test("a relay that goes silent is detected without waiting for the OS", async ()
 
 test("retry-now cuts the reconnect delay short and is removed on abort", async () => {
   const { createRetryNow, RETRY_NOW_SIGNAL } = await import("./relay-client.js");
-  if (process.platform === "win32") return;
-  const controller = new AbortController(), before = process.listenerCount(RETRY_NOW_SIGNAL);
-  const retry = createRetryNow(controller.signal);
+  // A stand-in emitter: emitting SIGUSR2 on the real process would also fire a runner's --report-signal handler and drop a report file.
+  const { EventEmitter } = await import("node:events");
+  const fake = new EventEmitter();
+  const controller = new AbortController();
+  const retry = createRetryNow(controller.signal, "linux", fake as unknown as NodeJS.Process);
   let fired = false;
   retry.arm(() => { fired = true; });
-  process.emit(RETRY_NOW_SIGNAL);
+  fake.emit(RETRY_NOW_SIGNAL);
   assert.equal(fired, true);
   controller.abort();
-  assert.equal(process.listenerCount(RETRY_NOW_SIGNAL), before);
+  assert.equal(fake.listenerCount(RETRY_NOW_SIGNAL), 0);
+  // Windows has no signals: nothing is registered.
+  const win = new EventEmitter();
+  createRetryNow(new AbortController().signal, "win32", win as unknown as NodeJS.Process);
+  assert.equal(win.listenerCount(RETRY_NOW_SIGNAL), 0);
 });
