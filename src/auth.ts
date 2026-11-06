@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -680,15 +680,7 @@ async function loadCredential(config: CliConfig, refresh: boolean, input?: strin
   if (stored.version !== 1 || stored.type !== "basic-oauth" || !isString(stored.accessToken) || typeof stored.expiresAt !== "number") return null;
   if (refresh && stored.refreshToken && stored.expiresAt <= Date.now() + 30_000) {
     // Refresh failures propagate: a network outage must not read as "No Frely login is stored".
-    const next = await refreshOAuthCredential(config.relayUrl, stored.refreshToken, config.deviceId);
-    if (next.expiresAt === undefined) return null;
-    const refreshed: StoredOAuthCredential = { version: 1, type: "basic-oauth", accessToken: next.value, ...(next.refreshToken ? { refreshToken: next.refreshToken } : {}), expiresAt: next.expiresAt };
-    const sessionBindingId = next.sessionBindingId ?? stored.sessionBindingId;
-    if (sessionBindingId) refreshed.sessionBindingId = sessionBindingId;
-    const mcpToken = next.mcpToken ?? stored.mcpToken;
-    if (mcpToken) refreshed.mcpToken = mcpToken;
-    await credentialStore.setPassword(SERVICE, accountKey(config.relayUrl), JSON.stringify(refreshed satisfies StoredOAuthCredential));
-    return { ...next, ...(mcpToken ? { mcpToken } : {}) };
+    return await refreshStoredCredential(config, stored as StoredOAuthCredential, false);
   }
   return { scheme: "bearer", value: stored.accessToken, ...(stored.refreshToken ? { refreshToken: stored.refreshToken } : {}), expiresAt: stored.expiresAt, ...(stored.sessionBindingId ? { sessionBindingId: stored.sessionBindingId } : {}), ...(stored.mcpToken ? { mcpToken: stored.mcpToken } : {}) };
 }
@@ -719,21 +711,124 @@ async function refreshOAuthCredentialOnce(relayUrl: string, refreshToken: string
   const body = new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken, client_id: OAUTH_CLIENT_ID });
   appendLoginResources(body, relayUrl);
   appendSessionBinding(body, deviceId);
-  let response: Response;
+  let status: number;
+  let payload: unknown;
   try {
-    response = await fetchWithTimeout(`${relayUrl}/api/auth/oauth2/token`, {
+    // The body is read under the same timeout: a response cut off half-way (the server has already rotated the token) must not hang.
+    ({ status, payload } = await fetchJsonWithTimeout(`${relayUrl}/api/auth/oauth2/token`, {
       method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: relayUrl, accept: "application/json" },
       body: body.toString(), redirect: "error",
-    });
-  } catch {
+    }));
+  } catch (error) {
+    debugAuth(`stage=refresh fetch_failed=${error instanceof Error ? `${error.name}:${(error.cause as { code?: string } | undefined)?.code ?? error.message}` : "unknown"}`);
     throw new TransientRefreshError();
   }
-  if (response.status === 408 || response.status === 429 || response.status >= 500) throw new TransientRefreshError();
-  const payload = await safeJson(response);
+  if (status === 408 || status === 429 || status >= 500) {
+    debugAuth(`stage=refresh status=${status}`);
+    throw new TransientRefreshError();
+  }
   const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
-  if (!response.ok || !isString(record.access_token)) throw new Error("Frely login expired. Run `frely login`.");
+  // Only the OAuth server itself saying no (400/401 with an OAuth `error` code) means the login is gone. A proxy page, a captive portal,
+  // a 403/407 or a 200 without a token says nothing about the refresh token, so it is retried later instead of asking for `frely login`.
+  if ((status === 400 || status === 401) && isString(record.error)) throw new Error("Frely login expired. Run `frely login`.");
+  if (status < 200 || status >= 300 || !isString(record.access_token)) {
+    debugAuth(`stage=refresh unexpected_status=${status}`);
+    throw new TransientRefreshError();
+  }
   const expiresIn = numberPayload(record.expires_in, 1, 86_400);
   return { scheme: "bearer", value: record.access_token, ...(isString(record.refresh_token) ? { refreshToken: record.refresh_token } : { refreshToken }), expiresAt: Date.now() + expiresIn * 1000, ...(isString(record[SESSION_BINDING_ID_FIELD]) ? { sessionBindingId: record[SESSION_BINDING_ID_FIELD] as string } : {}), ...(isString(record[FRELY_MCP_TOKEN_FIELD]) ? { mcpToken: record[FRELY_MCP_TOKEN_FIELD] as string } : {}) };
+}
+
+const inflightRefresh = new Map<string, Promise<AuthCredential>>();
+const REFRESH_LOCK_WAIT_MS = 20_000;
+const REFRESH_LOCK_STALE_MS = 60_000;
+
+function refreshLockPath(): string {
+  return join(dirname(authConfigPath()), "refresh.lock");
+}
+
+/** The server rotates the refresh token on every use and treats a reused old one as theft, so two processes must never refresh at once. */
+async function withRefreshLock<T>(work: () => Promise<T>): Promise<T> {
+  const path = refreshLockPath();
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 }).catch(() => undefined);
+  const deadline = Date.now() + REFRESH_LOCK_WAIT_MS;
+  let held = false;
+  for (;;) {
+    try {
+      const handle = await open(path, "wx", 0o600);
+      await handle.writeFile(String(process.pid)).catch(() => undefined);
+      await handle.close();
+      held = true;
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") break;
+      const age = await stat(path).then((info) => Date.now() - info.mtimeMs, () => 0);
+      if (age > REFRESH_LOCK_STALE_MS) { await unlink(path).catch(() => undefined); continue; }
+      if (Date.now() >= deadline) break;
+      await delay(100);
+    }
+  }
+  try {
+    return await work();
+  } finally {
+    if (held) await unlink(path).catch(() => undefined);
+  }
+}
+
+function parseStoredCredential(raw: string | null): StoredOAuthCredential | null {
+  if (!raw) return null;
+  try {
+    const stored = JSON.parse(raw) as Partial<StoredOAuthCredential>;
+    if (stored.version !== 1 || stored.type !== "basic-oauth" || !isString(stored.accessToken) || typeof stored.expiresAt !== "number") return null;
+    return stored as StoredOAuthCredential;
+  } catch {
+    return null;
+  }
+}
+
+function bearerFromStored(stored: StoredOAuthCredential): AuthCredential {
+  return { scheme: "bearer", value: stored.accessToken, ...(stored.refreshToken ? { refreshToken: stored.refreshToken } : {}), expiresAt: stored.expiresAt, ...(stored.sessionBindingId ? { sessionBindingId: stored.sessionBindingId } : {}), ...(stored.mcpToken ? { mcpToken: stored.mcpToken } : {}) };
+}
+
+async function saveRefreshedCredential(key: string, refreshed: StoredOAuthCredential): Promise<void> {
+  const value = JSON.stringify(refreshed satisfies StoredOAuthCredential);
+  try {
+    await credentialStore.setPassword(SERVICE, key, value);
+  } catch {
+    await delay(200);
+    // The new token is already valid on the server; if the store still refuses, keep working in memory rather than failing the call.
+    await credentialStore.setPassword(SERVICE, key, value).catch((error: unknown) => debugAuth(`stage=refresh save_failed=${error instanceof Error ? error.message : "unknown"}`));
+  }
+}
+
+/**
+ * Refreshes the stored login once for everyone: callers in this process share one request, other processes wait on a file lock and then
+ * reuse the tokens the first one saved (the token they started from has been rotated away and must not be sent again).
+ * `force` refreshes even when the stored access token is still valid, for a request the server refused.
+ */
+async function refreshStoredCredential(config: CliConfig, started: StoredOAuthCredential, force: boolean): Promise<AuthCredential> {
+  const key = accountKey(config.relayUrl);
+  const pending = inflightRefresh.get(key);
+  if (pending) return pending;
+  const run = withRefreshLock(async () => {
+    const latest = parseStoredCredential(await credentialStore.getPassword(SERVICE, key).catch(() => null));
+    if (latest) {
+      const rotated = Boolean(latest.refreshToken) && latest.refreshToken !== started.refreshToken;
+      if (rotated || (!force && latest.expiresAt > Date.now() + 30_000)) return bearerFromStored(latest);
+    }
+    const current = latest?.refreshToken ? latest : started;
+    const next = await refreshOAuthCredential(config.relayUrl, current.refreshToken!, config.deviceId);
+    if (next.expiresAt === undefined) throw new Error("Frely login expired. Run `frely login`.");
+    const refreshed: StoredOAuthCredential = { version: 1, type: "basic-oauth", accessToken: next.value, ...(next.refreshToken ? { refreshToken: next.refreshToken } : {}), expiresAt: next.expiresAt };
+    const sessionBindingId = next.sessionBindingId ?? current.sessionBindingId;
+    if (sessionBindingId) refreshed.sessionBindingId = sessionBindingId;
+    const mcpToken = next.mcpToken ?? current.mcpToken;
+    if (mcpToken) refreshed.mcpToken = mcpToken;
+    await saveRefreshedCredential(key, refreshed);
+    return { ...next, ...(sessionBindingId ? { sessionBindingId } : {}), ...(mcpToken ? { mcpToken } : {}) };
+  }).finally(() => { inflightRefresh.delete(key); });
+  inflightRefresh.set(key, run);
+  return run;
 }
 
 /** Refreshes the login now, whatever its expiry, and returns it with the machine's FreyMCP side token — for a request the server refused. */
@@ -741,11 +836,10 @@ export async function refreshLoginCredential(): Promise<{ config: { relayUrl: st
   const config = await currentRelayConfig(await readConfig());
   const stored = await loadCredential(config, false);
   if (!stored?.refreshToken) throw new Error("Frely login expired. Run `frely login`.");
-  const next = await refreshOAuthCredential(config.relayUrl, stored.refreshToken, config.deviceId);
-  const mcpToken = next.mcpToken ?? stored.mcpToken;
-  const refreshed: StoredOAuthCredential = { version: 1, type: "basic-oauth", accessToken: next.value, ...(next.refreshToken ? { refreshToken: next.refreshToken } : {}), expiresAt: next.expiresAt!, ...(mcpToken ? { mcpToken } : {}) };
-  await credentialStore.setPassword(SERVICE, accountKey(config.relayUrl), JSON.stringify(refreshed satisfies StoredOAuthCredential));
-  return { config: { relayUrl: config.relayUrl }, credential: { ...next, ...(mcpToken ? { mcpToken } : {}) } };
+  const current = parseStoredCredential(await credentialStore.getPassword(SERVICE, accountKey(config.relayUrl)));
+  if (!current?.refreshToken) throw new Error("Frely login expired. Run `frely login`.");
+  const credential = await refreshStoredCredential(config, current, true);
+  return { config: { relayUrl: config.relayUrl }, credential };
 }
 
 export function openVerificationUrl(url: string): void {
@@ -800,6 +894,24 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
   timer.unref?.();
   try {
     return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error("Frely request timed out.");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchJsonWithTimeout(url: string, init: RequestInit): Promise<{ status: number; payload: unknown }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  timer.unref?.();
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const text = await response.text();
+    let payload: unknown = null;
+    try { payload = JSON.parse(text); } catch { /* not JSON: a proxy or captive-portal page */ }
+    return { status: response.status, payload };
   } catch (error) {
     if (controller.signal.aborted) throw new Error("Frely request timed out.");
     throw error;

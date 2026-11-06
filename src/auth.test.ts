@@ -292,6 +292,55 @@ test("a rejected refresh token reports an expired login without retrying", async
   assert.equal(login.refreshCalls(), 1);
 });
 
+test("a refresh answered by a proxy or captive portal is retried later, never reported as an expired login", async (t) => {
+  for (const response of [() => new Response("<html>blocked</html>", { status: 403 }), () => new Response("<html>login</html>", { status: 200 }), () => new Response("auth required", { status: 407 })]) {
+    const login = await withExpiredLogin(t, response);
+    await assert.rejects(requireLogin(), (error: Error) => error.message === LOGIN_REFRESH_UNAVAILABLE);
+    assert.equal(login.refreshCalls(), 3);
+  }
+});
+
+test("a refresh response cut off while its body is read is retried later, not an expired login", async (t) => {
+  const login = await withExpiredLogin(t, () => new Response(new ReadableStream({ start(controller) { controller.error(new Error("connection reset")); } }), { status: 200 }));
+  await assert.rejects(requireLogin(), (error: Error) => error.message === LOGIN_REFRESH_UNAVAILABLE);
+  assert.equal(login.refreshCalls(), 3);
+});
+
+test("a 401 with an OAuth error code means the login is gone", async (t) => {
+  const login = await withExpiredLogin(t, () => Response.json({ error: "invalid_token" }, { status: 401 }));
+  await assert.rejects(requireLogin(), /Frely login expired\. Run `frely login`\./);
+  assert.equal(login.refreshCalls(), 1);
+});
+
+test("concurrent callers share one refresh and the lock is released afterwards", async (t) => {
+  let calls = 0;
+  const login = await withExpiredLogin(t, async () => {
+    calls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    return Response.json({ access_token: `synthetic-next-${calls}`, refresh_token: `synthetic-refresh-${calls + 1}`, token_type: "bearer", expires_in: 3600 });
+  });
+  const [first, second] = await Promise.all([requireLogin(), requireLogin()]);
+  assert.equal(login.refreshCalls(), 1);
+  assert.equal(first.credential.value, "synthetic-next-1");
+  assert.equal(second.credential.value, "synthetic-next-1");
+  await assert.rejects(readFile(join(dirname(authConfigPath()), "refresh.lock")), /ENOENT/);
+});
+
+test("a login another process refreshes while this one waits on the lock is reused, not refreshed again", async (t) => {
+  const login = await withExpiredLogin(t, () => Response.json({ error: "invalid_grant" }, { status: 400 }));
+  const lock = join(dirname(authConfigPath()), "refresh.lock");
+  await mkdir(dirname(lock), { recursive: true });
+  await writeFile(lock, "other-process");
+  const waiting = requireLogin();
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  // The other process finished: it saved rotated tokens, then released the lock.
+  const stored = JSON.parse((await basicCredentialStore.getPassword("frely-cli-basic-v1", "https://test.invalid"))!);
+  await basicCredentialStore.setPassword("frely-cli-basic-v1", "https://test.invalid", JSON.stringify({ ...stored, accessToken: "from-other-process", refreshToken: "rotated-by-other", expiresAt: Date.now() + 3_600_000 }));
+  await rm(lock);
+  assert.equal((await waiting).credential.value, "from-other-process");
+  assert.equal(login.refreshCalls(), 0);
+});
+
 test("an email sign-in that names an install sends it when the code is sent and again when it is entered", async (t) => {
   const { initEmailDeviceLogin, completeEmailDeviceLogin } = await import("./auth.js");
   const restore = useMemoryCredentialStore();
