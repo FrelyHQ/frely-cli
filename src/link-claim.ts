@@ -1,4 +1,4 @@
-import { claimLinkAuthorization, registerLinkKey, type LinkClaimResult } from "./mcp-authorization.js";
+import { claimLinkAuthorization, isDefinitiveAuthorizationFailure, registerLinkKey, type LinkClaimResult } from "./mcp-authorization.js";
 
 export interface LinkClaimDeps {
   register: () => Promise<void>;
@@ -21,7 +21,8 @@ const defaultDeps: LinkClaimDeps = {
  * computer's remote-link key, then asks the relay whether a lease was approved for it. When one was, it is saved like `frely link on`
  * would save it and `onClaimed` runs, so the service can restart in full mode. It also runs in full mode: when the web turned remote
  * control off (the relay answers `locked`) the local lock is written and `onLocked` runs, so the service restarts into standby and
- * `frely link status` shows off. A failed round never stops the watch.
+ * `frely link status` shows off. A transient failed round never stops the watch; a login the server has refused does, because
+ * retrying it cannot succeed and would hammer the token endpoint.
  */
 export async function watchLinkClaim(options: { signal: AbortSignal; log: (message: string) => void; onClaimed: () => void; onLocked?: () => void; intervalMs?: number; deps?: LinkClaimDeps }): Promise<void> {
   const deps = options.deps ?? defaultDeps;
@@ -36,6 +37,13 @@ export async function watchLinkClaim(options: { signal: AbortSignal; log: (messa
       if (result === "locked") { await deps.lock(); options.log("Remote control was turned off from the web; locking this computer."); options.onLocked?.(); return; }
     } catch (error) {
       options.log(`Remote link check failed: ${error instanceof Error ? error.message : String(error)}`);
+      // A login the OAuth server has refused cannot recover by itself. Retrying every 20 s would keep posting
+      // the same dead refresh token to /oauth2/token forever (invalid_grant: session not found). Stop the
+      // watch until `frely login` replaces the credential and the service is restarted; outages still retry.
+      if (isDefinitiveAuthorizationFailure(error)) {
+        options.log("Frely login is no longer valid; remote link watch stopped. Run `frely login` and restart the service.");
+        return;
+      }
     }
     await sleep(interval, options.signal);
   }

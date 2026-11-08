@@ -40,6 +40,46 @@ test("a locked computer neither registers nor claims, and a failed round does no
   assert.ok(logs.some((line) => /offline/.test(line)));
 });
 
+test("a login the OAuth server has refused stops the watch instead of retrying with a dead refresh token", async () => {
+  const calls: string[] = [];
+  const logs: string[] = [];
+  let claimed = false;
+  await watchLinkClaim({
+    signal: new AbortController().signal, log: (message) => logs.push(message), intervalMs: 1,
+    onClaimed: () => { claimed = true; },
+    deps: {
+      locked: async () => false,
+      register: async () => { calls.push("register"); },
+      claim: async () => { calls.push("claim"); throw new Error("Frely login expired. Run `frely login`."); },
+      lock: async () => undefined,
+    },
+  });
+  assert.deepEqual(calls, ["register", "claim"]);
+  assert.equal(claimed, false);
+  assert.ok(logs.some((line) => /remote link watch stopped/i.test(line) && /frely login/i.test(line)));
+});
+
+test("a temporarily unavailable refresh still retries and can recover", async () => {
+  const calls: string[] = [];
+  let claimed = false;
+  await watchLinkClaim({
+    signal: new AbortController().signal, log: () => undefined, intervalMs: 1,
+    onClaimed: () => { claimed = true; },
+    deps: {
+      locked: async () => false,
+      register: async () => { calls.push("register"); },
+      claim: async () => {
+        calls.push("claim");
+        if (calls.filter((call) => call === "claim").length === 1) throw new Error("Frely login refresh is temporarily unavailable; retrying later.");
+        return "claimed";
+      },
+      lock: async () => undefined,
+    },
+  });
+  assert.equal(claimed, true);
+  assert.deepEqual(calls, ["register", "claim", "claim"]);
+});
+
 test("the web turning remote control off writes the local lock and reports it, in full mode too", async () => {
   const calls: string[] = [];
   let locked = false, reported = 0, claimed = false;
