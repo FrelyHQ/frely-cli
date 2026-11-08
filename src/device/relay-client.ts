@@ -294,6 +294,12 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
         delayMs = 1000;
       } catch (error) {
         if (options.signal.aborted) break;
+        const loginRefusal = relayLoginRefusal(error);
+        if (loginRefusal !== null) {
+          diagnostic(log, "relay.login_refused", {}, error);
+          log(loginRefusal);
+          break;
+        }
         if (selectedTransport && isTransportFallbackEligible(error)) {
           const fallback = nextDeviceTransportKind(transports, selectedTransport.kind);
           if (fallback) {
@@ -336,6 +342,18 @@ class DeviceTransportConnectionError extends Error {
 
 export function isTransportFallbackEligible(error: unknown): boolean {
   return error instanceof DeviceTransportConnectionError && error.fallbackEligible;
+}
+
+/**
+ * A login the OAuth server refused (`400/401 invalid_grant`, a signed-out session, a revoked link)
+ * can never recover by reconnecting. Retrying it posts the same dead refresh token to
+ * /api/auth/oauth2/token on every backoff cycle, for hours, from every running service.
+ * Returns the message to show when the relay loop must stop, or null for a retryable failure.
+ */
+export function relayLoginRefusal(error: unknown): string | null {
+  return isDefinitiveAuthorizationFailure(error)
+    ? "Frely login is no longer valid; the device relay stopped. Run `frely login` and restart the service."
+    : null;
 }
 
 function closedTransportError(code: number, reason: Buffer): DeviceTransportConnectionError {
