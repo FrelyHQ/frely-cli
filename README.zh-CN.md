@@ -4,34 +4,46 @@
 
 [官网](https://cli.frely.cloud/zh/) · [文档](https://cli.frely.cloud/docs/) · [Frely](https://frely.cloud/) · [English](README.md) · [简体中文](README.zh-CN.md)
 
-Frely CLI 为 Claude Code、Codex、pi 等有 Shell 的 Agent 安装 `frely` Skill：你的 Agent 在终端使用你的 Frely 账号和 Store。对网页版 ChatGPT 和 Claude，或要操作另一台电脑时，它把你指定的一台电脑接入 **FrelyMCP**。
 
-它也是 Frely 账号的命令行工具：
+Frely CLI 帮您连接Agent和您的设备. 特别是网页版Claude/ChatGPT和您的多台远程设备.
 
-- **Agent、Prompt 与 Skill**：把已发布的 Frely Agent 安装为本地 Skill，或安装你购买的 Prompt 和 Skill。
-- **设备 MCP**：让远程 AI 客户端操作这台电脑。
-- **本机 MCP 服务**：把只在这台电脑上运行的 MCP 服务（例如监听 `127.0.0.1` 的）转给远程客户端使用。
-- **本地模型共享**：把本机 Ollama 或 OpenAI 兼容运行时发布为你自己的 Frely Provider。
+## 功能与安装指南
 
-## 安装
+### 想让网页Claude/CharGPT 连接本地设备?
+1. [在网页端添加FrelyMCP](#在网页agent上添加frelymcp)
+2. [在您的设备上安装FrelyCLI](#在设备上安装frelycli)
 
-### 让 Agent 帮你安装
+### 想让Agent连接本地与远程设备?
+1. [在您的设备上安装FrelyCLI](#在设备上安装frelycli)
+
+### 想要共享本地模型给朋友使用?
+
+1. [在您的设备上安装FrelyCLI](#在设备上安装frelycli)
+2. **本地模型共享**：`frely service share model ollama` 把本机模型服务发布为你的个人 Frely Provider。[详情](https://cli.frely.cloud/docs/help/share-local-model/)
+
+## 操作步骤
+
+### 在设备上安装FrelyCLI
+
+#### A Agent帮你安装FrelyCLI
 
 让有 Shell 的 Agent（Claude Code、Codex、pi）安装 CLI、登录并安装 Skill：
 
 ```text
-在这台电脑上安装 Frely CLI 和 frely Skill。macOS 或 Linux 运行 curl -fsSL https://frely.cloud/install.sh | sh；Windows PowerShell 运行 curl.exe -fsSLo "$env:TEMP\frely-install.ps1" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-install.ps1"。向我询问我的邮箱，运行 frely login --email <my email>，再向我要邮件里的 6 位验证码，然后运行 frely login --code <code>。接着运行 frely skill install --host <your host: claude-code, codex, pi or generic>，并阅读它安装的 Skill。在我要求之前，不要运行 frely link on。
+在这台电脑上安装 Frely CLI 和 frely Skill。先向用户询问邮箱，以及是否同时允许远程控制这台电脑（例如从网页版 ChatGPT/Claude），再用这个邮箱按当前操作系统运行安装命令：macOS 或 Linux 运行 curl -fsSL https://frely.cloud/install.sh | sh -s -- --quiet --email <my email>；Windows PowerShell 运行 curl.exe -fsSLo "$env:TEMP\frely-install.ps1" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-install.ps1" -Quiet -Email <my email>。安装完成后会向我的邮箱发送 6 位验证码：向我索要验证码，然后运行 frely login --code <code> --host <your host: claude-code, codex, pi or generic> --quiet（如果我同意远程控制，就加上 --link on，否则不要加），并阅读它安装的 Skill。
 ```
 
 安装的 `frely` Skill 会教 Agent 使用你的账号，只在需要时才建议 FrelyMCP。这种方式不会把这台电脑开放给远程客户端，`frely link on` 才会。[详情](https://cli.frely.cloud/zh/#skill)
 
-### 自己安装
+#### B 手动安装FrelyCLI
 
 `https://frely.cloud/install.sh` 和 `install.ps1` 只安装程序，供脚本和 Agent 使用。也可以用 npm（需要 Node.js 22 或更新版本）：
 
 ```sh
 # macOS / Linux
 curl -fsSL https://frely.cloud/install.sh | sh
+# Agent 用：静默输出（失败才显示详情），并立即发送登录验证码邮件
+curl -fsSL https://frely.cloud/install.sh | sh -s -- --quiet --email you@example.com
 ```
 
 ```powershell
@@ -50,9 +62,23 @@ npm install --global --ignore-scripts frely-cli@latest
 然后登录并为你的 Agent 宿主安装 Skill：
 
 ```sh
-frely login --email <you@example.com>   # 再运行：frely login --code <6 位验证码>
+frely login --email <you@example.com>   # 再运行：frely login --code <6 位验证码> [--host <host>] [--link on]（同时安装 Skill；--link on 同时开启远程控制）
 frely skill install --host <claude-code|codex|pi|workbuddy|codebuddy|generic>
 ```
+
+### 在网页Agent上添加FrelyMCP
+
+1. 在设置中找到连接器相关页面, 添加新连接器/MCP
+2. 连接器名称任意,建议使用`FrelyMCP`
+3. 连接器地址填入 `https://frely.cloud/mcp`
+4. 认证方式选 `OAuth`
+> 如果你没有Frely账号,那么在启动认证的时候就会跳转到Frely登录页面, 你可以在Frely登录页面,使用邮箱创建新账号.
+
+#### ChatGPT图文教程
+教程 [https://frely.cloud/docs/chatgpt](https://frely.cloud/docs/chatgpt/)
+
+#### Claude图文教程
+教程 [https://frely.cloud/docs/claude](https://frely.cloud/docs/claude/)
 
 ## 常用命令
 
@@ -72,57 +98,6 @@ frely skill install --host <claude-code|codex|pi|workbuddy|codebuddy|generic>
 
 全部命令和参数见[命令参考](https://cli.frely.cloud/docs/help/commands/)。`frely help --agent --json` 输出完整的机器可读契约。
 
-## 与 FrelyMCP 配合使用
-
-通过 FrelyMCP，让网页版 ChatGPT、Claude 等没有 Shell 的客户端使用 Frely，或操作另一台电脑。
-
-FrelyMCP 是整个账号共用的一个 MCP 地址：`https://mcp.frely.cloud/mcp`。每台开启了远程控制（`frely link on`）的电脑都在它后面。
-
-### 1. 在电脑上开启远程控制
-
-已安装 `frely` 时，运行 `frely link on`。否则用下面的启动脚本：它安装最新版 `frely` 并替你运行 `frely link on`；随时再运行一次即可升级。
-
-**有浏览器：**
-
-```sh
-# macOS / Linux
-curl -fsSL https://frely.cloud/start.sh | sh
-```
-
-```powershell
-# Windows（PowerShell）
-curl.exe -fsSLo "$env:TEMP\frely-start.ps1" https://frely.cloud/start.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-start.ps1"
-```
-
-浏览器会打开，用于登录（新账号可在同一页面注册）和批准这台电脑，最后输出 MCP URL。工作区默认是 `~/Frely`（自动创建），设置 `FRELY_WORKSPACE=/path` 可共享其他文件夹。AI 客户端需要工作区以外的文件夹时，可以在网页上允许。[详情](https://cli.frely.cloud/docs/help/how-do-i-install/)
-
-**服务器（无浏览器）：** 在 Frely 网站 **My Devices → Add a computer → Create install command** 获取一次性安装命令，或让已连接 FrelyMCP 的 ChatGPT、Claude 添加一台电脑。粘贴到服务器上运行：
-
-```sh
-curl -fsSL https://frely.cloud/start.sh | FRELY_INSTALL_TOKEN=fit_... sh
-```
-
-它会登录你的账号，并在不打开浏览器的情况下开启远程控制。令牌只能用一次，15 分钟内有效。Linux 上请运行 `sudo loginctl enable-linger $USER`，退出 SSH 后服务才能保持在线。[详情](https://cli.frely.cloud/docs/help/install-on-a-server/)
-
-### 2. 把 FrelyMCP 加到客户端
-
-1. 把 `https://mcp.frely.cloud/mcp` 作为使用 OAuth 的远程 MCP 服务添加：
-   - ChatGPT 或 Claude：用这个 URL 添加自定义连接器。
-   - 另一台电脑上的 Claude Code：`claude mcp add --transport http frely "https://mcp.frely.cloud/mcp"`，然后打开 `/mcp` 完成授权。
-2. 登录 Frely 并批准该客户端。
-
-验证连接：让客户端列出工作区的顶层文件名。要停止，在那台电脑上运行 `frely link off`。
-
-- **AI 能做什么**：先 `list_devices`，再在选定的电脑上用 `read`、`edit_file`、`process`、`web_fetch`，账号操作用 `frely_list` 和 `frely_call`。[详情](https://cli.frely.cloud/docs/help/what-can-the-ai-do/)
-- **本机 MCP 服务**：只监听回环地址的服务会被自动发现（`frely link local list`），每个都要在 Frely 上逐个开启才对远程可见。[详情](https://cli.frely.cloud/docs/help/local-mcp-servers/)
-- **授权**：默认 90 天，`frely link on --days 1..365` 可提前续期，URL 永远不变。[详情](https://cli.frely.cloud/docs/help/authorization-expiry/)
-
-## 更多功能
-
-- **Frely 托管的 Agent**：`frely item install <username/name> --host claude-code` 安装为本地 Skill，`frely agent run <username/name>` 调用。[详情](https://cli.frely.cloud/docs/help/install-agents-and-items/)
-- **市场里的 Prompt 和 Skill**：`frely item install <username/name> --host claude-code`（Agent 也用同一条命令，加 `@3` 指定版本 3），付费部分需要账号持有通行证。[详情](https://cli.frely.cloud/docs/help/install-agents-and-items/)
-- **本地模型共享**：`frely service share model ollama` 把本机模型服务发布为你的个人 Frely Provider。[详情](https://cli.frely.cloud/docs/help/share-local-model/)
-- **在终端管理账号**：`frely api list|describe|call`。[详情](https://cli.frely.cloud/docs/help/manage-account-from-cli/)
 
 ## 安全
 
