@@ -1,38 +1,46 @@
 # Frely CLI
 
-[![Frely CLI: let agents access your device from any location](site/assets/og.png)](https://cli.frely.cloud/)
+[![Frely CLI: Let AI agents access your devices](site/assets/og.png)](https://cli.frely.cloud/)
 
-[Website](https://cli.frely.cloud/) · [Docs](https://cli.frely.cloud/docs/) · [Frely](https://frely.cloud/) · [English](README.md) · [简体中文](README.zh-CN.md)
+[Website](https://cli.frely.cloud/) · [Docs](https://cli.frely.cloud/docs/) · [Freely](https://frely.cloud/) · [English](README.md) · [简体中文](README.zh-CN.md)
 
-Frely CLI (`frely-cli`) gives agents with a shell, such as Claude Code, Codex and pi, the `frely` Skill: your agent uses your Frely account and the Store from the terminal. For web ChatGPT and Claude, and to work on another computer, it connects a computer you choose to **FrelyMCP**, so those clients can use the files, shell commands and processes in the folders you allow. The computer connects out to Frely, so you open no ports.
+Frely CLI (`frely-cli`) connects AI agents to your devices: remote computers, local servers, and shared models. For web ChatGPT and Claude, it connects computers you choose to **FrelyMCP** so those clients can use the files and commands in the folders you allow. For your own agents (Claude Code, Codex, pi), it lets them run and update Skills from the terminal.
 
-It is also the command line for your Frely account:
+## Features and Installation
 
-- **Agents, Prompts and Skills**: install a published Frely Agent as a local Skill, or install Prompts and Skills you bought.
-- **Device MCP**: let remote AI clients work on this computer.
-- **Local MCP servers**: pass MCP servers that only run on this computer (for example on `127.0.0.1`) through to remote clients.
-- **Local model sharing**: publish a local Ollama or OpenAI-compatible runtime as your own Frely Provider.
+### Want web ChatGPT or Claude to access your devices?
+1. [Add FreelyMCP to web agents](#add-freelymcp-to-web-agents)
+2. [Install Freely CLI on your computer](#install-freely-cli-on-your-computer)
 
-## Install
+### Want AI agents to access local or remote devices?
+1. [Install Freely CLI on your computer](#install-freely-cli-on-your-computer)
 
-### Let your agent set it up
+### Want to share local models with friends?
+1. [Install Freely CLI on your computer](#install-freely-cli-on-your-computer)
+2. **Local model sharing**: `frely service share model ollama` publishes a local model server's models as your personal Freely Provider. [Details](https://cli.frely.cloud/docs/help/share-local-model/)
+
+## Step-by-Step Instructions
+
+### Install Freely CLI on your computer
+
+#### A. Let your agent install Freely CLI
 
 Ask an agent that has a shell (Claude Code, Codex, pi) to install the CLI, sign in and install the Skill:
 
 ```text
-Install Frely CLI and the frely Skill on this computer. First ask me for my email, and whether I also want to control this computer remotely (for example from ChatGPT or Claude on the web). Then, using that email, run the installer for this operating system: on macOS or Linux run curl -fsSL https://frely.cloud/install.sh | sh -s -- --quiet --email <my email>; on Windows PowerShell run curl.exe -fsSLo "$env:TEMP\frely-install.ps1" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-install.ps1" -Quiet -Email <my email>. It emails me a 6-digit code: ask me for it, then run frely login --code <code> --host <your host: claude-code, codex, pi or generic> --quiet (add --link on if I said yes to remote control; otherwise do not), and read the Skill it installs. Do not run frely link on until I ask for it.
+Install Freely CLI and the frely Skill on this computer. First ask the user for their email, and whether they also want to allow remote control of this computer (for example from ChatGPT or Claude on the web). Then, using that email, run the installer for this operating system: on macOS or Linux run curl -fsSL https://frely.cloud/install.sh | sh -s -- --quiet --email <my email>; on Windows PowerShell run curl.exe -fsSLo "$env:TEMP\frely-install.ps1" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-install.ps1" -Quiet -Email <my email>. The installation emails me a 6-digit code: ask me for it, then run frely login --code <code> --host <your host: claude-code, codex, pi or generic> --quiet (add --link on if I agree to remote control; otherwise do not), and read the Skill it installs.
 ```
 
-The `frely` Skill teaches the agent to use your account and to offer FrelyMCP only when a request needs it. This path does not open this computer to remote clients; `frely link on` does. [More](https://cli.frely.cloud/#skill)
+The installed `frely` Skill teaches the agent to use your account, and to suggest FreelyMCP only when a request needs it. This path does not expose this computer to remote clients; `frely link on` does. [Details](https://cli.frely.cloud/zh/#skill)
 
-### Install it yourself
+#### B. Install Freely CLI manually
 
-`https://frely.cloud/install.sh` and `install.ps1` only install the program, for scripts and agents that need the CLI. Node.js 22 or newer is needed only for npm.
+`https://frely.cloud/install.sh` and `install.ps1` only install the program, for scripts and agents that need the CLI. You can also use npm (Node.js 22 or newer required):
 
 ```sh
 # macOS / Linux
 curl -fsSL https://frely.cloud/install.sh | sh
-# agents: quiet output (details only on failure) and send the sign-in code mail right away
+# For agents: quiet output (details on failure only), sends the login code email right away
 curl -fsSL https://frely.cloud/install.sh | sh -s -- --quiet --email you@example.com
 ```
 
@@ -47,16 +55,30 @@ Or with npm:
 npm install --global --ignore-scripts frely-cli@latest
 ```
 
-The installers check the SHA-256 and measure GitHub Releases and npmmirror in parallel and download from the faster one first (npmjs is the last fallback; set `FRELY_INSTALL_SOURCES` to pin an order). GitHub Releases carry each executable as `frely-<platform>.gz` (use `gunzip`, or 7-Zip/`tar` on Windows) with a `.sha256` of the decompressed file; the installers do this for you, so prefer them. [More](https://cli.frely.cloud/docs/help/install-only/)
+The installers verify SHA-256, download from GitHub Releases first, then fall back to npmmirror and npmjs. [Details](https://cli.frely.cloud/docs/help/install-only/)
 
 Then sign in and install the Skill for your agent host:
 
 ```sh
-frely login --email <you@example.com>   # then: frely login --code <6-digit code> [--host <host>] (also installs the Skill)
+frely login --email <you@example.com>   # Then run: frely login --code <6-digit code> [--host <host>] [--link on] (installs Skill; --link on also turns on remote control)
 frely skill install --host <claude-code|codex|pi|workbuddy|codebuddy|generic>
 ```
 
-## Common commands
+### Add FreelyMCP to web agents
+
+1. Find the connectors section in your settings, add a new connector/MCP
+2. Name the connector anything, we recommend `FreelyMCP`
+3. For the connector URL, enter `https://freely.cloud/mcp`
+4. For authentication, select `OAuth`
+> If you don't have a Freely account, you'll be directed to the Freely login page, where you can create a new account using your email.
+
+#### ChatGPT Tutorial
+Tutorial [https://freely.cloud/docs/chatgpt](https://freely.cloud/docs/chatgpt/)
+
+#### Claude Tutorial
+Tutorial [https://freely.cloud/docs/claude](https://freely.cloud/docs/claude/)
+
+## Common Commands
 
 | Command | What it does |
 | --- | --- |
@@ -67,67 +89,12 @@ frely skill install --host <claude-code|codex|pi|workbuddy|codebuddy|generic>
 | `frely link workspace add <path>` | Share another folder. `frely link workspace list` shows them all. |
 | `frely doctor` | Check sign-in, installation, service and connection. `-v` for details. |
 | `frely update` | Update to the latest version in place. |
-| `frely login` / `frely logout` | Sign in or out of your Frely account. `frely login --email <you@example.com>` then `--code <code>` signs in without a browser. |
+| `frely login` / `frely logout` | Sign in or out of Freely account. |
 | `frely sandbox proxy <url>` | Forward the command sandbox's network traffic to your own HTTP(S) proxy. Without it the CLI uses `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` and, on macOS, the system proxy. `--clear` removes it. A running background service restarts to apply the change. |
 | `frely tunnel <host>:<port>` | Inside a sandboxed command: listen on `127.0.0.1` and forward TCP connections to `host:port` through the sandbox, for database and redis clients. `--local-port N` picks the local port. |
-| `frely uninstall` | Remove Frely from this computer (lists everything first). |
+| `frely uninstall` | Remove Freely from this computer (lists everything first). |
 
-All commands and options: [command reference](https://cli.frely.cloud/docs/help/commands/). `frely help --agent --json` prints the full machine-readable contract; add `--summary` for a short grouped index, or a command id or group (for example `agent.run`, `agent`) for one command family with examples.
-
-## Use with FrelyMCP
-
-Use FrelyMCP from clients with no shell, such as web ChatGPT and Claude, or to work on another computer.
-
-FrelyMCP is one MCP address for your whole account: `https://mcp.frely.cloud/mcp`. Every computer with remote control on (`frely link on`) appears behind it.
-
-### 1. Turn on remote control on the computer
-
-If `frely` is installed, run `frely link on`. Otherwise the start scripts below install the latest `frely` and run `frely link on` for you; run them again any time to update.
-
-**With a browser:**
-
-```sh
-# macOS / Linux
-curl -fsSL https://frely.cloud/start.sh | sh
-```
-
-```powershell
-# Windows (PowerShell)
-curl.exe -fsSLo "$env:TEMP\frely-start.ps1" https://frely.cloud/start.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-start.ps1"
-```
-
-The browser opens to sign in (new accounts can register there) and to approve this computer, then the MCP URL is printed. The workspace is `~/Frely` by default (created for you); set `FRELY_WORKSPACE=/path` to share another folder. When an AI client needs a folder outside it, you can allow that folder on the web. [More](https://cli.frely.cloud/docs/help/how-do-i-install/)
-
-**On a server (no browser):** get a one-time install command on the Frely website (**My Devices → Add a computer → Create install command**), or ask ChatGPT or Claude connected to FrelyMCP to add a computer. Paste it on the server:
-
-```sh
-curl -fsSL https://frely.cloud/start.sh | FRELY_INSTALL_TOKEN=fit_... sh
-```
-
-It signs in to your account and turns remote control on without a browser. The token works once and expires after 15 minutes. On Linux, run `sudo loginctl enable-linger $USER` so the service stays online after you log out of SSH. [More](https://cli.frely.cloud/docs/help/install-on-a-server/)
-
-### 2. Add FrelyMCP to your client
-
-1. Add `https://mcp.frely.cloud/mcp` as a remote MCP server with OAuth:
-   - ChatGPT or Claude: add a custom connector with the URL.
-   - Claude Code on another computer: `claude mcp add --transport http frely "https://mcp.frely.cloud/mcp"`, then open `/mcp` to authorize.
-2. Sign in to Frely and approve the client.
-
-To check the connection, ask the client to list the top-level names in your workspace. To stop it, run `frely link off` on that computer.
-
-- **What the AI can do**: `list_devices`, then `read`, `edit_file`, `process` and `web_fetch` on the computer you pick, plus your account through `frely_list` and `frely_call`. [More](https://cli.frely.cloud/docs/help/what-can-the-ai-do/)
-- **Local MCP servers**: loopback servers are found automatically (`frely link local list`); each stays hidden until you turn it on in Frely. [More](https://cli.frely.cloud/docs/help/local-mcp-servers/)
-- **Authorization**: access lasts 90 days by default; `frely link on --days 1..365` renews early. The URL never changes. [More](https://cli.frely.cloud/docs/help/authorization-expiry/)
-
-## More features
-
-- **Agents on this computer**: `frely agent local add <username/name>` downloads an Agent's repository into its own folder and `frely agent local start <name>` runs it inside the Frely sandbox. It can write only that folder, cannot read your SSH or cloud credentials, and never sees your Frely API key; its model calls go through a local proxy that adds the key. It can reach Frely's API and, after you approve each one once, the sites its `frely.yaml` lists. To let your own FrelyMCP call one that serves A2A on a loopback port, use `frely service share --type a2a --port <n> --label agent-<name>`. [Details](docs/agent-local.md)
-- **Tasks on this computer**: `frely task add <name> [--model <name>] -- <command>` defines a command that runs inside the Frely sandbox; `frely task start <name> --wait` runs it in its own worker that survives a closed terminal or a reconnect, and `--cron` runs it on a schedule through the background service, and `frely task share <name>` offers it as an A2A service. [Details](docs/tasks.md)
-- **Frely-hosted Agents**: `frely item install <username/name> --host claude-code` installs an Agent as a local Skill; `frely agent run <username/name>` calls it. [More](https://cli.frely.cloud/docs/help/install-agents-and-items/)
-- **Marketplace Prompts and Skills**: `frely item install <username/name> --host claude-code` (the same command installs Agents too; add `@3` for version 3). Paid parts install only when your account holds a pass. `frely item update` lists installed items that have a newer version; it changes nothing until you run `frely item update <folder>`. [More](https://cli.frely.cloud/docs/help/install-agents-and-items/)
-- **Local model sharing**: `frely service share model ollama` publishes a local model server's models and prints the AccessPoint made for each one (price 0 until you set it; put it in a Plan to sell it). A model endpoint on your private network works too (`--url http://192.168.1.20:3000/v1 --key-stdin`; you confirm the address in a terminal). To use a model only from tasks on this computer, register it with `frely provider add` instead. [More](https://cli.frely.cloud/docs/help/share-local-model/)
-- **Share a local web page**: `frely share 3000` asks first, then prints a private link to `http://127.0.0.1:3000` through Frely's relay until you press Ctrl+C or it expires (at most 24 hours). Relay traffic is a plan allowance per UTC week; direct connections are not counted. Not the same as `frely service share model` (local models) or `frely tunnel` (inside the command sandbox).
-- **Your account from the terminal**: `frely api list|describe|call`. [More](https://cli.frely.cloud/docs/help/manage-account-from-cli/)
+All commands and options: [command reference](https://cli.frely.cloud/docs/help/commands/). `frely help --agent --json` prints the full machine-readable contract.
 
 ## Safety
 
@@ -136,8 +103,8 @@ File tools stay inside the shared workspaces and protect credential and shell st
 ## Documentation
 
 - Help: [cli.frely.cloud/docs](https://cli.frely.cloud/docs/) ([update](https://cli.frely.cloud/docs/help/update/), [doctor](https://cli.frely.cloud/docs/help/doctor/), [uninstall](https://cli.frely.cloud/docs/help/uninstall/))
-- Contracts, for contributors: [Device MCP](docs/device-mcp.md) · [Device Relay transport](docs/device-transport.md) · [MCP OAuth contract](docs/mcp-oauth-relay-contract.md) · [`frely api`](docs/api.md) · [Frely Network (preview)](docs/frely-network.md) · [self-update](docs/self-update.md) · [service maintenance](docs/service-maintenance.md)
+- Contracts, for contributors: [Device MCP](docs/device-mcp.md) · [Device Relay transport](docs/device-transport.md) · [MCP OAuth contract](docs/mcp-oauth-relay-contract.md) · [`frely api`](docs/api.md) · [Freely Network (preview)](docs/freely-network.md) · [self-update](docs/self-update.md) · [service maintenance](docs/service-maintenance.md)
 
 ## License and trademarks
 
-`frely-cli` is licensed under the Apache License 2.0; see [`LICENSE`](LICENSE). The Frely name, logos and product names are not licensed as trademarks; see [`TRADEMARKS.md`](TRADEMARKS.md). See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development and [`SECURITY.md`](SECURITY.md) to report a vulnerability.
+`frely-cli` is licensed under the Apache License 2.0; see [`LICENSE`](LICENSE). The Freely name, logos and product names are not licensed as trademarks; see [`TRADEMARKS.md`](TRADEMARKS.md). See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development and [`SECURITY.md`](SECURITY.md) to report a vulnerability.
