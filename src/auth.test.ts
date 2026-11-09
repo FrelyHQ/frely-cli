@@ -446,3 +446,21 @@ test("code mails are throttled locally and need a plain address", async () => {
     if (saved === undefined) delete process.env.XDG_RUNTIME_DIR; else process.env.XDG_RUNTIME_DIR = saved;
   }
 });
+
+test("the emailed code can ask for device MCP in the same step and returns the preapproval", async (t) => {
+  const { completeEmailDeviceLogin } = await import("./auth.js");
+  const oldFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = oldFetch; });
+  const bodies: Record<string, unknown>[] = [];
+  globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return Response.json({ state: "signed_in", user: { id: "u1", email: "t@x.test" }, mcpPreapproval: "pre.token" });
+  }) as typeof fetch;
+  const challenge = { challengeId: "c1", userCode: "ABCDEFGH", deviceCode: "dev", email: "t***@x.test", expiresIn: 600 };
+  const mcp = { keyThumbprint: "thumb", workspace: "/home/u/Frely", days: 90 };
+  const withMcp = await completeEmailDeviceLogin("https://test.invalid", challenge, "123456", mcp);
+  assert.equal(withMcp.mcpPreapproval, "pre.token");
+  assert.deepEqual(bodies[0]!.mcp, mcp);
+  await completeEmailDeviceLogin("https://test.invalid", challenge, "123456");
+  assert.equal("mcp" in bodies[1]!, false);
+});

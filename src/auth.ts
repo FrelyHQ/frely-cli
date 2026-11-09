@@ -249,7 +249,9 @@ export async function completeEmailDeviceLogin(
   relayInput: string,
   challenge: EmailDeviceChallenge,
   code: string,
-): Promise<{ user: PublicUser; sessionBound: boolean }> {
+  /** Asks for device MCP in the same step: entering the emailed code is then the owner's consent, and the answer carries the preapproval. */
+  mcp?: { keyThumbprint: string; workspace: string; days: number },
+): Promise<{ user: PublicUser; sessionBound: boolean; mcpPreapproval?: string }> {
   const relayUrl = normalizeRelayUrl(relayInput);
 
   const response = await fetch(`${relayUrl}/api/auth/device/email/verify`, {
@@ -260,6 +262,7 @@ export async function completeEmailDeviceLogin(
       challengeId: challenge.challengeId,
       code,
       ...(challenge.install ? { install: challenge.install } : {}),
+      ...(mcp ? { mcp } : {}),
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
@@ -288,7 +291,7 @@ export async function completeEmailDeviceLogin(
 
   // After email verification, device code has been approved
   // Caller should poll /oauth2/token to get access token
-  return { user: publicUser, sessionBound: false };
+  return { user: publicUser, sessionBound: false, ...(typeof data.mcpPreapproval === "string" ? { mcpPreapproval: data.mcpPreapproval } : {}) };
 }
 
 /**
