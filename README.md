@@ -20,7 +20,7 @@ It is also the command line for your Frely account:
 Ask an agent that has a shell (Claude Code, Codex, pi) to install the CLI, sign in and install the Skill:
 
 ```text
-Install Frely CLI and the frely Skill on this computer. On macOS or Linux run curl -fsSL https://frely.cloud/install.sh | sh; on Windows PowerShell run curl.exe -fsSLo "$env:TEMP\frely-install.ps1" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-install.ps1". Ask me for my email, run frely login --email <my email>, ask me for the 6-digit code from the email, then run frely login --code <code>. Then run frely skill install --host <your host: claude-code, codex, pi or generic> and read the Skill it installs. Do not run frely link on until I ask for it.
+Install Frely CLI and the frely Skill on this computer. First ask me for my email. Then, using that email, run the installer for this operating system: on macOS or Linux run curl -fsSL https://frely.cloud/install.sh | sh -s -- --quiet --email <my email>; on Windows PowerShell run curl.exe -fsSLo "$env:TEMP\frely-install.ps1" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\frely-install.ps1" -Quiet -Email <my email>. It emails me a 6-digit code: ask me for it, then run frely login --code <code> --host <your host: claude-code, codex, pi or generic> --quiet, and read the Skill it installs. Do not run frely link on until I ask for it.
 ```
 
 The `frely` Skill teaches the agent to use your account and to offer FrelyMCP only when a request needs it. This path does not open this computer to remote clients; `frely link on` does. [More](https://cli.frely.cloud/#skill)
@@ -32,6 +32,8 @@ The `frely` Skill teaches the agent to use your account and to offer FrelyMCP on
 ```sh
 # macOS / Linux
 curl -fsSL https://frely.cloud/install.sh | sh
+# agents: quiet output (details only on failure) and send the sign-in code mail right away
+curl -fsSL https://frely.cloud/install.sh | sh -s -- --quiet --email you@example.com
 ```
 
 ```powershell
@@ -50,7 +52,7 @@ The installers check the SHA-256 and measure GitHub Releases and npmmirror in pa
 Then sign in and install the Skill for your agent host:
 
 ```sh
-frely login --email <you@example.com>   # then: frely login --code <6-digit code>
+frely login --email <you@example.com>   # then: frely login --code <6-digit code> [--host <host>] (also installs the Skill)
 frely skill install --host <claude-code|codex|pi|workbuddy|codebuddy|generic>
 ```
 

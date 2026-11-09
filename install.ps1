@@ -1,4 +1,10 @@
+param([switch]$Quiet, [string]$Email)
 $ErrorActionPreference = 'Stop'
+# -Quiet (agents): print only the one-line result, warnings and errors. -Email: after installing, send the sign-in code mail.
+function Say([string]$text) { if (-not $Quiet) { Write-Output $text } }
+if ($Email) {
+  if ($Email.Length -gt 254 -or $Email -notmatch '^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$') { throw '-Email must be a plain address like name@example.com.' }
+}
 $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
 if ($architecture -notin @('x64', 'arm64')) { throw 'This Windows CPU architecture has no Frely release artifact.' }
 $asset = "frely-windows-$architecture.exe"
@@ -223,8 +229,8 @@ try {
     }
   }
   if ($env:FRELY_INSTALL_NO_PROFILE -ne '1') {
-    if ($freshOk -and $inheritedOk) { Write-Output "Verified: 'frely' resolves from a new terminal and from this process." }
-    elseif ($freshOk -and $shim) { Write-Output "Verified: 'frely' resolves from a new terminal; this process' PATH was stale, so a forwarder was added at $shim (open a new terminal if 'frely' is still not found)." }
+    if ($freshOk -and $inheritedOk) { Say "Verified: 'frely' resolves from a new terminal and from this process." }
+    elseif ($freshOk -and $shim) { Say "Verified: 'frely' resolves from a new terminal; this process' PATH was stale, so a forwarder was added at $shim (open a new terminal if 'frely' is still not found)." }
     else {
       Write-Warning "'frely' does not resolve from every shell yet."
       Write-Output "Run it by full path: `"$target`" <command>  (agents: use this path, do not reinstall)."
@@ -232,5 +238,11 @@ try {
       if (-not $pathPersisted) { Write-Output "The user PATH was not updated; add $directory to PATH manually." }
     }
   }
-  Write-Output 'Basic commands require no keyring setup. MCP authorization begins with frely link on.'
+  Say 'Basic commands require no keyring setup. MCP authorization begins with frely link on.'
+  # Sign-in step 1: the mail goes out now so the user only has to read the 6 digits back (finish with: frely login --code <code> --host <host>).
+  if ($Email) {
+    $loginArgs = @('login', '--email', $Email, '--no-wait'); if ($Quiet) { $loginArgs += '--quiet' }
+    & $target @loginArgs
+    if ($LASTEXITCODE -ne 0) { throw "Frely was installed, but the sign-in code could not be sent. Run: `"$target`" login --email $Email --no-wait" }
+  }
 } finally { Remove-Item -LiteralPath $stage -Recurse -Force }

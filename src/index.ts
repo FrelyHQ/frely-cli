@@ -552,6 +552,9 @@ async function main(): Promise<void> {
     const code = option(args, "--code");
     const invite = option(args, "--invite");
     const json = args.includes("--json");
+    const quiet = args.includes("--quiet") || args.includes("-q");
+    const loginHost = option(args, "--host");
+    if (loginHost !== undefined) skillHost(loginHost);
 
     // Picks up a browser login whose process was killed before the owner approved; blocks until approval, so the calling agent continues when it returns.
     if (args.includes("--wait")) {
@@ -592,7 +595,12 @@ async function main(): Promise<void> {
           stdout.write(`Logged in as ${user.email}.\n`);
           if (pendingChallenge.install) stdout.write(`This code also confirmed installing ${pendingChallenge.install.name}${pendingChallenge.install.gift ? " and claiming its gift" : ""}. Run the same install command again; it needs no other confirmation.\n`);
           await installStandbyService();
-          stdout.write("Run `frely link on` on the computer you want to control, then connect your MCP client with OAuth.\n");
+          // One step for agents: sign in, standby (remote control stays `null` until the owner turns it on) and the frely Skill.
+          if (loginHost) {
+            const entry = await installEntrySkill({ host: skillHost(loginHost), scope: "global" });
+            stdout.write(quiet ? `Skill: frely at ${entry.path}. Restart or reload the agent session so it rescans Skills.\n` : `Skill: frely\nPath: ${entry.path}\n${linkLines(entry.links)}Restart or reload the agent session so it rescans Skills.\n`);
+          }
+          if (!quiet) stdout.write("Run `frely link on` on the computer you want to control, then connect your MCP client with OAuth.\n");
         } catch (error) {
           stdout.write(`Verification failed: ${error instanceof Error ? error.message : String(error)}\n`);
           process.exitCode = 1;
@@ -613,10 +621,11 @@ async function main(): Promise<void> {
             ...(challenge.reference ? { reference: challenge.reference } : {}),
           }, null, 2) + "\n");
         } else {
-          stdout.write(`Verification code sent to ${challenge.email}\n`);
-          if (challenge.reference) stdout.write(`Mail reference: ${challenge.reference} (use the newest mail with this reference; enter only the 6 digits)\n`);
-          stdout.write(`Expires in: ${challenge.expiresIn} seconds\n`);
-          stdout.write(wait ? "Click the link in the email, or run: frely login --code <code>. Waiting for up to 10 minutes...\n" : `Run: frely login --code <code>\n`);
+          if (quiet) stdout.write(`Code sent to ${challenge.email}${challenge.reference ? ` (mail reference ${challenge.reference})` : ""}. Ask the user for the 6 digits, then run: frely login --code <code> --host <your host: claude-code, codex, pi or generic>${wait ? " (this command waits up to 10 minutes first)" : ""}\n`);
+          else stdout.write(`Verification code sent to ${challenge.email}\n`);
+          if (!quiet && challenge.reference) stdout.write(`Mail reference: ${challenge.reference} (use the newest mail with this reference; enter only the 6 digits)\n`);
+          if (!quiet) stdout.write(`Expires in: ${challenge.expiresIn} seconds\n`);
+          if (!quiet) stdout.write(wait ? "Click the link in the email, or run: frely login --code <code>. Waiting for up to 10 minutes...\n" : `Run: frely login --code <code>\n`);
         }
         if (wait) {
           try {

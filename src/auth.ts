@@ -174,6 +174,8 @@ export async function startOrResumeEmailLogin(relayInput: string, email: string,
   if (pending && pending.emailInput === input && JSON.stringify(pending.install ?? null) === JSON.stringify(install ?? null) && emailChallengeSecondsLeft(pending) > 5) {
     return { challenge: pending, resumed: true };
   }
+  assertPlainEmail(input);
+  await takeEmailSendSlot();
   const challenge = await initEmailDeviceLogin(relayUrl, email, invite, install);
   const saved = { ...challenge, savedAt: Date.now(), emailInput: input };
   await savePendingEmailChallenge(relayUrl, saved);
@@ -981,6 +983,30 @@ function publicError(payload: unknown, status: number): string {
   const error = root.error && typeof root.error === "object" ? root.error as Record<string, unknown> : root;
   const message = typeof error.message === "string" ? error.message : typeof error.error_description === "string" ? error.error_description : null;
   return message || `Frely request failed with HTTP ${status}.`;
+}
+
+/** A plain mailbox address only: the code mail goes to whatever is typed here, so reject anything that is not one address (backend limits per IP and per recipient apply on top). */
+export function assertPlainEmail(email: string): void {
+  if (email.length > 254 || !/^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/u.test(email)) throw new Error("Enter one plain email address like name@example.com.");
+}
+
+export const EMAIL_SEND_MIN_GAP_MS = 60_000;
+export const EMAIL_SEND_MAX_PER_HOUR = 5;
+
+/**
+ * Local brake on code mails (any address): at most one a minute and five an hour from this computer, so a looping script or agent cannot
+ * mail-bomb an address. A new mail is only needed after the pending one expired; resuming never counts. The backend enforces the real
+ * limits; this one only stops honest mistakes early. Throws with the wait time and tells the caller not to retry in a loop.
+ */
+export async function takeEmailSendSlot(now = Date.now()): Promise<void> {
+  const path = join(dirname(pendingEmailChallengePath()), "email-send-log.json");
+  let sent: number[] = [];
+  try { sent = (JSON.parse(await readFile(path, "utf8")) as number[]).filter((time) => typeof time === "number" && now - time < 3_600_000); } catch { /* no log yet */ }
+  const last = sent.length > 0 ? Math.max(...sent) : 0;
+  if (now - last < EMAIL_SEND_MIN_GAP_MS) throw new Error(`A code mail was just sent. Check the mailbox, or wait ${Math.ceil((EMAIL_SEND_MIN_GAP_MS - (now - last)) / 1000)} seconds before asking for another. Do not retry in a loop.`);
+  if (sent.length >= EMAIL_SEND_MAX_PER_HOUR) throw new Error(`Too many code mails from this computer in the last hour (limit ${EMAIL_SEND_MAX_PER_HOUR}). Try again later. Do not retry in a loop.`);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify([...sent, now]), { mode: 0o600 });
 }
 
 function pendingEmailChallengePath(): string {
