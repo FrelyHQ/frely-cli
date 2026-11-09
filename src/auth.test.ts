@@ -326,6 +326,29 @@ test("concurrent callers share one refresh and the lock is released afterwards",
   await assert.rejects(readFile(join(dirname(authConfigPath()), "refresh.lock")), /ENOENT/);
 });
 
+test("a refreshed login the credential store refuses is kept in memory, so the rotated-away token is never sent again", async (t) => {
+  const sent: string[] = [];
+  let calls = 0;
+  const login = await withExpiredLogin(t, () => { calls += 1; return Response.json({ access_token: `synthetic-next-${calls}`, refresh_token: `synthetic-refresh-${calls + 1}`, token_type: "bearer", expires_in: 3600 }); });
+  const originalSet = basicCredentialStore.setPassword.bind(basicCredentialStore);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string | URL | Request, options?: RequestInit) => {
+    const body = new URLSearchParams(String(options?.body));
+    if (body.get("grant_type") === "refresh_token") sent.push(body.get("refresh_token")!);
+    return originalFetch(url, options);
+  }) as typeof fetch;
+  basicCredentialStore.setPassword = async () => { throw new Error("store is read-only"); };
+  const stderr = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (() => true) as typeof process.stderr.write;
+  t.after(() => { basicCredentialStore.setPassword = originalSet; process.stderr.write = stderr; globalThis.fetch = originalFetch; });
+  const { refreshLoginCredential } = await import("./auth.js");
+  assert.equal((await requireLogin()).credential.value, "synthetic-next-1");
+  // The store still holds the first refresh token; a forced refresh must send the rotated one.
+  await refreshLoginCredential();
+  assert.equal(login.refreshCalls(), 2);
+  assert.deepEqual(sent, ["synthetic-refresh", "synthetic-refresh-2"]);
+});
+
 test("a login another process refreshes while this one waits on the lock is reused, not refreshed again", async (t) => {
   const login = await withExpiredLogin(t, () => Response.json({ error: "invalid_grant" }, { status: 400 }));
   const lock = join(dirname(authConfigPath()), "refresh.lock");

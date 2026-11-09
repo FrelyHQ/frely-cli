@@ -455,6 +455,7 @@ export async function logout(): Promise<void> {
     return;
   }
   const key = accountKey(config.relayUrl);
+  unsavedRefresh.delete(key);
   const credential = await loadCredential(config, false);
   if (credential?.scheme === "cookie") {
     await fetchWithTimeout(`${config.relayUrl}/api/auth/logout`, {
@@ -790,15 +791,20 @@ function bearerFromStored(stored: StoredOAuthCredential): AuthCredential {
   return { scheme: "bearer", value: stored.accessToken, ...(stored.refreshToken ? { refreshToken: stored.refreshToken } : {}), expiresAt: stored.expiresAt, ...(stored.sessionBindingId ? { sessionBindingId: stored.sessionBindingId } : {}), ...(stored.mcpToken ? { mcpToken: stored.mcpToken } : {}) };
 }
 
+// Refreshed logins the credential store refused to save (headless host, locked keychain). The server has already rotated the refresh token,
+// so the stale copy still in the store must never be sent again: it reads as a stolen token and the server revokes the whole login.
+const unsavedRefresh = new Map<string, StoredOAuthCredential>();
+
 async function saveRefreshedCredential(key: string, refreshed: StoredOAuthCredential): Promise<void> {
   const value = JSON.stringify(refreshed satisfies StoredOAuthCredential);
-  try {
-    await credentialStore.setPassword(SERVICE, key, value);
-  } catch {
-    await delay(200);
-    // The new token is already valid on the server; if the store still refuses, keep working in memory rather than failing the call.
-    await credentialStore.setPassword(SERVICE, key, value).catch((error: unknown) => debugAuth(`stage=refresh save_failed=${error instanceof Error ? error.message : "unknown"}`));
+  let failure: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try { await credentialStore.setPassword(SERVICE, key, value); unsavedRefresh.delete(key); return; }
+    catch (error) { failure = error; await delay(200 * (attempt + 1)); }
   }
+  // The new token is already valid on the server: keep it in this process and say so, because other processes will read the stale copy.
+  unsavedRefresh.set(key, refreshed);
+  process.stderr.write(`Frely could not save the refreshed login (${failure instanceof Error ? failure.message : "unknown error"}); it is kept in memory only. Fix the credential store, or run \`frely login\` again after a restart.\n`);
 }
 
 /**
@@ -811,8 +817,15 @@ async function refreshStoredCredential(config: CliConfig, started: StoredOAuthCr
   const pending = inflightRefresh.get(key);
   if (pending) return pending;
   const run = withRefreshLock(async () => {
-    const latest = parseStoredCredential(await credentialStore.getPassword(SERVICE, key).catch(() => null));
-    if (latest) {
+    let latest = parseStoredCredential(await credentialStore.getPassword(SERVICE, key).catch(() => null));
+    const unsaved = unsavedRefresh.get(key);
+    if (unsaved && latest && latest.expiresAt >= unsaved.expiresAt) unsavedRefresh.delete(key);
+    else if (unsaved) {
+      // The store still holds the token the server rotated away; the in-memory login is the current one.
+      if (!force && unsaved.expiresAt > Date.now() + 30_000) return bearerFromStored(unsaved);
+      latest = unsaved;
+    }
+    if (latest && latest !== unsaved) {
       const rotated = Boolean(latest.refreshToken) && latest.refreshToken !== started.refreshToken;
       if (rotated || (!force && latest.expiresAt > Date.now() + 30_000)) return bearerFromStored(latest);
     }
