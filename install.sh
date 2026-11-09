@@ -2,7 +2,27 @@
 set -eu
 umask 077
 
-fail() { printf '%s\n' "frely-cli install failed: $*" >&2; exit 1; }
+# --quiet (agents): progress goes to a log that is shown only when the install fails. --email ADDRESS: after installing, send the sign-in code mail.
+quiet=0 email=
+log="$(mktemp "${TMPDIR:-/tmp}/frely-install-log.XXXXXX")"
+fail() {
+  if [ "${quiet:-0}" = 1 ] && [ -s "${log:-}" ]; then tail -n 40 "$log" >&2; fi
+  printf '%s\n' "frely-cli install failed: $*" >&2; exit 1
+}
+note() { if [ "$quiet" = 1 ]; then printf "$@" >>"$log"; else printf "$@" >&2; fi; }
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --quiet|-q) quiet=1 ;;
+    --email) [ $# -ge 2 ] || fail "--email needs an address."; email="$2"; shift ;;
+    --email=*) email="${1#--email=}" ;;
+    *) fail "Unknown option: $1 (use --quiet, --email <address>)." ;;
+  esac
+  shift
+done
+if [ -n "$email" ]; then
+  case "$email" in *[!A-Za-z0-9.@_+-]*|*@*@*|@*|*@|*@*[!.]@*) fail "--email must be a plain address like name@example.com." ;; esac
+  case "$email" in *@*.*) [ "${#email}" -le 254 ] || fail "--email is too long." ;; *) fail "--email must be a plain address like name@example.com." ;; esac
+fi
 case "$(uname -s)" in Darwin) os=darwin ;; Linux) os=linux ;; *) fail "Use install.ps1 on Windows." ;; esac
 case "$(uname -m)" in x86_64|amd64) arch=x64 ;; arm64|aarch64) arch=arm64 ;; *) fail "This CPU architecture has no Frely release artifact." ;; esac
 libc=
@@ -25,7 +45,7 @@ mkdir -p "$install_dir"
 [ -w "$install_dir" ] || fail "Install directory is not writable by this user."
 # Download into the destination filesystem so replacement uses rename, not a partial copy.
 stage="$(mktemp -d "$install_dir/.frely-install.XXXXXX")"
-trap 'rm -rf "$stage"' EXIT HUP INT TERM
+trap 'rm -rf "$stage" "$log"' EXIT HUP INT TERM
 # fetch URL DESTINATION: a system HTTPS downloader only. A stalled transfer (under 50 KB/s for 20 s) counts as unreachable.
 # FRELY_RELEASE_DIR serves a local release directory for tests.
 fetch() {
@@ -120,10 +140,10 @@ for source in $sources; do
   esac
   [ -z "$downloaded" ] || break
   rm -rf "$stage/$asset" "$stage/$asset.gz" "$stage/$asset.sha256" "$stage/npm" "$stage/package.tgz" "$stage/meta.json"
-  printf 'Frely: %s unavailable or failed verification; trying the next source.\n' "$source" >&2
+  note 'Frely: %s unavailable or failed verification; trying the next source.\n' "$source"
 done
 [ -n "$downloaded" ] || fail "No source supplied a verified release (checksum mismatch or no connection); installation was not changed."
-printf 'Frely: using %s\n' "$downloaded" >&2
+note 'Frely: using %s\n' "$downloaded"
 chmod 755 "$stage/$asset"
 "$stage/$asset" --version >/dev/null || fail "The downloaded executable could not run."
 [ ! -L "$install_dir/frely" ] || fail "Existing frely is a symbolic link; choose another FRELY_INSTALL_DIR."
@@ -134,11 +154,11 @@ mv -f "$stage/$asset" "$install_dir/frely"
 add_user_bin_to_profile() {
   profile="$1"
   if [ -L "$profile" ]; then
-    printf 'Frely: skipped symbolic-link shell profile: %s\n' "$profile" >&2
+    note 'Frely: skipped symbolic-link shell profile: %s\n' "$profile"
     return 0
   fi
   if [ -e "$profile" ] && [ ! -f "$profile" ]; then
-    printf 'Frely: skipped non-file shell profile: %s\n' "$profile" >&2
+    note 'Frely: skipped non-file shell profile: %s\n' "$profile"
     return 0
   fi
   if grep -Fq '# Frely user bin' "$profile" 2>/dev/null; then return 0; fi
@@ -169,5 +189,10 @@ if [ -n "$first_frely" ] && [ "$first_frely" != "$install_dir/frely" ]; then
     printf "Frely: warning: 'frely' on PATH resolves to %s (version %s), not the one just installed (%s). Remove it, put %s first on PATH, or run %s.\n" "$first_frely" "$first_version" "$new_version" "$install_dir" "$install_dir/frely" >&2
   fi
 fi
-printf '%s\n' 'Basic commands require no keyring setup. MCP authorization begins with frely link on.'
-case ":${PATH:-}:" in *":$install_dir:"*) ;; *) printf 'This terminal can use %s; new shells use frely.\n' "$install_dir/frely" ;; esac
+note '%s\n' 'Basic commands require no keyring setup. MCP authorization begins with frely link on.'
+case ":${PATH:-}:" in *":$install_dir:"*) ;; *) note 'This terminal can use %s; new shells use frely.\n' "$install_dir/frely" ;; esac
+# Sign-in step 1: the mail goes out now so the user only has to read the 6 digits back (finish with: frely login --code <code> --host <host>).
+if [ -n "$email" ]; then
+  if [ "$quiet" = 1 ]; then "$install_dir/frely" login --email "$email" --no-wait --quiet
+  else "$install_dir/frely" login --email "$email" --no-wait; fi || fail "Frely was installed, but the sign-in code could not be sent. Run: $install_dir/frely login --email $email --no-wait"
+fi

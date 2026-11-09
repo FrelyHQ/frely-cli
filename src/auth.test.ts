@@ -413,7 +413,8 @@ test("an install sign-in resumes a live challenge without a second email, and fi
   assert.equal(first.resumed, false);
   assert.equal((await startOrResumeEmailLogin("https://test.invalid", "t@x.test", undefined, install)).resumed, true);
   assert.equal(mails, 1);
-  // Another address or install is a different sign-in and sends its own mail.
+  // Another address or install is a different sign-in and sends its own mail (the local send brake is cleared here).
+  await rm(join(directory, "frely", "email-send-log.json"), { force: true });
   assert.equal((await startOrResumeEmailLogin("https://test.invalid", "other@x.test", undefined, install)).resumed, false);
   assert.equal(mails, 2);
   approved = true;
@@ -425,4 +426,23 @@ test("an install sign-in resumes a live challenge without a second email, and fi
 test("waiting for an email sign-in whose time ran out says to run the command again", async () => {
   const { waitEmailDeviceLogin, EmailLoginTimeout } = await import("./auth.js");
   await assert.rejects(waitEmailDeviceLogin("https://test.invalid", { challengeId: "c", userCode: "U", deviceCode: "d", email: "t***@x.test", expiresIn: 600, savedAt: Date.now() - 700_000 }), EmailLoginTimeout);
+});
+
+test("code mails are throttled locally and need a plain address", async () => {
+  const { takeEmailSendSlot, assertPlainEmail, EMAIL_SEND_MAX_PER_HOUR } = await import("./auth.js");
+  const dir = await mkdtemp(join(tmpdir(), "frely-throttle-"));
+  const saved = process.env.XDG_RUNTIME_DIR;
+  process.env.XDG_RUNTIME_DIR = dir;
+  try {
+    const start = Date.now();
+    await takeEmailSendSlot(start);
+    await assert.rejects(takeEmailSendSlot(start + 1000), /just sent/u);
+    for (let i = 1; i < EMAIL_SEND_MAX_PER_HOUR; i += 1) await takeEmailSendSlot(start + i * 61_000);
+    await assert.rejects(takeEmailSendSlot(start + EMAIL_SEND_MAX_PER_HOUR * 61_000), /Too many/u);
+    await takeEmailSendSlot(start + 3_700_000 + 61_000);
+    assert.doesNotThrow(() => assertPlainEmail("a.b+c@x.example"));
+    for (const bad of ["a@b", "a@b.c,d@e.f", "a b@c.d", "<a@b.c>"]) assert.throws(() => assertPlainEmail(bad));
+  } finally {
+    if (saved === undefined) delete process.env.XDG_RUNTIME_DIR; else process.env.XDG_RUNTIME_DIR = saved;
+  }
 });
