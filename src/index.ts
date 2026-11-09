@@ -2,8 +2,9 @@
 import { formatApprovalCode } from "./approval-code.js";
 import { applyDataDir, activeDataDir } from "./data-dir.js";
 import { update } from "./update/update.js";
-import { requireMcpAuthorization, inspectMcpMetadata, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, lockLinkOnServer } from "./mcp-authorization.js";
-import { chmod, readFile, stat, writeFile } from "node:fs/promises";
+import { requireMcpAuthorization, inspectMcpMetadata, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, lockLinkOnServer, generateMcpKey, parseMcpDays, MCP_DEFAULT_DAYS } from "./mcp-authorization.js";
+import { ensureDefaultWorkspace } from "./default-workspace.js";
+import { chmod, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { sshProxyConnect } from "./runtime/ssh-proxy.js";
 import { parseTunnelArguments, startTunnel, tunnelUsage } from "./runtime/tunnel.js";
 import { runSandboxProxyCommand } from "./runtime/sandbox-proxy.js";
@@ -554,6 +555,10 @@ async function main(): Promise<void> {
     const json = args.includes("--json");
     const quiet = args.includes("--quiet") || args.includes("-q");
     const loginHost = option(args, "--host");
+    // `--link on` (with --code): entering the emailed code also turns remote control on for this computer, with no second approval.
+    const linkFlag = option(args, "--link");
+    if (linkFlag !== undefined && linkFlag !== "on") throw new Error("--link only accepts `on`.");
+    const linkOnAtLogin = linkFlag === "on";
     if (loginHost !== undefined) skillHost(loginHost);
 
     // Picks up a browser login whose process was killed before the owner approved; blocks until approval, so the calling agent continues when it returns.
@@ -583,8 +588,19 @@ async function main(): Promise<void> {
           }
           const deviceId = localDeviceId((await readConfig().catch(() => null))?.deviceId);
           let user;
+          let preset: { privateKeyPem: string; preapproval: string } | undefined;
+          let linkRequest: { workspace: string; days: number } | undefined;
           try {
-            await completeEmailDeviceLogin(relayUrl, pendingChallenge, code);
+            let mcp: { keyThumbprint: string; workspace: string; days: number } | undefined;
+            let privateKeyPem = "";
+            if (linkOnAtLogin) {
+              const key = generateMcpKey();
+              privateKeyPem = key.privateKeyPem;
+              linkRequest = { workspace: await realpath(await ensureDefaultWorkspace()), days: parseMcpDays(process.env.FRELY_MCP_DAYS ?? MCP_DEFAULT_DAYS) };
+              mcp = { keyThumbprint: key.keyThumbprint, ...linkRequest };
+            }
+            const verified = await completeEmailDeviceLogin(relayUrl, pendingChallenge, code, mcp);
+            if (verified.mcpPreapproval) preset = { privateKeyPem, preapproval: verified.mcpPreapproval };
             ({ user } = await finishDeviceLogin(relayUrl, pendingChallenge, deviceId));
           } catch (error) {
             // The code may already have been entered on the page the mail links to: then the device code is approved and a token is waiting.
@@ -594,13 +610,24 @@ async function main(): Promise<void> {
           await deletePendingEmailChallenge(relayUrl);
           stdout.write(`Logged in as ${user.email}.\n`);
           if (pendingChallenge.install) stdout.write(`This code also confirmed installing ${pendingChallenge.install.name}${pendingChallenge.install.gift ? " and claiming its gift" : ""}. Run the same install command again; it needs no other confirmation.\n`);
-          await installStandbyService();
+          if (linkOnAtLogin && preset && linkRequest) {
+            // Same as `frely link on`, run here on this computer: it also lifts a local lock (`false`) because the user asked for it on this computer.
+            await setLinkOnPending(true);
+            try {
+              await setRemoteLock(false);
+              const authorization = await startMcp({ workspace: linkRequest.workspace, days: String(linkRequest.days), preset, notify: (message) => { if (!quiet) process.stderr.write(message); } });
+              stdout.write(quiet ? `Remote control is on until ${authorization.grant.expiresAt}.\n` : `Remote control is on until ${authorization.grant.expiresAt}.\nMCP URL: ${authorization.mcpUrl}\n`);
+            } finally { await setLinkOnPending(false); }
+          } else {
+            if (linkOnAtLogin) stdout.write("Remote control was not turned on: the code was already confirmed through the email link. Run `frely link on` on this computer.\n");
+            await installStandbyService();
+          }
           // One step for agents: sign in, standby (remote control stays `null` until the owner turns it on) and the frely Skill.
           if (loginHost) {
             const entry = await installEntrySkill({ host: skillHost(loginHost), scope: "global" });
             stdout.write(quiet ? `Skill: frely at ${entry.path}. Restart or reload the agent session so it rescans Skills.\n` : `Skill: frely\nPath: ${entry.path}\n${linkLines(entry.links)}Restart or reload the agent session so it rescans Skills.\n`);
           }
-          if (!quiet) stdout.write("Run `frely link on` on the computer you want to control, then connect your MCP client with OAuth.\n");
+          if (!quiet && !linkOnAtLogin) stdout.write("Run `frely link on` on the computer you want to control, then connect your MCP client with OAuth.\n");
         } catch (error) {
           stdout.write(`Verification failed: ${error instanceof Error ? error.message : String(error)}\n`);
           process.exitCode = 1;
