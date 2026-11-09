@@ -1,12 +1,21 @@
+import { createHash } from "node:crypto";
 import { rmdir, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { VERSION } from "../version.js";
 import { unlinkSkill, type LinkOutcome } from "./agent-links.js";
 import { CloudItemError, writeItemFolder } from "./cloud-item.js";
 import { managedSkillRoot, type SkillHost, type SkillScope } from "./managed.js";
 import { deleteInstall, listInstalls, readInstall, untouched } from "./registry.js";
 
 export const ENTRY_SKILL_ID = "frely-entry";
+
+/** Where Frely answers with the entry Skill this CLI is new enough for (`?cliVersion=`). */
+const ENTRY_SKILL_PATH = "/api/public/entry-skill";
+/** A Skill file is small; a larger answer is not an entry Skill and is refused unread. */
+const MAX_ENTRY_SKILL_BYTES = 64 * 1024;
+/** A refresh never holds up an install: Frely unreachable means the copy this CLI shipped with is used. */
+const ENTRY_SKILL_TIMEOUT_MS = 5_000;
 
 /** Teaches an agent with a shell to use Frely through the CLI, and when to offer FrelyMCP. */
 export const ENTRY_SKILL = `---
@@ -48,6 +57,72 @@ export interface EntrySkillInstallResult {
   readonly name: "frely";
   readonly path: string;
   readonly links: readonly LinkOutcome[];
+  /** Frely's revision of the text when it came from the server; absent when the copy this CLI ships with was written. */
+  readonly version?: string;
+}
+
+/** Frely's current entry Skill for one CLI version. */
+export interface RemoteEntrySkill {
+  readonly version: string;
+  readonly minCliVersion: string;
+  readonly content: string;
+}
+
+function parseVersion(value: string): readonly [number, number, number] | null {
+  const match = /^v?(\d{1,4})\.(\d{1,4})\.(\d{1,4})(?:[-+][0-9A-Za-z.-]{1,32})?$/u.exec(value.trim());
+  return match === null ? null : [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/** True when this CLI is new enough for a document: `version` is at least `minimum`. */
+function atLeast(version: string, minimum: string): boolean {
+  const asked = parseVersion(version);
+  const floor = parseVersion(minimum);
+  if (asked === null || floor === null) return false;
+  for (let i = 0; i < 3; i++) {
+    if (asked[i]! !== floor[i]!) return asked[i]! > floor[i]!;
+  }
+  return true;
+}
+
+/**
+ * The entry Skill Frely keeps for this CLI version, fetched so the instructions an assistant follows can change between CLI releases.
+ * Every failure — no relay, older server without the endpoint, a body that is not the hash it claims, a document meant for a newer CLI —
+ * answers null, and the caller writes the copy this CLI shipped with.
+ */
+export async function fetchEntrySkill(input: {
+  readonly relayUrl: string;
+  readonly cliVersion?: string;
+  readonly fetchFn?: typeof fetch;
+}): Promise<RemoteEntrySkill | null> {
+  const cliVersion = input.cliVersion ?? VERSION;
+  let url: URL;
+  try { url = new URL(ENTRY_SKILL_PATH, input.relayUrl); } catch { return null; }
+  url.searchParams.set("cliVersion", cliVersion);
+  const fetchFn = input.fetchFn ?? fetch;
+  try {
+    const response = await fetchFn(url, {
+      method: "GET",
+      headers: { accept: "application/json" },
+      redirect: "error",
+      signal: AbortSignal.timeout(ENTRY_SKILL_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+    const text = await response.text();
+    if (Buffer.byteLength(text, "utf8") > MAX_ENTRY_SKILL_BYTES * 2) return null;
+    const payload = JSON.parse(text) as Record<string, unknown>;
+    const { contentBase64, version, minCliVersion } = payload;
+    if (typeof contentBase64 !== "string" || typeof version !== "string" || typeof minCliVersion !== "string") return null;
+    const bytes = Buffer.from(contentBase64, "base64");
+    if (bytes.byteLength === 0 || bytes.byteLength > MAX_ENTRY_SKILL_BYTES) return null;
+    if (typeof payload.sha256 === "string" && createHash("sha256").update(bytes).digest("hex") !== payload.sha256) return null;
+    if (!atLeast(cliVersion, minCliVersion)) return null;
+    const content = bytes.toString("utf8");
+    // The text lands in a Skill folder as-is: only a whole SKILL.md may be written there.
+    if (!/^---\r?\nname: frely\r?\n/u.test(content)) return null;
+    return Object.freeze({ version, minCliVersion, content });
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -60,6 +135,10 @@ export async function ensureEntrySkill(input: {
   readonly dir?: string;
   readonly cwd?: string;
   readonly home?: string;
+  /** Where to ask for the current text; without it the copy this CLI ships with is written. */
+  readonly relayUrl?: string;
+  readonly cliVersion?: string;
+  readonly fetchFn?: typeof fetch;
 }): Promise<EntrySkillInstallResult | null> {
   return installEntrySkill(input).catch((error: unknown) => {
     if (error instanceof CloudItemError && (error.code === "unmanaged_item_exists" || error.code === "managed_item_modified")) return null;
@@ -68,9 +147,9 @@ export async function ensureEntrySkill(input: {
 }
 
 /**
- * Writes (or refreshes) the entry Skill; a folder Frely did not write, or one
- * the user edited, is never overwritten. For the project scope `dir` is the
- * project root (default: the current directory).
+ * Writes (or refreshes) the entry Skill, asking Frely first when `relayUrl` is given so the text is never older than this CLI's release; a
+ * folder Frely did not write, or one the user edited, is never overwritten. For the project scope `dir` is the project root (default: the
+ * current directory).
  */
 export async function installEntrySkill(input: {
   readonly host?: SkillHost;
@@ -78,12 +157,20 @@ export async function installEntrySkill(input: {
   readonly dir?: string;
   readonly cwd?: string;
   readonly home?: string;
+  readonly relayUrl?: string;
+  readonly cliVersion?: string;
+  readonly fetchFn?: typeof fetch;
 }): Promise<EntrySkillInstallResult> {
   const home = input.home ?? homedir();
   const project = resolve(input.cwd ?? process.cwd(), input.dir ?? ".");
   const path = join(managedSkillRoot(input.host ?? "generic", input.scope ?? "global", project, home), "frely");
-  const written = await writeItemFolder(path, ENTRY_SKILL_ID, "entry", [{ path: "SKILL.md", contentBase64: Buffer.from(ENTRY_SKILL).toString("base64"), isScript: false }], home, undefined, input.host ? { host: input.host } : {});
-  return Object.freeze({ name: "frely", path, links: written.linkOutcomes });
+  const remote = input.relayUrl === undefined ? null : await fetchEntrySkill({
+    relayUrl: input.relayUrl,
+    ...(input.cliVersion === undefined ? {} : { cliVersion: input.cliVersion }),
+    ...(input.fetchFn === undefined ? {} : { fetchFn: input.fetchFn }),
+  });
+  const written = await writeItemFolder(path, ENTRY_SKILL_ID, "entry", [{ path: "SKILL.md", contentBase64: Buffer.from(remote?.content ?? ENTRY_SKILL).toString("base64"), isScript: false }], home, undefined, input.host ? { host: input.host } : {});
+  return Object.freeze({ name: "frely", path, links: written.linkOutcomes, ...(remote === null ? {} : { version: remote.version }) });
 }
 
 /** Every entry Skill Frely wrote, in any host and scope, that is still exactly as written. */

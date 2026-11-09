@@ -79,6 +79,15 @@ import { runUninstall } from "./uninstall.js";
 
 const ITEM_INSTALL_USAGE = "Usage: frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|workbuddy|codebuddy|generic] [--scope global|project] [--dir <path>] [--gift <code>] [--email <address>] [--no-wait] [--no-browser] [--replace] [--api-key-stdin] [--json]";
 
+/**
+ * Where to ask for the current entry Skill text. A relay that cannot be read from the local config, or a configured address that is not
+ * allowed, answers undefined: the entry Skill then keeps the copy this CLI ships with instead of failing the install.
+ */
+async function entrySkillRelayUrl(): Promise<string | undefined> {
+  const auth = await inspectAuth().catch(() => null);
+  try { return normalizeRelayUrl(auth?.relayUrl); } catch { return undefined; }
+}
+
 /** Installs a published Agent as a local trigger Skill, from `username/name[@version]` (or the distribution id older scripts use). */
 async function installAgent(target: string, args: string[], resolved: { manifest?: unknown; extra?: Record<string, unknown>; accountLine?: string } = {}): Promise<void> {
   const host = skillHost(option(args, "--host") ?? "generic");
@@ -87,7 +96,7 @@ async function installAgent(target: string, args: string[], resolved: { manifest
   const relayUrl = normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl);
   const projectDir = option(args, "--dir");
   const value = await installSkillAdapter({ manifestUrl: agentManifestUrl(target, relayUrl), ...(resolved.manifest === undefined ? {} : { manifest: resolved.manifest }), host, scope, ...(projectDir ? { cwd: resolve(projectDir) } : {}), ...(apiKey ? { apiKey } : {}) });
-  const entry = await ensureEntrySkill({ host, scope, ...(projectDir ? { dir: projectDir } : {}) });
+  const entry = await ensureEntrySkill({ host, scope, ...(projectDir ? { dir: projectDir } : {}), relayUrl });
   if (args.includes("--json")) stdout.write(`${JSON.stringify({ ...value, ...resolved.extra, ...(entry ? { entrySkill: entry.path } : {}) })}\n`);
   else stdout.write(`${resolved.accountLine ?? ""}Agent: ${value.name}\nSkill: ${value.skillPath}\n${linkLines(value.links)}Auth: ${value.authMode}\nState: ${value.state}\n${value.hostAction ? `Host action: ${value.hostAction}\n` : ""}${entry ? `Frely Skill: ${entry.path}\n` : ""}`);
 }
@@ -441,6 +450,8 @@ async function main(): Promise<void> {
     const host = skillHost(option(args, "--host") ?? "generic");
     const scope = skillScope(option(args, "--scope") ?? "global");
     const dir = option(args, "--dir");
+    // Every install path below ends by writing the entry Skill beside the item; ask Frely once for the text this CLI is new enough for.
+    const entrySkill = { ...(await entrySkillRelayUrl().then((url) => (url === undefined ? {} : { relayUrl: url }))) };
     const byId = /^creator_distribution_/u.test(itemRef) || /^cloud_skill_|^skill_/u.test(itemRef) || args.includes("--api-key-stdin");
     const noBrowser = args.includes("--no-browser") || process.env.FRELY_NO_BROWSER === "1";
     // Not signed in and given an address: the sign-in code mail names this install, so entering the code is also the owner's approval of it
@@ -500,7 +511,7 @@ async function main(): Promise<void> {
     if (/^github-/iu.test(itemRef) && resolved?.kind !== "github_skill") throw new CloudItemError("input_invalid", resolved === null ? "Installing a GitHub Skill needs a login: run frely login first." : `${itemRef} is not a listed GitHub Skill. Open its page on Frely once so it is listed.`);
     if (resolved?.kind === "github_skill" && resolved.github) {
       const installed = await installGithubItem({ ...resolved.github, commitSha: resolved.github.commitSha, host, scope, ...(dir ? { dir } : {}) });
-      const entry = await ensureEntrySkill({ host, scope, ...(dir ? { dir } : {}) });
+      const entry = await ensureEntrySkill({ host, scope, ...(dir ? { dir } : {}), ...entrySkill });
       if (json) { stdout.write(`${JSON.stringify({ ...installed, ...extra, ...(entry ? { entrySkill: entry.path } : {}) })}\n`); return; }
       stdout.write(`${accountLine}GitHub Skill: ${installed.name} (commit ${installed.commit.slice(0, 7)}, license ${installed.license ?? "none declared"})\nPath: ${installed.path}\n${linkLines(installed.links)}Files: ${installed.files}\n${entry ? `Frely Skill: ${entry.path}\n` : ""}`);
       stdout.write(`Frely did not scan this Skill and does not host it; the files came straight from GitHub at that commit and were saved without execute permission.${installed.hasScripts ? " It contains scripts." : ""} Read every file in it before you use it (look for deleting files, reading credentials, unrelated network calls, obfuscated code, or instructions to hide actions from the user). If it is safe, run: frely item trust ${installed.path}\nRestart or reload the agent session so it rescans Skills.\n`);
@@ -515,7 +526,7 @@ async function main(): Promise<void> {
       if (!isNotASkill(error) || itemRef.includes("@") || !/^[^/@]+\/[^/@]+$/u.test(itemRef)) throw error;
       return installRemoteMcpSkill({ ref: itemRef, call, host, scope, ...(dir ? { dir } : {}), ...(args.includes("--replace") ? { replace: true } : {}) }).catch((mcpError: unknown) => { throw isNotASkill(mcpError) || (mcpError instanceof CloudToolError && mcpError.code === "remote_mcp_not_found") ? error : mcpError; });
     });
-    const entry = await ensureEntrySkill({ host, scope, ...(dir ? { dir } : {}) });
+    const entry = await ensureEntrySkill({ host, scope, ...(dir ? { dir } : {}), ...entrySkill });
     if ("tools" in value) {
       if (args.includes("--json")) { stdout.write(`${JSON.stringify({ ...value, ...extra, ...(entry ? { entrySkill: entry.path } : {}) })}\n`); return; }
       stdout.write(`${accountLine}MCP: ${value.name}\nPath: ${value.path}\n${linkLines(value.links)}Tools: ${value.tools}\nThe Skill calls this MCP through frely item tools|call; no MCP client configuration is needed. Restart or reload the agent session so it rescans Skills.\n`);
