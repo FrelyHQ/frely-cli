@@ -627,12 +627,22 @@ export async function pollDeviceToken(
     const body = new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: deviceCode, client_id: OAUTH_CLIENT_ID });
     appendLoginResources(body, relayUrl);
     appendSessionBinding(body, deviceId);
-    const response = await fetchWithTimeout(`${relayUrl}/api/auth/oauth2/token`, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded", origin: relayUrl, accept: "application/json" },
-      body: body.toString(),
-      redirect: "error",
-    });
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(`${relayUrl}/api/auth/oauth2/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", origin: relayUrl, accept: "application/json" },
+        body: body.toString(),
+        redirect: "error",
+      });
+    } catch (error) {
+      // Network timeout during polling: treat as "not ready yet" and retry, so intermittent latency doesn't abort the whole login.
+      if (error instanceof TypeError || (error instanceof Error && error.message === "Frely request timed out.")) {
+        await delay(intervalMs);
+        continue;
+      }
+      throw error;
+    }
     const payload = await safeJson(response);
     debugAuth(`stage=token status=${response.status}`);
     const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
