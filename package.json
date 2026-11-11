@@ -32,6 +32,7 @@
     "README.md",
     "NOTICE",
     "TRADEMARKS.md",
+    "scripts/skill-install.mjs",
     "skills"
   ],
   "scripts": {
@@ -46,7 +47,8 @@
     "build:standalone": "node scripts/build-standalone.mjs",
     "test:standalone": "node scripts/standalone-smoke.mjs",
     "test:standalone-iroh": "node scripts/standalone-iroh-smoke.mjs",
-    "test:installer": "node scripts/installer-smoke.mjs"
+    "test:installer": "node scripts/installer-smoke.mjs",
+    "postinstall": "node scripts/skill-install.mjs"
   },
   "engines": {
     "node": ">=22.12"
