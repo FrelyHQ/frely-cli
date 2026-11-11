@@ -1,13 +1,12 @@
 // postinstall: link frely CLI skill to ~/.agents/skills/frely/SKILL.md
 // Runs automatically after `npm install -g frely-cli`.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { tmpdir } from 'node:os';
-import { mkdtemp } from 'node:fs/promises';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 
 const SKILL_SRC = join(import.meta.dirname, '..', 'skills', 'frely-cli', 'SKILL.md');
-const AGENTS_DIR = join(process.env.HOME ?? tmpdir(), '.agents', 'skills', 'frely');
+const AGENTS_DIR = join(homedir(), '.agents', 'skills', 'frely');
 const SKILL_DST = join(AGENTS_DIR, 'SKILL.md');
 
 try {
@@ -23,13 +22,15 @@ try {
   // 3. Create target directory (recursive)
   mkdirSync(AGENTS_DIR, { recursive: true });
 
-  // 4. Write SKILL.md atomically (write to temp, then rename)
+  // 4. Write SKILL.md atomically (write to temp, then rename onto the target; only a failed write can leave the temp behind, so clean it up there)
   const tmp = join(AGENTS_DIR, `.SKILL.md.tmp.${Date.now()}`);
-  writeFileSync(tmp, content, 'utf-8');
-  writeFileSync(SKILL_DST, content, 'utf-8');
-
-  // 5. Cleanup temp (may fail if same filesystem, ignore)
-  try { process.unlinkSync(tmp); } catch { /* ignore */ }
+  try {
+    writeFileSync(tmp, content, 'utf-8');
+    renameSync(tmp, SKILL_DST);
+  } catch (err) {
+    try { unlinkSync(tmp); } catch { /* ignore */ }
+    throw err;
+  }
 
 } catch (err) {
   process.stderr.write(`postinstall: ${err.message}\n`);
