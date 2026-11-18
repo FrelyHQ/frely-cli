@@ -1,5 +1,5 @@
 import { execFile as execFileCallback, spawn } from "node:child_process";
-import { chmod, mkdir, open, readFile, realpath, rm, stat, truncate, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, realpath, rename, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -7,6 +7,7 @@ import { cliLaunchArguments, IS_STANDALONE } from "./cli-launch.js";
 import { windowsService } from "./service-windows.js";
 
 const execFile = promisify(execFileCallback);
+export const SERVICE_AUTH_REQUIRED = 77;
 const LABEL = "cloud.frely.cli-mcp";
 export interface McpServiceInfo { installed: boolean; active: boolean; platform: string; workspace?: string; definitionPath?: string; pid?: number; detached?: boolean; logPath?: string; crontab?: string }
 
@@ -218,9 +219,30 @@ export function launchAgentPlist(command: string[], stateDir: string): string {
   const argumentsXml = command.map((value) => `<string>${xml(value)}</string>`).join("");
   return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${LABEL}</string>\n<key>ProgramArguments</key><array>${argumentsXml}</array>\n<key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(process.env.PATH || "/usr/local/bin:/usr/bin:/bin")}</string></dict>\n<key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>30</integer>\n<key>StandardOutPath</key><string>${xml(join(stateDir, "mcp.log"))}</string>\n<key>StandardErrorPath</key><string>${xml(join(stateDir, "mcp.log"))}</string>\n</dict></plist>\n`;
 }
+/** Existing installations can switch binaries without reinstalling their generated unit. */
+export async function migrateRelayRestartPolicy(): Promise<void> {
+  if (process.platform !== "linux" || !process.env.INVOCATION_ID || noService()) return;
+  const path = systemdUnitPath();
+  const unit = await readFile(path, "utf8");
+  const marker = "Restart=always\nRestartSec=3\n";
+  if (!unit.includes("Description=Frely Device Relay\n") || !unit.includes(marker)) return;
+  if (unit.includes("RestartPreventExitStatus=")) {
+    // The previous process may have updated the file and exited before daemon-reload.
+    const { stdout } = await execFile("systemctl", ["--user", "show", "--property=NeedDaemonReload", "--value", "frely-mcp.service"]);
+    if (stdout.trim() === "yes") await execFile("systemctl", ["--user", "daemon-reload"]);
+    return;
+  }
+  const updated = unit.replace(marker, marker + `RestartPreventExitStatus=${SERVICE_AUTH_REQUIRED}\n`);
+  const temporary = `${path}.${process.pid}.tmp`;
+  try {
+    await writeFile(temporary, updated, { flag: "wx", mode: 0o600 });
+    await rename(temporary, path);
+  } finally { await rm(temporary, { force: true }); }
+  await execFile("systemctl", ["--user", "daemon-reload"]);
+}
 export function systemdUnit(command: string[]): string {
   const args = command.map(systemdQuote).join(" ");
-  return `[Unit]\nDescription=Frely Device Relay\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart=${args}\nRestart=always\nRestartSec=3\nEnvironment=${systemdQuote(`PATH=${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}`)}\n\n[Install]\nWantedBy=default.target\n`;
+  return `[Unit]\nDescription=Frely Device Relay\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart=${args}\nRestart=always\nRestartSec=3\nRestartPreventExitStatus=${SERVICE_AUTH_REQUIRED}\nEnvironment=${systemdQuote(`PATH=${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}`)}\n\n[Install]\nWantedBy=default.target\n`;
 }
 function xml(value: string): string {
   if (/[\x00-\x1f\x7f]/u.test(value)) throw new Error("Service arguments contain control characters.");

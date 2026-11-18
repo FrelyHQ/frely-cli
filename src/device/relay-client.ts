@@ -298,6 +298,11 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
         if (loginRefusal !== null) {
           diagnostic(log, "relay.login_refused", {}, error);
           log(loginRefusal);
+          if (options.managedService && process.platform === "linux") {
+            reporter.report({ type: "stopped" });
+            await reporter.flush();
+            throw error;
+          }
           break;
         }
         if (selectedTransport && isTransportFallbackEligible(error)) {

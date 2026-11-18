@@ -2,7 +2,7 @@
 import { formatApprovalCode } from "./approval-code.js";
 import { applyDataDir, activeDataDir } from "./data-dir.js";
 import { update } from "./update/update.js";
-import { requireMcpAuthorization, inspectMcpMetadata, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, lockLinkOnServer, generateMcpKey, parseMcpDays, MCP_DEFAULT_DAYS } from "./mcp-authorization.js";
+import { isDefinitiveAuthorizationFailure, requireMcpAuthorization, inspectMcpMetadata, inspectMcpMetadataOrQuarantine, revokeMcpAuthorization, lockLinkOnServer, generateMcpKey, parseMcpDays, MCP_DEFAULT_DAYS } from "./mcp-authorization.js";
 import { ensureDefaultWorkspace } from "./default-workspace.js";
 import { chmod, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { sshProxyConnect } from "./runtime/ssh-proxy.js";
@@ -22,7 +22,7 @@ import { ensureDevice } from "./device/control.js";
 import { createLocalProviderToken, loadOrCreateDeviceIdentity } from "./device/identity.js";
 import { serveDeviceRelay } from "./device/relay-client.js";
 import { startStdioMcp } from "./runtime/mcp.js";
-import { installDeviceRelayService, serviceStatus, trimServiceLog, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
+import { migrateRelayRestartPolicy, SERVICE_AUTH_REQUIRED, installDeviceRelayService, serviceStatus, trimServiceLog, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
 import { createLocalModelsHub } from "./provider/local-models.js";
 import { shareLocalProvider } from "./provider/share.js";
 import { confirmLanEndpoint, registerLocalOnlyProvider, removeLocalOnlyProvider, setProviderKey, type RegisterIo } from "./provider/register.js";
@@ -826,6 +826,7 @@ async function main(): Promise<void> {
     const serviceConfigHome = option(args, "--service-config-home");
     const serviceCredentialStore = option(args, "--service-credential-store");
     if (serviceConfigHome) process.env.XDG_CONFIG_HOME = resolve(serviceConfigHome);
+    if (serviceConfigHome) await migrateRelayRestartPolicy().catch((error) => process.stderr.write(`Service policy update failed: ${String(error)}\n`));
     if (serviceConfigHome) await trimServiceLog().catch(() => undefined);
     if (serviceCredentialStore) process.env.FRELY_CREDENTIAL_STORE = serviceCredentialStore;
     await requireLogin();
@@ -1070,5 +1071,6 @@ main().catch((error) => {
   else if (jsonMode && command === "agent") process.stdout.write(`${JSON.stringify(error instanceof KeyBudgetError ? publicKeyBudgetError(error) : publicSkillAccessError(error))}\n`);
   // A managed service writes to a shared log, so startup failures there carry a time.
   else process.stderr.write(`${process.argv.includes("--service-config-home") ? `${new Date().toISOString()} ` : ""}${message}\n`);
-  process.exitCode = error instanceof ControllerError ? error.exitCode : 1;
+  process.exitCode = process.platform === "linux" && command === "mcp" && process.argv[3] === "serve" && process.argv.includes("--service-config-home") && isDefinitiveAuthorizationFailure(error)
+    ? SERVICE_AUTH_REQUIRED : error instanceof ControllerError ? error.exitCode : 1;
 });

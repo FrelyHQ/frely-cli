@@ -123,7 +123,7 @@ export async function requireLocalMcpAuthorization(workspace?: string): Promise<
 
 const DEFINITIVE_AUTHORIZATION_FAILURES = [
   "MCP_AUTHORIZATION_EXPIRED", "MCP authorization changed", "MCP authorization belongs to a different account",
-  "Frely login expired", "No Frely login is stored", "Workspace differs from the approved MCP workspace", "MCP is not enabled",
+  "Frely login expired", "No Frely login is stored", "No Frely login is configured", "Legacy credentials require a new basic login", "Workspace differs from the approved MCP workspace", "MCP is not enabled",
 ];
 
 /** True only when the web app answered that this login or authorization is no longer valid; outages and network errors are not. */
