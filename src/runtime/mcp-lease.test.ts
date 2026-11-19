@@ -64,3 +64,16 @@ test("closing an MCP process manager stops tracked children and forbids new star
     await assert.rejects(manager.start("echo blocked", process.cwd(), safeEnv(), process.cwd()), /closed/);
   } finally { await manager.close(); }
 });
+
+test("a lease closed while still valid reports a closed session, not an expired authorization", () => {
+  const lease = new McpLease("synthetic", Date.now() + 60_000);
+  assert.deepEqual({ active: lease.state().active, reason: lease.state().reason }, { active: true, reason: undefined });
+  lease.close();
+  assert.throws(() => lease.assert(), (error: Error) => !/MCP_AUTHORIZATION_EXPIRED/u.test(error.message) && /session closed/u.test(error.message));
+  assert.equal(lease.state().reason, "closed");
+  let wall = 1000;
+  const old = new McpLease("synthetic", 2000, () => wall, () => 0);
+  wall = 2000;
+  assert.equal(old.state().reason, "expired");
+  old.close();
+});

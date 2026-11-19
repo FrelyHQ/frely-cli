@@ -21,8 +21,12 @@ import { doctor, formatDoctor } from "./diagnostics.js";
 import { ensureDevice } from "./device/control.js";
 import { createLocalProviderToken, loadOrCreateDeviceIdentity } from "./device/identity.js";
 import { serveDeviceRelay } from "./device/relay-client.js";
+import { acquireRelayInstanceLock } from "./device/instance-lock.js";
+import { IS_STANDALONE } from "./cli-launch.js";
+import { createHash } from "node:crypto";
+import { otherInstallNotes, otherInstalls } from "./other-installs.js";
 import { startStdioMcp } from "./runtime/mcp.js";
-import { migrateRelayRestartPolicy, SERVICE_AUTH_REQUIRED, installDeviceRelayService, serviceStatus, trimServiceLog, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
+import { adoptMcpService, migrateRelayRestartPolicy, SERVICE_AUTH_REQUIRED, installDeviceRelayService, serviceStatus, trimServiceLog, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
 import { createLocalModelsHub } from "./provider/local-models.js";
 import { shareLocalProvider } from "./provider/share.js";
 import { confirmLanEndpoint, registerLocalOnlyProvider, removeLocalOnlyProvider, setProviderKey, type RegisterIo } from "./provider/register.js";
@@ -547,6 +551,7 @@ async function main(): Promise<void> {
 
   if (command === "login") {
     if (args.includes("--help") || args.includes("-h")) return usage();
+    if (!args.includes("--json") && !args.includes("--quiet") && !args.includes("-q")) for (const note of otherInstallNotes(await otherInstalls().catch(() => []))) process.stderr.write(`${note}\n`);
     const relay = option(args, "--relay");
     const noBrowser = args.includes("--no-browser") || process.env.FRELY_NO_BROWSER === "1";
     const email = option(args, "--email");
@@ -635,6 +640,17 @@ async function main(): Promise<void> {
         return;
       }
 
+      // Installers and agents run `login --email` on every install. When this computer is already signed in to that account with a working
+      // login, a second login only adds another refresh-token family to keep in step, so it is skipped.
+      if (!invite && !args.includes("--force")) {
+        const current = await inspectAuth().catch(() => null);
+        if (current?.user?.email && current.user.email.toLowerCase() === email!.toLowerCase() && normalizeRelayUrl(current.relayUrl) === relayUrl
+          && await requireLogin().then(() => true, () => false)) {
+          if (json) stdout.write(JSON.stringify({ state: "signed_in", email: current.user.email, alreadySignedIn: true }, null, 2) + "\n");
+          else stdout.write(`Already signed in as ${current.user.email} on this computer; no code was sent and none is needed. Run the same command with --force to sign in again.\n`);
+          return;
+        }
+      }
       try {
         const wait = !args.includes("--no-wait");
         const { challenge } = await startOrResumeEmailLogin(relayUrl, email!, invite);
@@ -830,6 +846,8 @@ async function main(): Promise<void> {
     if (serviceConfigHome) await trimServiceLog().catch(() => undefined);
     if (serviceCredentialStore) process.env.FRELY_CREDENTIAL_STORE = serviceCredentialStore;
     await requireLogin();
+    // One relay per device key: a second one would make the relay close the first (4409) and the two would take turns cancelling each other.
+    const releaseInstance = await acquireRelayInstanceLock({ entry: IS_STANDALONE ? process.execPath : process.argv[1] ?? "unknown", version: VERSION });
     // `--standby` is the background service of a computer that is not (yet) controlled: it serves local Providers only until the owner turns
     // remote control on, then restarts in full mode. It stays provider-only while the local lock is set (`frely link off`).
     const standby = args.includes("--standby");
@@ -878,6 +896,8 @@ async function main(): Promise<void> {
           upgrade: { supported: ["standalone", "npm", "bun"].includes((await inspectInstall().catch(() => ({ method: "unknown" }))).method), version: VERSION, status: upgradeStatus() },
           // The relay keeps a caller waiting after a disconnect when results can arrive on the next connection.
           resumable: true,
+          // Which process this is: when two processes share one device key the relay logs both (pid, version, hashed program path).
+          instance: { pid: process.pid, version: VERSION, entry: createHash("sha256").update(IS_STANDALONE ? process.execPath : process.argv[1] ?? "").digest("hex").slice(0, 16) },
           ...(providerOnly ? { workspaces: [] } : await reportedWorkspaceInfo(workspace).then((info) => ({ workspaces: info.workspaces, workspacesTruncated: info.truncated, workspaceManage: 1 }))),
           ...(localMcp ? { localMcp: localMcp.capabilities() } : {}),
         };
@@ -892,6 +912,7 @@ async function main(): Promise<void> {
       await taskShares;
       await piNode?.stop(); // the node keeps running; a restarted service adopts it
       await localMcp?.close();
+      releaseInstance();
     }
     return;
   }
@@ -921,6 +942,7 @@ async function main(): Promise<void> {
 
   if (command === "link" && args[1] === "on") {
     // Turning remote control back on is the one way out of `false`: it has to happen here, on this computer.
+    for (const note of otherInstallNotes(await otherInstalls().catch(() => []))) process.stderr.write(`${note}\n`);
     await setLinkOnPending(true);
     try {
     await setRemoteLock(false);
@@ -960,6 +982,7 @@ async function main(): Promise<void> {
     return;
   }
   // Internal, for update scripts: stop the installed service before an update and start it again after, never prompting for approval.
+  if (command === "mcp" && args[1] === "service" && args[2] === "adopt") { stdout.write(`${await adoptMcpService()}\n`); return; }
   if (command === "mcp" && args[1] === "service" && args[2] === "stop") { const service = await stopMcpService(); stdout.write(`Frely background service ${service.active ? "still active" : "stopped"}.\n`); return; }
   if (command === "mcp" && args[1] === "service" && args[2] === "start") { const service = await startMcpService(); stdout.write(`Frely background service ${service.active ? "started" : "not active"}.\n`); return; }
 

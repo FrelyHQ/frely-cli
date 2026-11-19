@@ -10,12 +10,13 @@ import { installMcpService, serviceStatus, startMcpService } from "./service.js"
  * The controlled-side group is `frely link`: whether this computer accepts remote control, whatever the channel (an MCP client, `frely run`
  * from another computer, a hosted Agent). It has one switch, `link on` / `link off`, plus `link status`; a bare `frely link` prints the usage.
  * `link on` is the idempotent enable/start/print-URL action. The internal `frely mcp …` commands are not in help: `mcp serve` and `mcp stdio`
- * are what installed services and local MCP clients launch, and `mcp service stop|start` is what update scripts run around an update.
+ * are what installed services and local MCP clients launch, `mcp service stop|start` is what update scripts run around an update, and
+ * `mcp service adopt` is what the installers run so an existing background service runs the copy just installed.
  */
 export function normalizeLinkArgs(input: readonly string[]): string[] {
   const args = [...input];
   if (args[0] === "mcp") {
-    if (args[1] === "service" && args.length === 3 && (args[2] === "start" || args[2] === "stop")) return args;
+    if (args[1] === "service" && args.length === 3 && (args[2] === "start" || args[2] === "stop" || args[2] === "adopt")) return args;
     if (args[1] !== "serve" && args[1] !== "stdio") throw new Error("Unknown command. Controlled-side commands are under frely link; run frely link --help.");
     return checkOptions(args, args[1]);
   }
