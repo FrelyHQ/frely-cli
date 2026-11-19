@@ -31,7 +31,7 @@ interface PublicCapability {
   readonly description?: string;
 }
 
-interface PublicVirtualModelManifest {
+interface PublicAgentManifest {
   readonly schemaVersion: typeof MANIFEST_SCHEMA;
   readonly id: string;
   readonly installName?: string;
@@ -316,7 +316,7 @@ function assertApiKey(value: string): void {
   }
 }
 
-async function verifyApiKey(manifest: PublicVirtualModelManifest, apiKey: string, fetchFn: typeof fetch): Promise<void> {
+async function verifyApiKey(manifest: PublicAgentManifest, apiKey: string, fetchFn: typeof fetch): Promise<void> {
   let response: Response;
   try {
     response = await fetchFn(manifest.urls.mcp, {
@@ -349,7 +349,7 @@ export function publicSkillAccessError(error: unknown): Readonly<Record<string, 
   return Object.freeze({ ok: false, error: Object.freeze({ code: "unexpected_error", message: error instanceof Error ? error.message : "Unexpected error" }) });
 }
 
-async function fetchManifest(value: string, fetchFn: typeof fetch): Promise<PublicVirtualModelManifest> {
+async function fetchManifest(value: string, fetchFn: typeof fetch): Promise<PublicAgentManifest> {
   const url = normalizedFrelyUrl(value, "invalid_manifest_url");
   let response: Response;
   try {
@@ -372,7 +372,7 @@ async function fetchManifest(value: string, fetchFn: typeof fetch): Promise<Publ
   return parseManifest(payload, url);
 }
 
-function parseManifest(value: unknown, sourceUrl: URL): PublicVirtualModelManifest {
+function parseManifest(value: unknown, sourceUrl: URL): PublicAgentManifest {
   const root = record(value);
   const urls = record(root?.urls);
   if (!root || root.schemaVersion !== MANIFEST_SCHEMA || typeof root.id !== "string" || !DISTRIBUTION_ID.test(root.id) || typeof root.modelId !== "string" || root.modelId.length < 1 || root.modelId.length > 256 || typeof root.version !== "string" || typeof root.name !== "string" || root.name.length < 1 || root.name.length > 120 || !(root.description === null || typeof root.description === "string") || !Array.isArray(root.capabilities) || !urls || typeof urls.manifest !== "string" || typeof urls.mcp !== "string") {
@@ -416,7 +416,7 @@ function parseClientTrigger(value: unknown): { readonly description: string; rea
   return Object.freeze({ description: item.description, when: Object.freeze(item.when as string[]) });
 }
 
-function renderSkill(manifest: PublicVirtualModelManifest, slug: string): string {
+function renderSkill(manifest: PublicAgentManifest, slug: string): string {
   const description = oneLine(manifest.clientTrigger?.description ?? manifest.description ?? `Use ${manifest.name} through Frely when the user's task matches this Agent.`).slice(0, 900);
   const capabilities = manifest.capabilities.length === 0 ? "- Use the published Agent for tasks described by this Skill." : manifest.capabilities.map((capability) => `- ${capability.id}${capability.description ? `: ${oneLine(capability.description)}` : ""}`).join("\n");
   const triggers = manifest.clientTrigger?.when.map((condition) => `- ${oneLine(condition)}`).join("\n") ?? `- The user explicitly asks for ${oneLine(manifest.name)} or their task matches its published capabilities.`;
