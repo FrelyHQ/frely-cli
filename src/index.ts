@@ -26,7 +26,7 @@ import { IS_STANDALONE } from "./cli-launch.js";
 import { createHash } from "node:crypto";
 import { otherInstallNotes, otherInstalls } from "./other-installs.js";
 import { startStdioMcp } from "./runtime/mcp.js";
-import { adoptMcpService, migrateRelayRestartPolicy, SERVICE_AUTH_REQUIRED, installDeviceRelayService, serviceStatus, trimServiceLog, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
+import { adoptMcpService, migrateRelayRestartPolicy, SERVICE_AUTH_REQUIRED, installDeviceRelayService, serviceStatus, wakeInstalledService, trimServiceLog, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
 import { createLocalModelsHub } from "./provider/local-models.js";
 import { shareLocalProvider } from "./provider/share.js";
 import { confirmLanEndpoint, registerLocalOnlyProvider, removeLocalOnlyProvider, setProviderKey, type RegisterIo } from "./provider/register.js";
@@ -114,7 +114,8 @@ async function installAgent(target: string, args: string[], resolved: { manifest
 async function installStandbyService(): Promise<void> {
   if (process.env.FRELY_NO_SERVICE === "1" || (await remoteLocked())) return;
   try {
-    if ((await serviceStatus()).installed) return;
+    // An installed service may be stopped or waiting with the old login: a new login must not leave it offline.
+    if ((await serviceStatus()).installed) { await wakeInstalledService(); return; }
     await installDeviceRelayService(undefined, { standby: true });
   } catch (error) {
     process.stderr.write(`Could not start the standby service (${error instanceof Error ? error.message : String(error)}). Remote control stays off; run frely link on to enable it on this computer.\n`);

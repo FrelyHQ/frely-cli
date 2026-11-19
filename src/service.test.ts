@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { cliLaunchArguments } from "./cli-launch.js";
 import { windowsArgument, windowsService } from "./service-windows.js";
-import { startDetachedRelay, detachedRelayPid, stopDetachedRelay, systemdUnit, launchAgentPlist, serviceLaunchArguments, systemdUnitPath, parseServiceCommand, trimServiceLog } from "./service.js";
+import { startDetachedRelay, wakeInstalledService, detachedRelayPid, stopDetachedRelay, systemdUnit, launchAgentPlist, serviceLaunchArguments, systemdUnitPath, parseServiceCommand, trimServiceLog } from "./service.js";
 import { join } from "node:path";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -106,4 +106,16 @@ test("a service without a workspace starts in standby mode, not provider-only", 
   assert.ok(!withoutWorkspace.includes("--provider-only"));
   const withWorkspace = serviceLaunchArguments("/src/index.js", "/w");
   assert.ok(withWorkspace.includes("--workspace") && !withWorkspace.includes("--standby"));
+});
+
+describe("a new login and an installed service", () => {
+  const info = (installed: boolean, active: boolean, pid?: number) => ({ installed, active, platform: "linux", ...(pid ? { pid } : {}) }) as never;
+  test("a stopped service is started, a running one is asked to reconnect, no service is left alone", async () => {
+    const calls: string[] = [];
+    const deps = (status: unknown) => ({ status: async () => status as never, start: async () => { calls.push("start"); }, signal: (pid: number) => { calls.push(`signal:${pid}`); return true; } });
+    expect(await wakeInstalledService(deps(info(true, false)))).toBe("started");
+    expect(await wakeInstalledService(deps(info(true, true, 42)))).toBe("nudged");
+    expect(await wakeInstalledService(deps(info(false, false)))).toBe("none");
+    expect(calls).toEqual(["start", "signal:42"]);
+  });
 });
