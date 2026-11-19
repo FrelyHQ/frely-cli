@@ -9,6 +9,8 @@ export class McpLease {
   private expired = false;
   /** Why a still-valid lease was closed, when the reason is one the owner can act on. */
   private closedFor: "login_expired" | undefined;
+  /** The server refused this computer's login. Remote control does not depend on it (device key and MCP authorization do), so this is only reported. */
+  loginExpired = false;
   constructor(readonly authorizationId: string, readonly expiresAt: number,
     private readonly wall = () => Date.now(), private readonly elapsed = () => performance.now()) {
     if (!Number.isFinite(expiresAt)) throw new Error("MCP authorization expiry is invalid.");
@@ -28,10 +30,10 @@ export class McpLease {
     }
   }
   /** For the capability report: what this computer believes, so the web can show a lease that differs from its own record. */
-  state(): { id: string; expiresAt: string; active: boolean; reason?: "expired" | "closed" | "login_expired" } {
+  state(): { id: string; expiresAt: string; active: boolean; reason?: "expired" | "closed" | "login_expired"; loginExpired?: true } {
     const expired = this.expired || this.wall() >= this.expiresAt || this.elapsed() >= this.elapsedDeadline;
     const active = !expired && !this.controller.signal.aborted;
-    return { id: this.authorizationId, expiresAt: new Date(this.expiresAt).toISOString(), active, ...(active ? {} : { reason: expired ? "expired" : this.closedFor ?? "closed" }) };
+    return { id: this.authorizationId, expiresAt: new Date(this.expiresAt).toISOString(), active, ...(active ? {} : { reason: expired ? "expired" : this.closedFor ?? "closed" }), ...(active && this.loginExpired ? { loginExpired: true as const } : {}) };
   }
   /** `reason` is kept only for the first close: it says why this session ended. */
   close(reason?: "login_expired"): void {

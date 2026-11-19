@@ -5,7 +5,7 @@ import { removeLegacyAutoUpdate, restartWindowsService, Upgrader } from "../upda
 import { applyPendingUpdate } from "../update/windows-pending.js";
 import { inspectInstallation } from "../update/installation.js";
 import { MaintenanceGate, serveMaintenance } from "../update/maintenance.js";
-import { isDefinitiveAuthorizationFailure, isLoginFailure, requireLocalMcpAuthorization, requireMcpAuthorization } from "../mcp-authorization.js";
+import { isDefinitiveAuthorizationFailure, isLoginFailure, isLoginRefusedByServer, requireLocalMcpAuthorization, requireMcpAuthorization } from "../mcp-authorization.js";
 import { storedLoginFingerprint } from "../auth.js";
 import { McpLease } from "../runtime/mcp-lease.js";
 import WebSocket, { type RawData } from "ws";
@@ -791,11 +791,18 @@ async function obtainGrant(
       const check = () => requireMcpAuthorization(workspace);
       // Read before the check, so a login made while it runs still counts as a change.
       const loginBefore = storedLoginFingerprint().catch(() => null);
-      void check().then(() => undefined, async (error: unknown) => {
+      void check().then(() => { if (lease) lease.loginExpired = false; }, async (error: unknown) => {
         diagnostic(log, "relay.background_check_failed", {}, error);
         if (!isDefinitiveAuthorizationFailure(error)) return;
         if (!lease || !isLoginFailure(error)) { lease?.close(); return; }
-        // The connection itself needs no login, so the computer stays online: say why it stopped, and come back once the owner signs in.
+        if (isLoginRefusedByServer(error)) {
+          // The relay verified the device key and the signed MCP authorization for this connection and rechecks them itself;
+          // a login the server no longer renews takes nothing away from that, so remote control keeps running and the state is only reported.
+          lease.loginExpired = true;
+          log("Frely login expired on this computer. Remote control keeps working; run `frely login` to use frely commands here again.");
+          return;
+        }
+        // No login is stored here (the owner signed out on this computer): stop, say why, and come back once they sign in.
         lease.close("login_expired");
         log("Frely login expired on this computer, so remote commands are paused. Run `frely login`; remote control resumes by itself within a minute.");
         if (turn) await resumeAfterLogin({ failed: await loginBefore, fingerprint: storedLoginFingerprint, check, signal: turn.signal, reconnect: () => turn.abort(), log });
