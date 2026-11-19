@@ -21,18 +21,37 @@ export function releaseSources(version: string, asset = standaloneAsset()): Rele
   ];
 }
 
-/** GitHub cannot be reached (mainland China and similar networks): ask the npm registries for the platform package's latest version. */
-async function npmLatest(request: typeof fetch, asset: string): Promise<string> {
-  for (const registry of NPM_REGISTRIES) {
-    try {
-      const response = await request(`${registry}/${platformPackage(asset)}/latest`, { headers: { accept: "application/json", "user-agent": "frely-cli" }, signal: AbortSignal.timeout(6000), redirect: "error" });
-      if (!response.ok) continue;
-      const text = await response.text();
-      if (text.length > 1024 * 1024) continue;
-      return stableVersion((JSON.parse(text) as { version?: unknown }).version);
-    } catch { /* next registry */ }
-  }
-  throw new Error("Release lookup failed on GitHub, npmmirror and npmjs.");
+/** GitHub answered, but not with a stable published release: a real error, never a reason to try another source. */
+class ReleaseRejected extends Error {}
+
+/** Why a lookup failed, short enough for one line: timeouts and the network error code (ECONNRESET, ENOTFOUND...) are what tell the networks apart. */
+function reason(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown error";
+  if (error.name === "TimeoutError" || error.name === "AbortError") return "timeout";
+  const code = (error.cause as { code?: unknown } | undefined)?.code;
+  return typeof code === "string" ? `${error.message} (${code})` : error.message;
+}
+
+async function githubLatest(request: typeof fetch): Promise<string> {
+  const response = await request("https://api.github.com/repos/FrelyHQ/frely-cli/releases/latest", {
+    headers: { accept: "application/json", "user-agent": "frely-cli" },
+    signal: AbortSignal.timeout(4000), redirect: "error",
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const text = await response.text();
+  if (text.length > 1024 * 1024) throw new Error("metadata too large");
+  const data = JSON.parse(text) as Record<string, unknown>;
+  if (data.draft !== false || data.prerelease !== false) throw new ReleaseRejected("GitHub release is not a stable published release.");
+  try { return stableVersion(String(data.tag_name).replace(/^v/u, "")); } catch (error) { throw new ReleaseRejected((error as Error).message); }
+}
+
+/** The npm registries carry the platform package of every release: ask one of them for its latest version. */
+async function npmRegistryLatest(request: typeof fetch, registry: string, asset: string): Promise<string> {
+  const response = await request(`${registry}/${platformPackage(asset)}/latest`, { headers: { accept: "application/json", "user-agent": "frely-cli" }, signal: AbortSignal.timeout(6000), redirect: "error" });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const text = await response.text();
+  if (text.length > 1024 * 1024) throw new Error("metadata too large");
+  return stableVersion((JSON.parse(text) as { version?: unknown }).version);
 }
 
 export function stableVersion(value: unknown): string {
@@ -49,33 +68,44 @@ export function compareVersions(a: string, b: string): number {
   return a.includes("-") === b.includes("-") ? 0 : a.includes("-") ? -1 : 1;
 }
 
-/** A standalone installation asks GitHub first and the npm registries (npmmirror, then npmjs) when GitHub cannot answer. */
+/**
+ * Standalone installations query GitHub first and use the npm registries as fallbacks.
+ * If every source fails, the error includes the reason from each source.
+ */
 export async function latestRelease(installation: Installation, request: typeof fetch = fetch): Promise<Release> {
-  const standalone = installation.method === "standalone";
-  let version: string;
-  try {
-    const response = await request(standalone
-      ? "https://api.github.com/repos/FrelyHQ/frely-cli/releases/latest"
-      // npm/bun resolve from the abbreviated packument, which can lag /latest after a publish; check what they will install.
-      : "https://registry.npmjs.org/frely-cli", {
-      headers: { accept: standalone ? "application/json" : "application/vnd.npm.install-v1+json", "user-agent": "frely-cli" },
+  if (installation.method !== "standalone") {
+    // npm/bun resolve from the abbreviated packument, which can lag /latest after a publish; check what they will install.
+    const response = await request("https://registry.npmjs.org/frely-cli", {
+      headers: { accept: "application/vnd.npm.install-v1+json", "user-agent": "frely-cli" },
       signal: AbortSignal.timeout(4000), redirect: "error",
     });
     if (!response.ok) throw new Error(`Release lookup failed (HTTP ${response.status}).`);
     const text = await response.text();
     if (text.length > 1024 * 1024) throw new Error("Release metadata is too large.");
     const data = JSON.parse(text) as Record<string, unknown>;
-    if (standalone && (data.draft !== false || data.prerelease !== false)) throw new Error("GitHub release is not a stable published release.");
-    if (!standalone && data.name !== "frely-cli") throw new Error("Release package name does not match frely-cli.");
-    const latest = standalone ? undefined : (data["dist-tags"] as Record<string, unknown> | undefined)?.latest;
-    version = stableVersion(standalone ? String(data.tag_name).replace(/^v/u, "") : latest);
-    if (!standalone && !(data.versions as Record<string, unknown> | undefined)?.[version]) throw new Error("Registry metadata does not list its latest version.");
-  } catch (error) {
-    // A GitHub answer that is invalid (draft, bad tag) is a real error, not a network problem.
-    if (!standalone || (error instanceof Error && /stable/u.test(error.message))) throw error;
-    version = await npmLatest(request, standaloneAsset());
+    if (data.name !== "frely-cli") throw new Error("Release package name does not match frely-cli.");
+    const version = stableVersion((data["dist-tags"] as Record<string, unknown> | undefined)?.latest);
+    if (!(data.versions as Record<string, unknown> | undefined)?.[version]) throw new Error("Registry metadata does not list its latest version.");
+    return { version };
   }
-  return { version, ...(standalone ? { sources: releaseSources(version) } : {}) };
+  const asset = standaloneAsset();
+  const failures: string[] = [];
+  try {
+    const version = await githubLatest(request);
+    return { version, sources: releaseSources(version, asset) };
+  } catch (error) {
+    if (error instanceof ReleaseRejected) throw error;
+    failures.push(`GitHub: ${reason(error)}`);
+  }
+  for (const registry of NPM_REGISTRIES) {
+    try {
+      const version = await npmRegistryLatest(request, registry, asset);
+      return { version, sources: releaseSources(version, asset) };
+    } catch (error) {
+      failures.push(`${new URL(registry).hostname}: ${reason(error)}`);
+    }
+  }
+  throw new Error(`Release lookup failed on GitHub, npmmirror and npmjs. (${failures.join("; ")})`);
 }
 
 declare const FRELY_BUILD_TARGET: string | undefined;

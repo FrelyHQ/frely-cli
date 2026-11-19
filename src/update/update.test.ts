@@ -244,6 +244,12 @@ test("standalone lookup falls back to npmmirror when GitHub is unreachable, and 
   assert.deepEqual(viaNpm.sources?.map((source) => source.kind), ["github", "npm", "npm"]);
   assert.match((viaNpm.sources![1] as { tarballUrl: string }).tarballUrl, /^https:\/\/registry\.npmmirror\.com\/@frelyhq\/cli-[a-z0-9-]+\/-\/cli-[a-z0-9-]+-1\.2\.4\.tgz$/u);
   await assert.rejects(latestRelease(install, async () => { throw new TypeError("offline"); }), /GitHub, npmmirror and npmjs/u);
+  // When every source fails, the error says why each one did.
+  await assert.rejects(latestRelease(install, async (url) => {
+    if (String(url).startsWith("https://api.github.com/")) throw new TypeError("fetch failed", { cause: { code: "ECONNRESET" } });
+    if (String(url).startsWith("https://registry.npmmirror.com/")) return new Response("", { status: 503 });
+    throw new DOMException("timed out", "TimeoutError");
+  }), /GitHub: fetch failed \(ECONNRESET\); registry\.npmmirror\.com: HTTP 503; registry\.npmjs\.org: timeout/u);
 
   const root = await mkdtemp(join(tmpdir(), "frely-sources-"));
   t.after(() => rm(root, { recursive: true, force: true }));
