@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
@@ -521,6 +521,13 @@ export async function hasConfiguredLocalToken(relayInput?: string): Promise<bool
   const relayUrl = normalizeRelayUrl(relayInput);
   const raw = await credentialStore.getPassword(SERVICE, accountKey(relayUrl));
   return typeof raw === "string" && raw.length > 0;
+}
+
+/** Changes whenever the stored login changes (a new `frely login`, or a rotation); null when none is stored. Never the credential itself. */
+export async function storedLoginFingerprint(): Promise<string | null> {
+  const config = await currentRelayConfig(await readConfig());
+  const raw = await credentialStore.getPassword(SERVICE, accountKey(config.relayUrl));
+  return raw ? createHash("sha256").update(raw).digest("hex") : null;
 }
 
 /** Load a configured credential without refreshing or validating it remotely. */

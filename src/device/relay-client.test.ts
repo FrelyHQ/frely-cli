@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RelayMcpSession } from "../runtime/relay-mcp.js";
 import { McpLease } from "../runtime/mcp-lease.js";
-import { isTransportFallbackEligible, serveConnection } from "./relay-client.js";
+import { isTransportFallbackEligible, resumeAfterLogin, serveConnection } from "./relay-client.js";
 import type { DeviceRelayEnvelope, DeviceRelayResponse } from "./protocol.js";
 
 test("Device Relay websocket subprotocol can carry multiplexed envelopes", async () => {
@@ -307,4 +307,35 @@ test("a connection replaced by another process (4409) waits a minute instead of 
   const next = nextReconnectDelay({ backoffMs: 1000 }, error, 0, () => 0);
   assert.equal(next.delayMs, RELAY_REPLACED_RETRY_MS);
   assert.equal(isConnectionReplacedClose(new Error("refused")), false);
+});
+
+test("after the login expired, the relay waits for a new login, verifies it once and reconnects; the dead login is never sent again", async () => {
+  const abort = new AbortController();
+  let stored: string | null = "dead";
+  let checks = 0, reconnects = 0, rounds = 0;
+  const done = resumeAfterLogin({
+    failed: "dead", signal: abort.signal, intervalMs: 5, log: () => undefined,
+    fingerprint: async () => { rounds += 1; if (rounds === 4) stored = "rejected"; if (rounds === 7) stored = "fresh"; return stored; },
+    check: async () => { checks += 1; if (stored === "rejected") throw new Error("Frely login expired. Run `frely login`."); },
+    reconnect: () => { reconnects += 1; },
+  });
+  await done;
+  // Unchanged login: no check. A new login the server refuses: one check, then wait for the next change.
+  assert.equal(checks, 2);
+  assert.equal(reconnects, 1);
+  abort.abort();
+});
+
+test("waiting for a new login ends with the connection, and stops when the authorization itself is gone", async () => {
+  const abort = new AbortController();
+  let checks = 0;
+  const waiting = resumeAfterLogin({ failed: "dead", signal: abort.signal, intervalMs: 5, log: () => undefined,
+    fingerprint: async () => "dead", check: async () => { checks += 1; }, reconnect: () => assert.fail("must not reconnect") });
+  setTimeout(() => abort.abort(), 30);
+  await waiting;
+  assert.equal(checks, 0);
+  let reconnects = 0;
+  await resumeAfterLogin({ failed: "dead", signal: new AbortController().signal, intervalMs: 5, log: () => undefined,
+    fingerprint: async () => "fresh", check: async () => { throw new Error("MCP authorization changed. Run frely link on --days 90 to renew."); }, reconnect: () => { reconnects += 1; } });
+  assert.equal(reconnects, 0);
 });

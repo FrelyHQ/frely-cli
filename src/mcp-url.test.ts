@@ -170,6 +170,11 @@ test("frely link on configures once, then only starts the service", async (t) =>
   // Already running: nothing to do.
   await startMcp({ notify: f.notify }, deps);
   assert.deepEqual(started, ["start"]);
+  // Running but no longer serving remote commands (its session closed): restart it.
+  await startMcp({ notify: f.notify }, { ...deps, serviceStalled: async () => true });
+  assert.deepEqual(f.state.installations, [workspace, workspace]);
+  assert.deepEqual(started, ["start"]);
+  f.state.installations.pop();
   // Authorized but service removed: reinstall without a new approval.
   status = { installed: false, active: false, platform: process.platform };
   await startMcp({ notify: f.notify }, deps);

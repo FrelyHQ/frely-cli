@@ -1,10 +1,11 @@
 import { approvalCodeOfLink, formatApprovalCode } from "./approval-code.js";
 import { ensureDefaultWorkspace } from "./default-workspace.js";
-import { realpath } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import { attachDeviceCodeMcp, finishDeviceLogin, localDeviceId, loginDevice, readConfig, redeemInstallToken, requireLogin } from "./auth.js";
 import { discardForeignMcpAuthorization, generateMcpKey, inspectMcpMetadata, inspectMcpMetadataOrQuarantine, MCP_DEFAULT_DAYS, parseMcpDays, requireMcpAuthorization, setupMcpAuthorization, takeDeviceCodeMcpPreapproval, type McpAuthorization, type McpMetadata, type McpPreset } from "./mcp-authorization.js";
 import { installMcpService, serviceStatus, startMcpService } from "./service.js";
+import { connectionStatusPath } from "./device/connection-status.js";
 
 /**
  * The controlled-side group is `frely link`: whether this computer accepts remote control, whatever the channel (an MCP client, `frely run`
@@ -141,6 +142,16 @@ export interface McpStartDeps {
   installService: typeof installMcpService;
   startService: typeof startMcpService;
   serviceStatus: typeof serviceStatus;
+  /** True when the running service is connected but no longer runs remote commands (its session closed, for example after the login expired). */
+  serviceStalled?: () => Promise<boolean>;
+}
+
+/** Reads the running service's own status record; unreadable or absent means "not known to be stalled". */
+export async function runningServiceStalled(): Promise<boolean> {
+  try {
+    const status = JSON.parse(await readFile(connectionStatusPath(), "utf8")) as { state?: unknown; mcpEnabled?: unknown; workspace?: unknown };
+    return status.state === "connected" && status.mcpEnabled === false && typeof status.workspace === "string";
+  } catch { return false; }
 }
 
 /**
@@ -149,14 +160,18 @@ export interface McpStartDeps {
  */
 export async function startMcp(
   input: McpSetupInput,
-  deps: McpStartDeps = { installService: installMcpService, startService: startMcpService, serviceStatus },
+  deps: McpStartDeps = { installService: installMcpService, startService: startMcpService, serviceStatus, serviceStalled: runningServiceStalled },
 ): Promise<McpAuthorization> {
   const metadata = await discardForeignMcpAuthorization(await inspectMcpMetadataOrQuarantine(input.notify), input.notify);
   await checkWorkspace(metadata, input.workspace);
   if (!metadata || grantInactive(metadata) || input.days !== undefined) return setupMcp(metadata, input, deps.installService);
   const authorization = await requireMcpAuthorization();
   const status = await deps.serviceStatus();
-  if (status.active) input.notify("Background service: already running\n");
+  if (status.active && await deps.serviceStalled?.()) {
+    // The authorization was just verified, yet the service refuses remote commands: only a restart gives it a new session.
+    const service = await deps.installService(authorization.grant.workspace);
+    input.notify(`Background service: restarted (it had stopped running remote commands)${service.active ? "" : "; not active"}\n`);
+  } else if (status.active) input.notify("Background service: already running\n");
   else {
     const service = status.installed ? await deps.startService() : await deps.installService(authorization.grant.workspace);
     input.notify(`Background service: ${service.active ? "running" : "not active"}\n`);
