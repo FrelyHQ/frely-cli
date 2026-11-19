@@ -25,7 +25,7 @@ test("single workspace keeps relative paths and reports workspace_info root + wo
   try {
     assert.equal(text(await client.callTool({ name: "read_file", arguments: { path: "a.txt" } })), "solo\n");
     const info = JSON.parse(text(await client.callTool({ name: "workspace_info", arguments: {} })));
-    assert.deepEqual(info, { root, workspaces: [root] });
+    assert.deepEqual(info, { root, workspaces: [root], rev: 0 });
   } finally { await close(); }
 });
 
@@ -156,4 +156,34 @@ test("a granted parent directory never opens protected credential folders to fil
     for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     await close();
   }
+});
+
+test("workspace_manage needs an approval bound to the exact change and applies it to the running service", async () => {
+  const launch = await realpath(await mkdtemp(join(tmpdir(), "frely-mw-manage-")));
+  const next = await realpath(await mkdtemp(join(tmpdir(), "frely-mw-manage-next-")));
+  const { client, close } = await connect(launch);
+  const proof = (action: string, path: string, expectedRev: number) => ({ "frely/workspace-change": { approvalId: "apr_1", action, path, expectedRev } });
+  try {
+    // No approval, or an approval for another path, changes nothing.
+    const refused = await client.callTool({ name: "workspace_manage", arguments: { action: "primary", path: next, expectedRev: 0 } });
+    assert.equal(refused.isError, true);
+    assert.match(text(refused), /not approved/);
+    const mismatched = await client.callTool({ name: "workspace_manage", arguments: { action: "primary", path: next, expectedRev: 0 }, _meta: proof("primary", launch, 0) });
+    assert.equal(mismatched.isError, true);
+
+    const ok = await client.callTool({ name: "workspace_manage", arguments: { action: "primary", path: next, expectedRev: 0 }, _meta: proof("primary", next, 0) });
+    assert.equal(ok.isError, undefined);
+    assert.deepEqual(JSON.parse(text(ok)), { primary: next, workspaces: [next, launch], rev: 1 });
+    const info = JSON.parse(text(await client.callTool({ name: "workspace_info", arguments: {} })));
+    assert.deepEqual(info, { root: next, workspaces: [next, launch], rev: 1 });
+
+    // The same approval cannot be replayed: the configuration moved on.
+    const replay = await client.callTool({ name: "workspace_manage", arguments: { action: "primary", path: next, expectedRev: 0 }, _meta: proof("primary", next, 0) });
+    assert.equal(replay.isError, true);
+    assert.match(text(replay), /workspace_config_changed/);
+
+    // Removal only forgets the folder.
+    const removed = await client.callTool({ name: "workspace_manage", arguments: { action: "remove", path: launch, expectedRev: 1 }, _meta: proof("remove", launch, 1) });
+    assert.deepEqual(JSON.parse(text(removed)), { primary: next, workspaces: [next], rev: 2 });
+  } finally { await close(); }
 });

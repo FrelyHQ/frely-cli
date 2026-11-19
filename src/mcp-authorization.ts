@@ -3,6 +3,7 @@ import { realpath, rename, unlink } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { ensureDefaultWorkspace } from "./default-workspace.js";
+import { readWorkspaceState } from "./runtime/workspace-registry.js";
 import { requireLogin, openVerificationUrl } from "./auth.js";
 import { credentialStore } from "./credential-store.js";
 import { ensureCredentialDirectory, readPrivateFile, writePrivateFile } from "./credential-file.js";
@@ -112,18 +113,24 @@ export async function loadMcpAuthorization(): Promise<McpAuthorization | null> {
   return { ...metadata, mcpUrl: metadata.mcpResource, sign: (message) => identity.signMessage(message) };
 }
 
+/** The launch workspace of the authorization, or any workspace the owner registered (including a chosen primary): changing the primary never needs a new authorization. */
+async function workspaceServed(workspace: string, launch: string): Promise<boolean> {
+  const path = await realpath(resolve(workspace));
+  return path === launch || (await readWorkspaceState(launch).catch(() => null))?.workspaces.includes(path) === true;
+}
+
 /** Local checks only (no web app): the stored authorization exists, is unexpired and matches the workspace. */
 export async function requireLocalMcpAuthorization(workspace?: string): Promise<McpAuthorization> {
   const authorization = await loadMcpAuthorization();
   if (!authorization) throw new Error("MCP is not enabled. Run frely link on.");
   assertMcpActive(authorization.grant);
-  if (workspace !== undefined && await realpath(resolve(workspace)) !== authorization.grant.workspace) throw new Error("Workspace differs from the approved MCP workspace. Run frely link on for the new workspace.");
+  if (workspace !== undefined && !await workspaceServed(workspace, authorization.grant.workspace)) throw new Error("Workspace is not one this device serves. Add it with frely link workspace add <path> (--primary to make it the primary workspace).");
   return authorization;
 }
 
 const DEFINITIVE_AUTHORIZATION_FAILURES = [
   "MCP_AUTHORIZATION_EXPIRED", "MCP authorization changed", "MCP authorization belongs to a different account",
-  "Frely login expired", "No Frely login is stored", "No Frely login is configured", "Legacy credentials require a new basic login", "Workspace differs from the approved MCP workspace", "MCP is not enabled",
+  "Frely login expired", "No Frely login is stored", "No Frely login is configured", "Legacy credentials require a new basic login", "Workspace is not one this device serves", "MCP is not enabled",
 ];
 
 /** True only when the web app answered that this login or authorization is no longer valid; outages and network errors are not. */
@@ -136,7 +143,7 @@ export async function requireMcpAuthorization(workspace?: string): Promise<McpAu
   const authorization = await loadMcpAuthorization();
   if (!authorization) throw new Error("MCP is not enabled. Run frely link on.");
   assertMcpActive(authorization.grant);
-  if (workspace !== undefined && await realpath(resolve(workspace)) !== authorization.grant.workspace) throw new Error("Workspace differs from the approved MCP workspace. Run frely link on for the new workspace.");
+  if (workspace !== undefined && !await workspaceServed(workspace, authorization.grant.workspace)) throw new Error("Workspace is not one this device serves. Add it with frely link workspace add <path> (--primary to make it the primary workspace).");
   const auth = await requireLogin();
   if (authorization.relayUrl !== auth.config.relayUrl || authorization.userId !== auth.user.id) throw new Error("MCP authorization belongs to a different account.");
   const response = await relayFetch(auth.config.relayUrl, auth.credential, `${ENDPOINT}?requestId=${authorization.grant.id}`, { method: "GET" });

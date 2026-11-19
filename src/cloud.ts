@@ -283,7 +283,7 @@ export async function callCloudTool(name: string, input: Record<string, unknown>
  * ApprovalRequiredError, so the caller can exit with 3 and say what to run again.
  */
 /** Tools the read-only reader can never see, so a command that calls one goes straight to the FrelyMCP connection and saves a handshake. */
-const KNOWN_WRITE_TOOLS = new Set(["items.claim_install", "share_links.redeem", "mcps.connect"]);
+const KNOWN_WRITE_TOOLS = new Set(["items.claim_install", "share_links.redeem", "mcps.connect", "devices.confirm_workspace_change"]);
 
 export async function callCloudToolAwaiting(name: string, input: Record<string, unknown>, deps: CloudCallDeps = { openReader: openCloudReader, openControllerConnection },
   wait: (controller: { call(name: string, args: Record<string, unknown>): Promise<DirectResult> }, ref: ApprovalRef, timeoutMs: number) => Promise<ApprovalOutcome> = (controller, ref, timeoutMs) => waitForApproval(controller as never, ref, timeoutMs),

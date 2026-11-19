@@ -92,3 +92,12 @@ test("invalid MCP arguments fail before login, authorization, service installati
     });
   }
 });
+
+test("workspace add takes --primary or -p before or after the path; remove takes no flag", () => {
+  assert.deepEqual(normalizeLinkArgs(["link", "workspace", "add", "/p", "--primary"]), ["link", "workspace", "add", "/p", "--primary"]);
+  assert.deepEqual(normalizeLinkArgs(["link", "workspace", "add", "-p", "/p"]), ["link", "workspace", "add", "/p", "--primary"]);
+  assert.deepEqual(normalizeLinkArgs(["link", "workspace", "add", "--primary"]), ["link", "workspace", "add", ".", "--primary"]);
+  assert.throws(() => normalizeLinkArgs(["link", "workspace", "remove", "/p", "--primary"]), /Unsupported workspace remove option/);
+  assert.throws(() => normalizeLinkArgs(["link", "workspace", "add", "/p", "--nope"]), /Unsupported workspace add option/);
+  assert.throws(() => normalizeLinkArgs(["link", "workspace", "primary", "/p"]), /Unknown workspace command/);
+});

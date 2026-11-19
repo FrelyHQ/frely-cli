@@ -1,44 +1,39 @@
 import { realpath } from "node:fs/promises";
-import { addWorkspace, ensureWorkspaceRegistered, listWorkspaces, removeWorkspace } from "./runtime/workspace-registry.js";
+import { resolve } from "node:path";
+import { changeWorkspaces, readWorkspaceState, type WorkspaceOperation, type WorkspaceState } from "./runtime/workspace-registry.js";
 
 export interface WorkspaceCommandInput {
   args: string[];
-  /** grant.workspace of the device's MCP authorization, or null when MCP is not enabled. */
+  /** grant.workspace of the device's MCP authorization (the launch workspace), or null when MCP is not enabled. */
   primary: string | null;
   write: (text: string) => void;
+  /** Called before a change that is not read-only; throws to refuse it (the owner's confirmation). */
+  confirm?: (change: { action: WorkspaceOperation; path: string }) => Promise<void>;
 }
 
-/** `frely link workspace list|add <path>|remove <path>`. `args` is the normalized argv, e.g. ["mcp", "workspace", "add", "/path"]. */
-export async function runWorkspaceCommand({ args, primary: primaryInput, write }: WorkspaceCommandInput): Promise<void> {
+/** `frely link workspace list|add <path> [--primary]|remove <path>`. `args` is the normalized argv, e.g. ["link", "workspace", "add", "/path"]. */
+export async function runWorkspaceCommand({ args, primary: primaryInput, write, confirm }: WorkspaceCommandInput): Promise<void> {
   if (!primaryInput) throw new Error("MCP is not enabled. Run frely link on.");
-  const primary = await realpath(primaryInput);
-  // The primary workspace is always registered, so it is listed and routed like any other root.
-  await ensureWorkspaceRegistered(primary);
+  const launch = await realpath(primaryInput);
   const action = args[2];
-  if (action === "add") {
-    const roots = await addWorkspace(args[3]!);
-    write(`Added workspace ${roots[roots.length - 1]}\n${format(primary, roots)}`);
-    return;
-  }
-  if (action === "remove") {
-    const roots = await removeWorkspace(args[3]!, primary);
-    write(`Removed workspace. Remaining:\n${format(primary, roots)}`);
-    return;
-  }
   if (action === "list") {
-    const roots = await listWorkspaces();
-    write(args.includes("--json")
-      ? `${JSON.stringify({ primary, workspaces: ordered(primary, roots) })}\n`
-      : format(primary, roots));
+    const state = await readWorkspaceState(launch);
+    write(args.includes("--json") ? `${JSON.stringify({ primary: state.primary, workspaces: state.workspaces })}\n` : format(state));
+    return;
+  }
+  if (action === "add" || action === "remove") {
+    const path = resolve(args[3]!);
+    // `add --primary` registers the folder if needed and makes it the primary workspace.
+    const change: WorkspaceOperation = action === "add" && args.includes("--primary") ? "primary" : action;
+    await confirm?.({ action: change, path });
+    const state = await changeWorkspaces(change, path, launch);
+    const done = change === "add" ? "Added workspace" : change === "remove" ? "Removed workspace" : "Primary workspace is now";
+    write(`${done} ${change === "primary" ? state.primary : await realpath(path).catch(() => path)}\n${format(state)}`);
     return;
   }
   throw new Error("Unknown workspace command. Run frely link workspace.");
 }
 
-function ordered(primary: string, roots: string[]): string[] {
-  return [primary, ...roots.filter((root) => root !== primary)];
-}
-
-function format(primary: string, roots: string[]): string {
-  return ordered(primary, roots).map((root) => `${root === primary ? "* " : "  "}${root}${root === primary ? " (primary)" : ""}\n`).join("");
+function format(state: WorkspaceState): string {
+  return state.workspaces.map((root) => `${root === state.primary ? "* " : "  "}${root}${root === state.primary ? " (primary)" : ""}\n`).join("");
 }
