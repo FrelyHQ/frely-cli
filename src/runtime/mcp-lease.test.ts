@@ -33,6 +33,17 @@ test("a lease closed because the login expired says so, and tells the owner what
   assert.equal(plain.state().reason, "closed");
 });
 
+test("a login the server refused is reported but does not stop the lease", () => {
+  const lease = new McpLease("synthetic", Date.now() + 60_000);
+  try {
+    lease.loginExpired = true;
+    lease.assert();
+    assert.deepEqual({ active: lease.state().active, loginExpired: lease.state().loginExpired }, { active: true, loginExpired: true });
+    lease.loginExpired = false;
+    assert.equal("loginExpired" in lease.state(), false);
+  } finally { lease.close(); }
+});
+
 test("a 365-day lease does not overflow a Node timer", async () => {
   const lease = new McpLease("synthetic", Date.now() + 365 * 86400000);
   try { await sleep(15); assert.equal(lease.controller.signal.aborted, false); lease.assert(); }

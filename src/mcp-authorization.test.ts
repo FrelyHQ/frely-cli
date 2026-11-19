@@ -10,3 +10,13 @@ test("only a definitive answer from the web app counts as an authorization failu
   assert.equal(isDefinitiveAuthorizationFailure(new Error("Frely Device Relay request timed out.")), false);
   assert.equal(isDefinitiveAuthorizationFailure(new Error("Server error (502)")), false);
 });
+
+test("only a login the server refused keeps remote control running; a computer with no stored login does not", async () => {
+  const { isLoginFailure, isLoginRefusedByServer } = await import("./mcp-authorization.js");
+  const refused = new Error("Frely login expired. Run `frely login`.");
+  const signedOut = new Error("No Frely login is stored. Run `frely login`.");
+  assert.equal(isLoginFailure(refused) && isLoginRefusedByServer(refused), true);
+  assert.equal(isLoginFailure(signedOut), true);
+  assert.equal(isLoginRefusedByServer(signedOut), false);
+  assert.equal(isLoginRefusedByServer(new Error("MCP authorization changed. Run frely link on --days 90 to renew.")), false);
+});

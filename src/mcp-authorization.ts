@@ -141,6 +141,14 @@ export function isLoginFailure(error: unknown): boolean {
   return LOGIN_FAILURES.some((prefix) => message.startsWith(prefix));
 }
 
+/**
+ * The server refused to renew this computer's login (as opposed to no login being stored: the owner signed out here, or never signed in).
+ * Remote control keeps running through it: the relay checks the device key and the MCP authorization itself, at connect and every 30 s after.
+ */
+export function isLoginRefusedByServer(error: unknown): boolean {
+  return (error instanceof Error ? error.message : String(error)).startsWith("Frely login expired");
+}
+
 /** True only when the web app answered that this login or authorization is no longer valid; outages and network errors are not. */
 export function isDefinitiveAuthorizationFailure(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
