@@ -86,7 +86,7 @@ Tutorial [https://freely.cloud/docs/claude](https://freely.cloud/docs/claude/)
 | `frely link on` | Turn remote control on: sign in if needed, approve this computer in the browser, start the background service and print the MCP URL. Safe to re-run: it renews expired access and starts a stopped service. |
 | `frely link off` | Turn remote control off: revoke access for every client and lock it on this computer, so only `frely link on` here turns it on again. The background service is uninstalled, or kept running for local Providers. |
 | `frely link status` | Show whether remote control is on, off or not enabled yet, with the MCP URL, workspace, expiry and service state. |
-| `frely link workspace add <path>` | Share another folder. `frely link workspace list` shows them all. |
+| `frely link workspace add <path>` | Share another folder. `frely link workspace list` shows them all. `frely link workspace primary <path>` changes the primary folder without a new authorization; `remove` only stops sharing, it never deletes files. |
 | `frely doctor` | Check sign-in, installation, service and connection. `-v` for details. |
 | `frely update` | Update to the latest version in place. |
 | `frely login` / `frely logout` | Sign in or out of Freely account. |

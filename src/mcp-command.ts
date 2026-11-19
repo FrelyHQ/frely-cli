@@ -36,7 +36,7 @@ export function normalizeLinkArgs(input: readonly string[]): string[] {
       if (args.length > 4 || (args[3] !== undefined && args[3] !== "--json")) throw new Error("Unsupported workspace list option. Run frely link workspace.");
       return args;
     }
-    if (subaction !== "add" && subaction !== "remove") throw new Error("Unknown workspace command. Run frely link workspace.");
+    if (subaction !== "add" && subaction !== "remove" && subaction !== "primary") throw new Error("Unknown workspace command. Run frely link workspace.");
     // A bare `workspace add` means the current directory.
     if (subaction === "add" && args.length === 3) return [...args, "."];
     if (!args[3]) throw new Error(`frely link workspace ${subaction} requires a path argument.`);
@@ -96,7 +96,7 @@ async function checkWorkspace(metadata: McpMetadata | null, workspace: string | 
   if (!metadata || workspace === undefined) return;
   const requested = await realpath(resolve(workspace));
   if (requested !== metadata.grant.workspace) {
-    throw new Error(`Device MCP is already enabled for ${metadata.grant.workspace}. Add another directory with frely link workspace add <path>, or run frely link off first to change the primary workspace.`);
+    throw new Error(`Device MCP is already enabled for ${metadata.grant.workspace}. Add another directory with frely link workspace add <path>, or change the primary workspace with frely link workspace primary <path>.`);
   }
 }
 

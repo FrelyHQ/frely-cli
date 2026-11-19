@@ -53,8 +53,27 @@ test("workspace remove refuses the primary and removes other workspaces", async 
   const primary = await dir("frely-ws-rm-primary-");
   const extra = await dir("frely-ws-rm-extra-");
   await run(primary, "add", extra);
-  await assert.rejects(() => run(primary, "remove", primary), /Cannot remove the primary workspace .*frely link off/);
+  await assert.rejects(() => run(primary, "remove", primary), /Cannot remove the primary workspace .*frely link workspace primary/);
   await run(primary, "remove", extra);
   assert.deepEqual(JSON.parse(await run(primary, "list", "--json")).workspaces, [primary]);
   await assert.rejects(() => run(primary, "remove", extra), /Workspace not registered/);
+});
+
+test("workspace primary makes another directory primary, keeps the old one listed and prints the full list", async () => {
+  const launch = await dir("frely-ws-launch-");
+  const next = await dir("frely-ws-next-");
+  const out = await run(launch, "primary", next);
+  assert.match(out, new RegExp(`Primary workspace is now ${next.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.deepEqual(JSON.parse(await run(launch, "list", "--json")), { primary: next, workspaces: [next, launch] });
+  // The old launch workspace is now an ordinary one: it can be removed, the primary cannot.
+  await assert.rejects(() => run(launch, "remove", next), /Cannot remove the primary workspace/);
+  await run(launch, "remove", launch);
+  assert.deepEqual(JSON.parse(await run(launch, "list", "--json")), { primary: next, workspaces: [next] });
+});
+
+test("workspace changes ask the confirm hook first and stop when it refuses", async () => {
+  const launch = await dir("frely-ws-confirm-");
+  const extra = await dir("frely-ws-confirm-extra-");
+  await assert.rejects(() => runWorkspaceCommand({ args: ["link", "workspace", "add", extra], primary: launch, write: () => undefined, confirm: async () => { throw new Error("denied"); } }), /denied/);
+  assert.deepEqual(JSON.parse(await run(launch, "list", "--json")), { primary: launch, workspaces: [launch] });
 });

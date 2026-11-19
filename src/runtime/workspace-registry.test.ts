@@ -125,3 +125,24 @@ test("workspace registry: reportedWorkspaces lists the primary workspace first, 
   assert(reported.includes(await realpath(other)));
   assert.equal(reported.filter((root) => root === reported[0]).length, 1);
 });
+
+test("workspace registry: changeWorkspaces refuses a stale revision and never overwrites a newer change", async () => {
+  const { changeWorkspaces, readWorkspaceState } = await import("./workspace-registry.js");
+  const launch = await realpath(await mkdtemp(join(tmpdir(), "frely-rev-launch-")));
+  const a = await realpath(await mkdtemp(join(tmpdir(), "frely-rev-a-")));
+  const b = await realpath(await mkdtemp(join(tmpdir(), "frely-rev-b-")));
+  const first = await readWorkspaceState(launch);
+  await changeWorkspaces("add", a, launch, first.rev);
+  await assert.rejects(() => changeWorkspaces("add", b, launch, first.rev), /changed since it was read/);
+  const state = await readWorkspaceState(launch);
+  assert.ok(state.workspaces.includes(a) && !state.workspaces.includes(b));
+  assert.equal(state.rev, first.rev + 1);
+});
+
+test("workspace registry: the report flags a list that does not fit", async () => {
+  const { reportedWorkspaceInfo } = await import("./workspace-registry.js");
+  const launch = await realpath(await mkdtemp(join(tmpdir(), "frely-trunc-")));
+  const info = await reportedWorkspaceInfo(launch);
+  assert.equal(info.workspaces[0], launch);
+  assert.equal(typeof info.truncated, "boolean");
+});

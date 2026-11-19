@@ -49,7 +49,7 @@ import { installCapsule, readAnyInstall } from "./agent/capsule-install.js";
 import { appInstallStatus, installApp, openApp, uninstallApp, updateApp } from "./app-manager.js";
 import { detectSandboxBackend } from "./runtime/sandbox.js";
 import { LocalMcpHub, loadManualEntries } from "./runtime/local-mcp.js";
-import { reportedWorkspaces } from "./runtime/workspace-registry.js";
+import { reportedWorkspaceInfo } from "./runtime/workspace-registry.js";
 import { VERSION } from "./version.js";
 import { agentHelpView, cliUsage, linkUsage, subcommandUsage } from "./agent-help.js";
 import { grantInactive, mcpStartLogin, normalizeLinkArgs, startMcp, takeInstallToken } from "./mcp-command.js";
@@ -878,7 +878,7 @@ async function main(): Promise<void> {
           upgrade: { supported: ["standalone", "npm", "bun"].includes((await inspectInstall().catch(() => ({ method: "unknown" }))).method), version: VERSION, status: upgradeStatus() },
           // The relay keeps a caller waiting after a disconnect when results can arrive on the next connection.
           resumable: true,
-          workspaces: providerOnly ? [] : await reportedWorkspaces(workspace),
+          ...(providerOnly ? { workspaces: [] } : await reportedWorkspaceInfo(workspace).then((info) => ({ workspaces: info.workspaces, workspacesTruncated: info.truncated, workspaceManage: 1 }))),
           ...(localMcp ? { localMcp: localMcp.capabilities() } : {}),
         };
       };
@@ -903,7 +903,19 @@ async function main(): Promise<void> {
   if (command === "link" && args[1] === "workspace") {
     if (args[2] === undefined) { stdout.write(subcommandUsage("link.workspace")); return; }
     const metadata = await inspectMcpMetadataOrQuarantine((message) => { process.stderr.write(message); });
-    await runWorkspaceCommand({ args, primary: metadata?.grant.workspace ?? null, write: (text) => { stdout.write(text); } });
+    const deviceId = metadata?.grant.deviceId;
+    // A change to what AI clients can reach is confirmed by the owner first: the same approval (a code on the web console) every other account write uses.
+    // It names this computer, the operation and the path; the change runs here only after it is approved, and fails closed when it is not.
+    const announce = (approval: Approval) => { process.stderr.write(`Approve this workspace change: ${approval.url}\nCode: ${approval.code.slice(0, 4)}-${approval.code.slice(4)}\n`); openVerificationUrl(approval.url); };
+    await runWorkspaceCommand({ args, primary: metadata?.grant.workspace ?? null, write: (text) => { stdout.write(text); },
+      confirm: async ({ action, path }) => {
+        if (!deviceId) throw new Error("MCP is not enabled. Run frely link on.");
+        try { await callCloudToolAwaiting("devices.confirm_workspace_change", { deviceId, action, path }, undefined, undefined, announce); }
+        catch (error) {
+          if (error instanceof CloudToolError && error.code === "tool_unavailable_or_forbidden") throw new Error("Frely cannot confirm workspace changes yet. Update Frely CLI with frely update, or sign in again, and try again.");
+          throw error;
+        }
+      } });
     return;
   }
 

@@ -15,7 +15,7 @@ class ImageResult {
   constructor(readonly meta: Record<string, unknown>, readonly data: string, readonly mimeType: string) {}
 }
 import { VERSION } from "../version.js";
-import { ensureWorkspaceRegistered, listWorkspaces } from "./workspace-registry.js";
+import { changeWorkspaces, ensureWorkspaceRegistered, readWorkspaceState, WorkspaceConflictError, type WorkspaceOperation } from "./workspace-registry.js";
 import { OutsideWorkspaceError, resolveWorkspace, resolveWorkspacePair } from "./workspace-router.js";
 import type { LocalMcpHub } from "./local-mcp.js";
 import type { LocalModelsHub } from "../provider/local-models.js";
@@ -70,16 +70,10 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
   // Ensure the primary workspace is registered
   await ensureWorkspaceRegistered(workspaceInput);
 
-  // Load all registered workspaces
-  const roots = await listWorkspaces();
+  // Load all registered workspaces; `workspaceInput` is the launch workspace, the primary until the owner chooses another.
   const workspaces = new Map<string, Workspace>();
-  for (const root of roots) {
-    workspaces.set(root, await Workspace.open(root));
-  }
-
-  // Get the primary workspace root (realpath-ed)
-  const primaryWorkspace = await Workspace.open(workspaceInput);
-  const primaryRoot = primaryWorkspace.root;
+  const launchRoot = (await Workspace.open(workspaceInput)).root;
+  await syncWorkspaces(workspaces, launchRoot);
 
   const lifecycle = new AbortController();
   const assertAuthorized = async () => { lifecycle.signal.throwIfAborted(); await options.assertAuthorized?.(); };
@@ -164,7 +158,12 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
         return { content: [{ type: "text" as const, text: JSON.stringify(await options.localModels.share({ url, ...(models?.length ? { models } : {}), ...(providerName ? { name: providerName.slice(0, 128) } : {}) }, signal)) }] };
       }
       // `frely link workspace add|remove` edits the registry while this runtime keeps running; pick the change up per call.
-      await syncWorkspaces(workspaces, primaryRoot);
+      const primaryRoot = await syncWorkspaces(workspaces, launchRoot);
+      if (name === WORKSPACE_MANAGE_TOOL) {
+        const state = await manageWorkspaces(args, request.params._meta, launchRoot);
+        await syncWorkspaces(workspaces, launchRoot);
+        return { content: [{ type: "text" as const, text: JSON.stringify(state) }] };
+      }
       const result = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]), pathGrantsFromMeta(request.params._meta), networkAllowFromMeta(request.params._meta), transferAllowedFromMeta(request.params._meta), p2p);
       if (result instanceof ImageResult) {
         return { content: [{ type: "image" as const, data: result.data, mimeType: result.mimeType }, { type: "text" as const, text: JSON.stringify(result.meta) }] };
@@ -183,16 +182,40 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
   return server;
 }
 
-/** Make `workspaces` match the registry: open added roots, drop removed ones. The primary root always stays. */
-async function syncWorkspaces(workspaces: Map<string, Workspace>, primaryRoot: string): Promise<void> {
-  const roots = new Set(await listWorkspaces());
-  roots.add(primaryRoot);
+/** Make `workspaces` match the registry: open added roots, drop removed ones, and return the effective primary root. */
+async function syncWorkspaces(workspaces: Map<string, Workspace>, launchRoot: string): Promise<string> {
+  const state = await readWorkspaceState(launchRoot);
+  const roots = new Set(state.workspaces);
   for (const root of [...workspaces.keys()]) if (!roots.has(root)) workspaces.delete(root);
-  for (const root of roots) {
+  for (const root of state.workspaces) {
     if (workspaces.has(root)) continue;
     // A root that vanished from disk must not break calls to the other workspaces.
     try { workspaces.set(root, await Workspace.open(root)); } catch { /* skipped until it is valid again */ }
   }
+  // Primary first, so listings show it first.
+  const ordered = state.workspaces.filter((root) => workspaces.has(root)).map((root) => [root, workspaces.get(root)!] as const);
+  workspaces.clear();
+  for (const [root, workspace] of ordered) workspaces.set(root, workspace);
+  return state.primary;
+}
+
+/** Relay-made call that changes workspaces after the owner confirmed it on the web; never listed, and the relay strips this meta from client calls. */
+export const WORKSPACE_MANAGE_TOOL = "workspace_manage";
+export const WORKSPACE_CHANGE_META_KEY = "frely/workspace-change";
+
+async function manageWorkspaces(args: Record<string, unknown>, meta: unknown, launchRoot: string): Promise<unknown> {
+  const op = textArg(args, "action") as WorkspaceOperation;
+  if (op !== "add" && op !== "remove" && op !== "primary") throw new Error("action must be one of add, remove, primary.");
+  const path = textArg(args, "path");
+  const expectedRev = args.expectedRev;
+  if (typeof expectedRev !== "number" || !Number.isSafeInteger(expectedRev) || expectedRev < 0) throw new Error("expectedRev is required.");
+  // The approval the owner gave on the web, bound to exactly this operation, path and configuration version.
+  const proof = meta && typeof meta === "object" ? (meta as Record<string, unknown>)[WORKSPACE_CHANGE_META_KEY] as Record<string, unknown> | undefined : undefined;
+  if (!proof || typeof proof.approvalId !== "string" || !proof.approvalId || proof.action !== op || proof.path !== path || proof.expectedRev !== expectedRev) {
+    throw new Error("This workspace change was not approved. Confirm it on the Frely web page for this device.");
+  }
+  try { return await changeWorkspaces(op, path, launchRoot, expectedRev); }
+  catch (error) { if (error instanceof WorkspaceConflictError) throw new Error(`workspace_config_changed: ${error.message}`); throw error; }
 }
 
 export async function startStdioMcp(workspaceInput: string, options: McpRuntimeOptions = {}): Promise<void> {
@@ -236,6 +259,7 @@ async function dispatch(
     return read(async () => ({
       root: primaryRoot,
       workspaces: Array.from(workspaces.keys()),
+      rev: (await readWorkspaceState(primaryRoot)).rev,
     }));
   }
 
