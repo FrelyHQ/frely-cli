@@ -108,14 +108,12 @@ test("a service without a workspace starts in standby mode, not provider-only", 
   assert.ok(withWorkspace.includes("--workspace") && !withWorkspace.includes("--standby"));
 });
 
-describe("a new login and an installed service", () => {
+test("a new login starts a stopped service, wakes a running one and leaves a missing one alone", async () => {
   const info = (installed: boolean, active: boolean, pid?: number) => ({ installed, active, platform: "linux", ...(pid ? { pid } : {}) }) as never;
-  test("a stopped service is started, a running one is asked to reconnect, no service is left alone", async () => {
-    const calls: string[] = [];
-    const deps = (status: unknown) => ({ status: async () => status as never, start: async () => { calls.push("start"); }, signal: (pid: number) => { calls.push(`signal:${pid}`); return true; } });
-    expect(await wakeInstalledService(deps(info(true, false)))).toBe("started");
-    expect(await wakeInstalledService(deps(info(true, true, 42)))).toBe("nudged");
-    expect(await wakeInstalledService(deps(info(false, false)))).toBe("none");
-    expect(calls).toEqual(["start", "signal:42"]);
-  });
+  const calls: string[] = [];
+  const deps = (status: unknown) => ({ status: async () => status as never, start: async () => { calls.push("start"); }, signal: (pid: number) => { calls.push(`signal:${pid}`); return true; } });
+  assert.equal(await wakeInstalledService(deps(info(true, false))), "started");
+  assert.equal(await wakeInstalledService(deps(info(true, true, 42))), "nudged");
+  assert.equal(await wakeInstalledService(deps(info(false, false))), "none");
+  assert.deepEqual(calls, ["start", "signal:42"]);
 });
