@@ -14,7 +14,7 @@ test("other copies on PATH are listed with their versions, never the running one
   const versions: Record<string, string | null> = { "/old/frely": "0.21.0", "/new/frely": "0.23.41", "/broken/frely": null };
   const found = await otherInstalls({ current: "/me/frely", paths: ["/me/frely", "/old/frely", "/new/frely", "/broken/frely"], version: async (path) => versions[path] ?? null });
   assert.deepEqual(found.map((item) => [item.path, item.unsafeRefresh]), [["/old/frely", true], ["/new/frely", false], ["/broken/frely", false]]);
-  const notes = otherInstallNotes(found);
+  const notes = otherInstallNotes(found, "linux");
   assert.match(notes[0]!, /^Warning: an older frely 0\.21\.0 .*can sign it out/u);
   assert.match(notes[1]!, /^Note: another frely 0\.23\.41 is installed at \/new\/frely/u);
   assert.match(notes[2]!, /^Note: another frely is installed at \/broken\/frely.*Remove it with: rm '\/broken\/frely'$/u);
@@ -30,4 +30,6 @@ test("each other copy comes with the command that removes only that copy", () =>
   const [note] = otherInstallNotes([{ path: nvm, version: "0.23.38", unsafeRefresh: false }], "darwin");
   assert.match(note!, /Remove it with: '\/Users\/w\/\.nvm\/versions\/node\/v24\.14\.1\/bin\/npm' uninstall -g/u);
   assert.doesNotMatch(note!, /frely uninstall/u);
+  assert.equal(removalCommand("C:\\Users\\w\\AppData\\Roaming\\npm\\node_modules\\frely-cli\\dist\\index.js", "win32"), 'npm uninstall -g --prefix "C:\\Users\\w\\AppData\\Roaming\\npm" frely-cli');
+  assert.equal(removalCommand("C:\\tools\\frely.exe", "win32"), 'del "C:\\tools\\frely.exe"');
 });
