@@ -49,6 +49,22 @@ export async function installDeviceRelayService(workspaceInput?: string, options
   } else throw new Error("Device Relay background services support macOS, Windows and Linux.");
   return serviceStatus();
 }
+/**
+ * Points an existing background service at this copy of frely (installers run it after replacing another copy). The service keeps its
+ * mode (standby or full) and workspace. A service saved for another data directory is left alone: adopting it would switch identities.
+ */
+export async function adoptMcpService(): Promise<"adopted" | "current" | "none" | "other-data-dir"> {
+  if (noService() || process.platform === "win32") return "none";
+  const command = await serviceCommand().catch(() => null);
+  if (!command || command.length < 2) return "none";
+  const configHome = command[command.indexOf("--service-config-home") + 1];
+  if (command.includes("--service-config-home") && configHome && resolve(configHome) !== resolve(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"))) return "other-data-dir";
+  const entry = IS_STANDALONE ? process.execPath : await realpath(process.argv[1] ?? "");
+  const program = command.indexOf("mcp") > 0 ? command[command.indexOf("mcp") - 1]! : command[0]!;
+  if (await realpath(program).catch(() => program) === entry) return "current";
+  await installDeviceRelayService(undefined, { standby: command.includes("--standby") });
+  return "adopted";
+}
 export async function startMcpService(): Promise<McpServiceInfo> {
   const skipped = noService();
   if (skipped) return skipped;

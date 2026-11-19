@@ -85,7 +85,7 @@ A failed or interrupted approval can be retried with setup. The server caps pend
 
 ## Installation and service distribution
 
-`install.sh` and `install.ps1` consume standalone release artifacts and SHA-256 manifests from `FrelyHQ/frely-cli`. They install in the user's directory without Node/npm, root/admin elevation, keyring setup, dependency lifecycle scripts or an execution-policy override. `FRELY_RELEASE_DIR` selects an offline artifact directory; `FRELY_INSTALL_DIR` selects the user installation path.
+`install.sh` and `install.ps1` consume standalone release artifacts and SHA-256 manifests from `FrelyHQ/frely-cli`. They install in the user's directory without Node/npm, root/admin elevation, keyring setup, dependency lifecycle scripts or an execution-policy override. `FRELY_RELEASE_DIR` selects an offline artifact directory; `FRELY_INSTALL_DIR` selects the user installation path. Other `frely` copies found on `PATH` share the computer's login, so the installers offer to remove each one (default yes); without a terminal (agents, `--quiet`/`-Quiet`) they only warn unless `FRELY_INSTALL_REPLACE=1` is set. An existing background service is then pointed at the copy just installed (`frely mcp service adopt`).
 
 Checksum comparison detects corruption or a mismatched artifact/manifest pair. It does not replace release signing or authenticate a compromised release publisher. macOS signing/notarization and Windows signing require a release procedure and platform verification. The patch does not bypass Gatekeeper, SmartScreen or enterprise policy.
 

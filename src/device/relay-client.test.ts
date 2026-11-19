@@ -191,7 +191,9 @@ test("device reports capabilities once per connection", async () => {
       poll();
     });
     assert.equal(reported.type, "device_capabilities");
-    assert.deepEqual((reported as { capabilities: Record<string, unknown> }).capabilities, { app: { installed: true, version: "0.4.0" }, sandbox: "none" });
+    // The lease this connection serves under rides along, so the web can tell a lease that ended on the computer.
+    assert.deepEqual((reported as { capabilities: Record<string, unknown> }).capabilities, { app: { installed: true, version: "0.4.0" }, sandbox: "none",
+      mcpLease: { id: `mca_${"a".repeat(32)}`, expiresAt: new Date(lease.expiresAt).toISOString(), active: true } });
 
   } finally {
     controller.abort();
@@ -286,4 +288,23 @@ test("retry-now cuts the reconnect delay short and is removed on abort", async (
   const win = new EventEmitter();
   createRetryNow(new AbortController().signal, "win32", win as unknown as NodeJS.Process);
   assert.equal(win.listenerCount(RETRY_NOW_SIGNAL), 0);
+});
+
+test("a connection replaced by another process (4409) waits a minute instead of taking the device back at once", async () => {
+  const { nextReconnectDelay, isConnectionReplacedClose, RELAY_REPLACED_RETRY_MS } = await import("./relay-client.js");
+  const error = await new Promise<unknown>((resolve) => {
+    const server = new WebSocketServer({ port: 0, handleProtocols: () => DEVICE_RELAY_PROTOCOL });
+    server.once("connection", (peer) => peer.close(4409, "connection_replaced"));
+    server.once("listening", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("missing test address");
+      serveConnection(`ws://127.0.0.1:${address.port}`, "t", `drd_${"a".repeat(32)}`, null, null, new AbortController().signal, () => undefined)
+        .catch((failure: unknown) => { server.close(); resolve(failure); });
+    });
+  });
+  assert.equal(isConnectionReplacedClose(error), true);
+  assert.equal(isTransportFallbackEligible(error), false);
+  const next = nextReconnectDelay({ backoffMs: 1000 }, error, 0, () => 0);
+  assert.equal(next.delayMs, RELAY_REPLACED_RETRY_MS);
+  assert.equal(isConnectionReplacedClose(new Error("refused")), false);
 });

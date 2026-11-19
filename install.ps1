@@ -220,6 +220,31 @@ try {
   if (($env:PATH -split ';') -notcontains $directory) { $env:PATH = "$directory;$env:PATH" }
   $installedVersion = & $target --version
   Write-Output "Installed Frely $installedVersion at $target"
+  # Other copies of frely share this computer's login; an older one can sign it out. Offer to remove each (default yes);
+  # with -Quiet or no console only FRELY_INSTALL_REPLACE=1 removes them.
+  $others = @(Get-Command frely -All -CommandType Application -ErrorAction SilentlyContinue | ForEach-Object { $_.Source } |
+    Where-Object { $_ -and ($_ -ne $target) -and -not ($shim -and $_ -eq $shim) } | Select-Object -Unique)
+  foreach ($other in $others) {
+    $otherVersion = try { (& $other --version 2>$null | Select-Object -First 1) } catch { 'unknown' }
+    $remove = $env:FRELY_INSTALL_REPLACE -eq '1'
+    if (-not $remove -and -not $Quiet -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+      $reply = Read-Host "Another frely $otherVersion is installed at $other. It shares this computer's login; keep one copy. Remove it? [Y/n]"
+      $remove = -not ($reply -match '^[nN]')
+    }
+    $removed = $false
+    if ($remove) {
+      try {
+        if ($other -match '\\npm\\frely(\.cmd|\.ps1)?$') { $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue | Select-Object -First 1; if ($npm) { & $npm.Source uninstall -g frely-cli | Out-Null } }
+        elseif ($other -match '\\\.bun\\') { $bun = Get-Command bun -ErrorAction SilentlyContinue | Select-Object -First 1; if ($bun) { & $bun.Source remove -g frely-cli | Out-Null } }
+        elseif ($other -match '\.exe$') { Remove-Item -LiteralPath $other -Force }
+        $removed = -not (Test-Path -LiteralPath $other)
+      } catch { $removed = $false }
+    }
+    if ($removed) { Write-Output "Removed $other ($otherVersion)." }
+    else { Write-Warning "Another frely $otherVersion is still installed at $other and shares this computer's login. Remove it with the tool that installed it, or rerun the installer with FRELY_INSTALL_REPLACE=1." }
+  }
+  # An existing background service now runs the copy just installed (no-op when there is none, or it already does).
+  try { & $target mcp service adopt *> $null } catch { }
   # Another frely earlier on PATH (an old install elsewhere) would still win; warn when it is older than what was just installed.
   $first = Find-Frely $env:PATH
   if ($first -and ($first.Trim() -ne $target)) {

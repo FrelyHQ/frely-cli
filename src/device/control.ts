@@ -1,3 +1,4 @@
+import { machineFingerprint, osMachineId } from "./machine-id.js";
 import { hostname, platform } from "node:os";
 import { requireLogin } from "../auth.js";
 import { createConnectionProof, deleteDeviceIdentity, loadOrCreateDeviceIdentity } from "./identity.js";
@@ -17,6 +18,7 @@ export async function ensureDevice(): Promise<DeviceBinding> {
   const existing = await readDeviceBinding();
   if (existing && existing.relayUrl === auth.config.relayUrl && existing.userId === auth.user.id) return existing;
   const identity = await loadOrCreateDeviceIdentity(auth.config.relayUrl, auth.user.id);
+  const machineId = await osMachineId();
   const response = await relayFetch(auth.config.relayUrl, auth.credential, "/api/user/device-relay/enroll", {
     method: "POST",
     body: JSON.stringify({
@@ -25,6 +27,8 @@ export async function ensureDevice(): Promise<DeviceBinding> {
       deviceName: hostname(),
       platform: platform(),
       cliVersion: CLIENT_VERSION,
+      // Lets Frely replace this computer's earlier, offline entry (a re-install under another home directory) instead of listing it twice.
+      ...(machineId ? { machineFingerprint: machineFingerprint(machineId, auth.user.id) } : {}),
     }),
   });
   if (response.status === 404 || response.status === 405) throw new Error("This Frely Relay does not provide MCP device enrollment yet.");
@@ -42,7 +46,17 @@ export async function ensureDevice(): Promise<DeviceBinding> {
     updatedAt: new Date().toISOString(),
   };
   await writeDeviceBinding(binding);
+  for (const line of sameComputerNotes(record)) process.stderr.write(`${line}\n`);
   return binding;
+}
+
+/** What Frely said about other entries of this same computer at enrollment. */
+export function sameComputerNotes(record: Record<string, unknown>): string[] {
+  const names = (value: unknown) => Array.isArray(value) ? value.flatMap((item) => item && typeof item === "object" && typeof (item as { name?: unknown }).name === "string" ? [String((item as { name: string }).name).slice(0, 128)] : []) : [];
+  const notes: string[] = [];
+  for (const name of names(record.replaced)) notes.push(`This computer was registered before as "${name}" (offline); that entry was replaced by this one.`);
+  for (const name of names(record.sameComputerOnline)) notes.push(`Warning: another Frely on this computer is connected as "${name}" with a different device key (another user account or home directory). Keep one: run \`frely uninstall\` in the one you do not need.`);
+  return notes;
 }
 
 /** The enrolled device from local state, without contacting the web app; null when this machine is not enrolled. */

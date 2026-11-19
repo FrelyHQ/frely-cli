@@ -318,6 +318,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
           preferredTransport = undefined;
         }
         diagnostic(log, selectedTransport ? `relay.disconnected.${selectedTransport.kind}` : "relay.disconnected", {}, error);
+        if (isConnectionReplacedClose(error)) log("Another process connected to Frely with this computer's device key; this one retries in a minute. Run only one `frely link` service per computer.");
         reporter.report({ type: "disconnected", error });
         if (!retryWithoutDelay) {
           // Only a connection that held resets the backoff; one that drops at once keeps growing it.
@@ -376,6 +377,11 @@ function isRelayRestartCode(code: number): boolean {
   return code === 1012 || code === 1001;
 }
 
+/** 4409: the relay accepted a newer connection for this same device, so another process holds this computer's device key. */
+export function isConnectionReplacedClose(error: unknown): boolean {
+  return error instanceof DeviceTransportConnectionError && error.closeCode === 4409;
+}
+
 export function isRelayRestartClose(error: unknown): boolean {
   return error instanceof DeviceTransportConnectionError && error.closeCode !== undefined && isRelayRestartCode(error.closeCode);
 }
@@ -390,6 +396,11 @@ const BACKOFF_JITTER = 0.2;
 export const RELAY_SILENCE_LIMIT_MS = 35_000;
 const RELAY_PING_MS = 15_000;
 const RELAY_SILENCE_CHECK_MS = 5_000;
+/**
+ * After 4409 the newer connection keeps the device. Coming straight back would close that one in turn, and the two would take turns
+ * cancelling each other's commands, so the replaced side waits a minute.
+ */
+export const RELAY_REPLACED_RETRY_MS = 60_000;
 
 /**
  * After the relay announced a restart, retry about every 2 seconds for ten minutes (also when attempts fail
@@ -402,6 +413,9 @@ export function nextReconnectDelay(
   now: number,
   random: () => number = Math.random,
 ): { delayMs: number; backoffMs: number; restartSince?: number | undefined } {
+  if (isConnectionReplacedClose(error)) {
+    return { delayMs: Math.round(RELAY_REPLACED_RETRY_MS * (1 + random() * BACKOFF_JITTER)), backoffMs: MAX_BACKOFF_MS };
+  }
   const restartSince = state.restartSince ?? (isRelayRestartClose(error) ? now : undefined);
   if (restartSince !== undefined && now - restartSince < RELAY_RESTART_RETRY_WINDOW_MS) {
     return { delayMs: Math.round(1600 + random() * 800), backoffMs: state.backoffMs, restartSince };
@@ -423,6 +437,9 @@ export async function serveConnection(
   carry: RelayCarry = createRelayCarry(),
 ): Promise<void> {
   if (signal.aborted) return;
+  // The lease this connection serves under, as this computer sees it: the web compares it with its own record.
+  const reported = capabilities;
+  capabilities = reported ? async () => ({ ...(await reported() ?? {}), mcpLease: lease ? lease.state() : null }) : undefined;
   await new Promise<void>((resolve, reject) => {
     const socket = new WebSocket(websocketUrl, DEVICE_RELAY_PROTOCOL, {
       headers: { authorization: `Bearer ${accessToken}`, "x-frely-device-id": deviceId },
@@ -673,11 +690,17 @@ async function sendAsync(socket: WebSocket, envelope: DeviceRelayEnvelope): Prom
   });
 }
 
+const CAPABILITIES_MAX_BYTES = 4096;
+
 /** Best-effort capability report; relay-side rejection must never drop the connection. */
 async function sendCapabilities(socket: WebSocket, capabilities?: () => Record<string, unknown> | Promise<Record<string, unknown>> | undefined): Promise<void> {
   try {
-    const report = await capabilities?.() ?? {};
+    const report: Record<string, unknown> = { ...(await capabilities?.() ?? {}) };
     if (socket.readyState !== WebSocket.OPEN) return;
+    // The relay closes the connection on a report over 4 KB: drop the diagnostic fields first, and send nothing rather than too much.
+    const size = () => Buffer.byteLength(JSON.stringify(report));
+    if (size() > CAPABILITIES_MAX_BYTES) { delete report.instance; delete report.mcpLease; }
+    if (size() > CAPABILITIES_MAX_BYTES) return;
     socket.send(encodeDeviceRelayEnvelope({ protocol: DEVICE_RELAY_PROTOCOL, type: "device_capabilities", id: `caps_${randomBytes(8).toString("hex")}`, capabilities: report }));
   } catch {
     // Older relays reject unknown frames; capability reporting is advisory only.

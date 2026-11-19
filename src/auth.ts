@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rename, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -756,38 +756,52 @@ async function refreshOAuthCredentialOnce(relayUrl: string, refreshToken: string
 }
 
 const inflightRefresh = new Map<string, Promise<AuthCredential>>();
-const REFRESH_LOCK_WAIT_MS = 20_000;
-const REFRESH_LOCK_STALE_MS = 60_000;
+/** How long a refresh waits for another process holding the lock; tests shorten it. */
+export const refreshLockTiming = { waitMs: 20_000 };
+/** Longer than the slowest refresh (3 attempts x 15 s timeout plus backoff); the holder also touches the lock while it works. */
+const REFRESH_LOCK_STALE_MS = 90_000;
+const REFRESH_LOCK_TOUCH_MS = 10_000;
 
 function refreshLockPath(): string {
   return join(dirname(authConfigPath()), "refresh.lock");
 }
 
-/** The server rotates the refresh token on every use and treats a reused old one as theft, so two processes must never refresh at once. */
+/**
+ * The server rotates the refresh token on every use and treats a reused old one as theft, so two processes must never refresh at once.
+ * A caller that cannot get the lock fails as "temporarily unavailable" and tries again later: refreshing without it could send a token
+ * the holder is rotating right now, and a replay found after the server's grace window signs this login out.
+ */
 async function withRefreshLock<T>(work: () => Promise<T>): Promise<T> {
   const path = refreshLockPath();
   await mkdir(dirname(path), { recursive: true, mode: 0o700 }).catch(() => undefined);
-  const deadline = Date.now() + REFRESH_LOCK_WAIT_MS;
-  let held = false;
+  const deadline = Date.now() + refreshLockTiming.waitMs;
   for (;;) {
     try {
       const handle = await open(path, "wx", 0o600);
       await handle.writeFile(String(process.pid)).catch(() => undefined);
       await handle.close();
-      held = true;
       break;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") break;
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        debugAuth(`stage=refresh lock_failed=${(error as NodeJS.ErrnoException).code ?? "unknown"}`);
+        throw new TransientRefreshError();
+      }
       const age = await stat(path).then((info) => Date.now() - info.mtimeMs, () => 0);
       if (age > REFRESH_LOCK_STALE_MS) { await unlink(path).catch(() => undefined); continue; }
-      if (Date.now() >= deadline) break;
+      if (Date.now() >= deadline) {
+        debugAuth("stage=refresh lock_busy=1");
+        throw new TransientRefreshError();
+      }
       await delay(100);
     }
   }
+  const touch = setInterval(() => { const now = new Date(); void utimes(path, now, now).catch(() => undefined); }, REFRESH_LOCK_TOUCH_MS);
+  touch.unref?.();
   try {
     return await work();
   } finally {
-    if (held) await unlink(path).catch(() => undefined);
+    clearInterval(touch);
+    await unlink(path).catch(() => undefined);
   }
 }
 

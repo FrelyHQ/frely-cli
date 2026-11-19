@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { authConfigPath, inspectAuth, LOGIN_REFRESH_UNAVAILABLE, login, loginDevice, logout, normalizeRelayUrl, requireLogin } from "./auth.js";
+import { authConfigPath, inspectAuth, LOGIN_REFRESH_UNAVAILABLE, login, refreshLockTiming, loginDevice, logout, normalizeRelayUrl, requireLogin } from "./auth.js";
 import { credentialStore } from "./credential-store.js";
 import { basicCredentialStore } from "./credential-basic.js";
 import { useMemoryCredentialStore } from "./test-support.js";
@@ -362,6 +362,20 @@ test("a login another process refreshes while this one waits on the lock is reus
   await rm(lock);
   assert.equal((await waiting).credential.value, "from-other-process");
   assert.equal(login.refreshCalls(), 0);
+});
+
+test("a refresh that cannot get the lock fails as temporary and never refreshes without it", async (t) => {
+  const login = await withExpiredLogin(t, () => Response.json({ access_token: "must-not-happen", refresh_token: "x", token_type: "bearer", expires_in: 3600 }));
+  const lock = join(dirname(authConfigPath()), "refresh.lock");
+  await mkdir(dirname(lock), { recursive: true });
+  await writeFile(lock, "other-process");
+  const wait = refreshLockTiming.waitMs;
+  refreshLockTiming.waitMs = 300;
+  t.after(async () => { refreshLockTiming.waitMs = wait; await rm(lock, { force: true }); });
+  await assert.rejects(requireLogin(), (error: Error) => error.message === LOGIN_REFRESH_UNAVAILABLE);
+  assert.equal(login.refreshCalls(), 0);
+  // The other process's lock is left alone.
+  assert.equal(await readFile(lock, "utf8"), "other-process");
 });
 
 test("an email sign-in that names an install sends it when the code is sent and again when it is entered", async (t) => {

@@ -181,13 +181,57 @@ if [ "$install_dir" = "$HOME/.local/bin" ] && [ "${FRELY_INSTALL_NO_PROFILE:-0}"
   ;; esac
 fi
 printf 'Installed Frely %s at %s\n' "$("$install_dir/frely" --version)" "$install_dir/frely"
+# Other copies of frely share this computer's login; an older one can sign it out, and two copies drift apart in version.
+# Offer to remove each (default yes). Without a terminal (agents, --quiet) only FRELY_INSTALL_REPLACE=1 removes them.
+remove_other() {
+  other="$1" target="$1"
+  [ -L "$other" ] && target="$(readlink "$other" 2>/dev/null || printf '%s' "$other")"
+  case "$target" in
+    *node_modules/frely-cli/*)
+      case "$other$target" in
+        */.bun/*) command -v bun >/dev/null 2>&1 && bun remove -g frely-cli ;;
+        *) command -v npm >/dev/null 2>&1 && npm uninstall -g --prefix "$(dirname "$(dirname "$other")")" frely-cli ;;
+      esac ;;
+    *) [ -f "$other" ] && [ ! -L "$other" ] && rm -f "$other" ;;
+  esac
+}
+others=
+old_ifs="$IFS"; IFS=:
+for dir in ${PATH:-}; do
+  candidate="$dir/frely"
+  [ -n "$dir" ] && [ -x "$candidate" ] && [ ! -d "$candidate" ] || continue
+  [ "$candidate" -ef "$install_dir/frely" ] && continue
+  case ":$others:" in *":$candidate:"*) continue ;; esac
+  others="${others:+$others:}$candidate"
+done
+IFS="$old_ifs"
+replace="${FRELY_INSTALL_REPLACE:-}"
+if [ -n "$others" ]; then
+  IFS=:
+  for other in $others; do
+    IFS="$old_ifs"
+    other_version="$("$other" --version 2>/dev/null || printf 'unknown')"
+    answer="$replace"
+    if [ -z "$answer" ] && [ "$quiet" != 1 ] && [ -t 2 ] && { : </dev/tty; } 2>/dev/null; then
+      printf "Frely: another frely %s is installed at %s. It shares this computer's login; keep one copy. Remove it? [Y/n] " "$other_version" "$other" >/dev/tty
+      read -r reply </dev/tty || reply=n
+      case "$reply" in [nN]*) answer=0 ;; *) answer=1 ;; esac
+    fi
+    if [ "$answer" = 1 ]; then
+      if remove_other "$other" && [ ! -e "$other" ]; then printf 'Frely: removed %s (%s).\n' "$other" "$other_version" >&2
+      else printf 'Frely: could not remove %s; remove it with the tool that installed it.\n' "$other" >&2; fi
+    else
+      printf "Frely: warning: another frely %s is still installed at %s and shares this computer's login. Remove it with the tool that installed it, or rerun the installer with FRELY_INSTALL_REPLACE=1.\n" "$other_version" "$other" >&2
+    fi
+    IFS=:
+  done
+  IFS="$old_ifs"
+fi
+# An existing background service now runs the copy just installed (no-op when there is none, or it already does).
+"$install_dir/frely" mcp service adopt >/dev/null 2>&1 || note '%s\n' 'Frely: the background service still runs the previous copy; run frely link on to restart it.'
 first_frely="$(command -v frely 2>/dev/null || true)"
-if [ -n "$first_frely" ] && [ "$first_frely" != "$install_dir/frely" ]; then
-  first_version="$("$first_frely" --version 2>/dev/null || true)"
-  new_version="$("$install_dir/frely" --version 2>/dev/null || true)"
-  if [ -n "$first_version" ] && [ "$first_version" != "$new_version" ]; then
-    printf "Frely: warning: 'frely' on PATH resolves to %s (version %s), not the one just installed (%s). Remove it, put %s first on PATH, or run %s.\n" "$first_frely" "$first_version" "$new_version" "$install_dir" "$install_dir/frely" >&2
-  fi
+if [ -n "$first_frely" ] && [ "$first_frely" != "$install_dir/frely" ] && [ -e "$first_frely" ]; then
+  printf "Frely: warning: 'frely' on PATH resolves to %s, not the one just installed. Put %s first on PATH, or run %s.\n" "$first_frely" "$install_dir" "$install_dir/frely" >&2
 fi
 note '%s\n' 'Basic commands require no keyring setup. MCP authorization begins with frely link on.'
 case ":${PATH:-}:" in *":$install_dir:"*) ;; *) note 'This terminal can use %s; new shells use frely.\n' "$install_dir/frely" ;; esac
