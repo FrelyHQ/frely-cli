@@ -1,7 +1,7 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { access, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
-import { delimiter, join } from "node:path";
+import { delimiter, join, posix, win32 } from "node:path";
 import { promisify } from "node:util";
 import { IS_STANDALONE } from "./cli-launch.js";
 
@@ -51,9 +51,36 @@ export async function otherInstalls(options: { current?: string; paths?: string[
   }));
 }
 
+/**
+ * The command that removes just that copy (never `frely uninstall`, which would also sign this computer out): an npm or bun global
+ * package by its own package manager, a standalone file by deleting it. Null when the owner cannot be told from the path.
+ */
+export function removalCommand(path: string, platform: NodeJS.Platform = process.platform): string | null {
+  const quote = (value: string) => platform === "win32" ? `"${value}"` : `'${value.replace(/'/gu, `'\\''`)}'`;
+  // The path rules of the computer the copy is on, not of the machine running this code (tests run every platform's cases).
+  const paths = platform === "win32" ? win32 : posix;
+  const sep = paths.sep;
+  const marker = `${sep}node_modules${sep}frely-cli${sep}`;
+  const at = path.indexOf(marker);
+  if (at >= 0) {
+    if (path.includes(`${sep}.bun${sep}`)) return "bun remove -g frely-cli";
+    // <prefix>/lib/node_modules on macOS and Linux (nvm, Homebrew node, system node); <prefix>\node_modules on Windows.
+    const modules = path.slice(0, at);
+    const prefix = platform === "win32" ? modules : paths.dirname(modules);
+    const npm = platform === "win32" ? "npm" : paths.join(prefix, "bin", "npm");
+    return `${platform === "win32" ? npm : quote(npm)} uninstall -g --prefix ${quote(prefix)} frely-cli`;
+  }
+  if (/[\\/]frely(?:\.exe)?$/u.test(path)) return platform === "win32" ? `del ${quote(path)}` : `rm ${quote(path)}`;
+  return null;
+}
+
 /** One line per other copy, for `frely login` and `frely link on`; empty when this is the only one. */
-export function otherInstallNotes(installs: OtherInstall[]): string[] {
-  return installs.map((install) => install.unsafeRefresh
-    ? `Warning: an older frely ${install.version} is also installed at ${install.path}. It shares this computer's login and can sign it out; remove it with the tool that installed it (or run \`${install.path} uninstall\`).`
-    : `Note: another frely${install.version ? ` ${install.version}` : ""} is installed at ${install.path}. Keep one copy so the background service and your shell run the same version.`);
+export function otherInstallNotes(installs: OtherInstall[], platform: NodeJS.Platform = process.platform): string[] {
+  return installs.map((install) => {
+    const command = removalCommand(install.path, platform);
+    const remove = command ? ` Remove it with: ${command}` : " Remove it with the tool that installed it.";
+    return install.unsafeRefresh
+      ? `Warning: an older frely ${install.version} is also installed at ${install.path}. It shares this computer's login and can sign it out.${remove}`
+      : `Note: another frely${install.version ? ` ${install.version}` : ""} is installed at ${install.path}. Keep one copy so the background service and your shell run the same version.${remove}`;
+  });
 }
