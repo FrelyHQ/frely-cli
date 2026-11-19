@@ -1,0 +1,57 @@
+name: Cut a frely-cli release
+
+# （环境：CLI 发版, 原因：mbp 不在线时也要能发版。云端会话和 GitHub 网页都不能推 tag（403），
+#   所以由本 workflow 在 GitHub 内部校验 main、建 annotated tag 并触发 publish.yml。
+#   用 GITHUB_TOKEN 推的 tag 不会再触发 publish.yml 的 push 事件，所以不会重复发布；发布由下面的 dispatch 触发一次。
+#   前提：main 上 package.json 已是要发的版本（先合并 bump 提交）。）
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release; empty means the version in package.json on main
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: cut-frely-cli-release
+  cancel-in-progress: false
+
+jobs:
+  cut:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Validate, tag and publish
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${INPUT_VERSION:-$(node -p "require('./package.json').version")}"
+          version="${version#v}"
+          # The admission ./scripts/release applies; publish.yml re-validates the tag and runs the full CI before publishing anything.
+          [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "Invalid release version: $version" >&2; exit 1; }
+          [[ "$(node -p "require('./package.json').version")" == "$version" ]] || { echo "package.json on main is not ${version}; merge the version bump first." >&2; exit 1; }
+          sha="$(git rev-parse HEAD)"
+          plan="{\"project\":\"frely-cli\",\"artifact\":\"cli\",\"executor\":\"actions\",\"tag\":\"v${version}\",\"version\":\"${version}\",\"source_sha\":\"${sha}\",\"workflow\":\"publish.yml\"}"
+          tag="v${version}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "Release tag ${tag} already exists; rerun its publish workflow for a retry." >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --annotate --no-sign "$tag" HEAD -m "$plan"
+          git push origin "refs/tags/${tag}"
+          gh workflow run publish.yml --ref "$tag"
+          echo "Started publish.yml for ${tag}" >> "$GITHUB_STEP_SUMMARY"
