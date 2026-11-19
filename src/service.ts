@@ -102,6 +102,25 @@ export async function uninstallMcpService(): Promise<void> {
   }
   await rm(serviceConfigPath(), { force: true });
 }
+/** What a fresh login does to a background service that is already installed. */
+export type ServiceWake = "nudged" | "started" | "none";
+/**
+ * After a new login, an installed service may be stopped (it exits when its login expired) or sitting in its reconnect delay with the old
+ * login. Starts a stopped one with its saved mode and workspace, and asks a running one (same SIGUSR2 as `frely doctor`) to reconnect now.
+ */
+export async function wakeInstalledService(
+  deps: { status: () => Promise<McpServiceInfo>; start: () => Promise<unknown>; signal: (pid: number) => boolean } = {
+    status: serviceStatus,
+    start: async () => { const config = await readServiceConfig(); await installDeviceRelayService(config?.workspace, { standby: !config?.workspace }); },
+    signal: (pid) => { if (process.platform === "win32") return false; try { process.kill(pid, "SIGUSR2"); return true; } catch { return false; } },
+  },
+): Promise<ServiceWake> {
+  const status = await deps.status();
+  if (!status.installed) return "none";
+  if (status.active) return status.pid && deps.signal(status.pid) ? "nudged" : "none";
+  await deps.start();
+  return "started";
+}
 export async function serviceStatus(): Promise<McpServiceInfo> {
   const skipped = noService();
   if (skipped) return skipped;
