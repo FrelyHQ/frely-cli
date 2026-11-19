@@ -133,6 +133,14 @@ const DEFINITIVE_AUTHORIZATION_FAILURES = [
   "Frely login expired", "No Frely login is stored", "No Frely login is configured", "Legacy credentials require a new basic login", "Workspace is not one this device serves", "MCP is not enabled",
 ];
 
+const LOGIN_FAILURES = ["Frely login expired", "No Frely login is stored", "No Frely login is configured", "Legacy credentials require a new basic login"];
+
+/** A definitive failure of the login itself (not of the MCP authorization): `frely login` on this computer fixes it. */
+export function isLoginFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return LOGIN_FAILURES.some((prefix) => message.startsWith(prefix));
+}
+
 /** True only when the web app answered that this login or authorization is no longer valid; outages and network errors are not. */
 export function isDefinitiveAuthorizationFailure(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);

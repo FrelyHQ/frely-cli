@@ -5,7 +5,8 @@ import { removeLegacyAutoUpdate, restartWindowsService, Upgrader } from "../upda
 import { applyPendingUpdate } from "../update/windows-pending.js";
 import { inspectInstallation } from "../update/installation.js";
 import { MaintenanceGate, serveMaintenance } from "../update/maintenance.js";
-import { isDefinitiveAuthorizationFailure, requireLocalMcpAuthorization, requireMcpAuthorization } from "../mcp-authorization.js";
+import { isDefinitiveAuthorizationFailure, isLoginFailure, requireLocalMcpAuthorization, requireMcpAuthorization } from "../mcp-authorization.js";
+import { storedLoginFingerprint } from "../auth.js";
 import { McpLease } from "../runtime/mcp-lease.js";
 import WebSocket, { type RawData } from "ws";
 import { observeApprovals, setObserveIdentity } from "../trust/observe.js";
@@ -215,6 +216,8 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
       let selectedTransport: DeviceTransportGrant | undefined;
       let transports: readonly DeviceTransportGrant[] = [];
       let retryWithoutDelay = false;
+      // Ends this connection alone, so the loop builds a new lease (the login came back after it had expired).
+      const turn = new AbortController();
       try {
         let authorization = null;
         if (options.session) {
@@ -268,7 +271,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
         }
         // Results kept for resending belong to one authorization; a different one never sees them.
         if (carryAuthorization !== authorization?.grant.id) { carry.outbox.clear(); carry.unacked.clear(); carry.unpinged.clear(); carryAuthorization = authorization?.grant.id; }
-        const grant = await obtainGrant(device, authorization, lease, options.workspace, log);
+        const grant = await obtainGrant(device, authorization, lease, options.workspace, log, turn);
         transports = grant.transports;
         selectedTransport = selectDeviceTransport(transports, preferredTransport);
         const isFallback = preferredTransport !== undefined && selectedTransport.kind === preferredTransport;
@@ -280,7 +283,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
           device.deviceId,
           session,
           lease,
-          options.signal,
+          AbortSignal.any([options.signal, turn.signal]),
           log,
           (event) => {
             if (event.type === "connected") { connectedAt = Date.now(); restartSince = undefined; }
@@ -330,6 +333,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
           await wait(next.delayMs, options.signal, retryNow);
         }
       } finally {
+        turn.abort();
         if (session && lease && !options.signal.aborted && !lease.controller.signal.aborted && hasCarriedMcp(carry)) held = { session, lease };
         else { lease?.close(); await session?.close(); }
       }
@@ -519,7 +523,8 @@ export async function serveConnection(
     const onAbort = () => finish();
     signal.addEventListener("abort", onAbort, { once: true });
 
-    const onLeaseAbort = () => report({ type: "mcp_disabled" });
+    // The relay learns at once why this computer stopped, instead of at the next periodic report.
+    const onLeaseAbort = () => { report({ type: "mcp_disabled" }); void sendCapabilities(socket, capabilities); };
     lease?.controller.signal.addEventListener("abort", onLeaseAbort, { once: true });
     socket.once("open", () => {
       carry.socket = socket;
@@ -736,6 +741,37 @@ export function createRetryNow(signal: AbortSignal, platform: NodeJS.Platform = 
   return { arm: (fn) => { waiting = fn; }, cancel: (fn) => { if (waiting === fn) waiting = undefined; } };
 }
 
+export const LOGIN_RECHECK_MS = 60_000;
+
+/**
+ * After the login expired: wait for the stored login to change (a new `frely login`), verify it, then reconnect so a fresh lease is made.
+ * The expired login is never sent again, so a signed-out computer does not keep posting a dead refresh token.
+ */
+export async function resumeAfterLogin(input: {
+  failed: string | null; fingerprint: () => Promise<string | null>; check: () => Promise<unknown>;
+  signal: AbortSignal; reconnect: () => void; log: DiagnosticLog; intervalMs?: number;
+}): Promise<void> {
+  let failed = input.failed;
+  while (!input.signal.aborted) {
+    await wait(input.intervalMs ?? LOGIN_RECHECK_MS, input.signal);
+    if (input.signal.aborted) return;
+    const current = await input.fingerprint().catch(() => null);
+    if (current === null || current === failed) continue;
+    try {
+      await input.check();
+    } catch (error) {
+      if (isLoginFailure(error)) { failed = current; continue; }
+      // Another definitive answer (authorization changed or expired) is not fixed by a login; an outage is retried next round.
+      if (isDefinitiveAuthorizationFailure(error)) return;
+      continue;
+    }
+    diagnostic(input.log, "relay.login_restored");
+    input.log("Frely login is valid again; remote control resumes.");
+    input.reconnect();
+    return;
+  }
+}
+
 /**
  * Direct to Device Relay first, so a web app outage does not stop reconnecting. A relay that predates the
  * direct endpoint (404/405) gets the previous flow: login and authorization checked up front, grant via the web app.
@@ -747,13 +783,22 @@ async function obtainGrant(
   lease: McpLease | null,
   workspace: string | undefined,
   log: (message: string) => void,
+  turn?: AbortController,
 ): Promise<ConnectionGrant> {
   if (authorization) {
     const direct = await directConnectionGrant(device, { authorizationId: authorization.grant.id, mcpResource: authorization.mcpResource, sign: authorization.sign });
     if (direct) {
-      void requireMcpAuthorization(workspace).then(() => undefined, (error: unknown) => {
+      const check = () => requireMcpAuthorization(workspace);
+      // Read before the check, so a login made while it runs still counts as a change.
+      const loginBefore = storedLoginFingerprint().catch(() => null);
+      void check().then(() => undefined, async (error: unknown) => {
         diagnostic(log, "relay.background_check_failed", {}, error);
-        if (isDefinitiveAuthorizationFailure(error)) lease?.close();
+        if (!isDefinitiveAuthorizationFailure(error)) return;
+        if (!lease || !isLoginFailure(error)) { lease?.close(); return; }
+        // The connection itself needs no login, so the computer stays online: say why it stopped, and come back once the owner signs in.
+        lease.close("login_expired");
+        log("Frely login expired on this computer, so remote commands are paused. Run `frely login`; remote control resumes by itself within a minute.");
+        if (turn) await resumeAfterLogin({ failed: await loginBefore, fingerprint: storedLoginFingerprint, check, signal: turn.signal, reconnect: () => turn.abort(), log });
       });
       return direct;
     }

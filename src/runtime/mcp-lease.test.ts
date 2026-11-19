@@ -21,6 +21,18 @@ test("MCP lease expires at the boundary and clock rollback cannot extend a runni
   } finally { lease.close(); }
 });
 
+test("a lease closed because the login expired says so, and tells the owner what to run", () => {
+  const lease = new McpLease("synthetic", Date.now() + 60_000);
+  lease.close("login_expired");
+  lease.close();
+  assert.throws(() => lease.assert(), /Frely login expired on this computer.*frely login/);
+  assert.deepEqual({ active: lease.state().active, reason: lease.state().reason }, { active: false, reason: "login_expired" });
+  const plain = new McpLease("synthetic", Date.now() + 60_000);
+  plain.close();
+  assert.throws(() => plain.assert(), /MCP session closed on this computer/);
+  assert.equal(plain.state().reason, "closed");
+});
+
 test("a 365-day lease does not overflow a Node timer", async () => {
   const lease = new McpLease("synthetic", Date.now() + 365 * 86400000);
   try { await sleep(15); assert.equal(lease.controller.signal.aborted, false); lease.assert(); }
