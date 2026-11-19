@@ -11,7 +11,7 @@ export interface WorkspaceCommandInput {
   confirm?: (change: { action: WorkspaceOperation; path: string }) => Promise<void>;
 }
 
-/** `frely link workspace list|add <path>|remove <path>|primary <path>`. `args` is the normalized argv, e.g. ["link", "workspace", "add", "/path"]. */
+/** `frely link workspace list|add <path> [--primary]|remove <path>`. `args` is the normalized argv, e.g. ["link", "workspace", "add", "/path"]. */
 export async function runWorkspaceCommand({ args, primary: primaryInput, write, confirm }: WorkspaceCommandInput): Promise<void> {
   if (!primaryInput) throw new Error("MCP is not enabled. Run frely link on.");
   const launch = await realpath(primaryInput);
@@ -21,12 +21,14 @@ export async function runWorkspaceCommand({ args, primary: primaryInput, write, 
     write(args.includes("--json") ? `${JSON.stringify({ primary: state.primary, workspaces: state.workspaces })}\n` : format(state));
     return;
   }
-  if (action === "add" || action === "remove" || action === "primary") {
+  if (action === "add" || action === "remove") {
     const path = resolve(args[3]!);
-    await confirm?.({ action, path });
-    const state = await changeWorkspaces(action, path, launch);
-    const done = action === "add" ? "Added workspace" : action === "remove" ? "Removed workspace" : "Primary workspace is now";
-    write(`${done} ${action === "primary" ? state.primary : await realpath(path).catch(() => path)}\n${format(state)}`);
+    // `add --primary` registers the folder if needed and makes it the primary workspace.
+    const change: WorkspaceOperation = action === "add" && args.includes("--primary") ? "primary" : action;
+    await confirm?.({ action: change, path });
+    const state = await changeWorkspaces(change, path, launch);
+    const done = change === "add" ? "Added workspace" : change === "remove" ? "Removed workspace" : "Primary workspace is now";
+    write(`${done} ${change === "primary" ? state.primary : await realpath(path).catch(() => path)}\n${format(state)}`);
     return;
   }
   throw new Error("Unknown workspace command. Run frely link workspace.");

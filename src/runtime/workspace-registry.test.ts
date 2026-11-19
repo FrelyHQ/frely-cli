@@ -82,13 +82,6 @@ test("workspace registry: removeWorkspace removes non-primary workspace", async 
   assert(afterRemove.length < beforeRemove.length);
 });
 
-test("workspace registry: removeWorkspace rejects removing primary workspace", async () => {
-  const primaryPath = await mkdtemp(join(tmpdir(), "frely-registry-reject-primary-"));
-  await ensureWorkspaceRegistered(primaryPath);
-
-  await assert.rejects(() => removeWorkspace(primaryPath, primaryPath), /Cannot remove the primary workspace/i);
-});
-
 test("workspace registry: removeWorkspace rejects non-registered workspace", async () => {
   const primary = await mkdtemp(join(tmpdir(), "frely-registry-primary3-"));
   const notRegistered = await mkdtemp(join(tmpdir(), "frely-registry-not-reg-"));

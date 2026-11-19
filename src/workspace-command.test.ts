@@ -49,24 +49,36 @@ test("workspace add accepts nested and containing directories", async () => {
   assert.ok((JSON.parse(await run(primary, "list", "--json")) as { workspaces: string[] }).workspaces.includes(inner));
 });
 
-test("workspace remove refuses the primary and removes other workspaces", async () => {
+test("workspace remove forgets another folder; the last workspace cannot be removed", async () => {
   const primary = await dir("frely-ws-rm-primary-");
   const extra = await dir("frely-ws-rm-extra-");
   await run(primary, "add", extra);
-  await assert.rejects(() => run(primary, "remove", primary), /Cannot remove the primary workspace .*frely link workspace primary/);
   await run(primary, "remove", extra);
   assert.deepEqual(JSON.parse(await run(primary, "list", "--json")).workspaces, [primary]);
   await assert.rejects(() => run(primary, "remove", extra), /Workspace not registered/);
+  await assert.rejects(() => run(primary, "remove", primary), /Cannot remove the only workspace/);
 });
 
-test("workspace primary makes another directory primary, keeps the old one listed and prints the full list", async () => {
+test("the primary workspace is the first one: add --primary moves an existing folder to the front, and removing the first promotes the next", async () => {
+  const first = await dir("frely-ws-first-");
+  const second = await dir("frely-ws-second-");
+  const third = await dir("frely-ws-third-");
+  await run(first, "add", second);
+  await run(first, "add", third);
+  await run(first, "add", third, "--primary");
+  assert.deepEqual(JSON.parse(await run(first, "list", "--json")), { primary: third, workspaces: [third, first, second] });
+  await assert.rejects(() => run(first, "add", second), /already registered/);
+  await run(first, "remove", third);
+  assert.deepEqual(JSON.parse(await run(first, "list", "--json")), { primary: first, workspaces: [first, second] });
+});
+
+test("workspace add --primary makes another directory primary, keeps the old one listed and prints the full list", async () => {
   const launch = await dir("frely-ws-launch-");
   const next = await dir("frely-ws-next-");
-  const out = await run(launch, "primary", next);
+  const out = await run(launch, "add", next, "--primary");
   assert.match(out, new RegExp(`Primary workspace is now ${next.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   assert.deepEqual(JSON.parse(await run(launch, "list", "--json")), { primary: next, workspaces: [next, launch] });
-  // The old launch workspace is now an ordinary one: it can be removed, the primary cannot.
-  await assert.rejects(() => run(launch, "remove", next), /Cannot remove the primary workspace/);
+  // The old launch workspace is now an ordinary one and can be removed.
   await run(launch, "remove", launch);
   assert.deepEqual(JSON.parse(await run(launch, "list", "--json")), { primary: next, workspaces: [next] });
 });

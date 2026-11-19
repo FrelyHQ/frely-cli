@@ -7,8 +7,8 @@ import { ensureCredentialDirectory, readPrivateFile, writePrivateFile } from "..
 interface WorkspaceRegistry {
   version: 1;
   roots: string[];
-  /** The primary workspace the owner chose; absent until one is set, then the launch workspace of the MCP authorization applies. */
-  primary?: string;
+  /** Set once the owner changes the list: `roots` is then the whole ordered list and its first entry is the primary workspace. Before that the launch workspace of the MCP authorization comes first. */
+  ordered?: boolean;
   /** Bumped by every change, so a change made from a stale listing is refused instead of overwriting a newer one. */
   rev?: number;
 }
@@ -22,7 +22,7 @@ async function readRegistry(): Promise<WorkspaceRegistry> {
   if (!raw) return { version: 1, roots: [] };
   const value = JSON.parse(raw) as WorkspaceRegistry;
   if (value.version !== 1 || !Array.isArray(value.roots) || !value.roots.every((r) => typeof r === "string")
-    || (value.primary !== undefined && typeof value.primary !== "string") || (value.rev !== undefined && !Number.isSafeInteger(value.rev))) {
+    || (value.ordered !== undefined && typeof value.ordered !== "boolean") || (value.rev !== undefined && !Number.isSafeInteger(value.rev))) {
     throw new Error("Workspace registry is corrupted.");
   }
   return value;
@@ -72,7 +72,7 @@ export async function ensureWorkspaceRegistered(input: string): Promise<void> {
 export type WorkspaceOperation = "add" | "remove" | "primary";
 
 export interface WorkspaceState {
-  /** The effective primary workspace: the owner's choice, else the launch workspace of the MCP authorization. */
+  /** The first workspace in the list; the launch workspace of the MCP authorization until the owner changes the list. */
   primary: string;
   /** Every workspace the device serves, primary first; never truncated (unlike the capability report). */
   workspaces: string[];
@@ -94,51 +94,51 @@ async function realDirectory(input: string): Promise<string> {
   return path;
 }
 
-function effectivePrimary(registry: WorkspaceRegistry, fallback: string): string {
-  return registry.primary !== undefined && registry.roots.includes(registry.primary) ? registry.primary : fallback;
-}
-
+/** The primary workspace is simply the first one in the list, so it always exists. */
 function stateOf(registry: WorkspaceRegistry, fallback: string): WorkspaceState {
-  const primary = effectivePrimary(registry, fallback);
-  return { primary, workspaces: [primary, ...registry.roots.filter((root) => root !== primary)], rev: registry.rev ?? 0 };
+  const workspaces = registry.ordered === true && registry.roots.length > 0
+    ? [...registry.roots]
+    : fallback ? [fallback, ...registry.roots.filter((root) => root !== fallback)] : [...registry.roots];
+  return { primary: workspaces[0] ?? fallback, workspaces, rev: registry.rev ?? 0 };
 }
 
 /** The full, untruncated configuration. `fallbackPrimary` is the launch workspace of the MCP authorization. */
 export async function readWorkspaceState(fallbackPrimary: string): Promise<WorkspaceState> {
   const fallback = await realpath(resolve(fallbackPrimary)).catch(() => resolve(fallbackPrimary));
-  const registry = await readRegistry();
-  if (!registry.roots.includes(fallback) && registry.primary === undefined) registry.roots.push(fallback);
-  return stateOf(registry, fallback);
+  return stateOf(await readRegistry(), fallback);
 }
 
 /**
- * The one place a workspace changes: add, remove or set the primary. Add and primary validate the directory; remove never touches the
- * disk and refuses the current primary (choose another primary first). Returns the configuration that is now in effect.
+ * The one place a workspace changes: add, remove, or move one to the front ("primary"). Add and primary validate the directory; remove
+ * never touches the disk. Returns the configuration that is now in effect.
  */
 export function changeWorkspaces(op: WorkspaceOperation, input: string, fallbackPrimary: string | undefined, expectedRev?: number): Promise<WorkspaceState> {
   const run = queue.then(async () => {
     const registry = await readRegistry();
     const fallback = fallbackPrimary === undefined ? (registry.roots[0] ?? "") : await realpath(resolve(fallbackPrimary)).catch(() => resolve(fallbackPrimary));
-    // The launch workspace is a normal root until the owner chooses another primary.
-    if (fallback && registry.primary === undefined && !registry.roots.includes(fallback)) registry.roots.push(fallback);
     if (expectedRev !== undefined && expectedRev !== (registry.rev ?? 0)) throw new WorkspaceConflictError();
-    const primary = effectivePrimary(registry, fallback);
+    // The first change fixes the order the owner now sees (the launch workspace first, as before); from then on the list is the order.
+    registry.roots = stateOf(registry, fallback).workspaces;
+    registry.ordered = true;
     if (op === "remove") {
       const path = await realpath(resolve(input)).catch(() => resolve(input));
       if (/[\x00-\x1f\x7f]/u.test(path)) throw new Error("Workspace path contains control characters.");
-      if (path === primary) throw new Error(`Cannot remove the primary workspace (${path}). Set another primary first with frely link workspace primary <path>.`);
       const index = registry.roots.indexOf(path);
       if (index < 0) throw new Error(`Workspace not registered: ${path}`);
+      // Removing the first one promotes the next; the last workspace cannot go, so a primary always exists.
+      if (registry.roots.length === 1) throw new Error(`Cannot remove the only workspace (${path}). Add another one first.`);
       registry.roots.splice(index, 1);
     } else {
       const path = await realDirectory(input);
+      const index = registry.roots.indexOf(path);
       if (op === "add") {
         // Nested workspaces are allowed; requests route to the deepest matching root (see workspace-router).
-        if (registry.roots.includes(path)) throw new Error(`Workspace already registered: ${path}`);
+        if (index >= 0) throw new Error(`Workspace already registered: ${path}`);
         registry.roots.push(path);
       } else {
-        if (!registry.roots.includes(path)) registry.roots.push(path);
-        registry.primary = path;
+        // `add --primary`: the path moves to (or is put at) the front, which is what makes it the primary workspace.
+        if (index >= 0) registry.roots.splice(index, 1);
+        registry.roots.unshift(path);
       }
     }
     registry.rev = (registry.rev ?? 0) + 1;

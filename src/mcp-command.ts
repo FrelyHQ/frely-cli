@@ -36,12 +36,15 @@ export function normalizeLinkArgs(input: readonly string[]): string[] {
       if (args.length > 4 || (args[3] !== undefined && args[3] !== "--json")) throw new Error("Unsupported workspace list option. Run frely link workspace.");
       return args;
     }
-    if (subaction !== "add" && subaction !== "remove" && subaction !== "primary") throw new Error("Unknown workspace command. Run frely link workspace.");
-    // A bare `workspace add` means the current directory.
-    if (subaction === "add" && args.length === 3) return [...args, "."];
-    if (!args[3]) throw new Error(`frely link workspace ${subaction} requires a path argument.`);
-    if (args.length > 4) throw new Error(`Unsupported workspace ${subaction} option. Run frely link workspace.`);
-    return args;
+    if (subaction !== "add" && subaction !== "remove") throw new Error("Unknown workspace command. Run frely link workspace.");
+    // `add <path> --primary|-p` also makes the folder the primary workspace; a bare `add` means the current directory.
+    const flags = args.slice(3).filter((arg) => arg.startsWith("-"));
+    const paths = args.slice(3).filter((arg) => !arg.startsWith("-"));
+    const primary = flags.includes("--primary") || flags.includes("-p");
+    if (flags.some((flag) => flag !== "--primary" && flag !== "-p") || (primary && subaction !== "add") || flags.length > 1) throw new Error(`Unsupported workspace ${subaction} option. Run frely link workspace.`);
+    if (paths.length > 1) throw new Error(`Unsupported workspace ${subaction} option. Run frely link workspace.`);
+    if (subaction === "remove" && paths.length === 0) throw new Error("frely link workspace remove requires a path argument.");
+    return [...args.slice(0, 3), paths[0] ?? ".", ...(primary ? ["--primary"] : [])];
   }
   if (action === "local") {
     // Arguments after `--` belong to the local server's own command line and are not validated here.
@@ -96,7 +99,7 @@ async function checkWorkspace(metadata: McpMetadata | null, workspace: string | 
   if (!metadata || workspace === undefined) return;
   const requested = await realpath(resolve(workspace));
   if (requested !== metadata.grant.workspace) {
-    throw new Error(`Device MCP is already enabled for ${metadata.grant.workspace}. Add another directory with frely link workspace add <path>, or change the primary workspace with frely link workspace primary <path>.`);
+    throw new Error(`Device MCP is already enabled for ${metadata.grant.workspace}. Add another directory with frely link workspace add <path>, or change the primary workspace with frely link workspace add <path> --primary.`);
   }
 }
 

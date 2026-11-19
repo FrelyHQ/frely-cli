@@ -124,7 +124,7 @@ export async function requireLocalMcpAuthorization(workspace?: string): Promise<
   const authorization = await loadMcpAuthorization();
   if (!authorization) throw new Error("MCP is not enabled. Run frely link on.");
   assertMcpActive(authorization.grant);
-  if (workspace !== undefined && !await workspaceServed(workspace, authorization.grant.workspace)) throw new Error("Workspace is not one this device serves. Add it with frely link workspace add <path> or frely link workspace primary <path>.");
+  if (workspace !== undefined && !await workspaceServed(workspace, authorization.grant.workspace)) throw new Error("Workspace is not one this device serves. Add it with frely link workspace add <path> (--primary to make it the primary workspace).");
   return authorization;
 }
 
@@ -143,7 +143,7 @@ export async function requireMcpAuthorization(workspace?: string): Promise<McpAu
   const authorization = await loadMcpAuthorization();
   if (!authorization) throw new Error("MCP is not enabled. Run frely link on.");
   assertMcpActive(authorization.grant);
-  if (workspace !== undefined && !await workspaceServed(workspace, authorization.grant.workspace)) throw new Error("Workspace is not one this device serves. Add it with frely link workspace add <path> or frely link workspace primary <path>.");
+  if (workspace !== undefined && !await workspaceServed(workspace, authorization.grant.workspace)) throw new Error("Workspace is not one this device serves. Add it with frely link workspace add <path> (--primary to make it the primary workspace).");
   const auth = await requireLogin();
   if (authorization.relayUrl !== auth.config.relayUrl || authorization.userId !== auth.user.id) throw new Error("MCP authorization belongs to a different account.");
   const response = await relayFetch(auth.config.relayUrl, auth.credential, `${ENDPOINT}?requestId=${authorization.grant.id}`, { method: "GET" });
