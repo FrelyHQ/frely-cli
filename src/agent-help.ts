@@ -23,12 +23,11 @@ export const COMMANDS = [
   { id: "item.update", usage: "frely item update [<folder>] [--json]", auth: "cloud-oauth", effect: "local-write", purpose: "Without a folder, list the installed marketplace items and say which have a newer version; nothing is changed. With a folder, install the newer version into that folder, after you decide to. Frely never updates an item by itself. A folder you edited is refused, and a new version needs a new review (frely item trust) unless Frely's scan passed for it." },
   { id: "item.install", usage: "frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|workbuddy|codebuddy|generic] [--scope global|project] [--dir <path>] [--gift <code>] [--email <address>] [--no-wait] [--no-browser] [--api-key-stdin] [--json]", auth: "cloud-oauth", effect: "local-write", purpose: "Install a download-install Prompt or Skill, or a public Agent's trigger Skill, from the marketplace through Frely Cloud. An Agent's API key goes only through stdin (--api-key-stdin) to secure storage. The paid part is installed only with a valid pass; otherwise the command prints how to buy one. Skills are saved once in ~/.agents/skills (or .agents/skills with --scope project); agents that do not read that folder (WorkBuddy, CodeBuddy, Claude Code, pi) and are installed here get a link to it (a junction on Windows, a copy if linking fails), and --host workbuddy|codebuddy|claude-code|pi links that agent even if its folder is missing. Prompts to --dir (default: current directory). Scripts are saved without execute permission. --gift <code> first claims the share link (fsl_ code) the item came with, then installs. The confirmation page opens by itself on a desktop (--no-browser or FRELY_NO_BROWSER=1 only prints the link); a claim needs one click and no sign-in. The command waits for it up to 30 minutes: keep it running, and if it has ended run the same command again (item install takes no --wait). When this computer is not signed in, add --email <address>: Frely emails one code and a confirm link that also confirm this install. The command waits up to 10 minutes and finishes the install by itself once the user clicks the link; if the user gives you the code instead, run `frely login --code <code>`, then the same install command again. If the command was stopped, run it again: it resumes without a new email. --no-wait only sends the mail and exits (exit code 3 means the wait timed out)." },
   { id: "item.tools", usage: "frely item tools <username/name> [--json] [--replace]", auth: "cloud-oauth", effect: "remote-read", purpose: "List the tools of a remote MCP product from the marketplace, with their input schemas, without configuring it in an MCP client. The first use asks Frely for a key that works only for this MCP. If the name now belongs to a different MCP than the one connected before, it stops; --replace switches to the new one." },
-  { id: "item.call", usage: "frely item call <username/name> <tool> [--json '<object>' | --input <file>] [--replace]", auth: "cloud-oauth", effect: "remote-call", purpose: "Call one tool of a remote MCP product and print the result as JSON (exit code 1 when the tool reports an error). Each call is billed or needs a pass exactly as in an MCP client; ask the user before a call that writes data they did not ask for." },
   { id: "item.config", usage: "frely item config <username/name> [--write <file>] [--replace]", auth: "cloud-oauth", effect: "remote-write", purpose: "Get a new key for one remote MCP product (it replaces the previous one) and print the mcpServers JSON that MCP clients take for it; with --write the entry is merged into that JSON file (created 0600) instead of printed. The key works only for this MCP." },
-  { id: "agent.run", usage: "frely agent run <username/name> (--input <text>|--input-stdin) [--read [<dir>] [--read-max-bytes <n>] [--read-max-rounds <n>]] [--progress-summary|--no-progress-summary] [--json]", auth: "installed-api-key-or-account", effect: "remote-call", purpose: "Send the complete relevant user request to the installed Agent through model-scoped MCP. Usage may be billed. The call runs in a background worker and is recorded on this computer (run id on stderr), so a cut-off command loses nothing: use `frely agent result`. A long call keeps running at Frely and the worker waits for it (reading is free); `frely agent result` shows its newest progress line while it runs. --no-progress-summary asks the Agent not to write progress lines (use it when the user says so, for example in AGENTS.md); without a flag the account setting applies. With --read the Agent may read files of <dir> (default: the git root of the current directory) through read-only tools that run here: only files it asks for leave this computer; .git, .env*, key files, git-ignored and binary files are refused; defaults 1 MiB read and 16 rounds per run; each round is billed, and the result lists filesRead." },
-  { id: "agent.result", usage: "frely agent result (<runId>|--last) [--wait] [--resume] [--json]", auth: "none", effect: "read", purpose: "Show a run of `frely agent run` from this computer: running (rounds done, files read so far), completed (the full text) or failed/interrupted. --wait blocks until it ends. --resume continues an interrupted or failed run from the rounds already done; the interrupted round is billed again." },
-  { id: "agent.runs", usage: "frely agent runs [--json]", auth: "none", effect: "read", purpose: "List the recent agent runs on this computer (kept 7 days)." },
-  { id: "agent.cancel", usage: "frely agent cancel (<runId>|--last) [--json]", auth: "none", effect: "local-process", purpose: "Stop a running agent run; the server stops and settles what was already used (a long call is canceled at Frely too)." },
+  { id: "item.call", usage: "frely item call <username/name> (--input <text>|--input-stdin) [--read [<dir>] [--read-max-bytes <n>] [--read-max-rounds <n>]] [--progress-summary|--no-progress-summary] [--json] | frely item call <username/name> <tool> [--json '<object>' | --input <file>] [--replace]", auth: "installed-api-key-or-account", effect: "remote-call", purpose: "Without a tool: send the complete relevant user request to the installed Agent through model-scoped MCP. Usage may be billed. The call runs in a background worker and is recorded on this computer (run id on stderr), so a cut-off command loses nothing: use `frely item result`. A long call keeps running at Frely and the worker waits for it (reading is free); `frely item result` shows its newest progress line while it runs. --no-progress-summary asks the Agent not to write progress lines (use it when the user says so, for example in AGENTS.md); without a flag the account setting applies. With --read the Agent may read files of <dir> (default: the git root of the current directory) through read-only tools that run here: only files it asks for leave this computer; .git, .env*, key files, git-ignored and binary files are refused; defaults 1 MiB read and 16 rounds per run; each round is billed, and the result lists filesRead. With a tool: call that one tool of a remote MCP product and print the result as JSON (exit code 1 when the tool reports an error); --input is then a JSON file. Each call is billed or needs a pass exactly as in an MCP client; ask the user before a call that writes data they did not ask for." },
+  { id: "item.result", usage: "frely item result (<runId>|--last) [--wait] [--resume] [--json]", auth: "none", effect: "read", purpose: "Show a run of `frely item call` from this computer: running (rounds done, files read so far), completed (the full text) or failed/interrupted. --wait blocks until it ends. --resume continues an interrupted or failed run from the rounds already done; the interrupted round is billed again." },
+  { id: "item.runs", usage: "frely item runs [--json]", auth: "none", effect: "read", purpose: "List the recent item calls on this computer (kept 7 days)." },
+  { id: "item.cancel", usage: "frely item cancel (<runId>|--last) [--json]", auth: "none", effect: "local-process", purpose: "Stop a running item call; the server stops and settles what was already used (a long call is canceled at Frely too)." },
   { id: "agent.status", usage: "frely agent status (<username/name>|--api-key-stdin [--relay <url>]) [--json]", auth: "none-or-api-key", effect: "read", purpose: "Inspect an installed Agent Skill and, for API-key installs, its Key budget. With --api-key-stdin, read that Key's budget without installing or logging in." },
   { id: "agent.remove", usage: "frely agent remove <username/name> [--json]", auth: "none", effect: "local-write", purpose: "Remove an installed Agent Skill and its saved API key." },
   { id: "agent.local.add", usage: "frely agent local add <username/name | https://github.com/owner/repo> [--name <folder-name>]", auth: "optional-account", effect: "local-write", purpose: "Download an Agent's repository into its own folder under ~/frely-agents and run its setup inside the sandbox. The sandbox can write only that folder, cannot read credential folders and can reach only Frely's API plus the sites the repository lists in frely.yaml, each of which the owner approves once through a link (exit code 3 with the link when nobody can wait; approve, then run the same command again). Needs a frely.yaml with a local.run command." },
@@ -103,7 +102,7 @@ export function agentHelp() {
     skill_update_required: false,
     instructions: [
       "Use this installed CLI's command contract instead of remembered command syntax.",
-      "For an installed Agent, pass the user's complete relevant request through stdin to agent.run and return its result.",
+      "For an installed Agent, pass the user's complete relevant request through stdin to item.call and return its result.",
       "A Skill installed with an API key does not require account login or local MCP execution setup.",
       "Read credentials from a secure input channel; never put them in argv, Skills, ordinary configuration, or logs.",
       "Use --json where the command advertises it. A nonzero exit status means failure; surface the returned error.",
@@ -150,8 +149,8 @@ const DETAILS: Readonly<Record<string, { examples?: readonly string[]; confirm?:
     examples: ["frely api list", "frely api describe credit_products.list", "frely api call credit_products.list --json '{}'", "frely api call <tool> --json '{...}' --wait"],
     confirm: "Ask the user before any call that spends Credit, buys something or changes credentials. A call that needs the owner's approval prints a link: show it to the user, and use --wait in the foreground.",
   },
-  "agent.run": {
-    examples: ["printf '%s' \"$REQUEST\" | frely agent run alice/reviewer --input-stdin --json", "frely agent run alice/reviewer --input 'summarize this repo' --read --json", "frely agent result --last --wait"],
+  "item.call": {
+    examples: ["printf '%s' \"$REQUEST\" | frely item call alice/reviewer --input-stdin --json", "frely item call alice/reviewer --input 'summarize this repo' --read --json", "frely item result --last --wait"],
     confirm: "Usage may be billed; tell the user before adding --read. On payment_required do not ask the user to sign in again: offer a Credit top-up through frely api.",
   },
   "item.install": {
@@ -191,7 +190,7 @@ const SUMMARY_OVERRIDES: Readonly<Record<string, string>> = {
   "item.update": "List installed items with newer versions, or update one folder",
   "item.run": "Run an encrypted paid script of an installed item in the sandbox",
   "item.install": "Install a Prompt or Skill from the marketplace",
-  "agent.run": "Send the user's request to an installed Agent (may be billed)",
+  "item.call": "Send a request to an installed Agent, or call a remote MCP tool (may be billed)",
   "agent.local.add": "Download an Agent's repository to run locally",
   "link.on": "Enable, renew or start remote control of this computer; prints the MCP URL",
   "sandbox.proxy": "Show, save or remove the proxy the command sandbox uses",
@@ -220,7 +219,7 @@ export type AgentHelpView = { readonly summary?: boolean; readonly all?: boolean
 
 /**
  * `agentHelp()` is the full contract. `{ summary: true }` is a short index (one `id [effect] summary` line per command, grouped) for choosing a command;
- * `{ name }` returns the full entries of one command (`agent.run`) or group (`agent`, `agents`, `link`) with examples and
+ * `{ name }` returns the full entries of one command (`item.call`) or group (`item`, `agents`, `link`) with examples and
  * confirmation notes. An unknown name returns `{ ok: false }` with the names that exist.
  */
 export function agentHelpView(view: AgentHelpView = {}): { readonly ok: boolean; readonly value: unknown } {
@@ -262,9 +261,9 @@ const GROUPS: readonly { title: string; ids: readonly string[] }[] = [
   { title: "Control your devices", ids: ["devices", "run", "ps", "logs", "kill", "read", "ls", "grep", "edit", "permission", "tools", "call"] },
   { title: "Account", ids: ["login", "logout", "uninstall", "doctor", "update"] },
   { title: "Let others control this computer", ids: ["link.on", "link.workspace", "link.local", "link.lifecycle"] },
-  { title: "Agents", ids: ["agent.run", "agent.status", "agent.remove", "agent.local"] },
+  { title: "Agents", ids: ["agent.status", "agent.remove", "agent.local"] },
   { title: "Skills", ids: ["skill.install", "skill.sync"] },
-  { title: "Marketplace items", ids: ["item.install", "item.update", "item.run", "item.trust", "item.tools", "item.call", "item.config"] },
+  { title: "Marketplace items", ids: ["item.install", "item.update", "item.run", "item.trust", "item.tools", "item.call", "item.result", "item.runs", "item.cancel", "item.config"] },
   { title: "Tasks", ids: ["task.add", "task.start", "task.result", "task.schedule", "task.manage"] },
   { title: "Todos", ids: ["todo.list", "todo.show", "todo.add", "todo.update", "todo.plan", "todo.step"] },
   { title: "Providers", ids: ["provider.add", "provider.list", "provider.remove", "provider.key"] },
@@ -305,10 +304,10 @@ const SHORT_USAGE: Readonly<Record<string, string>> = {
   "item.update": "frely item update [<folder>]",
   "item.run": "frely item run <script> [args...]",
   "item.trust": "frely item trust <folder> [--check]",
-  "agent.run": "frely agent run <username/name> (--input <text>|--input-stdin) [--read [<dir>]]",
-  "agent.result": "frely agent result (<runId>|--last) [--wait] [--resume]",
-  "agent.runs": "frely agent runs",
-  "agent.cancel": "frely agent cancel (<runId>|--last)",
+  "item.call": "frely item call <username/name> (--input <text>|--input-stdin) [--read [<dir>]] | <tool> [--json '<object>']",
+  "item.result": "frely item result (<runId>|--last) [--wait] [--resume]",
+  "item.runs": "frely item runs",
+  "item.cancel": "frely item cancel (<runId>|--last)",
   "agent.status": "frely agent status <username/name>",
   "agent.remove": "frely agent remove <username/name>",
   "agent.local": "frely agent local add|start|stop|logs|list|remove|key",
@@ -335,7 +334,6 @@ const SHORT_USAGE: Readonly<Record<string, string>> = {
   "sandbox.proxy": "frely sandbox proxy [<url> [--no-proxy <list>] | --clear]",
   api: "frely api list|describe|call",
   "item.tools": "frely item tools <username/name> [--json]",
-  "item.call": "frely item call <username/name> <tool> [--json '<object>']",
   "item.config": "frely item config <username/name> [--write <file>]",
 };
 

@@ -160,7 +160,7 @@ export async function buildPlan(deps: UninstallDeps = defaultDeps()): Promise<Un
     steps.push({ id: "uninstall-service", group: "service", label: "Stop and uninstall the Device Relay background service", paths: servicePaths(deps), run: deps.uninstallService });
   }
 
-  // E. Installed Agent Skills (they call `frely agent run`, so they stop working without the CLI).
+  // E. Installed Agent Skills (they call `frely item call`, so they stop working without the CLI).
   const recordsDir = join(home, ".config", "frely", "skills");
   for (const name of (await readdir(recordsDir).catch(() => [] as string[])).sort()) {
     const id = DISTRIBUTION_FILE.exec(name)?.[1];
