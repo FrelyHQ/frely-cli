@@ -119,6 +119,8 @@ export interface ApprovalPayload {
   ctl?: { kind: "oauth" | "key"; id: string; name?: string };
   grant: { kind: string; resource?: string; mode: "once" | "window" | "authorization" };
   bind?: { tool?: string; cmdHash?: string };
+  /** `todo_scope` approvals: what the owner read and signed (see todo-scope.ts). */
+  scope?: { todo: string; deviceName: string; workspace: string; sites: string[]; maxSteps: number };
   iat: string; nbf: string; exp: string;
 }
 export interface SignedApproval { payload: ApprovalPayload; sig: WebAuthnSignature }
