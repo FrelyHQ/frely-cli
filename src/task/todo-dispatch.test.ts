@@ -1,0 +1,95 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { setObserveIdentity } from "../trust/observe.js";
+import { APPROVAL_DOMAIN, pinTrustChain, TRUST_DOMAIN, trustDirectory, trustRecordHash, type ApprovalPayload, type TrustRecord } from "../trust/record.js";
+import { challengeFor, type Signer, type WebAuthnSignature } from "../trust/webauthn.js";
+import { TODO_SCOPE_GRANT } from "../trust/todo-scope.js";
+import { runTodoDispatch, TODO_SCOPE_META_KEY } from "./todo-dispatch.js";
+import { listDefinitions } from "./definition.js";
+import { listTaskRuns } from "./run-store.js";
+
+const ORIGIN = "https://approve.frely.cloud";
+const b64 = (data: Buffer | string) => Buffer.from(data).toString("base64url");
+const sha = (data: Buffer | string) => createHash("sha256").update(data).digest();
+const pair = generateKeyPairSync("ec", { namedCurve: "P-256" });
+const signer: Signer = { id: "pk_1", kind: "webauthn", credId: b64("cred-1"), alg: -7, spki: b64(pair.publicKey.export({ type: "spki", format: "der" })) };
+const record: TrustRecord = { typ: TRUST_DOMAIN, user: "usr_1", seq: 1, prev: null, rpId: "frely.cloud", approvalOrigins: [ORIGIN], signers: [signer] };
+const assertion = (payload: unknown): WebAuthnSignature => {
+  const clientData = Buffer.from(JSON.stringify({ type: "webauthn.get", challenge: challengeFor(APPROVAL_DOMAIN, payload), origin: ORIGIN }));
+  const authData = Buffer.concat([sha("frely.cloud"), Buffer.from([0x05]), Buffer.alloc(4)]);
+  return { kind: "webauthn", credId: signer.credId, authData: b64(authData), clientData: b64(clientData), signature: b64(sign("sha256", Buffer.concat([authData, sha(clientData)]), pair.privateKey)) };
+};
+const DEVICE = "drd_" + "a".repeat(32);
+
+async function withDevice(run: (work: string) => Promise<void>): Promise<void> {
+  const root = await mkdtemp(join(tmpdir(), "frely-dispatch-"));
+  const saved = { xdg: process.env.XDG_CONFIG_HOME, sandbox: process.env.FRELY_SANDBOX };
+  process.env.XDG_CONFIG_HOME = join(root, "config"); process.env.FRELY_SANDBOX = "off";
+  try {
+    const work = join(root, "work"); await mkdir(work);
+    setObserveIdentity({ device: DEVICE, deviceKey: "thumb", relayUrl: "https://r.test", userId: "usr_1" });
+    await run(work);
+  } finally {
+    if (saved.xdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = saved.xdg;
+    if (saved.sandbox === undefined) delete process.env.FRELY_SANDBOX; else process.env.FRELY_SANDBOX = saved.sandbox;
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+const trustSig = (r: TrustRecord): WebAuthnSignature => {
+  const clientData = Buffer.from(JSON.stringify({ type: "webauthn.get", challenge: challengeFor(TRUST_DOMAIN, r), origin: ORIGIN }));
+  const authData = Buffer.concat([sha("frely.cloud"), Buffer.from([0x05]), Buffer.alloc(4)]);
+  return { kind: "webauthn", credId: signer.credId, authData: b64(authData), clientData: b64(clientData), signature: b64(sign("sha256", Buffer.concat([authData, sha(clientData)]), pair.privateKey)) };
+};
+
+function approval(workspace: string, maxSteps = 2) {
+  const now = Date.now();
+  const payload: ApprovalPayload = {
+    typ: APPROVAL_DOMAIN, id: "tdsc_1", user: "usr_1", trust: trustRecordHash(record), trustSeq: 1, device: DEVICE, deviceKey: "thumb", authz: null,
+    grant: { kind: TODO_SCOPE_GRANT, resource: "td_1", mode: "authorization" }, scope: { todo: "td_1", deviceName: "mbp", workspace, sites: ["github.com"], maxSteps },
+    iat: new Date(now).toISOString(), nbf: new Date(now).toISOString(), exp: new Date(now + 3600_000).toISOString(),
+  };
+  return { payload, sig: assertion(payload) };
+}
+
+test("start verifies the signed scope, runs one step as a remote pi task, and a retried start returns the same run", async () => {
+  await withDevice(async (work) => {
+    // Pin with a proper first-version signature.
+    await pinTrustChain([{ record, sig: trustSig(record) }], "usr_1", trustDirectory({ relayUrl: "https://r.test", userId: "usr_1" }));
+    const spawned: string[] = [];
+    const deps = { spawnWorker: (runId: string) => { spawned.push(runId); } };
+    const args = { action: "start", runKey: "run_abcdef01", todoId: "td_1", instruction: "Say hello", cwd: work, sites: ["github.com"] };
+    const meta = { [TODO_SCOPE_META_KEY]: approval(work) };
+    const first = await runTodoDispatch(args, meta, deps);
+    assert.equal(first.status, "running");
+    assert.equal(spawned.length, 1);
+    const run = (await listTaskRuns())[0]!;
+    assert.deepEqual([run.trigger, run.snapshot.runner, run.snapshot.command, run.snapshot.cwd, [...run.snapshot.sites]], ["remote", "pi", "Say hello", work, ["github.com"]]);
+    assert.deepEqual(await listDefinitions(), [], "the one-off definition is removed once the run has its snapshot");
+    const again = await runTodoDispatch(args, meta, deps);
+    assert.equal(spawned.length, 1);
+    assert.equal(again.status, "running");
+    assert.equal((await runTodoDispatch({ action: "status", runKey: "run_abcdef01" }, undefined, deps)).status, "running");
+    assert.equal((await runTodoDispatch({ action: "cancel", runKey: "run_abcdef01" }, undefined, deps)).status, "cancelled");
+    assert.equal((await runTodoDispatch({ action: "status", runKey: "run_unknown1" }, undefined, deps)).status, "unknown");
+  });
+});
+
+test("start without a valid passkey approval or outside the folder starts nothing", async () => {
+  await withDevice(async (work) => {
+    await pinTrustChain([{ record, sig: trustSig(record) }], "usr_1", trustDirectory({ relayUrl: "https://r.test", userId: "usr_1" }));
+    const spawned: string[] = [];
+    const deps = { spawnWorker: (runId: string) => { spawned.push(runId); } };
+    const base = { action: "start", todoId: "td_1", instruction: "x", cwd: work, sites: [] };
+    await assert.rejects(runTodoDispatch({ ...base, runKey: "run_noapprv1" }, {}, deps), /approval_missing/u);
+    await assert.rejects(runTodoDispatch({ ...base, runKey: "run_outside1", cwd: tmpdir() }, { [TODO_SCOPE_META_KEY]: approval(work) }, deps), /outside_workspace/u);
+    const forged = approval(work, 99); forged.payload.scope!.workspace = tmpdir();
+    await assert.rejects(runTodoDispatch({ ...base, runKey: "run_forged01", cwd: tmpdir() }, { [TODO_SCOPE_META_KEY]: forged }, deps), /challenge_mismatch/u);
+    assert.equal(spawned.length, 0);
+    assert.deepEqual(await listTaskRuns(), []);
+  });
+});

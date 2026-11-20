@@ -11,6 +11,9 @@ let identity: { device: string; deviceKey: string; relayUrl: string; userId: str
 /** The device this process serves; set once the binding is known. */
 export function setObserveIdentity(value: { device: string; deviceKey: string; relayUrl: string; userId: string }): void { identity = value; }
 
+/** The device identity and account this process verifies approvals for; undefined before the binding is known. */
+export function observeIdentity(): { device: string; deviceKey: string; relayUrl: string; userId: string } | undefined { return identity; }
+
 export const observed = { seen: 0, valid: 0, failed: 0 };
 
 /**

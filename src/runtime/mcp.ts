@@ -1,4 +1,5 @@
 import { lstat } from "node:fs/promises";
+import { runTodoDispatch, TODO_DISPATCH_TOOL } from "../task/todo-dispatch.js";
 import { homedir } from "node:os";
 import { dirname, sep } from "node:path";
 import { createHash } from "node:crypto";
@@ -159,6 +160,10 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
       }
       // `frely link workspace add|remove` edits the registry while this runtime keeps running; pick the change up per call.
       const primaryRoot = await syncWorkspaces(workspaces, launchRoot);
+      if (name === TODO_DISPATCH_TOOL) {
+        // Relay-made, never listed. `start` needs a passkey todo_scope approval this device verifies itself.
+        return { content: [{ type: "text" as const, text: JSON.stringify(await runTodoDispatch(args, request.params._meta)) }] };
+      }
       if (name === WORKSPACE_MANAGE_TOOL) {
         const state = await manageWorkspaces(args, request.params._meta, launchRoot);
         await syncWorkspaces(workspaces, launchRoot);
