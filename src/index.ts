@@ -82,6 +82,7 @@ import { redeemGift } from "./skill/gift.js";
 import { callRemoteTool, connectRemoteMcp, installRemoteMcpSkill, isNotASkill, listRemoteTools, mcpClientConfig, parseMcpName, RemoteMcpError } from "./skill/remote-mcp.js";
 import { callCloudTool, callCloudToolAwaiting } from "./cloud.js";
 import { runTodoCommand } from "./todo-command.js";
+import { runKeyCommand } from "./key-setup.js";
 import { claimInstall, ItemNotFoundError, resolveItem, type ResolvedItem } from "./skill/resolve.js";
 import { ApprovalRequiredError, type Approval } from "./skill/cloud-item.js";
 import { createInterface } from "node:readline/promises";
@@ -215,6 +216,12 @@ async function main(): Promise<void> {
     const result = await runApi(args);
     stdout.write(result.text ?? JSON.stringify(result.value, null, 2) + "\n");
     if (result.failed) process.exitCode = 2;
+    return;
+  }
+
+  if (command === "key") {
+    if (args[1] === undefined) { stdout.write(subcommandUsage("key")); return; }
+    process.exitCode = await runKeyCommand(args.slice(1), { out: (text) => { stdout.write(text); }, call: (name, input) => callCloudToolAwaiting(name, input) });
     return;
   }
 

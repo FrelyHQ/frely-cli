@@ -49,6 +49,7 @@ export const COMMANDS = [
   { id: "task.schedule", usage: "frely task schedule <name> (--cron \"<m h dom mon dow>\" [--tz <zone>] | --pause | --resume | --clear)", auth: "none", effect: "local-write", purpose: "Set, pause, resume or clear a task's cron schedule. A slot missed while the computer was off runs once when the background service is back (if at most a day old); a task still running is skipped, not doubled." },
   { id: "task.approve", usage: "frely task approve <name>", auth: "account", effect: "authorization-if-needed", purpose: "Ask the owner to approve the sites a task wants to reach, through an approval link (exit code 3 with the link when nobody can wait). A schedule uses only the sites approved when it fires." },
   { id: "task.start", usage: "frely task start <name> [--wait [--wait-sec <n>]] [--json]", auth: "none", effect: "local-process", purpose: "Run a task now in its own detached worker: the run keeps going if this command is cut off, the terminal closes or the connection reconnects. Prints the run id; --wait also waits up to --wait-sec (at most 100) and prints the result. At most 8 runs at the same time on a computer." },
+  { id: "key.setup", usage: "frely key setup codex|claude-code [--name <text>] [--gateway <url>] [--json]", auth: "account", effect: "remote-write", purpose: "Create a new Frely API key and write it straight into another AI application's own settings on this computer (Codex: `openai_base_url` in config.toml plus `codex login --with-api-key`; Claude Code: env in ~/.claude/settings.json), pointing it at the Frely gateway. The key never appears in this command's arguments or output, so an AI agent can run it for the user without seeing the key. Creating a key needs the owner's approval on the web: the command prints the link and waits (keep it running), then continues. The previous config and Codex login are copied to *.frely-backup first; restart the application afterwards. The key shows on the Keys page like any other and can be deleted there. --gateway only accepts frely.cloud addresses." },
   { id: "todo.list", usage: "frely todo list [--status open|in_progress|done|cancelled|archived] [--search <text>] [--sort title|status|updated_at] [--direction asc|desc] [--page <n>] [--page-size <n>] [--json]", auth: "account", effect: "remote-read", purpose: "List your cloud todos with step progress. A todo is a goal and a plan of steps. Archived todos are hidden unless --status archived." },
   { id: "todo.show", usage: "frely todo show <todoId> [--json]", auth: "account", effect: "remote-read", purpose: "Show a todo and its plan. Each step has a status, a device and a result summary." },
   { id: "todo.add", usage: "frely todo add <title> [--description <text>] [--step <instruction> [--device <id>]]... [--json]", auth: "account", effect: "remote-write", purpose: "Create a todo, optionally with its plan: --step repeats, in order, each optionally followed by --device <device id> (one of your devices). The cloud holds the only copy; the same todos are in the web console and the FrelyMCP todo.* tools." },
@@ -122,6 +123,7 @@ const AGENT_GROUPS: readonly { key: string; title: string; test: (id: string) =>
   { key: "devices", title: "Control your devices", test: (id) => ["devices", "run", "ps", "logs", "kill", "read", "ls", "grep", "edit", "permission", "tools", "call"].includes(id) },
   { key: "link", title: "Let others control this computer", test: (id) => id.startsWith("link.") },
   { key: "tasks", title: "Tasks", test: (id) => id.startsWith("task.") || id.startsWith("pi.") },
+  { key: "keys", title: "Configure AI applications with a Frely key", test: (id) => id.startsWith("key.") },
   { key: "todos", title: "Todos", test: (id) => id.startsWith("todo.") },
   { key: "providers", title: "Providers", test: (id) => id.startsWith("provider.") },
   { key: "service", title: "Services this computer serves", test: (id) => id.startsWith("service.") },
@@ -174,6 +176,7 @@ function groupOf(command: CommandEntry): string {
 
 /** One-line summaries where the first sentence of `purpose` does not read well alone. */
 const SUMMARY_OVERRIDES: Readonly<Record<string, string>> = {
+  "key.setup": "Set up a new Frely key in Codex or Claude Code without showing it",
   "todo.list": "List your cloud todos",
   "todo.show": "Show a todo and its plan",
   "todo.add": "Create a todo with an optional plan",
@@ -259,6 +262,7 @@ const GROUPS: readonly { title: string; ids: readonly string[] }[] = [
   { title: "Marketplace items", ids: ["item.install", "item.update", "item.run", "item.trust", "item.tools", "item.call", "item.status", "item.remove", "item.config"] },
   { title: "Runs", ids: ["runs", "result", "cancel"] },
   { title: "Tasks", ids: ["task.add", "task.start", "task.schedule", "task.manage"] },
+  { title: "AI application keys", ids: ["key.setup"] },
   { title: "Todos", ids: ["todo.list", "todo.show", "todo.add", "todo.update", "todo.plan", "todo.step"] },
   { title: "Providers", ids: ["provider.add", "provider.list", "provider.remove", "provider.key"] },
   { title: "Services", ids: ["service.share", "service.share.http", "service.local", "service.manage"] },
