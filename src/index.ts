@@ -260,60 +260,6 @@ async function main(): Promise<void> {
       process.exitCode = await runAgentLocal(args.slice(2), { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY), readSecret: () => readStdinSecret(8192) });
       return;
     }
-    if (action === "run") {
-      const target = args[2];
-      if (!target || target.startsWith("-")) throw new Error(RUN_USAGE);
-      const distributionId = await resolveAgentTarget(target, normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl), undefined, undefined,
-        async (name) => { const found = await resolveItem(name, callCloudTool).catch((error: unknown) => { if (error instanceof ItemNotFoundError) return null; throw error; }); return found?.kind === "agent" ? found.id : null; });
-      const task = args.includes("--input-stdin") ? await readStdinText(128 * 1024) : option(args, "--input");
-      if (!task) throw new Error("Agent input is required. Use --input or --input-stdin.");
-      const read = await readOptions(args);
-      // The call runs in a detached worker so a cut-off command does not lose it; this process only waits and prints.
-      const onInterrupt = () => { process.stderr.write("Interrupted. The run keeps going; fetch it with `frely agent result --last --wait`.\n"); process.exit(130); };
-      process.once("SIGINT", onInterrupt);
-      const progressSummary = args.includes("--no-progress-summary") ? false : args.includes("--progress-summary") ? true : undefined;
-      const finished = await startRun({ distributionId, task, ...(read === undefined ? {} : { read }), ...(progressSummary === undefined ? {} : { progressSummary }) });
-      process.off("SIGINT", onInterrupt);
-      const value = runOutcome(finished);
-      if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
-      else {
-        stdout.write(`${value.text as string}\n`);
-        if (read !== undefined) process.stderr.write(`Read ${(finished.filesRead).length} file(s), ${finished.rounds.length} round(s), ${finished.usage.total_tokens} tokens. Run ${finished.runId}.\n`);
-      }
-      return;
-    }
-    if (action === "result" || action === "cancel") {
-      const json = args.includes("--json");
-      const runArg = args.slice(2).find((arg) => !arg.startsWith("--"));
-      const last = args.includes("--last");
-      if (runArg === undefined && !last) throw new Error(`Usage: frely agent ${action} (<runId>|--last)${action === "result" ? " [--wait] [--resume] [--json]" : " [--json]"}`);
-      let record = action === "cancel" ? await cancelRun(runArg) : await resolveRun(runArg);
-      if (action === "result") {
-        if (args.includes("--resume")) {
-          const status = effectiveStatus(record);
-          if (status !== "running") { await resumeRun(record.runId); record = (await readRun(record.runId))!; }
-        }
-        if (args.includes("--wait")) record = await waitForRun(record.runId);
-        else if (args.includes("--resume")) record = (await readRun(record.runId)) ?? record;
-      }
-      const summary = runSummary(record);
-      if (json) stdout.write(`${JSON.stringify(summary)}\n`);
-      else stdout.write(summary.status === "completed" ? `${summary.text as string}\n` : `${JSON.stringify(summary, null, 2)}\n`);
-      if (action === "result" && summary.ok === false) process.exitCode = 1;
-      return;
-    }
-    if (action === "runs") {
-      const runs = await listRunSummaries();
-      if (args.includes("--json")) stdout.write(`${JSON.stringify({ ok: true, runs })}\n`);
-      else stdout.write(runs.length === 0 ? "No agent runs on this computer.\n" : runs.map((run) => `${run.runId}  ${run.status}  ${run.distributionId}  ${run.createdAt}\n`).join(""));
-      return;
-    }
-    if (action === "__worker") {
-      const runId = args[2];
-      if (!runId || !isRunId(runId)) throw new Error("Internal command.");
-      await workerMain(runId);
-      return;
-    }
     if (action === "status") {
       const json = args.includes("--json");
       if (args.includes("--api-key-stdin")) {
@@ -369,6 +315,66 @@ async function main(): Promise<void> {
     if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
     stdout.write(`Skill: frely\nPath: ${value.path}\n${linkLines(value.links)}Restart or reload the agent session so it rescans Skills.\n`);
     return;
+  }
+
+  if (command === "item") {
+    const action = args[1];
+    // `item call <name>` without a tool sends a request to the item (an Agent, or the cloud part of a Skill) and waits for the answer;
+    // with a tool it calls that MCP tool (below). Runs, results and cancel live in the same group.
+    if (action === "call" && (args[3] === undefined || args[3].startsWith("-"))) {
+      const target = args[2];
+      if (!target || target.startsWith("-")) throw new Error(RUN_USAGE);
+      const distributionId = await resolveAgentTarget(target, normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl), undefined, undefined,
+        async (name) => { const found = await resolveItem(name, callCloudTool).catch((error: unknown) => { if (error instanceof ItemNotFoundError) return null; throw error; }); return found?.kind === "agent" ? found.id : null; });
+      const task = args.includes("--input-stdin") ? await readStdinText(128 * 1024) : option(args, "--input");
+      if (!task) throw new Error("Agent input is required. Use --input or --input-stdin.");
+      const read = await readOptions(args);
+      // The call runs in a detached worker so a cut-off command does not lose it; this process only waits and prints.
+      const onInterrupt = () => { process.stderr.write("Interrupted. The run keeps going; fetch it with `frely item result --last --wait`.\n"); process.exit(130); };
+      process.once("SIGINT", onInterrupt);
+      const progressSummary = args.includes("--no-progress-summary") ? false : args.includes("--progress-summary") ? true : undefined;
+      const finished = await startRun({ distributionId, task, ...(read === undefined ? {} : { read }), ...(progressSummary === undefined ? {} : { progressSummary }) });
+      process.off("SIGINT", onInterrupt);
+      const value = runOutcome(finished);
+      if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
+      else {
+        stdout.write(`${value.text as string}\n`);
+        if (read !== undefined) process.stderr.write(`Read ${(finished.filesRead).length} file(s), ${finished.rounds.length} round(s), ${finished.usage.total_tokens} tokens. Run ${finished.runId}.\n`);
+      }
+      return;
+    }
+    if (action === "result" || action === "cancel") {
+      const json = args.includes("--json");
+      const runArg = args.slice(2).find((arg) => !arg.startsWith("--"));
+      const last = args.includes("--last");
+      if (runArg === undefined && !last) throw new Error(`Usage: frely item ${action} (<runId>|--last)${action === "result" ? " [--wait] [--resume] [--json]" : " [--json]"}`);
+      let record = action === "cancel" ? await cancelRun(runArg) : await resolveRun(runArg);
+      if (action === "result") {
+        if (args.includes("--resume")) {
+          const status = effectiveStatus(record);
+          if (status !== "running") { await resumeRun(record.runId); record = (await readRun(record.runId))!; }
+        }
+        if (args.includes("--wait")) record = await waitForRun(record.runId);
+        else if (args.includes("--resume")) record = (await readRun(record.runId)) ?? record;
+      }
+      const summary = runSummary(record);
+      if (json) stdout.write(`${JSON.stringify(summary)}\n`);
+      else stdout.write(summary.status === "completed" ? `${summary.text as string}\n` : `${JSON.stringify(summary, null, 2)}\n`);
+      if (action === "result" && summary.ok === false) process.exitCode = 1;
+      return;
+    }
+    if (action === "runs") {
+      const runs = await listRunSummaries();
+      if (args.includes("--json")) stdout.write(`${JSON.stringify({ ok: true, runs })}\n`);
+      else stdout.write(runs.length === 0 ? "No runs on this computer.\n" : runs.map((run) => `${run.runId}  ${run.status}  ${run.distributionId}  ${run.createdAt}\n`).join(""));
+      return;
+    }
+    if (action === "__worker") {
+      const runId = args[2];
+      if (!runId || !isRunId(runId)) throw new Error("Internal command.");
+      await workerMain(runId);
+      return;
+    }
   }
 
   if (command === "item") {
@@ -1024,7 +1030,7 @@ async function main(): Promise<void> {
   process.exitCode = 2;
 }
 
-const RUN_USAGE = "Usage: frely agent run <username/name> (--input <text>|--input-stdin) [--read [<dir>] [--read-max-bytes <n>] [--read-max-rounds <n>]] [--progress-summary|--no-progress-summary] [--json]";
+const RUN_USAGE = "Usage: frely item call <username/name> (--input <text>|--input-stdin) [--read [<dir>] [--read-max-bytes <n>] [--read-max-rounds <n>]] [--progress-summary|--no-progress-summary] [--json]";
 
 /** `--read [<dir>]`: let the Agent read files of a directory (default: the git root of the current directory) through read-only tools that run here. */
 async function readOptions(args: string[]): Promise<{ root: string; limits: { totalBytes: number; maxRounds: number } } | undefined> {

@@ -1,12 +1,12 @@
 ---
 name: frely-cli
 description: >-
-  Use when the user works with their Frely account, the Frely marketplace, or Frely agents through the frely CLI. Triggers: sign in / login / register / 注册, credits / credit balance / 余额 / 充值 / top up / payment_required / HTTP 402 / checkout, API keys, plans, orders, usage, install a Frely Skill / Prompt / MCP / marketplace item / 安装 skill, install or run a Frely Agent / agent run / --read, connect a computer or an AI client to FrelyMCP / remote control / 连接电脑 / remote MCP, or any other `frely` command.
+  Use when the user works with their Frely account, the Frely marketplace, or Frely agents through the frely CLI. Triggers: sign in / login / register / 注册, credits / credit balance / 余额 / 充值 / top up / payment_required / HTTP 402 / checkout, API keys, plans, orders, usage, install a Frely Skill / Prompt / MCP / marketplace item / 安装 skill, install or call a Frely Agent / item call / --read, connect a computer or an AI client to FrelyMCP / remote control / 连接电脑 / remote MCP, or any other `frely` command.
 ---
 
 # Frely CLI Skill
 
-Use the installed `frely` CLI. Do not rely on remembered syntax: run `frely help --agent --json --summary` for the grouped command index, then `frely help --agent --json <command id or group>` (for example `agent` or `agent.run`) for full usage, examples and confirmation notes, and run `frely update` if a command is missing.
+Use the installed `frely` CLI. Do not rely on remembered syntax: run `frely help --agent --json --summary` for the grouped command index, then `frely help --agent --json <command id or group>` (for example `item` or `item.call`) for full usage, examples and confirmation notes, and run `frely update` if a command is missing.
 
 ## Command Routing
 
@@ -17,8 +17,8 @@ Use the installed `frely` CLI. Do not rely on remembered syntax: run `frely help
 | List, inspect, or call account APIs (API keys, Credit, plans, orders, Creator items) | `frely api list` / `frely api describe` / `frely api call` | Account APIs |
 | Spend Credit, buy something, or change credentials | ask first, then `frely api call` | Confirmation |
 | Install a marketplace Skill, Prompt, or MCP | `frely item install` | Marketplace installs |
-| Install or run a published Agent | `frely item install` → `frely agent run` | Marketplace installs |
-| `frely agent run` returned `payment_required` | credit recovery flow | Error handling |
+| Install or run a published Agent | `frely item install` → `frely item call` | Marketplace installs |
+| `frely item call` returned `payment_required` | credit recovery flow | Error handling |
 | Print `mcpServers` JSON for a direct MCP connection | `frely item config <username/mcp-name>` | Marketplace installs |
 | Control another computer, use Cloud MCPs, drive a connected browser, or work from a no-shell client | FrelyMCP setup | FrelyMCP |
 
@@ -38,7 +38,7 @@ Run `frely doctor --json` to see whether the CLI is signed in. If not, ask the u
 ## Marketplace installs
 
 - Install a marketplace Skill or Prompt: `frely item install <username/skill-name> --host <your host>`; add `--scope project --dir <project>` to install it for one project instead of globally.
-- The same command installs a published Agent (`frely item install <username/name> --host <your host>`); then use `frely agent run`. When an Agent needs the user's project files, add `--read` (optionally `--read <dir>`): the Agent can then read files of that directory through read-only tools that run on this computer, only the files it asks for; `.git`, `.env*`, key files and git-ignored files are never sent, and the result lists the files read. Tell the user before you add it.
+- The same command installs a published Agent (`frely item install <username/name> --host <your host>`); then use `frely item call`. When an Agent needs the user's project files, add `--read` (optionally `--read <dir>`): the Agent can then read files of that directory through read-only tools that run on this computer, only the files it asks for; `.git`, `.env*`, key files and git-ignored files are never sent, and the result lists the files read. Tell the user before you add it.
 - Use a marketplace MCP without configuring it in your client: `frely item install <username/mcp-name>` installs a Skill that calls it through `frely item tools|call <username/mcp-name>`. Each call is billed or needs a pass as in any MCP client. `frely item config <username/mcp-name>` prints the `mcpServers` JSON for clients that should connect to that one MCP directly.
 
 ## Confirmation
@@ -54,7 +54,7 @@ Ask the user before any call that spends Credit, buys something or changes crede
 ## Error handling
 
 - Report a `frely` error exactly as returned; do not rephrase, soften, or add your own interpretation. Explain a cause only when the error message itself is specific.
-- Special case — `frely agent run` returns `payment_required`: the balance is too low. Do not ask the user to sign in again. Run `frely api call credit_products.list --json '{}'`, ask which amount, then `frely api call payment_checkout.create` with `useImmediately` true, give the user the returned `checkoutUrl`, and retry once they have paid.
+- Special case — `frely item call` returns `payment_required`: the balance is too low. Do not ask the user to sign in again. Run `frely api call credit_products.list --json '{}'`, ask which amount, then `frely api call payment_checkout.create` with `useImmediately` true, give the user the returned `checkoutUrl`, and retry once they have paid.
 
 ## FrelyMCP
 

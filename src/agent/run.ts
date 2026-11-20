@@ -48,14 +48,14 @@ export const defaultRunDeps: RunDeps = {
   },
   spawnWorker: (runId) => {
     // Detached, so Ctrl-C, a host command timeout or a killed parent does not stop the call it is waiting for.
-    const launch = cliLaunchArguments(process.argv[1] ?? "", ["agent", "__worker", runId]);
+    const launch = cliLaunchArguments(process.argv[1] ?? "", ["item", "__worker", runId]);
     spawn(launch[0]!, launch.slice(1), { detached: true, stdio: "ignore", windowsHide: true, env: process.env }).unref();
   },
   stderr: (text) => { process.stderr.write(text); },
   pollMs: 400,
 };
 
-/** Create the run record, start the detached worker and wait for the end. The same call also serves `frely agent result --wait`. */
+/** Create the run record, start the detached worker and wait for the end. The same call also serves `frely item result --wait`. */
 export async function startRun(input: {
   readonly distributionId: string;
   readonly task: string;
@@ -69,7 +69,7 @@ export async function startRun(input: {
     ...(input.read === undefined ? {} : { readRoot: input.read.root, limits: input.read.limits }),
     ...(input.progressSummary === undefined ? {} : { progressSummary: input.progressSummary }),
   });
-  deps.stderr(`Run ${record.runId} started. If this command is cut off the run keeps going: frely agent result ${record.runId} --wait\n`);
+  deps.stderr(`Run ${record.runId} started. If this command is cut off the run keeps going: frely item result ${record.runId} --wait\n`);
   deps.spawnWorker(record.runId);
   return waitForRun(record.runId, deps);
 }
@@ -107,14 +107,14 @@ export function runOutcome(record: RunRecord): Record<string, unknown> {
 
 export function runFailure(record: RunRecord): SkillAccessError {
   if (record.status === "interrupted") {
-    return new SkillAccessError("remote_call_failed", `The run was interrupted before it finished. Run \`frely agent result ${record.runId} --resume --wait\` to continue it; the interrupted round is billed again.`);
+    return new SkillAccessError("remote_call_failed", `The run was interrupted before it finished. Run \`frely item result ${record.runId} --resume --wait\` to continue it; the interrupted round is billed again.`);
   }
   if (record.status === "cancelled") return new SkillAccessError("remote_call_failed", `The run ${record.runId} was cancelled.`);
   const code = (record.error?.code ?? "remote_call_failed") as SkillAccessError["code"];
   return new SkillAccessError(code, record.error?.message ?? "The remote Frely Agent call failed.");
 }
 
-/** The state `frely agent result` and `frely agent runs` print for a run (no task text; the result text only when finished). */
+/** The state `frely item result` and `frely item runs` print for a run (no task text; the result text only when finished). */
 export function runSummary(record: RunRecord): Record<string, unknown> {
   const status = effectiveStatus(record);
   return {
@@ -131,7 +131,7 @@ export function runSummary(record: RunRecord): Record<string, unknown> {
     ...(status === "running" && record.progress !== undefined ? { progress: record.progress } : {}),
     ...(status === "completed" || record.error === undefined ? {} : { error: record.error }),
     resumable: resumable(record),
-    ...(status === "running" ? { note: "Still running. Progress so far is listed; run `frely agent result <runId> --wait` to wait for the answer." } : {}),
+    ...(status === "running" ? { note: "Still running. Progress so far is listed; run `frely item result <runId> --wait` to wait for the answer." } : {}),
   };
 }
 

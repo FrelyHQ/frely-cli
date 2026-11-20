@@ -19,7 +19,7 @@ export interface RunRound {
   readonly usage?: Readonly<{ input_tokens: number; output_tokens: number; total_tokens: number }>;
 }
 
-/** Local record of one `frely agent run`. Full input and output stay on this computer (file mode 0600). */
+/** Local record of one `frely item call`. Full input and output stay on this computer (file mode 0600). */
 export interface RunRecord {
   readonly version: 1;
   readonly runId: string;
@@ -179,7 +179,7 @@ export async function resolveRun(target: string | undefined): Promise<RunRecord>
     if (latest === undefined) throw new Error("There are no agent runs on this computer.");
     return latest;
   }
-  if (!isRunId(target)) throw new Error("Use a run id from `frely agent runs`, or --last.");
+  if (!isRunId(target)) throw new Error("Use a run id from `frely item runs`, or --last.");
   const record = await readRun(target);
   if (record === null) throw new Error("This run is not on this computer (runs are removed after 7 days).");
   return record;
