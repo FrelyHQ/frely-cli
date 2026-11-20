@@ -490,3 +490,12 @@ test("a login refused because every endpoint slot is taken says so instead of a 
   globalThis.fetch = async () => Response.json({ error: "access_denied" }, { status: 400 });
   await assert.rejects(pollDeviceToken("https://frely.cloud", { device_code: "d", user_code: "U", verification_uri: "https://frely.cloud/device", verification_uri_complete: "https://frely.cloud/device?g=U", expires_in: 60, interval: 1 }), /authorization was denied/u);
 });
+
+test("a refused login shows the reason Frely sent", async (t) => {
+  const { pollDeviceToken } = await import("./auth.js");
+  const oldFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = oldFetch; });
+  globalThis.fetch = async () => Response.json({ error: "access_denied", error_description: "This account is frozen." }, { status: 403 });
+  await assert.rejects(pollDeviceToken("https://frely.cloud", { device_code: "d", user_code: "U", verification_uri: "https://frely.cloud/device", verification_uri_complete: "https://frely.cloud/device?g=U", expires_in: 60, interval: 1 }), /was denied: This account is frozen\./u);
+});
+
