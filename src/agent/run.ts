@@ -55,7 +55,7 @@ export const defaultRunDeps: RunDeps = {
   pollMs: 400,
 };
 
-/** Create the run record, start the detached worker and wait for the end. The same call also serves `frely item result --wait`. */
+/** Create the run record, start the detached worker and wait for the end. The same call also serves `frely result --wait`. */
 export async function startRun(input: {
   readonly distributionId: string;
   readonly task: string;
@@ -69,7 +69,7 @@ export async function startRun(input: {
     ...(input.read === undefined ? {} : { readRoot: input.read.root, limits: input.read.limits }),
     ...(input.progressSummary === undefined ? {} : { progressSummary: input.progressSummary }),
   });
-  deps.stderr(`Run ${record.runId} started. If this command is cut off the run keeps going: frely item result ${record.runId} --wait\n`);
+  deps.stderr(`Run ${record.runId} started. If this command is cut off the run keeps going: frely result ${record.runId} --wait\n`);
   deps.spawnWorker(record.runId);
   return waitForRun(record.runId, deps);
 }
@@ -107,14 +107,14 @@ export function runOutcome(record: RunRecord): Record<string, unknown> {
 
 export function runFailure(record: RunRecord): SkillAccessError {
   if (record.status === "interrupted") {
-    return new SkillAccessError("remote_call_failed", `The run was interrupted before it finished. Run \`frely item result ${record.runId} --resume --wait\` to continue it; the interrupted round is billed again.`);
+    return new SkillAccessError("remote_call_failed", `The run was interrupted before it finished. Run \`frely result ${record.runId} --resume --wait\` to continue it; the interrupted round is billed again.`);
   }
   if (record.status === "cancelled") return new SkillAccessError("remote_call_failed", `The run ${record.runId} was cancelled.`);
   const code = (record.error?.code ?? "remote_call_failed") as SkillAccessError["code"];
   return new SkillAccessError(code, record.error?.message ?? "The remote Frely Agent call failed.");
 }
 
-/** The state `frely item result` and `frely item runs` print for a run (no task text; the result text only when finished). */
+/** The state `frely result` and `frely runs` print for a run (no task text; the result text only when finished). */
 export function runSummary(record: RunRecord): Record<string, unknown> {
   const status = effectiveStatus(record);
   return {
@@ -131,7 +131,7 @@ export function runSummary(record: RunRecord): Record<string, unknown> {
     ...(status === "running" && record.progress !== undefined ? { progress: record.progress } : {}),
     ...(status === "completed" || record.error === undefined ? {} : { error: record.error }),
     resumable: resumable(record),
-    ...(status === "running" ? { note: "Still running. Progress so far is listed; run `frely item result <runId> --wait` to wait for the answer." } : {}),
+    ...(status === "running" ? { note: "Still running. Progress so far is listed; run `frely result <runId> --wait` to wait for the answer." } : {}),
   };
 }
 
@@ -271,7 +271,7 @@ async function withOverview(task: string, bridge: WorkspaceReadBridge): Promise<
   return overview === "" ? task : `${task}${OVERVIEW_HEADER}${overview}`;
 }
 
-/** Entry of `frely agent __worker <runId>`: cancel on SIGTERM, ignore the terminal hang-up. */
+/** Entry of `frely item __worker <runId>`: cancel on SIGTERM, ignore the terminal hang-up. */
 export async function workerMain(runId: string, deps: RunDeps = defaultRunDeps): Promise<void> {
   const controller = new AbortController();
   process.on("SIGTERM", () => controller.abort());

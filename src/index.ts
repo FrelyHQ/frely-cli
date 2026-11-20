@@ -31,7 +31,7 @@ import { createLocalModelsHub } from "./provider/local-models.js";
 import { shareLocalProvider } from "./provider/share.js";
 import { confirmLanEndpoint, registerLocalOnlyProvider, removeLocalOnlyProvider, setProviderKey, type RegisterIo } from "./provider/register.js";
 import { probeLoopback, runShareCommand, shareUsage, spawnFrpcProcess } from "./share/run.js";
-import { runServiceCommand, superviseServices } from "./share/service-run.js";
+import { runServiceCommand, serviceUsage, superviseServices } from "./share/service-run.js";
 import { accountServiceControl } from "./share/service-control.js";
 import { ensureFrpc } from "./share/frpc.js";
 import { listLocalServices } from "./share/service-state.js";
@@ -39,13 +39,18 @@ import { listLocalProviders } from "./provider/state.js";
 import { API_USAGE, logoutCloud, runApi } from "./cloud.js";
 import { CONTROLLER_COMMANDS, runControllerCommand } from "./controller/commands.js";
 import { ControllerError } from "./controller/client.js";
-import { runAgentLocal } from "./agent/local/command.js";
+import { LOCAL_USAGE, runAgentLocal } from "./agent/local/command.js";
+import { SLUG as LOCAL_AGENT_SLUG, readRecord as readLocalAgent } from "./agent/local/store.js";
 import { runTaskCommand } from "./task/command.js";
+import { runRecordCommand } from "./runs-command.js";
+import { installAt, installsOfItem, removeInstalls } from "./skill/item-remove.js";
+import { findManagedSkillByInstallName } from "./skill/managed.js";
+import type { InstallRecord } from "./skill/registry.js";
 import { taskWorkerMain } from "./task/worker.js";
 import { superviseTasks } from "./task/scheduler.js";
 import { superviseTaskShares } from "./task/share.js";
-import { cancelRun, listRunSummaries, resumeRun, runOutcome, runSummary, startRun, waitForRun, workerMain } from "./agent/run.js";
-import { effectiveStatus, isRunId, readRun, resolveRun } from "./agent/run-store.js";
+import { runOutcome, startRun, workerMain } from "./agent/run.js";
+import { isRunId } from "./agent/run-store.js";
 import { DEFAULT_READ_LIMITS, defaultReadRoot } from "./agent/workspace-read.js";
 import { PiNodeSupervisor } from "./agent/pi-node-supervisor.js";
 import { readAppInstall } from "./agent/app-install.js";
@@ -253,47 +258,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === "agent") {
-    const action = args[1];
-    if (action === undefined) { stdout.write(subcommandUsage("agent")); return; }
-    if (action === "local") {
-      process.exitCode = await runAgentLocal(args.slice(2), { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY), readSecret: () => readStdinSecret(8192) });
-      return;
-    }
-    if (action === "status") {
-      const json = args.includes("--json");
-      if (args.includes("--api-key-stdin")) {
-        const relayUrl = option(args, "--relay");
-        const budget = await getKeyBudget({ apiKey: await readStdinSecret(8192), ...(relayUrl === undefined ? {} : { relayUrl }) });
-        stdout.write(JSON.stringify({ ok: true, budget }, null, json ? undefined : 2) + "\n");
-        return;
-      }
-      const target = args[2];
-      if (!target || target.startsWith("-")) throw new KeyBudgetError("input_invalid", "Usage: frely agent status (<username/name>|--api-key-stdin [--relay <url>]) [--json]");
-      const distributionId = await resolveAgentTarget(target, normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl));
-      const status = await skillAdapterStatus(distributionId);
-      let budget: Record<string, unknown> | undefined;
-      if (status.installed && status.authMode === "api-key") {
-        budget = await getKeyBudget({ distributionId }).then((value) => ({ ...value }), (error: unknown) => ({ error: publicKeyBudgetError(error).error }));
-      }
-      const value = { ...status, ...(budget ? { budget } : {}) };
-      if (json) stdout.write(`${JSON.stringify(value)}\n`);
-      else if (!status.installed) stdout.write("Agent is not installed.\n");
-      else stdout.write(`Agent: ${status.name}\nState: ${status.state}\nAuth: ${status.authMode}\nSkill: ${status.skillPath}\n${budget ? `Budget: ${JSON.stringify(budget, null, 2)}\n` : ""}`);
-      return;
-    }
-    if (action === "remove") {
-      const target = args[2];
-      if (!target || target.startsWith("-")) throw new Error("Usage: frely agent remove <username/name> [--json]");
-      const distributionId = await resolveAgentTarget(target, normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl));
-      const value = await removeSkillAdapter(distributionId);
-      if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
-      else stdout.write(value.removed ? "Agent removed.\n" : "Agent was not installed.\n");
-      return;
-    }
-    throw new Error(`Unknown agent command.\n${subcommandUsage("agent")}`);
-  }
-
   if (command === "skill" && args[1] === "sync" && !args.includes("--help") && !args.includes("-h")) {
     const host = option(args, "--host");
     if (host !== undefined && !isLinkAgent(host)) throw new Error(`--host must be one of: ${Object.keys(LINK_AGENTS).join(", ")}`);
@@ -317,10 +281,15 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "runs" || command === "result" || command === "cancel") {
+    process.exitCode = await runRecordCommand(command, args.slice(1), { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); }, interactive: false });
+    return;
+  }
+
   if (command === "item") {
     const action = args[1];
     // `item call <name>` without a tool sends a request to the item (an Agent, or the cloud part of a Skill) and waits for the answer;
-    // with a tool it calls that MCP tool (below). Runs, results and cancel live in the same group.
+    // with a tool it calls that MCP tool (below). Its runs are read with `frely runs|result|cancel`, shared with task runs.
     if (action === "call" && (args[3] === undefined || args[3].startsWith("-"))) {
       const target = args[2];
       if (!target || target.startsWith("-")) throw new Error(RUN_USAGE);
@@ -330,7 +299,7 @@ async function main(): Promise<void> {
       if (!task) throw new Error("Agent input is required. Use --input or --input-stdin.");
       const read = await readOptions(args);
       // The call runs in a detached worker so a cut-off command does not lose it; this process only waits and prints.
-      const onInterrupt = () => { process.stderr.write("Interrupted. The run keeps going; fetch it with `frely item result --last --wait`.\n"); process.exit(130); };
+      const onInterrupt = () => { process.stderr.write("Interrupted. The run keeps going; fetch it with `frely result --last --wait`.\n"); process.exit(130); };
       process.once("SIGINT", onInterrupt);
       const progressSummary = args.includes("--no-progress-summary") ? false : args.includes("--progress-summary") ? true : undefined;
       const finished = await startRun({ distributionId, task, ...(read === undefined ? {} : { read }), ...(progressSummary === undefined ? {} : { progressSummary }) });
@@ -343,30 +312,58 @@ async function main(): Promise<void> {
       }
       return;
     }
-    if (action === "result" || action === "cancel") {
+    // An installed Skill, Prompt or remote MCP folder (by folder, or by name through the account); null means "not that kind": treat it as an Agent.
+    const installedFoldersOf = async (target: string): Promise<InstallRecord[] | null> => {
+      const atFolder = await installAt(target);
+      if (atFolder) return [atFolder];
+      if (/^creator_distribution_[a-f0-9]{24}$/u.test(target) || await findManagedSkillByInstallName(target).catch(() => null)) return null;
+      const found = await resolveItem(target, callCloudTool).catch((error: unknown) => { if (error instanceof ItemNotFoundError) return null; throw error; });
+      if (found === null || found.kind === "agent") return null;
+      return installsOfItem(found.id);
+    };
+    if (action === "status") {
       const json = args.includes("--json");
-      const runArg = args.slice(2).find((arg) => !arg.startsWith("--"));
-      const last = args.includes("--last");
-      if (runArg === undefined && !last) throw new Error(`Usage: frely item ${action} (<runId>|--last)${action === "result" ? " [--wait] [--resume] [--json]" : " [--json]"}`);
-      let record = action === "cancel" ? await cancelRun(runArg) : await resolveRun(runArg);
-      if (action === "result") {
-        if (args.includes("--resume")) {
-          const status = effectiveStatus(record);
-          if (status !== "running") { await resumeRun(record.runId); record = (await readRun(record.runId))!; }
-        }
-        if (args.includes("--wait")) record = await waitForRun(record.runId);
-        else if (args.includes("--resume")) record = (await readRun(record.runId)) ?? record;
+      if (args.includes("--api-key-stdin")) {
+        const relayUrl = option(args, "--relay");
+        const budget = await getKeyBudget({ apiKey: await readStdinSecret(8192), ...(relayUrl === undefined ? {} : { relayUrl }) });
+        stdout.write(JSON.stringify({ ok: true, budget }, null, json ? undefined : 2) + "\n");
+        return;
       }
-      const summary = runSummary(record);
-      if (json) stdout.write(`${JSON.stringify(summary)}\n`);
-      else stdout.write(summary.status === "completed" ? `${summary.text as string}\n` : `${JSON.stringify(summary, null, 2)}\n`);
-      if (action === "result" && summary.ok === false) process.exitCode = 1;
+      const target = args[2];
+      if (!target || target.startsWith("-")) throw new KeyBudgetError("input_invalid", "Usage: frely item status (<username/name>|<folder>|--api-key-stdin [--relay <url>]) [--json]");
+      const folders = await installedFoldersOf(target);
+      if (folders !== null) {
+        const value = { kind: "item", installed: folders.length > 0, folders: folders.map((record) => ({ path: record.path, kind: record.kind, version: record.itemVersion ?? null })) };
+        if (json) stdout.write(`${JSON.stringify(value)}\n`);
+        else stdout.write(folders.length === 0 ? "Not installed.\n" : folders.map((record) => `${record.kind}  v${record.itemVersion ?? "?"}  ${record.path}\n`).join(""));
+        return;
+      }
+      const distributionId = await resolveAgentTarget(target, normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl));
+      const status = await skillAdapterStatus(distributionId);
+      let budget: Record<string, unknown> | undefined;
+      if (status.installed && status.authMode === "api-key") {
+        budget = await getKeyBudget({ distributionId }).then((value) => ({ ...value }), (error: unknown) => ({ error: publicKeyBudgetError(error).error }));
+      }
+      const value = { ...status, ...(budget ? { budget } : {}) };
+      if (json) stdout.write(`${JSON.stringify(value)}\n`);
+      else if (!status.installed) stdout.write("Agent is not installed.\n");
+      else stdout.write(`Agent: ${status.name}\nState: ${status.state}\nAuth: ${status.authMode}\nSkill: ${status.skillPath}\n${budget ? `Budget: ${JSON.stringify(budget, null, 2)}\n` : ""}`);
       return;
     }
-    if (action === "runs") {
-      const runs = await listRunSummaries();
-      if (args.includes("--json")) stdout.write(`${JSON.stringify({ ok: true, runs })}\n`);
-      else stdout.write(runs.length === 0 ? "No runs on this computer.\n" : runs.map((run) => `${run.runId}  ${run.status}  ${run.distributionId}  ${run.createdAt}\n`).join(""));
+    if (action === "remove") {
+      const target = args[2];
+      if (!target || target.startsWith("-")) throw new Error("Usage: frely item remove <username/name>|<folder> [--json]");
+      const folders = await installedFoldersOf(target);
+      if (folders !== null) {
+        const removed = await removeInstalls(folders);
+        if (args.includes("--json")) stdout.write(`${JSON.stringify({ ok: true, removed })}\n`);
+        else stdout.write(removed.length === 0 ? "Not installed.\n" : removed.map((folder) => folder.state === "removed" ? `Removed ${folder.path}\n` : `Kept ${folder.path}: it was edited after install. Frely forgot it and removed its links; delete the folder yourself if you no longer need it.\n`).join(""));
+        return;
+      }
+      const distributionId = await resolveAgentTarget(target, normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl));
+      const value = await removeSkillAdapter(distributionId);
+      if (args.includes("--json")) stdout.write(`${JSON.stringify(value)}\n`);
+      else stdout.write(value.removed ? "Agent removed.\n" : "Not installed.\n");
       return;
     }
     if (action === "__worker") {
@@ -747,23 +744,54 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === "share") {
-    if (args[1] === undefined || args[1] === "help" || args[1] === "--help") { stdout.write(`Usage: ${shareUsage()}\n`); return; }
-    process.exitCode = await runShareCommand(args.slice(1), { write: (text) => { stdout.write(text); }, interactive: Boolean(stdin.isTTY && stdout.isTTY) });
-    return;
-  }
-
   if (command === "service") {
+    // One group for everything this computer serves: shared services (mcp, a2a, model), a temporary web link (--type http) and local Agents.
+    const localIo = { out: (text: string) => { stdout.write(text); }, err: (text: string) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY), readSecret: () => readStdinSecret(8192) };
+    const action = args[1];
+    if (action === "share" && option(args, "--type") === "http") {
+      const port = option(args, "--port");
+      if (port === undefined) throw new Error(`Usage: ${shareUsage()}`);
+      const rest = args.slice(2).filter((arg, index, all) => !(arg === "--type" || all[index - 1] === "--type" || arg === "--port" || all[index - 1] === "--port"));
+      process.exitCode = await runShareCommand([port, ...rest], { write: (text) => { stdout.write(text); }, interactive: Boolean(stdin.isTTY && stdout.isTTY) });
+      return;
+    }
+    if (action === "add" || action === "start" || action === "logs" || action === "key" || action === "supervise") {
+      process.exitCode = await runAgentLocal(args.slice(1), localIo);
+      return;
+    }
+    if ((action === "stop" || action === "remove") && args[2] !== undefined && !args[2].startsWith("-")) {
+      const name = args[2];
+      const agent = LOCAL_AGENT_SLUG.test(name) ? await readLocalAgent(name).catch(() => null) : null;
+      const shared = (await listLocalServices()).some((service) => service.label === name || service.serviceShareId === name);
+      if (agent && shared) throw new Error(`Both a local Agent and a shared service are called "${name}". Use the shared service's id (frely service list).`);
+      if (agent) { process.exitCode = await runAgentLocal(args.slice(1), localIo); return; }
+    }
+    if (action === "list") {
+      const json = args.includes("--json");
+      if (json) {
+        const parts: string[] = [];
+        process.exitCode = await runServiceCommand(["list", "--json"], { write: (text) => { parts.push(text); } }, serviceDeps());
+        const agents: string[] = [];
+        await runAgentLocal(["list", "--json"], { ...localIo, out: (text) => { agents.push(text); } });
+        stdout.write(`${JSON.stringify({ ...(JSON.parse(parts.join("")) as object), agents: JSON.parse(agents.join("")) as unknown }, null, 2)}\n`);
+        return;
+      }
+      stdout.write("Shared services:\n");
+      process.exitCode = await runServiceCommand(["list"], { write: (text) => { stdout.write(text); } }, serviceDeps());
+      stdout.write("\nLocal Agents:\n");
+      await runAgentLocal(["list"], localIo);
+      return;
+    }
+    if (action === undefined || action === "help" || action === "--help") {
+      stdout.write(`Usage:\n  ${serviceUsage().split("\n").join("\n  ")}\n  frely service share --type http --port <n> [--ttl <hours>] [--rewrite-host] [--json]\n\n${LOCAL_USAGE}`);
+      return;
+    }
     const controller = new AbortController();
     const onSignal = () => controller.abort();
     process.once("SIGINT", onSignal);
     process.once("SIGTERM", onSignal);
     try {
-      process.exitCode = await runServiceCommand(args.slice(1), { write: (text) => { stdout.write(text); } }, {
-        control: accountServiceControl, probe: probeLoopback, ensureFrpc: () => ensureFrpc({ log: (text) => { stdout.write(text); } }), spawnFrpc: spawnFrpcProcess, signal: controller.signal,
-        installDaemon: async () => { await installDeviceRelayService(); },
-        model: { share: shareLocalProvider, confirmLan: (baseUrl) => confirmLanEndpoint(baseUrl, providerIo()), readSecret: () => readStdinSecret(8192) },
-      });
+      process.exitCode = await runServiceCommand(args.slice(1), { write: (text) => { stdout.write(text); } }, serviceDeps(controller.signal));
     } finally { process.off("SIGINT", onSignal); process.off("SIGTERM", onSignal); }
     return;
   }
@@ -1117,9 +1145,18 @@ main().catch((error) => {
     return;
   }
   if (jsonMode && command === "network") process.stdout.write(`${JSON.stringify(publicNetworkError(error))}\n`);
-  else if (jsonMode && command === "agent") process.stdout.write(`${JSON.stringify(error instanceof KeyBudgetError ? publicKeyBudgetError(error) : publicSkillAccessError(error))}\n`);
+  else if (jsonMode && command === "item" && (["status", "remove"].includes(process.argv[3] ?? "") || (process.argv[3] === "call" && !(process.argv[5] ?? "-").match(/^[^-]/u)))) process.stdout.write(`${JSON.stringify(error instanceof KeyBudgetError ? publicKeyBudgetError(error) : publicSkillAccessError(error))}\n`);
   // A managed service writes to a shared log, so startup failures there carry a time.
   else process.stderr.write(`${process.argv.includes("--service-config-home") ? `${new Date().toISOString()} ` : ""}${message}\n`);
   process.exitCode = process.platform === "linux" && command === "mcp" && process.argv[3] === "serve" && process.argv.includes("--service-config-home") && isDefinitiveAuthorizationFailure(error)
     ? SERVICE_AUTH_REQUIRED : error instanceof ControllerError ? error.exitCode : 1;
 });
+
+/** What `frely service` share/list/stop/remove use to reach the account and run frpc. */
+function serviceDeps(signal: AbortSignal = new AbortController().signal) {
+  return {
+    control: accountServiceControl, probe: probeLoopback, ensureFrpc: () => ensureFrpc({ log: (text: string) => { process.stdout.write(text); } }), spawnFrpc: spawnFrpcProcess, signal,
+    installDaemon: async () => { await installDeviceRelayService(); },
+    model: { share: shareLocalProvider, confirmLan: (baseUrl: string) => confirmLanEndpoint(baseUrl, providerIo()), readSecret: () => readStdinSecret(8192) },
+  };
+}

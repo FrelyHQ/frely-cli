@@ -22,11 +22,11 @@ export const TASK_USAGE = `Usage:
   frely task schedule <name> (--cron "<m h dom mon dow>" [--tz <zone>] | --pause | --resume | --clear)
   frely task approve <name>
   frely task start <name> [--wait [--wait-sec <n>]] [--json]
-  frely task status [<runId>|--last] [--json]
-  frely task result [<runId>|--last] [--wait [--wait-sec <n>]] [--json]
-  frely task cancel [<runId>|--last]
-  frely task runs [<name>] [--json]
-  frely task logs [<runId>|--last] [--lines <n>] [--follow]
+Runs (task runs and item calls share these):
+  frely runs [<name>] [--json]
+  frely result [<runId>|--last] [--wait [--wait-sec <n>]] [--json]
+  frely result [<runId>|--last] --log [--lines <n>] [--follow]
+  frely cancel [<runId>|--last]
 `;
 
 const fail = (message: string, code: number = EXIT.cli): never => { throw new ControllerError(message, code); };
@@ -75,6 +75,14 @@ function waitMs(args: readonly string[]): number {
   return parsed * 1000;
 }
 
+/** The task half of `frely result|cancel|runs`: one task run (or the newest), its log with --log. */
+export async function taskRunRecordCommand(action: "result" | "cancel" | "runs", args: string[], io: TaskIo): Promise<number> {
+  if (action === "cancel") return cancel(args, io);
+  if (action === "runs") return runs(args, io);
+  if (has(args, "--log")) return logs(args, io);
+  return status(args, io, true);
+}
+
 /** Runs `frely task ...`; returns the exit code. */
 export async function runTaskCommand(args: readonly string[], io: TaskIo, deps: { manager?: ManagerDeps; approval?: ApprovalDeps } = {}): Promise<number> {
   try {
@@ -87,11 +95,6 @@ export async function runTaskCommand(args: readonly string[], io: TaskIo, deps: 
       case "schedule": return await schedule(rest, io);
       case "approve": return await approve(rest, io, deps.approval);
       case "start": return await start(rest, io, deps);
-      case "status": return await status(rest, io, false);
-      case "result": return await status(rest, io, true);
-      case "cancel": return await cancel(rest, io);
-      case "runs": return await runs(rest, io);
-      case "logs": return await logs(rest, io);
       case "share": return await shareCommand(rest, io);
       case "unshare": return await unshareCommand(rest, io);
       case "handled": return await handledCommand(rest, io);
@@ -234,7 +237,7 @@ async function start(args: string[], io: TaskIo, deps: { manager?: ManagerDeps; 
   const definition = await requireDefinition(positional(args)[0]);
   if (io.interactive && definition.network.some((host) => !approvedSites(definition).includes(host))) await approve([definition.name], io, deps.approval);
   const record = await startTask(definition.name, { trigger: "manual" }, deps.manager ?? defaultManagerDeps);
-  io.err(`Run ${record.runId} started. It keeps going if this command is cut off: frely task result ${record.runId} --wait\n`);
+  io.err(`Run ${record.runId} started. It keeps going if this command is cut off: frely result ${record.runId} --wait\n`);
   if (!has(args, "--wait")) { io.out(`${JSON.stringify(await describeRun(record), null, has(args, "--json") ? undefined : 2)}\n`); return EXIT.ok; }
   return printRun(await waitForTaskRun(record.runId, waitMs(args)), io, args, true);
 }

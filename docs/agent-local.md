@@ -1,15 +1,15 @@
 # Agents on this computer
 
-`frely agent local` runs an open-source Agent's repository on your computer, inside the Frely command sandbox.
+`frely service` runs an open-source Agent's repository on your computer, inside the Frely command sandbox.
 
 ```
-frely agent local add <username/name | https://github.com/owner/repo> [--name <folder-name>]
-frely agent local start <name> [--foreground]
-frely agent local stop <name>
-frely agent local logs <name> [--lines <n>] [--follow]
-frely agent local list [--json]
-frely agent local remove <name>
-frely agent local key --api-key-stdin | --clear
+frely service add <username/name | https://github.com/owner/repo> [--name <folder-name>]
+frely service start <name> [--foreground]
+frely service stop <name>
+frely service logs <name> [--lines <n>] [--follow]
+frely service list [--json]
+frely service remove <name>
+frely service key --api-key-stdin | --clear
 ```
 
 To let your own FrelyMCP call an Agent that serves A2A on `127.0.0.1:<port>`, register it as a service: `frely service share --type a2a --port <n> --label agent-<name>`.
@@ -45,6 +45,6 @@ When the Agent is added or started, each site in `local.network` that is not app
 
 The program gets `OPENAI_BASE_URL=http://frely-model.local/v1` and `ANTHROPIC_BASE_URL=http://frely-model.local` with a placeholder key. The sandbox's proxy hands those requests to a Unix socket served by the CLI, which adds your real Frely API key and forwards only the model endpoints (`/v1/chat/completions`, `/v1/responses`, `/v1/embeddings`, `/v1/messages`, `/v1/models`) to Frely's gateway. The program never holds the key, and calls are billed to it like any other API call.
 
-Save a key once with `frely agent local key --api-key-stdin` (or set `FRELY_API_KEY`). Create one in the Frely console under Keys.
+Save a key once with `frely service key --api-key-stdin` (or set `FRELY_API_KEY`). Create one in the Frely console under Keys.
 
 Clients that ignore `HTTP_PROXY` (Node's built-in `fetch` without `NODE_USE_ENV_PROXY=1`) cannot reach the proxy; the Agent should use a client that honors proxy variables or set that variable in its `run` command.

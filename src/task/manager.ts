@@ -87,7 +87,7 @@ export async function cancelTaskRun(target: string | undefined, pollMs = 200): P
   return writeTaskRun({ ...latest, status: "cancelled", endedAt: new Date().toISOString() });
 }
 
-/** What `frely task status|result|runs` print for a run. The log tail and answer are included for a finished run only when asked. */
+/** What `frely result|runs` print for a run. The log tail and answer are included for a finished run only when asked. */
 export async function describeRun(record: TaskRunRecord, options: { tail?: boolean } = {}): Promise<Record<string, unknown>> {
   const status = effectiveTaskStatus(record);
   const finished = status !== "running" && status !== "queued";
@@ -105,6 +105,6 @@ export async function describeRun(record: TaskRunRecord, options: { tail?: boole
     ...(record.worktreePath ? { worktree: record.worktreePath, branch: record.branch } : {}),
     ...(record.diffSummary ? { diff: record.diffSummary } : {}),
     ...(finished && options.tail ? { logTail: await logTail(record.runId) } : {}),
-    ...(!finished ? { note: "Still running. `frely task result <runId> --wait` waits up to 100 seconds for the end." } : {}),
+    ...(!finished ? { note: "Still running. `frely result <runId> --wait` waits up to 100 seconds for the end." } : {}),
   };
 }
