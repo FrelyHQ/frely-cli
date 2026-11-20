@@ -6,6 +6,34 @@ import { defaultEndpointLimit, getLocalProvider, isSupportedLocalModelName, norm
 const PROVIDER_RESPONSE_LIMIT = DEVICE_RELAY_MAX_FRAME_BYTES - 64 * 1024;
 const ALLOWED_PATHS = new Set(["/v1/models", "/v1/chat/completions", "/v1/embeddings", "/v1/responses"]);
 
+/** The endpoint answered, but wants an API key (HTTP 401 or 403). */
+export class LocalModelAuthError extends Error {
+  constructor(readonly status: number) { super(`Local Provider model discovery failed with HTTP ${status}.`); this.name = "LocalModelAuthError"; }
+}
+
+export const DEFAULT_LOCAL_MODEL_URLS = ["http://127.0.0.1:11434/v1", "http://127.0.0.1:1234/v1", "http://127.0.0.1:8000/v1", "http://127.0.0.1:8080/v1"] as const;
+
+export interface LocalEndpointProbe {
+  url: string;
+  models?: string[];
+  /** The endpoint is there but wants an API key. */
+  authRequired?: true;
+}
+
+/** Probes loopback OpenAI-compatible endpoints; a URL where nothing (usable) listens is left out. One implementation for `frely service share model` and the `local_models` device tool. */
+export async function probeLocalEndpoints(urls: readonly string[], timeoutMs: number, signal?: AbortSignal): Promise<LocalEndpointProbe[]> {
+  const probed = await Promise.all(urls.map(async (url): Promise<LocalEndpointProbe[]> => {
+    try {
+      signal?.throwIfAborted();
+      return [{ url, models: (await fetchLocalModelIds(url, timeoutMs)).slice(0, 256) }];
+    } catch (error) {
+      if (error instanceof LocalModelAuthError) return [{ url, authRequired: true }];
+      return []; // Nothing listens there, or it is not an OpenAI-compatible server.
+    }
+  }));
+  return probed.flat();
+}
+
 export async function discoverLocalModels(baseUrlInput: string, options: { key?: string; lan?: boolean } = {}): Promise<string[]> {
   const unique = await fetchLocalModelIds(baseUrlInput, 15_000, options);
   if (unique.length === 0) throw new Error("Local Provider did not report any models.");
@@ -19,6 +47,7 @@ export async function fetchLocalModelIds(baseUrlInput: string, timeoutMs: number
   const baseUrl = options.lan === true ? normalizeLocalOpenAiBaseUrl(baseUrlInput) : normalizeLoopbackOpenAiBaseUrl(baseUrlInput);
   const response = await fetch(`${baseUrl}/models`, { headers: { accept: "application/json", ...(options.key ? { authorization: `Bearer ${options.key}` } : {}) }, redirect: "error", signal: AbortSignal.timeout(timeoutMs) });
   const text = await readBounded(response, 2 * 1024 * 1024);
+  if (response.status === 401 || response.status === 403) throw new LocalModelAuthError(response.status);
   if (!response.ok) throw new Error(`Local Provider model discovery failed with HTTP ${response.status}.`);
   let value: unknown;
   try { value = JSON.parse(text); } catch { throw new Error("Local Provider /v1/models returned invalid JSON."); }

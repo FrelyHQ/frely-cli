@@ -27,7 +27,7 @@ test("`share model` and `--type model` both ask for a model share", () => {
 
 test("model share arguments", () => {
   const options = parseModelShareArguments(["openai-compatible", "--url", "http://192.168.1.2:3000/v1", "--models", "a, b", "--name=NewAPI", "--creator", "--key-stdin", "--max-concurrent", "4", "--json"]);
-  assert.deepEqual(options, { driver: "openai-compatible", url: "http://192.168.1.2:3000/v1", models: ["a", "b"], name: "NewAPI", creator: true, keyStdin: true, maxConcurrent: 4, json: true });
+  assert.deepEqual(options, { driver: "openai-compatible", url: "http://192.168.1.2:3000/v1", models: ["a", "b"], name: "NewAPI", creator: true, keyStdin: true, maxConcurrent: 4, json: true, explicitDriver: true });
   assert.equal(parseModelShareArguments([]).driver, "ollama");
   assert.throws(() => parseModelShareArguments(["vllm"]), /ollama or openai-compatible/);
   assert.throws(() => parseModelShareArguments(["--creator", "--slot", "s"]), /either --slot or --creator/);
@@ -88,4 +88,48 @@ test("`frely provider share` is gone: it is an unknown command and help no longe
   const help = JSON.parse((await promisify(execFile)(process.execPath, [entry, "help", "--agent", "--json"])).stdout) as { commands: Array<{ id: string }> };
   assert.ok(!help.commands.some((command) => command.id === "provider.share"));
   assert.ok(help.commands.some((command) => command.id === "service.share"));
+});
+
+test("without --url the usual ports are probed: one answer is used, several are chosen from, none keeps the default", async () => {
+  const one = fakes();
+  let out = "";
+  await shareModel(parseModelShareArguments([]), { write: (text) => { out += text; } }, { ...one.deps, probe: async () => [{ url: "http://127.0.0.1:1234/v1", models: ["qwen3"] }] });
+  assert.equal(one.calls[0]?.url, "http://127.0.0.1:1234/v1");
+  assert.match(out, /Found http:\/\/127\.0\.0\.1:1234\/v1/);
+
+  const many = fakes();
+  const found = [{ url: "http://127.0.0.1:11434/v1", models: ["a"] }, { url: "http://127.0.0.1:8001/v1", authRequired: true as const }];
+  await shareModel(parseModelShareArguments([]), { write: () => undefined }, { ...many.deps, probe: async () => found, interactive: true, ask: async () => "2" });
+  assert.equal(many.calls[0]?.url, "http://127.0.0.1:8001/v1");
+  await assert.rejects(shareModel(parseModelShareArguments([]), { write: () => undefined }, { ...fakes().deps, probe: async () => found }), /Run again with --url/);
+
+  const none = fakes();
+  await shareModel(parseModelShareArguments([]), { write: () => undefined }, { ...none.deps, probe: async () => [] });
+  assert.equal(none.calls[0]?.url, undefined);
+
+  const typed = fakes();
+  let probed = false;
+  await shareModel(parseModelShareArguments(["openai-compatible"]), { write: () => undefined }, { ...typed.deps, probe: async () => { probed = true; return []; } });
+  assert.equal(probed, false);
+});
+
+test("a server that wants a key is asked for it hidden at the terminal and retried once; elsewhere the error says how", async () => {
+  const { LocalModelAuthError } = await import("../provider/local.js");
+  const keys: Array<string | undefined> = [];
+  const share: ModelShareDeps["share"] = async (input) => {
+    keys.push(input.key);
+    if (!input.key) throw new LocalModelAuthError(401);
+    return { provider: { ...provider }, slot: "personal", resumed: false, accessPoints: [] };
+  };
+  const asked: string[] = [];
+  let out = "";
+  await shareModel(parseModelShareArguments(["--url", "http://127.0.0.1:8001/v1"]), { write: (text) => { out += text; } }, {
+    ...fakes().deps, share, interactive: true, askSecret: async (question) => { asked.push(question); return "sk-typed"; },
+  });
+  assert.deepEqual(keys, [undefined, "sk-typed"]);
+  assert.match(asked[0] ?? "", /needs an API key/);
+  assert.ok(!out.includes("sk-typed"));
+
+  await assert.rejects(shareModel(parseModelShareArguments(["--url", "http://127.0.0.1:8001/v1"]), { write: () => undefined }, { ...fakes().deps, share }), /--key-stdin/);
+  await assert.rejects(shareModel(parseModelShareArguments(["--url", "http://127.0.0.1:8001/v1", "--json"]), { write: () => undefined }, { ...fakes().deps, share, interactive: true, askSecret: async () => "x" }), /--key-stdin/);
 });
