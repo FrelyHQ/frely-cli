@@ -4,8 +4,9 @@
 // never the key. Frely's server has no special import logic: this is `frely api call keys.create` plus a local file edit.
 import { chmod, copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { statSync } from "node:fs";
 import { homedir, hostname } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 
 export const KEY_SETUP_AGENTS = ["codex", "claude-code"] as const;
 export type KeySetupAgent = (typeof KEY_SETUP_AGENTS)[number];
@@ -72,8 +73,15 @@ export function withCodexBaseUrl(toml: string, baseUrl: string): string {
   return [...head, line, ...(rest.length > 0 ? ["", ...rest] : [""])].join("\n");
 }
 
+/** Whether a command of this name is on PATH (with the Windows executable extensions); a missing one through the Windows shell would only exit 1. */
+function onPath(name: string): boolean {
+  const extensions = process.platform === "win32" ? ["", ".exe", ".cmd", ".bat"] : [""];
+  return (process.env.PATH ?? "").split(delimiter).filter(Boolean).some((dir) => extensions.some((ext) => { try { return statSync(join(dir, `${name}${ext}`)).isFile(); } catch { return false; } }));
+}
+
 /** Runs `codex login --with-api-key` (through the shell on Windows, where Codex is a .cmd shim; the arguments are fixed), handing it the key on stdin only: Codex itself saves it, so no argument or output carries the key. */
 function codexLogin(codexHome: string, apiKey: string): Promise<void> {
+  if (!onPath("codex")) return Promise.reject(new Error("Codex is not installed (no `codex` on PATH)."));
   return new Promise((resolve, reject) => {
     const child = spawn("codex", ["login", "--with-api-key"], { env: { ...process.env, CODEX_HOME: codexHome }, stdio: ["pipe", "ignore", "ignore"], shell: process.platform === "win32" });
     child.on("error", (error) => reject((error as NodeJS.ErrnoException).code === "ENOENT" ? new Error("Codex is not installed (no `codex` on PATH).") : error));
