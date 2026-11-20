@@ -231,6 +231,20 @@ test("service identity changes during preparation cancel before stop or install"
   assert.equal(calls.at(-1), "unlock");
 });
 
+test("registry lookup follows an https redirect and takes the first registry that answers", async () => {
+  const install = { method: "standalone" as const, entry: "/frely", platform: "linux" as const };
+  const release = await latestRelease(install, async (url) => {
+    const u = String(url);
+    if (u.startsWith("https://api.github.com/")) throw new TypeError("fetch failed");
+    if (u.startsWith("https://registry.npmjs.org/")) return new Promise<Response>(() => {});
+    if (u.startsWith("https://registry.npmmirror.com/")) return new Response(null, { status: 302, headers: { location: "https://cdn.npmmirror.com/meta/latest" } });
+    return Response.json({ version: "1.2.5" });
+  });
+  assert.equal(release.version, "1.2.5");
+  await assert.rejects(latestRelease(install, async (url) => String(url).startsWith("https://api.github.com/") ? Promise.reject(new TypeError("x"))
+    : new Response(null, { status: 302, headers: { location: "http://evil.test/" } })), /https/u);
+});
+
 test("standalone lookup falls back to npmmirror when GitHub is unreachable, and download falls back source by source", async (t) => {
   const install = { method: "standalone" as const, entry: "/frely", platform: "linux" as const };
   const asked: string[] = [];
