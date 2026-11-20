@@ -180,7 +180,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
   diagnostic(log, "relay.started");
   // A machine that is already enrolled starts without the web app; the checks run in the background.
   const device = await storedDevice() ?? await ensureDevice();
-  setObserveIdentity({ device: device.deviceId, deviceKey: device.keyThumbprint });
+  setObserveIdentity({ device: device.deviceId, deviceKey: device.keyThumbprint, relayUrl: device.relayUrl, userId: device.userId });
   const reporter = connectionReporter(device, options.workspace);
   const maintenance = options.managedService ? new MaintenanceGate() : undefined;
   // The socket lets `frely update` drain the service; Windows has no unix sockets, so there the gate is only used in-process.
