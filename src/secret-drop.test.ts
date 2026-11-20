@@ -163,7 +163,7 @@ test("the ssh writer quotes every parameter, uses sudo -n and carries no value i
   assert.equal(writerCommand(target({ owner: "wyatt", group: "wyatt" }), "wyatt", false).command, "sh");
 });
 
-test("the real writer script creates the file 0600 for this account, replaces it atomically and reports whether it replaced", async () => {
+test("the real writer script creates the file 0600 for this account, replaces it atomically and reports whether it replaced", { skip: process.platform === "win32" }, async () => {
   await withDevice(async (root) => {
     const me = execFileSync("id", ["-un"], { encoding: "utf8" }).trim();
     if (!/^[a-z_][a-z0-9_-]{0,31}$/u.test(me)) return;
