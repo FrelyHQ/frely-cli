@@ -72,10 +72,10 @@ export function withCodexBaseUrl(toml: string, baseUrl: string): string {
   return [...head, line, ...(rest.length > 0 ? ["", ...rest] : [""])].join("\n");
 }
 
-/** Runs `codex login --with-api-key`, handing it the key on stdin only: Codex itself saves it, so no argument or output carries the key. */
+/** Runs `codex login --with-api-key` (through the shell on Windows, where Codex is a .cmd shim; the arguments are fixed), handing it the key on stdin only: Codex itself saves it, so no argument or output carries the key. */
 function codexLogin(codexHome: string, apiKey: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn("codex", ["login", "--with-api-key"], { env: { ...process.env, CODEX_HOME: codexHome }, stdio: ["pipe", "ignore", "ignore"] });
+    const child = spawn("codex", ["login", "--with-api-key"], { env: { ...process.env, CODEX_HOME: codexHome }, stdio: ["pipe", "ignore", "ignore"], shell: process.platform === "win32" });
     child.on("error", (error) => reject((error as NodeJS.ErrnoException).code === "ENOENT" ? new Error("Codex is not installed (no `codex` on PATH).") : error));
     child.on("close", (status) => status === 0 ? resolve() : reject(new Error(`codex login exited with ${status ?? "a signal"}.`)));
     child.stdin.on("error", () => undefined);

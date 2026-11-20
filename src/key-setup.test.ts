@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import test from "node:test";
 import { checkedGatewayUrl, runKeyCommand, writeClaudeCodeSettings } from "./key-setup.js";
 
@@ -18,7 +18,7 @@ test("setup creates the key, writes Claude Code's settings (0600) and never prin
   assert.deepEqual(calls, [["keys.create", { name: "Claude Code on mbp" }]]);
   const file = join(dir, ".claude", "settings.json");
   assert.deepEqual(JSON.parse(await readFile(file, "utf8")).env, { ANTHROPIC_BASE_URL: "https://api.frely.cloud", ANTHROPIC_AUTH_TOKEN: RAW });
-  assert.equal((await stat(file)).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal((await stat(file)).mode & 0o777, 0o600); // Windows has no POSIX modes
   assert.ok(!out.join("").includes(RAW));
 });
 
@@ -79,16 +79,22 @@ test("withCodexBaseUrl replaces the top-level line or inserts it before the firs
 /** A stand-in `codex` on PATH: `login --with-api-key` writes stdin to $CODEX_HOME/auth.json, or fails when FAKE_CODEX_FAIL is set. */
 async function fakeCodex(): Promise<string> {
   const bin = await mkdtemp(join(tmpdir(), "frely-fake-codex-"));
-  const file = join(bin, "codex");
-  await writeFile(file, '#!/bin/sh\n[ -n "$FAKE_CODEX_FAIL" ] && exit 7\nread K\nprintf \'{"auth_mode":"apikey","OPENAI_API_KEY":"%s"}\' "$K" > "$CODEX_HOME/auth.json"\n');
-  await chmod(file, 0o755);
+  await writeFile(join(bin, "codex.js"), [
+    'if (process.env.FAKE_CODEX_FAIL) process.exit(7);',
+    'let d = "";',
+    'process.stdin.on("data", (c) => { d += c; });',
+    'process.stdin.on("end", () => { require("fs").writeFileSync(require("path").join(process.env.CODEX_HOME, "auth.json"), JSON.stringify({ auth_mode: "apikey", OPENAI_API_KEY: d.trim() })); });',
+    "",
+  ].join("\n"));
+  if (process.platform === "win32") await writeFile(join(bin, "codex.cmd"), '@node "%~dp0codex.js" %*\r\n');
+  else { await writeFile(join(bin, "codex"), '#!/bin/sh\nexec node "$(dirname "$0")/codex.js" "$@"\n'); await chmod(join(bin, "codex"), 0o755); }
   return bin;
 }
 
 test("codex setup sets the base URL, lets codex save the key, backs up config and login, and never prints the key", async () => {
   const bin = await fakeCodex(); const dir = await home();
   const saved = { path: process.env.PATH, home: process.env.CODEX_HOME };
-  process.env.PATH = `${bin}:${saved.path}`; process.env.CODEX_HOME = join(dir, ".codex");
+  process.env.PATH = `${bin}${delimiter}${saved.path}`; process.env.CODEX_HOME = join(dir, ".codex");
   try {
     await mkdir(join(dir, ".codex"));
     await writeFile(join(dir, ".codex", "config.toml"), 'model = "m"\n[mcp_servers.a]\nurl = "u"\n');
@@ -106,7 +112,7 @@ test("codex setup sets the base URL, lets codex save the key, backs up config an
 test("when codex cannot save the key the config is put back and the error names the created key", async () => {
   const bin = await fakeCodex(); const dir = await home();
   const saved = { path: process.env.PATH, home: process.env.CODEX_HOME };
-  process.env.PATH = `${bin}:${saved.path}`; process.env.CODEX_HOME = join(dir, ".codex"); process.env.FAKE_CODEX_FAIL = "1";
+  process.env.PATH = `${bin}${delimiter}${saved.path}`; process.env.CODEX_HOME = join(dir, ".codex"); process.env.FAKE_CODEX_FAIL = "1";
   try {
     await mkdir(join(dir, ".codex"));
     await writeFile(join(dir, ".codex", "config.toml"), 'model = "m"\n');
