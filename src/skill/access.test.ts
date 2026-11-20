@@ -71,7 +71,7 @@ test("installs a managed trigger Skill without installing the remote Agent", asy
     assert.match(text, /carry out a plan\), do so with your own tools/u);
     assert.match(text, /can take several minutes/u);
     assert.match(text, /--no-progress-summary/u);
-    assert.match(text, /frely item result --last --wait/u);
+    assert.match(text, /frely result --last --wait/u);
     assert.match(text, /result starts with NEED_FILES/u);
     assert.doesNotMatch(text, /remote Agent's result/u);
     const status = await skillAdapterStatus(distributionId, root);

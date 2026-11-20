@@ -244,7 +244,7 @@ function gitWriteDenials(workspaceRoot: string, allowGitConfig: boolean): string
 }
 
 /**
- * A narrower network than the open default, for a process that only ever runs one confined program (`frely agent local`).
+ * A narrower network than the open default, for a process that only ever runs one confined program (`frely service start`).
  * `mitmProxy` sends plain-HTTP requests for its domains to a Unix socket the CLI itself serves, so the program never holds the credential behind it.
  */
 export interface SandboxNetworkPolicy {
@@ -594,7 +594,7 @@ export function sshConfigReadable(): boolean {
   }
 }
 
-/** Stops srt's proxies and bridges. A process that confined its own work (`frely agent local`) calls this when done, or it never exits. */
+/** Stops srt's proxies and bridges. A process that confined its own work (`frely service start`) calls this when done, or it never exits. */
 export async function shutdownSandbox(): Promise<void> {
   if (!initialized) return;
   initialized = undefined;

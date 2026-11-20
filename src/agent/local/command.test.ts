@@ -22,7 +22,7 @@ const isolate = () => { process.env.FRELY_AGENTS_DIR = mkdtempSync(join(tmpdir()
 test("with no arguments the usage lists every local command", async () => {
   const h = harness();
   assert.equal(await runAgentLocal([], h.io), EXIT.ok);
-  for (const word of ["add", "start", "stop", "logs", "list", "remove", "key"]) assert.match(h.text(), new RegExp(`agent local ${word}`, "u"));
+  for (const word of ["add", "start", "stop", "logs", "list", "remove", "key"]) assert.match(h.text(), new RegExp(`service ${word}`, "u"));
   assert.equal(await runAgentLocal(["nonsense"], harness().io), EXIT.cli);
 });
 

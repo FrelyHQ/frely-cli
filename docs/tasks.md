@@ -8,9 +8,10 @@ frely task list | show <name> | remove <name>
 frely task schedule <name> (--cron "<m h dom mon dow>" [--tz <zone>] | --pause | --resume | --clear)
 frely task approve <name>
 frely task start <name> [--wait [--wait-sec <n>]]
-frely task status | result [<runId>|--last] [--wait [--wait-sec <n>]]
-frely task cancel [<runId>|--last]
-frely task runs [<name>] | logs [<runId>|--last] [--lines <n>] [--follow]
+frely runs [<name>]                 # task runs and item calls share runs, result and cancel
+frely result [<runId>|--last] [--wait [--wait-sec <n>]]
+frely result [<runId>|--last] --log [--lines <n>] [--follow]
+frely cancel [<runId>|--last]
 ```
 
 ## How a run works
@@ -30,14 +31,14 @@ Five cron fields in an IANA time zone (default: this computer's). When both day-
 `--model <name>` gives the program a model through a local proxy: `OPENAI_BASE_URL`, `OPENAI_API_KEY` (a placeholder) and `FRELY_MODEL`. The program never holds a real key.
 
 - **Registered here first.** `frely provider add --url http://192.168.1.20:3000/v1 --key-stdin` registers a model endpoint for this computer only (loopback, or a private network IP address; a network address is confirmed by typing yes in a terminal). Nothing is created on Frely's servers and no Provider slot is used. A task that asks for one of its models calls it directly: no relay, no Credit, and it works without Frely being reachable. The endpoint's key lives in this computer's secure storage.
-- **Otherwise Frely.** Any other model goes to the Frely gateway with your API key (`frely agent local key --api-key-stdin`), billed as usual.
+- **Otherwise Frely.** Any other model goes to the Frely gateway with your API key (`frely service key --api-key-stdin`), billed as usual.
 - **Fallback.** `--fallback-model` names models to try, in order, only when the first cannot be started: unreachable, not offered there, or key rejected. A slow or poor answer never switches the model, and a model is never switched in the middle of a run.
 - **Limits.** Each endpoint serves a limited number of calls at once, shared with callers that use a shared Provider: 1 for a model served on this computer, 6 for a network address or the gateway (`frely provider add --max-concurrent <n>` changes it). A task waits for a free slot; a remote buyer is told the endpoint is busy, so your own tasks go first.
 - **Records.** A run records how many model calls it made and how many failed, on this computer only. Nothing is reported or billed for them.
 
 ## Pi tasks (`--pi`)
 
-`frely task add <name> --pi [--model <name>] [--cwd <git-folder>] -- <prompt>` defines a task whose prompt is run by the Pi Node, an agent that edits files. The task folder must be a clean git repository: the Pi Node works in its own git worktree of it, so nothing is committed to your main branch or pushed. The result holds the agent's last answer and a short summary of the changes (`frely task result`).
+`frely task add <name> --pi [--model <name>] [--cwd <git-folder>] -- <prompt>` defines a task whose prompt is run by the Pi Node, an agent that edits files. The task folder must be a clean git repository: the Pi Node works in its own git worktree of it, so nothing is committed to your main branch or pushed. The result holds the agent's last answer and a short summary of the changes (`frely result`).
 
 - `frely pi install` downloads the Pi Node (the Capsule the Frely App publishes as a release asset), checks its SHA-256 and every file in it, and keeps it under `~/.config/frely/pi-node`. The Frely App is not needed; if the App is installed, its Pi Node is used instead. Run it again to update.
 - The background service (`frely link on`) keeps the Pi Node running. `frely pi status` shows its state.

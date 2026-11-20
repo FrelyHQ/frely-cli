@@ -57,7 +57,7 @@ export function parseShareArguments(args: readonly string[]): ShareOptions {
 }
 
 export function shareUsage(): string {
-  return "frely share <port> [--ttl <hours>] [--rewrite-host] [--json]";
+  return "frely service share --type http --port <n> [--ttl <hours>] [--rewrite-host] [--json]";
 }
 
 /** Shares http://127.0.0.1:<port> through Frely's relay until Ctrl+C, the link expires, the allowance is used up or Frely revokes it. Returns the exit code. */

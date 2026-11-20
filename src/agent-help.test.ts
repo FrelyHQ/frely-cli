@@ -28,13 +28,14 @@ test("Agent help runs offline without authentication or credential-store access"
   assert.ok(!help.commands.some(command => ["status"].includes(command.id)));
   const ordinary = await execute(process.execPath, [fileURLToPath(new URL("./index.js", import.meta.url)), "--help"]);
   assert.ok(ordinary.stdout.includes("frely help --agent --json"));
-  assert.ok(ordinary.stdout.includes("frely agent status"));
+  assert.ok(ordinary.stdout.includes("frely item status"));
+  for (const removed of ["frely agent ", "frely share "]) assert.ok(!ordinary.stdout.includes(removed), removed);
   for (const hidden of ["frely mcp serve", "frely mcp stdio", "frely network", "frely whoami", "frely key"]) assert.ok(!ordinary.stdout.includes(hidden), hidden);
 });
 
-test("agent status argument failures are JSON and never echo unsupported secret arguments", async () => {
+test("item status argument failures are JSON and never echo unsupported secret arguments", async () => {
   try {
-    await execute(process.execPath, [fileURLToPath(new URL("./index.js", import.meta.url)), "agent", "status", "--api-key", "synthetic-argv-key", "--json"]);
+    await execute(process.execPath, [fileURLToPath(new URL("./index.js", import.meta.url)), "item", "status", "--api-key", "synthetic-argv-key", "--json"]);
     assert.fail("must reject unsupported credential input");
   } catch (error) {
     const result = error as Error & { stdout: string; stderr: string; code: number };
@@ -56,8 +57,9 @@ test("command groups without a direct action print their subcommands offline", a
     [["link"], /frely link on/],
     [["link", "workspace"], /frely link workspace list/],
     [["link", "local"], /frely link local list/],
-    [["agent"], /frely agent status/],
     [["item"], /frely item call/],
+    [["item"], /frely item status/],
+    [["service"], /frely service share --type http/],
     [["provider"], /frely provider list/],
     [["api"], /frely api list/],
     [["app"], /frely app status/],
@@ -95,11 +97,11 @@ test("agent help by group or id returns full entries with examples", async () =>
     env: { ...process.env, FRELY_CREDENTIAL_STORE: "intentionally-invalid", FRELY_RELAY_URL: "not-a-url" },
   });
   type Entry = { id: string; usage: string; group: string; examples?: string[]; confirm?: string };
-  const agents = JSON.parse((await run("agent")).stdout) as { commands: Entry[] };
-  assert.ok(agents.commands.length > 5 && agents.commands.every((command) => command.id.startsWith("agent.")));
-  assert.ok(agents.commands.find((command) => command.id === "agent.status"));
-  const same = JSON.parse((await run("agents")).stdout) as { commands: Entry[] };
-  assert.equal(same.commands.length, agents.commands.length);
+  const services = JSON.parse((await run("service")).stdout) as { commands: Entry[] };
+  assert.ok(services.commands.length > 5 && services.commands.every((command) => command.id.startsWith("service.")));
+  assert.ok(services.commands.find((command) => command.id === "service.share.http"));
+  const runs = JSON.parse((await run("runs")).stdout) as { commands: Entry[] };
+  assert.deepEqual(runs.commands.map((command) => command.id).sort(), ["cancel", "result", "runs"]);
   const one = JSON.parse((await run("api")).stdout) as { commands: Entry[] };
   const items = JSON.parse((await run("items")).stdout) as { commands: Entry[] };
   assert.ok(items.commands.find((command) => command.id === "item.call")?.examples?.length, "the items group includes item.call with examples");
@@ -108,13 +110,13 @@ test("agent help by group or id returns full entries with examples", async () =>
     assert.equal(error.code, 1);
     const body = JSON.parse(error.stdout) as { ok: boolean; known: string[] };
     assert.equal(body.ok, false);
-    assert.ok(body.known.includes("agents"));
+    assert.ok(body.known.includes("service"));
     return true;
   });
 });
 
 test("every agent help command belongs to a group and examples point at real commands", () => {
-  for (const [name, id] of [["agents", "agent.status"], ["item", "item.call"], ["link", "link.on"], ["devices", "run"]] as const) {
+  for (const [name, id] of [["service", "service.add"], ["item", "item.status"], ["item", "item.call"], ["runs", "result"], ["link", "link.on"], ["devices", "run"]] as const) {
     const result = agentHelpView({ name });
     assert.ok(result.ok);
     const commands = (result.value as { commands: { id: string; group: string; examples?: string[] }[] }).commands;
@@ -122,7 +124,7 @@ test("every agent help command belongs to a group and examples point at real com
   }
   const internal = (agentHelpView({ name: "internal" }).value as { commands: { id: string }[] }).commands.map((command) => command.id).sort();
   assert.deepEqual(internal, ["network"]);
-  for (const id of ["login", "api", "item.call", "item.install", "link.on", "permission", "share"]) {
+  for (const id of ["login", "api", "item.call", "item.install", "link.on", "permission", "service.share.http"]) {
     const entry = (agentHelpView({ name: id }).value as { commands: { id: string; examples?: string[] }[] }).commands.find((command) => command.id === id);
     assert.ok(entry?.examples?.length, `${id} has examples`);
     for (const example of entry!.examples!) assert.ok(/^(frely |printf .*\| frely )/u.test(example), `${id}: ${example}`);

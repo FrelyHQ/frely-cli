@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, beforeEach, test } from "node:test";
-import { runTaskCommand } from "./command.js";
+import { runTaskCommand, taskRunRecordCommand } from "./command.js";
 import { buildDefinition, buildSchedule, getDefinition, listDefinitions, saveDefinition, taskHash } from "./definition.js";
 import { cancelTaskRun, describeRun, startTask, TaskError, waitForTaskRun, type ManagerDeps } from "./manager.js";
 import { effectiveTaskStatus, listTaskRuns, readTaskRun, writeTaskRun } from "./run-store.js";
@@ -173,7 +173,7 @@ test("the command line: add, list, start --wait, result, runs, remove", async ()
   assert.equal(result.status, "completed");
   assert.match(result.logTail, /two words/);
   out = "";
-  assert.equal(await runTaskCommand(["runs", "--json"], io), 0);
+  assert.equal(await taskRunRecordCommand("runs", ["--json"], io), 0);
   assert.equal((JSON.parse(out) as { runs: unknown[] }).runs.length, 1);
   assert.equal(await runTaskCommand(["list"], io), 0);
   assert.equal(await runTaskCommand(["remove", "cli-task"], io), 0);

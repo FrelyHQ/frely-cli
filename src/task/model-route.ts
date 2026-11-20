@@ -43,7 +43,7 @@ async function defaultGateway(): Promise<{ origin: string; key: string } | { rea
   if (!login) return { reason: "not signed in to Frely (run frely login)" };
   const origin = gatewayOrigin(login.config.relayUrl);
   const key = await readApiKey(origin);
-  return key ? { origin, key } : { reason: `no Frely API key (create one at ${login.config.relayUrl}/user/keys, then run frely agent local key --api-key-stdin)` };
+  return key ? { origin, key } : { reason: `no Frely API key (create one at ${login.config.relayUrl}/user/keys, then run frely service key --api-key-stdin)` };
 }
 
 interface Probe { readonly ok: boolean; readonly reason?: string }

@@ -12,21 +12,21 @@ export class SupervisorError extends Error {
 /**
  * Runs one Agent until it exits or this process is told to stop: the model proxy on a Unix socket, then the Agent's `local.run`
  * inside the sandbox with only Frely's gateway, the proxy name and the approved sites reachable. Everything the program prints goes to
- * this process's output, which `frely agent local start` points at the Agent's log file.
+ * this process's output, which `frely service start` points at the Agent's log file.
  */
 export async function superviseAgent(slug: string): Promise<number> {
   const record = await readRecord(slug);
-  if (!record) throw new SupervisorError(`No local Agent named ${slug}. Add it with frely agent local add.`);
-  if (!record.setupDone) throw new SupervisorError(`${slug} was not set up yet. Run frely agent local add again to finish.`);
+  if (!record) throw new SupervisorError(`No local Agent named ${slug}. Add it with frely service add.`);
+  if (!record.setupDone) throw new SupervisorError(`${slug} was not set up yet. Run frely service add again to finish.`);
   const login = await requireLogin().catch(() => { throw new SupervisorError("Frely login is required. Run `frely login`."); });
   const origin = gatewayOrigin(login.config.relayUrl);
   const apiKey = await readApiKey(origin);
-  if (!apiKey) throw new SupervisorError(`${slug} needs a Frely API key for its model calls. Create one at ${login.config.relayUrl}/user/keys, then run: frely agent local key --api-key-stdin`);
+  if (!apiKey) throw new SupervisorError(`${slug} needs a Frely API key for its model calls. Create one at ${login.config.relayUrl}/user/keys, then run: frely service key --api-key-stdin`);
 
   await ensureDataDir(record.workspace);
   const sites = approvedHosts(record);
   const skipped = record.network.filter((host) => !sites.includes(host));
-  if (skipped.length > 0) process.stderr.write(`Not approved, so blocked: ${skipped.join(", ")}. Run frely agent local start ${slug} again to ask.\n`);
+  if (skipped.length > 0) process.stderr.write(`Not approved, so blocked: ${skipped.join(", ")}. Run frely service start ${slug} again to ask.\n`);
   const socket = socketPath(slug);
   restrictSandboxNetwork({ allowedDomains: [new URL(origin).hostname, MODEL_HOST, ...sites], mitmProxy: { socketPath: socket, domains: [MODEL_HOST] } });
   const proxy = await startModelProxy({ socketPath: socket, upstream: origin, authorization: async () => `Bearer ${apiKey}` });

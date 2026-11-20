@@ -6,7 +6,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 /**
- * frpc, the client of Frely's frps relay, is downloaded on first use to the user's data directory and run by `frely share`. The version is
+ * frpc, the client of Frely's frps relay, is downloaded on first use to the user's data directory and run by `frely service share --type http`. The version is
  * pinned and every platform's archive has its SHA-256 here (from the release's frp_sha256_checksums.txt), so a changed download is refused.
  */
 export const FRPC_VERSION = "0.71.1";
@@ -29,7 +29,7 @@ const execute = promisify(execFile);
 
 export function frpcAsset(platform: string = process.platform, arch: string = process.arch): FrpcAsset {
   const asset = ASSETS[`${platform}-${arch}`];
-  if (!asset) throw new Error(`frely share has no frpc build for ${platform}-${arch}.`);
+  if (!asset) throw new Error(`frely service share --type http has no frpc build for ${platform}-${arch}.`);
   return asset;
 }
 

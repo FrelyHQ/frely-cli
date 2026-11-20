@@ -41,7 +41,7 @@ function shareFailure(result: CallResult): string {
   const text = Array.isArray(result.content) ? (result.content as Array<{ type?: unknown; text?: unknown }>).find((part) => part.type === "text")?.text : undefined;
   try {
     const error = (JSON.parse(String(text)) as { error?: { code?: unknown; message?: unknown } }).error;
-    if (error?.code === "confirmation_required") return "The share was not approved. Run frely share again and approve it in your browser.";
+    if (error?.code === "confirmation_required") return "The share was not approved. Run frely service share --type http again and approve it in your browser.";
     if (typeof error?.message === "string") return error.message;
     if (typeof error?.code === "string") return `Frely could not open the share (${error.code}).`;
   } catch { /* Not a JSON failure. */ }
