@@ -1,4 +1,4 @@
-import { fetchLocalModelIds } from "./local.js";
+import { DEFAULT_LOCAL_MODEL_URLS, fetchLocalModelIds, LocalModelAuthError, probeLocalEndpoints } from "./local.js";
 import { shareLocalProvider } from "./share.js";
 import { isSupportedLocalModelName, listLocalProviders, normalizeLoopbackOpenAiBaseUrl } from "./state.js";
 import { readConfig } from "../auth.js";
@@ -9,9 +9,13 @@ export interface LocalModelsHub {
   share(input: { url: string; models?: string[]; name?: string }, signal: AbortSignal): Promise<unknown>;
 }
 
-const DEFAULT_URLS = ["http://127.0.0.1:11434/v1", "http://127.0.0.1:1234/v1", "http://127.0.0.1:8000/v1", "http://127.0.0.1:8080/v1"];
 const PROBE_TIMEOUT_MS = 2_000;
 const MAX_LISTED_MODELS = 256;
+
+/** What the tool says when an endpoint wants an API key: the key is typed at a terminal on the device, never passed through this tool. */
+export function authRequiredHint(url: string): string {
+  return `${url} needs an API key. Share it from a terminal on this computer: frely service share model --url ${url}  (the key is typed there; it never goes through this tool).`;
+}
 
 export const SHARE_NOTICE = "Uses one personal Provider slot; without a free slot it counts against the Creator Plan Provider limit.";
 
@@ -24,6 +28,8 @@ export function localCallName(modelId: string): string | null {
 export interface LocalModelsHubOptions {
   /** The signed-in user's Frely username, when known; the account profile the CLI reads does not carry one today. */
   username?: () => Promise<string | null>;
+  /** The share itself; the CLI's own `shareLocalProvider` unless a test replaces it. */
+  share?: typeof shareLocalProvider;
 }
 
 export function createLocalModelsHub(options: LocalModelsHubOptions = {}): LocalModelsHub {
@@ -32,22 +38,23 @@ export function createLocalModelsHub(options: LocalModelsHubOptions = {}): Local
       const shared = (await listLocalProviders()).map((provider) => ({ providerId: provider.providerId, name: provider.name, url: provider.baseUrl, models: provider.models, ...(provider.pending ? { pending: true } : {}) }));
       if (url) {
         const normalized = normalizeLoopbackOpenAiBaseUrl(url);
-        return { servers: [{ url: normalized, models: (await fetchLocalModelIds(normalized, PROBE_TIMEOUT_MS)).slice(0, MAX_LISTED_MODELS) }], shared };
-      }
-      const urls = [...new Set([...DEFAULT_URLS, ...shared.map((provider) => provider.url)])];
-      const probed = await Promise.all(urls.map(async (candidate) => {
         try {
-          signal.throwIfAborted();
-          return [{ url: candidate, models: (await fetchLocalModelIds(candidate, PROBE_TIMEOUT_MS)).slice(0, MAX_LISTED_MODELS) }];
-        } catch { return []; /* Nothing listens there, or it is not an OpenAI-compatible server. */ }
-      }));
-      return { servers: probed.flat(), shared };
+          return { servers: [{ url: normalized, models: (await fetchLocalModelIds(normalized, PROBE_TIMEOUT_MS)).slice(0, MAX_LISTED_MODELS) }], shared };
+        } catch (error) {
+          if (error instanceof LocalModelAuthError) return { servers: [{ url: normalized, authRequired: true, hint: authRequiredHint(normalized) }], shared };
+          throw error;
+        }
+      }
+      const urls = [...new Set([...DEFAULT_LOCAL_MODEL_URLS, ...shared.map((provider) => provider.url)])];
+      const servers = (await probeLocalEndpoints(urls, PROBE_TIMEOUT_MS, signal)).map((probe) => probe.authRequired ? { url: probe.url, authRequired: true, hint: authRequiredHint(probe.url) } : probe);
+      return { servers, shared };
     },
     async share(input, signal) {
       signal.throwIfAborted();
       const invalid = input.models?.find((model) => !isSupportedLocalModelName(model));
       if (invalid !== undefined) throw new Error(`Model name "${invalid}" is not supported: no whitespace, no leading or trailing "/", no "//".`);
-      const result = await shareLocalProvider({ driver: "openai-compatible", url: input.url, ...(input.models?.length ? { models: input.models } : {}), ...(input.name ? { name: input.name } : {}), installService: false, accessPoints: true }, () => undefined);
+      const result = await (options.share ?? shareLocalProvider)({ driver: "openai-compatible", url: input.url, ...(input.models?.length ? { models: input.models } : {}), ...(input.name ? { name: input.name } : {}), installService: false, accessPoints: true }, () => undefined)
+        .catch((error: unknown) => { throw error instanceof LocalModelAuthError ? new Error(authRequiredHint(input.url)) : error; });
       const username = await (options.username ?? configUsername)().catch(() => null);
       const callNames = username ? [...new Set(result.provider.models.flatMap((model) => localCallName(model) ?? []))].map((name) => `${username}/${name}`) : null;
       return {

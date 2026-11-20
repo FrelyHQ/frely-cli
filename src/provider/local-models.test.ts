@@ -7,6 +7,7 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMcpServer } from "../runtime/mcp.js";
+import { LocalModelAuthError } from "./local.js";
 import { createLocalModelsHub, localCallName, type LocalModelsHub } from "./local-models.js";
 import { isSupportedLocalModelName, saveLocalProvider } from "./state.js";
 
@@ -109,5 +110,23 @@ test("local_models is listed only when the daemon injects a hub, and its actions
   } finally {
     await withHub.client.close(); await withHub.server.close();
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("an endpoint that wants a key is reported with the terminal command, not passed a key through the tool", async () => {
+  const server = createServer((_request, response) => { response.writeHead(401).end(); });
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const url = `http://127.0.0.1:${address.port}/v1`;
+    const hub = createLocalModelsHub({ share: async () => { throw new LocalModelAuthError(401); } });
+    const listed = await hub.list(url, new AbortController().signal) as { servers: Array<{ url: string; authRequired?: boolean; hint?: string }> };
+    assert.equal(listed.servers[0]?.authRequired, true);
+    assert.match(listed.servers[0]?.hint ?? "", /frely service share model --url .*never goes through this tool/u);
+    await assert.rejects(() => hub.share({ url }, new AbortController().signal), /needs an API key.*frely service share model/u);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });

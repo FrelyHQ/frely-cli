@@ -1,4 +1,5 @@
 import type { ShareLocalProviderInput, ShareLocalProviderResult } from "../provider/share.js";
+import { LocalModelAuthError, type LocalEndpointProbe } from "../provider/local.js";
 import { isLanBaseUrl, normalizeLocalOpenAiBaseUrl } from "../provider/state.js";
 
 export interface ModelShareOptions {
@@ -9,6 +10,8 @@ export interface ModelShareOptions {
   readonly slot?: string;
   readonly creator: boolean;
   readonly keyStdin: boolean;
+  /** A driver word was typed, so the default ports are not probed. */
+  readonly explicitDriver?: boolean;
   readonly maxConcurrent?: number;
   readonly json: boolean;
 }
@@ -49,6 +52,7 @@ export function parseModelShareArguments(args: readonly string[]): ModelShareOpt
     driver: driver === "openai-compatible" ? "openai-compatible" : "ollama",
     ...(url === undefined ? {} : { url }), ...(models?.length ? { models } : {}), ...(name === undefined ? {} : { name }), ...(slot === undefined ? {} : { slot }),
     creator, keyStdin, ...(maxConcurrent === undefined ? {} : { maxConcurrent }), json,
+    ...(driver === undefined ? {} : { explicitDriver: true }),
   };
 }
 
@@ -70,23 +74,56 @@ export interface ModelShareDeps {
   /** The owner confirms a network address in a terminal; throws when they do not. */
   confirmLan(baseUrl: string): Promise<void>;
   readSecret(): Promise<string>;
+  /** Looks for model servers on this computer's usual ports. */
+  probe?(): Promise<readonly LocalEndpointProbe[]>;
+  /** A person is at the terminal and can be asked. */
+  interactive?: boolean;
+  /** Asks a question at the terminal and returns the answer. */
+  ask?(question: string): Promise<string>;
+  /** Asks for a secret at the terminal without echoing it. */
+  askSecret?(question: string): Promise<string>;
+}
+
+/** Picks the endpoint to share when `--url` was not given: the one that answers, or the person's choice among several. `undefined` keeps the driver's default URL. */
+async function chooseEndpoint(options: ModelShareOptions, io: ModelShareIo, deps: ModelShareDeps): Promise<string | undefined> {
+  if (options.url !== undefined || options.driver !== "ollama" || options.explicitDriver || !deps.probe) return undefined;
+  const found = await deps.probe();
+  if (found.length === 0) return undefined;
+  const describe = (item: LocalEndpointProbe) => `${item.url}  ${item.authRequired ? "(needs an API key)" : (item.models ?? []).slice(0, 3).join(", ")}`;
+  if (found.length === 1) { io.write(`Found ${describe(found[0]!)}\n`); return found[0]!.url; }
+  if (!deps.interactive || !deps.ask) throw new Error(`Several model servers answer here:\n${found.map((item) => `  ${describe(item)}`).join("\n")}\nRun again with --url <one of them>.`);
+  io.write(`Model servers on this computer:\n${found.map((item, index) => `  ${index + 1}. ${describe(item)}`).join("\n")}\n`);
+  const answer = Number((await deps.ask(`Share which one (1-${found.length})? `)).trim());
+  const picked = found[answer - 1];
+  if (!Number.isInteger(answer) || !picked) throw new Error("Not shared: no server was chosen.");
+  return picked.url;
 }
 
 /** Shares models from this computer and returns the AccessPoints they are sold and planned through. */
 export async function shareModel(options: ModelShareOptions, io: ModelShareIo, deps: ModelShareDeps): Promise<number> {
   const log = (text: string) => { if (!options.json) io.write(text); };
   let lan = false;
-  if (options.url !== undefined) {
-    const normalized = normalizeLocalOpenAiBaseUrl(options.url);
+  const url = options.url ?? await chooseEndpoint(options, io, deps);
+  if (url !== undefined) {
+    const normalized = normalizeLocalOpenAiBaseUrl(url);
     if (isLanBaseUrl(normalized)) { await deps.confirmLan(normalized); lan = true; }
   }
-  const key = options.keyStdin ? await deps.readSecret() : undefined;
-  const result = await deps.share({
+  let key = options.keyStdin ? await deps.readSecret() : undefined;
+  const run = () => deps.share({
     driver: options.driver,
-    ...(options.url === undefined ? {} : { url: options.url }), ...(options.models ? { models: [...options.models] } : {}), ...(options.name === undefined ? {} : { name: options.name }),
+    ...(url === undefined ? {} : { url }), ...(options.models ? { models: [...options.models] } : {}), ...(options.name === undefined ? {} : { name: options.name }),
     ...(options.slot === undefined ? {} : { slot: options.slot }), creator: options.creator, accessPoints: true,
     ...(lan ? { lan: true } : {}), ...(key ? { key } : {}), ...(options.maxConcurrent === undefined ? {} : { maxConcurrent: options.maxConcurrent }),
   }, log);
+  let result: ShareLocalProviderResult;
+  try { result = await run(); } catch (error) {
+    if (!(error instanceof LocalModelAuthError) || key !== undefined) throw error;
+    // The server wants a key: ask for it here, hidden, so it never passes through a command line, a log or an AI.
+    if (!deps.interactive || !deps.askSecret || options.json) throw new Error(`${url ?? "The model server"} needs an API key. Run again with --key-stdin (pipe the key in), or in a terminal to be asked.`);
+    key = await deps.askSecret(`${url ?? "This model server"} needs an API key. Paste it (nothing is shown): `);
+    if (!key) throw new Error("Not shared: no key was given.");
+    result = await run();
+  }
   if (options.json) {
     io.write(`${JSON.stringify({ share: result.provider.providerId, models: result.provider.models, slot: result.slot, resumed: result.resumed, accessPoints: result.accessPoints, ...(result.accessPointNote ? { note: result.accessPointNote } : {}) })}\n`);
     return 0;

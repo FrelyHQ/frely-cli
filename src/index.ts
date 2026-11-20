@@ -29,7 +29,8 @@ import { startStdioMcp } from "./runtime/mcp.js";
 import { adoptMcpService, migrateRelayRestartPolicy, SERVICE_AUTH_REQUIRED, installDeviceRelayService, serviceStatus, wakeInstalledService, trimServiceLog, startMcpService, stopMcpService, uninstallMcpService } from "./service.js";
 import { createLocalModelsHub } from "./provider/local-models.js";
 import { shareLocalProvider } from "./provider/share.js";
-import { confirmLanEndpoint, registerLocalOnlyProvider, removeLocalOnlyProvider, setProviderKey, type RegisterIo } from "./provider/register.js";
+import { askSecretTerminal, askTerminal, confirmLanEndpoint, registerLocalOnlyProvider, removeLocalOnlyProvider, setProviderKey, type RegisterIo } from "./provider/register.js";
+import { DEFAULT_LOCAL_MODEL_URLS, probeLocalEndpoints } from "./provider/local.js";
 import { probeLoopback, runShareCommand, shareUsage, spawnFrpcProcess } from "./share/run.js";
 import { runServiceCommand, serviceUsage, superviseServices } from "./share/service-run.js";
 import { accountServiceControl } from "./share/service-control.js";
@@ -1157,6 +1158,9 @@ function serviceDeps(signal: AbortSignal = new AbortController().signal) {
   return {
     control: accountServiceControl, probe: probeLoopback, ensureFrpc: () => ensureFrpc({ log: (text: string) => { process.stdout.write(text); } }), spawnFrpc: spawnFrpcProcess, signal,
     installDaemon: async () => { await installDeviceRelayService(); },
-    model: { share: shareLocalProvider, confirmLan: (baseUrl: string) => confirmLanEndpoint(baseUrl, providerIo()), readSecret: () => readStdinSecret(8192) },
+    model: {
+      share: shareLocalProvider, confirmLan: (baseUrl: string) => confirmLanEndpoint(baseUrl, providerIo()), readSecret: () => readStdinSecret(8192),
+      probe: () => probeLocalEndpoints(DEFAULT_LOCAL_MODEL_URLS, 2_000), interactive: providerIo().interactive, ask: askTerminal, askSecret: askSecretTerminal,
+    },
   };
 }

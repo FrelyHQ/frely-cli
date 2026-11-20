@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { Writable } from "node:stream";
 import { createInterface } from "node:readline/promises";
 import { discoverLocalModels } from "./local.js";
 import { deleteProviderKey, saveProviderKey } from "./key.js";
@@ -26,9 +27,23 @@ export async function confirmLanEndpoint(baseUrl: string, io: RegisterIo): Promi
   if (answer.trim().toLowerCase() !== "yes") throw new Error("Not registered: the address was not confirmed.");
 }
 
-async function askTerminal(question: string): Promise<string> {
+export async function askTerminal(question: string): Promise<string> {
   const reader = createInterface({ input: process.stdin, output: process.stderr });
   try { return await reader.question(question); } finally { reader.close(); }
+}
+
+/** Reads a secret at the terminal without echoing it; it never reaches shell history or the process list. */
+export async function askSecretTerminal(question: string): Promise<string> {
+  let muted = false;
+  const output = new Writable({ write(chunk, _encoding, done) { if (!muted) process.stderr.write(chunk); done(); } });
+  const reader = createInterface({ input: process.stdin, output, terminal: true });
+  try {
+    const answer = reader.question(question);
+    muted = true;
+    const value = await answer;
+    process.stderr.write("\n");
+    return value.trim();
+  } finally { reader.close(); }
 }
 
 export interface RegisterInput {
