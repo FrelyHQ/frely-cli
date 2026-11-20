@@ -98,11 +98,11 @@ export const WRITE_SCRIPT = [
   "set -eu", "umask 077",
   'p=$1; o=$2; g=$3; m=$4',
   'd=$(dirname -- "$p")',
-  '[ -d "$d" ] || install -d -m 0700 -o "$o" -g "$g" -- "$d"',
+  'if [ ! -d "$d" ]; then mkdir -p -- "$d"; chmod 0700 "$d"; chown "$o:$g" "$d"; fi',
   "r=0; if [ -e \"$p\" ]; then r=1; fi",
   't="$p.frely-drop.$$"',
   "trap 'rm -f -- \"$t\"' EXIT",
-  'cat > "$t"', 'chown "$o:$g" -- "$t"', 'chmod "$m" -- "$t"', 'mv -f -- "$t" "$p"', "trap - EXIT", 'echo "replaced=$r"',
+  'cat > "$t"', 'if [ "$(id -un):$(id -gn)" != "$o:$g" ]; then chown "$o:$g" "$t"; fi', 'chmod "$m" "$t"', 'mv -f "$t" "$p"', "trap - EXIT", 'echo "replaced=$r"',
 ].join("\n");
 
 const shQuote = (value: string): string => `'${value.replace(/'/gu, `'\\''`)}'`;
