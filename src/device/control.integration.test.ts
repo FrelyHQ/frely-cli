@@ -103,7 +103,11 @@ test("account session enrolls device, gets signed legacy and edge connection gra
 
     await revokeDevice();
 
-    const protectedCalls = requests.filter((request) => request.path.startsWith("/api/user/device-relay/"));
+    // Each connection also asks for the account's trust chain (best effort; this server has none).
+    const trustCalls = requests.filter((request) => request.method === "GET" && request.path === "/api/user/device-relay/trust");
+    assert.equal(trustCalls.length, 2);
+    assert.ok(trustCalls.every((request) => request.authorization === "Bearer synthetic-basic-session"));
+    const protectedCalls = requests.filter((request) => request.path.startsWith("/api/user/device-relay/") && !trustCalls.includes(request));
     assert.equal(protectedCalls.length, 4);
     assert.ok(protectedCalls.every((request) => request.authorization === "Bearer synthetic-basic-session"));
     assert.equal(protectedCalls[0]?.body?.deviceId, undefined);

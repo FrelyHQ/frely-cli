@@ -7,6 +7,12 @@ import { challengeFor, TrustError, verifyAssertion, type Signer, type WebAuthnSi
 
 export const TRUST_DOMAIN = "frely.trust.v1";
 export const APPROVAL_DOMAIN = "frely.approval.v1";
+/**
+ * The only relying party and signing origin a device accepts, whatever a record says. Without this a first version served by a
+ * compromised cloud could list the main site as an approval origin, and signatures made there would count.
+ */
+export const TRUST_RP_ID = "frely.cloud";
+export const TRUST_APPROVAL_ORIGINS: readonly string[] = ["https://approve.frely.cloud"];
 
 export interface TrustRecord {
   typ: "frely.trust.v1";
@@ -26,7 +32,8 @@ export const trustRecordHash = (record: TrustRecord): string => createHash("sha2
 function shape(record: TrustRecord): void {
   if (record?.typ !== TRUST_DOMAIN || typeof record.user !== "string" || !Number.isSafeInteger(record.seq) || record.seq < 1) throw new TrustError("record_invalid");
   if (record.seq === 1 ? record.prev !== null : typeof record.prev !== "string") throw new TrustError("record_invalid");
-  if (typeof record.rpId !== "string" || !Array.isArray(record.approvalOrigins) || record.approvalOrigins.length < 1 || !record.approvalOrigins.every((origin) => /^https:\/\/[a-z0-9.-]+$/u.test(origin))) throw new TrustError("record_invalid");
+  if (record.rpId !== TRUST_RP_ID) throw new TrustError("rp_id_not_allowed");
+  if (!Array.isArray(record.approvalOrigins) || record.approvalOrigins.length !== TRUST_APPROVAL_ORIGINS.length || !record.approvalOrigins.every((origin, index) => origin === TRUST_APPROVAL_ORIGINS[index])) throw new TrustError("origin_not_allowed");
   if (!Array.isArray(record.signers) || record.signers.length < 1 || record.signers.length > 32) throw new TrustError("record_invalid");
 }
 
@@ -49,7 +56,11 @@ export function verifyTrustRecord(next: SignedTrustRecord, previous: TrustRecord
   return { seq: next.record.seq, hash, user: next.record.user };
 }
 
-export function trustDirectory(): string { return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "frely", "trust"); }
+/** One pin per relay and account: a device that is rebound to another account must not be stuck with the first account's pin. */
+export function trustDirectory(scope?: { relayUrl: string; userId: string }): string {
+  const base = join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "frely", "trust");
+  return scope ? join(base, createHash("sha256").update(`${scope.relayUrl}\0${scope.userId}`).digest("base64url").slice(0, 24)) : base;
+}
 
 export async function readTrust(directory = trustDirectory()): Promise<{ pin: TrustPin; record: TrustRecord } | undefined> {
   try {
@@ -66,6 +77,31 @@ export async function pinTrustRecord(next: SignedTrustRecord, directory = trustD
   if (!held || pin.seq > held.pin.seq) {
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await writeFile(join(directory, "record.json"), JSON.stringify({ pin, record: next.record }), { mode: 0o600 });
+    await chmod(join(directory, "record.json"), 0o600);
+  }
+  return pin;
+}
+
+/**
+ * Pin the newest version of a user's chain. The chain is walked from what the device already holds (or from version 1), so
+ * every version is checked against its predecessor, never only the newest. A first pin must belong to `userId` (the bound account).
+ */
+export async function pinTrustChain(chain: readonly SignedTrustRecord[], userId: string, directory = trustDirectory()): Promise<TrustPin | undefined> {
+  const held = await readTrust(directory);
+  if (held && held.pin.user !== userId) throw new TrustError("user_mismatch");
+  let pin = held?.pin, previous = held?.record, newest: SignedTrustRecord | undefined;
+  const ordered = [...chain].sort((a, b) => a.record.seq - b.record.seq);
+  if (!held && ordered[0]?.record.seq !== 1) throw new TrustError("chain_broken");
+  for (const version of ordered) {
+    if (version.record.user !== userId) throw new TrustError("user_mismatch");
+    if (pin && version.record.seq < pin.seq) continue;
+    pin = verifyTrustRecord(version, previous, pin);
+    previous = version.record;
+    newest = version;
+  }
+  if (newest && (!held || pin!.seq > held.pin.seq)) {
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    await writeFile(join(directory, "record.json"), JSON.stringify({ pin, record: newest.record }), { mode: 0o600 });
     await chmod(join(directory, "record.json"), 0o600);
   }
   return pin;

@@ -5,6 +5,8 @@ import { createConnectionProof, deleteDeviceIdentity, loadOrCreateDeviceIdentity
 import { clearDeviceBinding, readDeviceBinding, writeDeviceBinding, type DeviceBinding } from "./state.js";
 import { VERSION } from "../version.js";
 import { isDeviceTransportKind, type DeviceTransportGrant } from "./transport.js";
+import { syncTrust } from "../trust/sync.js";
+import type { SignedTrustRecord } from "../trust/record.js";
 
 const CLIENT_VERSION = VERSION;
 const TIMEOUT_MS = 15_000;
@@ -128,6 +130,13 @@ export async function connectionGrant(binding?: DeviceBinding, mcp?: { authoriza
   const payload = await responseJson(response);
   if (!response.ok) throw new Error(publicError(payload, response.status));
   const record = object(payload);
+  // Best effort: a trust chain that cannot be fetched or is refused must never stop the connection. The pin only moves forward.
+  await syncTrust(async () => {
+    const trust = await relayFetch(auth.config.relayUrl, auth.credential, "/api/user/device-relay/trust", { method: "GET" });
+    if (!trust.ok) return [];
+    const body = object(await responseJson(trust));
+    return Array.isArray(body.chain) ? body.chain as SignedTrustRecord[] : [];
+  }, { relayUrl: device.relayUrl, userId: device.userId }).catch(() => undefined);
   return { transports: parseConnectionTransports(record) };
 }
 

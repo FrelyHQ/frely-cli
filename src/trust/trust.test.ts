@@ -5,9 +5,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { jcs } from "./jcs.js";
-import { APPROVAL_DOMAIN, pinTrustRecord, readTrust, TRUST_DOMAIN, trustRecordHash, verifyApproval, verifyTrustRecord, type ApprovalPayload, type SignedTrustRecord, type TrustRecord } from "./record.js";
+import { APPROVAL_DOMAIN, pinTrustChain, pinTrustRecord, readTrust, trustDirectory, TRUST_DOMAIN, trustRecordHash, verifyApproval, verifyTrustRecord, type ApprovalPayload, type SignedTrustRecord, type TrustRecord } from "./record.js";
 import { challengeFor, TrustError, verifyAssertion, type CoseAlg, type Signer, type WebAuthnSignature } from "./webauthn.js";
 import { observeApprovals, observed, setObserveIdentity } from "./observe.js";
+import { heldTrust, syncTrust } from "./sync.js";
 
 const b64 = (data: Buffer | string) => Buffer.from(data).toString("base64url");
 const sha = (data: Buffer | string) => createHash("sha256").update(data).digest();
@@ -121,10 +122,10 @@ test("observation mode counts valid and invalid approvals and never throws", asy
   try {
     const key = passkey(-7), rec = record(1, null, [key.signer]);
     const device = "drd_" + "a".repeat(32);
-    setObserveIdentity({ device, deviceKey: "thumb" });
+    setObserveIdentity({ device, deviceKey: "thumb", relayUrl: "https://r.test", userId: "usr_1" });
     const call = (list: unknown) => ({ params: { _meta: { "frely/approvals": list } } });
     assert.deepEqual(await observeApprovals(call([approval(rec, key)])), { seen: 1, valid: 0, failures: ["no_trust_record"] });
-    await pinTrustRecord(sealed(rec, key));
+    await pinTrustChain([sealed(rec, key)], "usr_1", trustDirectory({ relayUrl: "https://r.test", userId: "usr_1" }));
     const before = { ...observed };
     const lines: string[] = [];
     const result = await observeApprovals(call([approval(rec, key), approval(rec, key, {}, { flags: 0x01 }), "junk"]), (line) => lines.push(line));
@@ -132,5 +133,56 @@ test("observation mode counts valid and invalid approvals and never throws", asy
     assert.equal(observed.valid - before.valid, 1);
     assert.match(lines[0]!, /trust.approval_unverified/u);
     assert.deepEqual(await observeApprovals({ params: {} }), { seen: 0, valid: 0, failures: [] });
+  } finally { if (saved === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = saved; await rm(dir, { recursive: true, force: true }); }
+});
+
+test("a record may only name the fixed rpId and approval origin, so a served first version cannot make the main site a signer", () => {
+  const a = passkey(-7);
+  const code = (r: TrustRecord) => { try { verifyTrustRecord(sealed(r, a), undefined); return "ok"; } catch (error) { return (error as TrustError).code; } };
+  assert.equal(code(record(1, null, [a.signer])), "ok");
+  assert.equal(code({ ...record(1, null, [a.signer]), approvalOrigins: ["https://frely.cloud"] }), "origin_not_allowed");
+  assert.equal(code({ ...record(1, null, [a.signer]), approvalOrigins: [ORIGIN, "https://frely.cloud"] }), "origin_not_allowed");
+  assert.equal(code({ ...record(1, null, [a.signer]), rpId: "evil.example" }), "rp_id_not_allowed");
+});
+
+test("pinTrustChain walks every version, requires the bound account on first pin, and never moves backwards", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "frely-chain-"));
+  try {
+    const a = passkey(-7), b = passkey(-8);
+    const v1 = record(1, null, [a.signer]), v2 = record(2, v1, [a.signer, b.signer]), v3 = record(3, v2, [b.signer]);
+    const chain = [sealed(v1, a), sealed(v2, a), sealed(v3, b)];
+    await assert.rejects(pinTrustChain(chain, "usr_other", dir), /user_mismatch/u);
+    assert.equal(await readTrust(dir), undefined);
+    await assert.rejects(pinTrustChain(chain.slice(1), "usr_1", dir), /chain_broken/u);
+    // A newest version without its predecessors is not enough.
+    assert.equal((await pinTrustChain([chain[0]!, chain[2]!], "usr_1", dir).catch((error) => (error as TrustError).code)), "chain_broken");
+    assert.equal((await pinTrustChain(chain, "usr_1", dir))?.seq, 3);
+    assert.equal((await pinTrustChain(chain.slice(0, 2), "usr_1", dir))?.seq, 3);
+    assert.equal((await readTrust(dir))?.pin.seq, 3);
+    const forked = [sealed(v1, a), sealed(v2, a), sealed(record(3, v2, [a.signer]), a)];
+    await assert.rejects(pinTrustChain(forked, "usr_1", dir), /fork/u);
+    // A shorter chain from the relay is not an attack and not progress: the pin stays.
+    assert.equal((await pinTrustChain([sealed(v1, a)], "usr_1", dir))?.seq, 3);
+    assert.equal((await readTrust(dir))?.pin.seq, 3);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("syncTrust keeps one pin per relay and account, treats an empty chain as nothing, and reports a refused chain without moving the pin", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "frely-sync-"));
+  const saved = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = dir;
+  try {
+    const a = passkey(-7);
+    const v1 = record(1, null, [a.signer]), mine = { relayUrl: "https://r.test", userId: "usr_1" }, other = { relayUrl: "https://r.test", userId: "usr_2" };
+    assert.deepEqual(await syncTrust(async () => [], mine), { status: "none" });
+    const pinned = await syncTrust(async () => [sealed(v1, a)], mine);
+    assert.equal(pinned.status, "pinned");
+    assert.equal((await heldTrust(mine))?.seq, 1);
+    assert.equal(await heldTrust(other), undefined);
+    // A different account on the same device gets its own pin instead of a permanent user_mismatch.
+    assert.equal((await syncTrust(async () => [sealed(record(1, null, [a.signer], "usr_2"), a)], other)).status, "pinned");
+    assert.deepEqual(await syncTrust(async () => [sealed({ ...v1, approvalOrigins: ["https://frely.cloud"] }, a)], { relayUrl: "https://s.test", userId: "usr_1" }), { status: "refused", code: "origin_not_allowed" });
+    assert.deepEqual(await syncTrust(async () => [sealed(record(1, null, [a.signer], "usr_9"), a)], mine), { status: "refused", code: "user_mismatch" });
+    assert.equal((await heldTrust(mine))?.seq, 1);
   } finally { if (saved === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = saved; await rm(dir, { recursive: true, force: true }); }
 });
