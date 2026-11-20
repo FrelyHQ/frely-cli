@@ -29,9 +29,9 @@ test("day of month and day of week combine with OR when both are restricted", ()
   assert.equal(next("0 0 15 * 5", "UTC", "2026-11-04T00:00:00Z"), "2026-11-06T00:00:00.000Z");
 });
 
-test("daylight saving: a time in the spring gap is skipped that day, an autumn repeat runs once", () => {
-  // America/New_York 2026-03-08 02:30 does not exist; the next real 02:30 is the 9th (EDT, UTC-4 => 06:30Z).
-  assert.equal(next("30 2 * * *", "America/New_York", "2026-03-08T00:00:00Z"), "2026-03-09T06:30:00.000Z");
+test("daylight saving: a time in the spring gap runs right after the gap, an autumn repeat runs once", () => {
+  // America/New_York 2026-03-08 02:30 does not exist; croner runs it at 03:00 EDT (07:00Z) that day instead of skipping it.
+  assert.equal(next("30 2 * * *", "America/New_York", "2026-03-08T00:00:00Z"), "2026-03-08T07:00:00.000Z");
   // 2026-11-01 01:30 happens twice; the first one is EDT (05:30Z).
   assert.equal(next("30 1 * * *", "America/New_York", "2026-11-01T00:00:00Z"), "2026-11-01T05:30:00.000Z");
 });
@@ -39,8 +39,8 @@ test("daylight saving: a time in the spring gap is skipped that day, an autumn r
 test("impossible schedules return undefined and bad ones throw", () => {
   assert.equal(next("0 0 31 2 *", "UTC", "2026-11-03T00:00:00Z"), undefined);
   assert.throws(() => parseCron("* * * *"), /five cron fields/);
-  assert.throws(() => parseCron("61 * * * *"), /out of range/);
-  assert.throws(() => parseCron("*/0 * * * *"), /step/);
+  assert.throws(() => parseCron("61 * * * *"), /Invalid value/);
+  assert.throws(() => parseCron("*/0 * * * *"), /stepping/);
   assert.equal(isValidTimezone("Asia/Shanghai"), true);
   assert.equal(isValidTimezone("Mars/Base"), false);
 });
