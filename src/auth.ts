@@ -669,6 +669,10 @@ export async function pollDeviceToken(
       await delay(intervalMs);
       continue;
     }
+    // Every endpoint slot is taken: Frely refuses the new login and says how the slots are used.
+    if (errorCode === "access_denied" && isString(record.error_description) && record.error_description.startsWith("Endpoint limit reached")) {
+      throw new Error(`${record.error_description.slice(0, 400)} Then run \`frely login\` again.`);
+    }
     if (errorCode === "access_denied") throw new Error("Frely device authorization was denied.");
     if (errorCode === "expired_token") throw new Error("Frely device authorization expired. Run `frely login` again.");
     throw new Error(publicError(payload, response.status));
