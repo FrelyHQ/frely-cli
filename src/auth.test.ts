@@ -478,3 +478,15 @@ test("the emailed code can ask for device MCP in the same step and returns the p
   await completeEmailDeviceLogin("https://test.invalid", challenge, "123456");
   assert.equal("mcp" in bodies[1]!, false);
 });
+
+test("a login refused because every endpoint slot is taken says so instead of a bare denial", async (t) => {
+  const { pollDeviceToken } = await import("./auth.js");
+  const oldFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = oldFetch; });
+  const message = "Endpoint limit reached (10 of 10 used: 6 computers, 0 with computer use, 0 browsers, 4 controllers). Disconnect or revoke one in the Frely web console.";
+  globalThis.fetch = async () => Response.json({ error: "access_denied", error_description: message }, { status: 403 });
+  await assert.rejects(pollDeviceToken("https://frely.cloud", { device_code: "d", user_code: "U", verification_uri: "https://frely.cloud/device", verification_uri_complete: "https://frely.cloud/device?g=U", expires_in: 60, interval: 1 }),
+    (error: Error) => error.message.startsWith("Endpoint limit reached (10 of 10") && error.message.endsWith("Then run `frely login` again."));
+  globalThis.fetch = async () => Response.json({ error: "access_denied" }, { status: 400 });
+  await assert.rejects(pollDeviceToken("https://frely.cloud", { device_code: "d", user_code: "U", verification_uri: "https://frely.cloud/device", verification_uri_complete: "https://frely.cloud/device?g=U", expires_in: 60, interval: 1 }), /authorization was denied/u);
+});
