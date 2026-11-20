@@ -45,13 +45,30 @@ async function githubLatest(request: typeof fetch): Promise<string> {
   try { return stableVersion(String(data.tag_name).replace(/^v/u, "")); } catch (error) { throw new ReleaseRejected((error as Error).message); }
 }
 
+/** Fetches registry metadata, following a few https redirects (some China edges redirect) but never leaving https. */
+async function registryJson(request: typeof fetch, url: string): Promise<unknown> {
+  const signal = AbortSignal.timeout(10000);
+  for (let hops = 0; hops < 3; hops++) {
+    if (new URL(url).protocol !== "https:") throw new Error("registry redirected away from https");
+    const response = await request(url, { headers: { accept: "application/json", "user-agent": "frely-cli" }, signal, redirect: "manual" });
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get("location");
+      await response.body?.cancel();
+      if (!location) throw new Error("registry redirect without location");
+      url = new URL(location, url).toString();
+      continue;
+    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const text = await response.text();
+    if (text.length > 1024 * 1024) throw new Error("metadata too large");
+    return JSON.parse(text);
+  }
+  throw new Error("too many redirects");
+}
+
 /** The npm registries carry the platform package of every release: ask one of them for its latest version. */
 async function npmRegistryLatest(request: typeof fetch, registry: string, asset: string): Promise<string> {
-  const response = await request(`${registry}/${platformPackage(asset)}/latest`, { headers: { accept: "application/json", "user-agent": "frely-cli" }, signal: AbortSignal.timeout(6000), redirect: "error" });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const text = await response.text();
-  if (text.length > 1024 * 1024) throw new Error("metadata too large");
-  return stableVersion((JSON.parse(text) as { version?: unknown }).version);
+  return stableVersion(((await registryJson(request, `${registry}/${platformPackage(asset)}/latest`)) as { version?: unknown }).version);
 }
 
 export function stableVersion(value: unknown): string {
@@ -69,7 +86,7 @@ export function compareVersions(a: string, b: string): number {
 }
 
 /**
- * Standalone installations query GitHub first and use the npm registries as fallbacks.
+ * Standalone installations query GitHub first, then both npm registries at once as fallbacks.
  * If every source fails, the error includes the reason from each source.
  */
 export async function latestRelease(installation: Installation, request: typeof fetch = fetch): Promise<Release> {
@@ -97,14 +114,13 @@ export async function latestRelease(installation: Installation, request: typeof 
     if (error instanceof ReleaseRejected) throw error;
     failures.push(`GitHub: ${reason(error)}`);
   }
-  for (const registry of NPM_REGISTRIES) {
-    try {
-      const version = await npmRegistryLatest(request, registry, asset);
-      return { version, sources: releaseSources(version, asset) };
-    } catch (error) {
-      failures.push(`${new URL(registry).hostname}: ${reason(error)}`);
-    }
-  }
+  // Ask both registries at once and take the first answer: a slow or blocked one must not delay the other.
+  const failed: string[] = [];
+  try {
+    const version = await Promise.any(NPM_REGISTRIES.map((registry) => npmRegistryLatest(request, registry, asset)
+      .catch((error: unknown) => { failed.push(`${new URL(registry).hostname}: ${reason(error)}`); throw error; })));
+    return { version, sources: releaseSources(version, asset) };
+  } catch { failures.push(...failed); }
   throw new Error(`Release lookup failed on GitHub, npmmirror and npmjs. (${failures.join("; ")})`);
 }
 
