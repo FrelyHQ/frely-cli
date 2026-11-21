@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { MaintenanceGate } from "./maintenance.js";
-import { removeLegacyAutoUpdate, Upgrader, upgradeStatus, type UpgradeDependencies } from "./upgrade.js";
+import { removeLegacyAutoUpdate, startSelfUpgrade, Upgrader, upgradeStatus, type UpgradeDependencies } from "./upgrade.js";
 
 const installation = { method: "standalone", entry: "/x/frely", platform: "linux" } as never;
 function deps(over: Partial<Record<keyof UpgradeDependencies, unknown>> = {}, calls: string[] = []): UpgradeDependencies {
@@ -81,4 +81,17 @@ test("on Windows a blocked swap keeps the verified executable for the next start
   assert.equal(await upgrader(gate, d).runOnce(), "pending_restart");
   assert.deepEqual(calls, ["stage 2.0.0 /stage/frely.exe", "cleanup", "unlock", "stale"]);
   gate.enter()();
+});
+
+test("a remote `frely update` starts the service's own upgrade once the calling request has finished, and only for a standalone installation", async () => {
+  const gate = new MaintenanceGate(), calls: string[] = [];
+  const finish = gate.track(); // the MCP call that asked for the update
+  const up = upgrader(gate, deps({}, calls));
+  assert.equal(await startSelfUpgrade(up, { delayMs: 5, inspect: async () => installation }), true);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(calls, []); // still busy: nothing changed
+  finish();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.ok((calls as string[]).includes("apply"));
+  assert.equal(await startSelfUpgrade(up, { inspect: async () => ({ method: "npm", platform: "linux", entry: "/x/frely" }) as never }), false);
 });

@@ -91,3 +91,21 @@ export function restartWindowsService(installation: Installation): void {
   const child = spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", command], { detached: true, stdio: "ignore", windowsHide: true });
   child.unref();
 }
+
+/**
+ * Start the service's own upgrade for a client that ran `frely update` through MCP. That call holds the maintenance gate until it returns, so the
+ * upgrade is retried while the gate is busy. Only a standalone installation qualifies (package managers are never driven remotely); otherwise it
+ * returns false and the command runs as before.
+ */
+export async function startSelfUpgrade(upgrader: Upgrader, options: { attempts?: number; delayMs?: number; inspect?: () => Promise<Installation> } = {}): Promise<boolean> {
+  const installation = await (options.inspect ?? inspectInstallation)().catch(() => null);
+  if (installation?.method !== "standalone") return false;
+  const attempts = options.attempts ?? 30, delayMs = options.delayMs ?? 1000;
+  void (async () => {
+    for (let i = 0; i < attempts; i++) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      if (await upgrader.runOnce().catch(() => "failed") !== "busy") return;
+    }
+  })();
+  return true;
+}

@@ -1,7 +1,7 @@
 import { watchAgentLinks } from "../skill/link-sync.js";
 import { remoteLocked } from "../remote-lock.js";
 import { watchServiceInstallation } from "../update/service-refresh.js";
-import { removeLegacyAutoUpdate, restartWindowsService, Upgrader } from "../update/upgrade.js";
+import { removeLegacyAutoUpdate, restartWindowsService, startSelfUpgrade, Upgrader } from "../update/upgrade.js";
 import { applyPendingUpdate } from "../update/windows-pending.js";
 import { inspectInstallation } from "../update/installation.js";
 import { MaintenanceGate, serveMaintenance } from "../update/maintenance.js";
@@ -251,6 +251,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
                 assertAuthorized: () => guard.assert(), signal: guard.controller.signal, log, ...(maintenance ? { maintenance } : {}),
                 ...(options.localMcp ? { localMcp: options.localMcp } : {}),
                 ...(options.localModels ? { localModels: options.localModels } : {}),
+                ...(activeUpgrader ? { requestUpgrade: () => startSelfUpgrade(activeUpgrader!) } : {}),
               });
               const activeSession = session;
               guard.controller.signal.addEventListener("abort", () => {

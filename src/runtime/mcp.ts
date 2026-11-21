@@ -48,6 +48,17 @@ export interface McpRuntimeOptions {
   getLocalMcps?: () => string[];
   /** Probes and shares loopback model servers from the daemon process. Without it (stdio mode) the local_models tool stays hidden. */
   localModels?: LocalModelsHub;
+  /**
+   * Managed service only. Called when a client runs exactly `frely update`: the service upgrades itself (outside the command sandbox, release signature required,
+   * idle-only) and switches over without anyone logging in. Resolves true when it took the request; false runs the command as usual.
+   */
+  requestUpgrade?: () => Promise<boolean>;
+}
+
+/** True for the exact command `frely update` (surrounding and repeated whitespace ignored); anything else, including extra arguments or shell syntax, is an ordinary command. */
+export function isSelfUpdateCommand(name: string, args: Record<string, unknown>): boolean {
+  if (!(name === "run_command" || (name === "process" && args.action === "run"))) return false;
+  return typeof args.command === "string" && args.command.trim().split(/\s+/u).join(" ") === "frely update";
 }
 
 function enabledLocalMcps(options: McpRuntimeOptions): string[] {
@@ -173,6 +184,9 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
         const state = await manageWorkspaces(args, request.params._meta, launchRoot);
         await syncWorkspaces(workspaces, launchRoot);
         return { content: [{ type: "text" as const, text: JSON.stringify(state) }] };
+      }
+      if (options.requestUpgrade && isSelfUpdateCommand(name, args) && await options.requestUpgrade()) {
+        return { content: [{ type: "text" as const, text: "The service is upgrading itself to the latest signed Frely release. No approval is needed. It installs once running work is finished, then restarts and reconnects on its own; this connection may drop briefly. Check with frely doctor." }] };
       }
       const result = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]), pathGrantsFromMeta(request.params._meta), networkAllowFromMeta(request.params._meta), transferAllowedFromMeta(request.params._meta), p2p);
       if (result instanceof ImageResult) {
