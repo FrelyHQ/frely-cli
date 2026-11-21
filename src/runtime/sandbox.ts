@@ -378,8 +378,10 @@ let wrapQueue: Promise<unknown> = Promise.resolve();
  * switching it back right after the wrap leaves that command's sandbox as it was made and later commands without it. Only the wrap
  * (milliseconds) is queued; the commands themselves run concurrently.
  */
-export function wrapSerialized(manager: WrapManager, base: SandboxRuntimeConfig, wrap: () => Promise<string>, allowGitConfig: boolean): Promise<string> {
+export function wrapSerialized(manager: WrapManager, base: SandboxRuntimeConfig, wrap: () => Promise<string>, allowGitConfig: boolean, signal?: AbortSignal): Promise<string> {
   const task = async (): Promise<string> => {
+    // A caller that gave up while queued must not hold the queue for the ones behind it.
+    signal?.throwIfAborted();
     if (!allowGitConfig) return wrap();
     manager.updateConfig({ ...base, filesystem: { ...base.filesystem, allowGitConfig: true } as SandboxRuntimeConfig["filesystem"] });
     try {
@@ -390,7 +392,24 @@ export function wrapSerialized(manager: WrapManager, base: SandboxRuntimeConfig,
   };
   const run = wrapQueue.then(task, task);
   wrapQueue = run.catch(() => undefined);
-  return run;
+  return untilAborted(run, signal);
+}
+
+/** How long preparing one command's sandbox may take, queue included, before the command fails instead of waiting with no output. */
+export const SANDBOX_WRAP_LIMIT_MS = 20_000;
+
+/** `work`, or a rejection as soon as `signal` aborts: a wait that never ends must not keep a tool call open. */
+export function untilAborted<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => { signal.removeEventListener("abort", onAbort); resolve(value); },
+      (error) => { signal.removeEventListener("abort", onAbort); reject(error); },
+    );
+  });
 }
 
 export interface SandboxedCommand {
@@ -405,6 +424,8 @@ export interface SandboxedCommand {
 export interface SandboxCommandOptions {
   /** run_command only: allow writing the workspace `.git/config` (the caller must run the guard). start_process never sets this. */
   allowGitConfig?: boolean;
+  /** The tool call's own cancellation (the relay cancelled it, the session closed). Preparing the sandbox stops at once when it aborts. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -421,7 +442,16 @@ export async function sandboxCommandDetailed(command: string, workspaceRoot: str
   if (allowedGroups.includes(UNSANDBOXED_GROUP)) return { command, gitConfig: false };
   const denied = deniedReadReference(command, allowedGroups);
   if (denied) throw new Error(deniedReadMessage(denied));
-  const init = await ensureInitialized(workspaceRoot);
+  const limit = AbortSignal.timeout(SANDBOX_WRAP_LIMIT_MS);
+  const signal = options.signal ? AbortSignal.any([options.signal, limit]) : limit;
+  const timedOut = () => limit.aborted && !options.signal?.aborted;
+  let init: Init;
+  try {
+    init = await untilAborted(ensureInitialized(workspaceRoot), signal);
+  } catch (error) {
+    if (timedOut()) throw new Error(sandboxUnavailableMessage(`sandbox start-up took longer than ${SANDBOX_WRAP_LIMIT_MS / 1000} s`));
+    throw error;
+  }
   if (!init.ready || !baseConfig) throw new Error(sandboxUnavailableMessage(init.ready ? "sandbox configuration missing" : init.reason));
   // Without git the guard cannot check the file afterwards, so `.git/config` then stays read-only.
   const gitConfig = options.allowGitConfig === true && await gitConfigGuardAvailable();
@@ -429,9 +459,11 @@ export async function sandboxCommandDetailed(command: string, workspaceRoot: str
   // initialize() fixed allowWrite to the first workspace that ran a command; give every call its own workspace.
   const { allowGitConfig: _unused, ...filesystem } = buildSandboxConfig(workspaceRoot, allowedGroups, { allowGitConfig: gitConfig }).filesystem ?? {};
   try {
-    const wrapped = await wrapSerialized(SandboxManager, baseConfig, () => SandboxManager.wrapWithSandbox(sshProxyPrefix() + command, undefined, { filesystem }, undefined, { commandId, commandText: command }), gitConfig);
+    const wrapped = await wrapSerialized(SandboxManager, baseConfig, () => SandboxManager.wrapWithSandbox(sshProxyPrefix() + command, undefined, { filesystem }, signal, { commandId, commandText: command }), gitConfig, signal);
     return { command: wrapped, commandId, gitConfig };
   } catch (error) {
+    if (options.signal?.aborted) throw error;
+    if (timedOut()) throw new Error(sandboxUnavailableMessage(`preparing the sandbox took longer than ${SANDBOX_WRAP_LIMIT_MS / 1000} s (another command may still be holding it)`));
     throw new Error(sandboxUnavailableMessage(`wrapping the command failed: ${errorText(error)}`));
   }
 }

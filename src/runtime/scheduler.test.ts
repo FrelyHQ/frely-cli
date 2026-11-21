@@ -37,3 +37,28 @@ test("queued write blocks later reads", async () => {
   await Promise.all([first, write, second]);
   assert.deepEqual(events, ["read1:start", "read1:end", "write:start", "write:end", "read2"]);
 });
+
+test("a queued job leaves the queue when its signal aborts, and the jobs behind it still run", async () => {
+  const scheduler = new FairRwScheduler(1);
+  let release!: () => void;
+  const first = scheduler.read(() => new Promise<void>((resolve) => { release = resolve; }));
+  const controller = new AbortController();
+  let ran = false;
+  const cancelled = scheduler.write(async () => { ran = true; }, controller.signal);
+  const behind = scheduler.read(async () => "behind");
+  controller.abort(new Error("cancelled by relay"));
+  await assert.rejects(cancelled, /cancelled by relay/u);
+  release();
+  await first;
+  assert.equal(await behind, "behind");
+  assert.equal(ran, false);
+});
+
+test("an aborted signal does not affect a job that already started", async () => {
+  const scheduler = new FairRwScheduler(1);
+  const controller = new AbortController();
+  const started = scheduler.read(async () => { await sleep(10); return "done"; }, controller.signal);
+  await sleep(1);
+  controller.abort();
+  assert.equal(await started, "done");
+});

@@ -284,9 +284,9 @@ async function dispatch(
       throw error;
     }
   };
-  const read = <T>(work: () => Promise<T>) => workspaceScheduler.read(guarded(work));
-  const write = <T>(work: () => Promise<T>) => workspaceScheduler.write(guarded(work));
-  const processRead = <T>(work: () => Promise<T>) => processScheduler.read(guarded(work));
+  const read = <T>(work: () => Promise<T>) => workspaceScheduler.read(guarded(work), signal);
+  const write = <T>(work: () => Promise<T>) => workspaceScheduler.write(guarded(work), signal);
+  const processRead = <T>(work: () => Promise<T>) => processScheduler.read(guarded(work), signal);
 
   // Special case: workspace_info returns {root, workspaces} for all workspaces
   if (name === "workspace_info") {
@@ -415,8 +415,18 @@ async function dispatch(
   }
   if (name === "run_command") {
     const command = textArg(args, "command");
-    const work = () => workspace.runCommand(command, relativeInput, intArg(args, "timeoutMs", 30000, 100, 120000), signal, pathGrants);
-    return concurrencyArg(args) === "exclusive" ? commandScheduler.write(guarded(work)) : commandScheduler.read(guarded(work));
+    const timeoutMs = intArg(args, "timeoutMs", 30000, 100, 120000);
+    let started = false;
+    const work = () => { started = true; return workspace.runCommand(command, relativeInput, timeoutMs, signal, pathGrants); };
+    // Waiting for a free slot counts against the same timeout: otherwise queue time plus run time outlasts the relay's wait,
+    // the call is cancelled with no answer, and the client retries into a longer queue.
+    const queueLimit = AbortSignal.timeout(timeoutMs);
+    const queued = AbortSignal.any([signal, queueLimit]);
+    const run = concurrencyArg(args) === "exclusive" ? commandScheduler.write(guarded(work), queued) : commandScheduler.read(guarded(work), queued);
+    return run.catch((error: unknown) => {
+      if (!started && queueLimit.aborted && !signal.aborted) throw new Error(`The device is busy: the command waited ${timeoutMs} ms for other commands to finish and did not start. Try again, or use process start for long commands.`);
+      throw error;
+    });
   }
   if (name === "start_process") {
     const command = textArg(args, "command");
