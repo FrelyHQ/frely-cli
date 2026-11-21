@@ -2,9 +2,11 @@ import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { observeIdentity } from "../trust/observe.js";
-import { readTrust, trustDirectory, type SignedApproval } from "../trust/record.js";
+import { trustDirectory, type SignedApproval } from "../trust/record.js";
+import { readTrustOrRefresh, type TrustRefresh } from "../trust/sync.js";
+import { refreshAccountTrust } from "../device/control.js";
 import { authorizeTodoStep } from "../trust/todo-scope.js";
-import { TrustError } from "../trust/webauthn.js";
+import { NO_TRUST_MESSAGE, TrustError } from "../trust/webauthn.js";
 import { buildDefinition, removeDefinition, saveDefinition } from "./definition.js";
 import { cancelTaskRun, defaultManagerDeps, describeRun, startTask, type ManagerDeps } from "./manager.js";
 import { readTaskRun } from "./run-store.js";
@@ -23,7 +25,7 @@ const ANSWER_LIMIT = 4000;
 
 interface RunMap { [runKey: string]: { runId: string; task: string } }
 
-export interface TodoDispatchDeps extends ManagerDeps { now?: () => number }
+export interface TodoDispatchDeps extends ManagerDeps { now?: () => number; refreshTrust?: TrustRefresh }
 
 const text = (args: Record<string, unknown>, name: string, max = 4096): string => {
   const value = args[name];
@@ -73,8 +75,8 @@ export async function runTodoDispatch(args: Record<string, unknown>, meta: unkno
   return serial(async () => {
     const existing = (await readRuns(mapPath))[runKey];
     if (existing) return runView(runKey, existing.runId);
-    const trust = await readTrust(directory);
-    if (!trust) throw new TrustError("no_trust_record");
+    const trust = await readTrustOrRefresh({ relayUrl: identity.relayUrl, userId: identity.userId }, deps.refreshTrust ?? refreshAccountTrust);
+    if (!trust) throw new TrustError("no_trust_record", NO_TRUST_MESSAGE);
     const approval = (meta && typeof meta === "object" ? (meta as Record<string, unknown>)[TODO_SCOPE_META_KEY] : undefined) as SignedApproval | undefined;
     if (!approval || typeof approval !== "object") throw new TrustError("approval_missing");
     const sites = Array.isArray(args.sites) ? args.sites.filter((site): site is string => typeof site === "string") : [];

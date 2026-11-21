@@ -10,7 +10,7 @@ import { storedLoginFingerprint } from "../auth.js";
 import { McpLease } from "../runtime/mcp-lease.js";
 import WebSocket, { type RawData } from "ws";
 import { observeApprovals, setObserveIdentity } from "../trust/observe.js";
-import { connectionGrant, directConnectionGrant, ensureDevice, storedDevice, type ConnectionGrant } from "./control.js";
+import { connectionGrant, directConnectionGrant, ensureDevice, refreshAccountTrust, storedDevice, type ConnectionGrant } from "./control.js";
 import { nextDeviceTransportKind, selectDeviceTransport, type DeviceTransportGrant, type DeviceTransportKind } from "./transport.js";
 import { connectionReporter, type ConnectionEvent } from "./connection-status.js";
 import { randomBytes } from "node:crypto";
@@ -788,6 +788,8 @@ async function obtainGrant(
   if (authorization) {
     const direct = await directConnectionGrant(device, { authorizationId: authorization.grant.id, mcpResource: authorization.mcpResource, sign: authorization.sign });
     if (direct) {
+      // The direct grant skips the web app, so the trust chain is pulled here too (best effort, never blocks the connection).
+      void refreshAccountTrust({ relayUrl: device.relayUrl, userId: device.userId });
       const check = () => requireMcpAuthorization(workspace);
       // Read before the check, so a login made while it runs still counts as a change.
       const loginBefore = storedLoginFingerprint().catch(() => null);

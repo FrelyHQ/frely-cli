@@ -4,8 +4,10 @@ import { userInfo } from "node:os";
 import { isAbsolute } from "node:path";
 import { observeIdentity } from "./trust/observe.js";
 import { jcs } from "./trust/jcs.js";
-import { readTrust, trustDirectory, verifyApproval, type SignedApproval } from "./trust/record.js";
-import { TrustError } from "./trust/webauthn.js";
+import { verifyApproval, type SignedApproval } from "./trust/record.js";
+import { readTrustOrRefresh, type TrustRefresh } from "./trust/sync.js";
+import { refreshAccountTrust } from "./device/control.js";
+import { NO_TRUST_MESSAGE, TrustError } from "./trust/webauthn.js";
 
 /**
  * Secret drop: the owner pastes a secret on the approval site, bound to one destination, and this device writes it there with a fixed
@@ -117,7 +119,7 @@ export function writerCommand(target: SecretDropTarget, self = userInfo().userna
   return plain ? { command: "sh", args: ["-c", WRITE_SCRIPT, "sh", ...params] } : { command: "sudo", args: ["-n", "sh", "-c", WRITE_SCRIPT, "sh", ...params] };
 }
 
-export interface SecretDropDeps { run?: SecretDropRunner; now?: () => number }
+export interface SecretDropDeps { run?: SecretDropRunner; now?: () => number; refreshTrust?: TrustRefresh }
 
 /** Never returns anything that could carry the value; stderr is scrubbed again against the plaintext as a last guard. */
 const scrub = (text: string, secret: Buffer): string => {
@@ -129,8 +131,8 @@ export async function applySecretDrop(args: Record<string, unknown>, deps: Secre
   const now = deps.now?.() ?? Date.now();
   const identity = observeIdentity();
   if (!identity) throw new TrustError("device_not_bound");
-  const trust = await readTrust(trustDirectory({ relayUrl: identity.relayUrl, userId: identity.userId }));
-  if (!trust) throw new TrustError("no_trust_record");
+  const trust = await readTrustOrRefresh({ relayUrl: identity.relayUrl, userId: identity.userId }, deps.refreshTrust ?? refreshAccountTrust);
+  if (!trust) throw new TrustError("no_trust_record", NO_TRUST_MESSAGE);
   const dropId = args.dropId;
   if (typeof dropId !== "string" || !DROP_ID.test(dropId)) throw new Error("dropId is invalid.");
   // One use: the key leaves the map before anything is checked, so a failed or replayed apply cannot be retried with the same key.

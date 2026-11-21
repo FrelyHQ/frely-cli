@@ -1,4 +1,4 @@
-import { pinTrustChain, readTrust, trustDirectory, type SignedTrustRecord, type TrustPin } from "./record.js";
+import { pinTrustChain, readTrust, trustDirectory, type SignedTrustRecord, type TrustPin, type TrustRecord } from "./record.js";
 import { TrustError } from "./webauthn.js";
 
 export interface TrustScope { relayUrl: string; userId: string }
@@ -24,4 +24,19 @@ export async function syncTrust(fetchChain: () => Promise<readonly SignedTrustRe
 /** What this device holds for the account; `undefined` before the first pin. */
 export async function heldTrust(scope: TrustScope): Promise<TrustPin | undefined> {
   return (await readTrust(trustDirectory(scope)))?.pin;
+}
+
+/** Pulls the account's chain from the relay and pins it; best effort, a failure leaves the earlier pin. */
+export type TrustRefresh = (scope: TrustScope) => Promise<unknown>;
+
+/**
+ * The pinned trust record, pulling the chain once when this device holds none yet. A chain the Owner set up after this
+ * device connected is then used at once instead of failing with `no_trust_record` until the next reconnect.
+ */
+export async function readTrustOrRefresh(scope: TrustScope, refresh?: TrustRefresh): Promise<{ pin: TrustPin; record: TrustRecord } | undefined> {
+  const directory = trustDirectory(scope);
+  const held = await readTrust(directory);
+  if (held || !refresh) return held;
+  await refresh(scope).catch(() => undefined);
+  return readTrust(directory);
 }

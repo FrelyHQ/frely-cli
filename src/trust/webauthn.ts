@@ -6,6 +6,9 @@ export type CoseAlg = -7 | -8 | -257;
 export interface Signer { id: string; kind: "webauthn"; credId: string; alg: CoseAlg; spki: string; label?: string; added?: string }
 export interface WebAuthnSignature { kind: "webauthn"; credId: string; authData: string; clientData: string; signature: string }
 
+/** Said when no trust record is pinned: it is set up once with an existing passkey, not by adding one. */
+export const NO_TRUST_MESSAGE = "Device trust is not set up for this account yet. This is not about adding a passkey: the owner opens the approval link, presses \"Set up device trust with a passkey\" and signs once with an existing passkey, then asks again.";
+
 export class TrustError extends Error {
   constructor(readonly code: string, message?: string) { super(message ?? code); this.name = "TrustError"; }
 }
