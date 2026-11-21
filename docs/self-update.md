@@ -59,3 +59,7 @@ There is no automatic updater. The owner can press Upgrade next to a computer's 
 ## Remote `frely update` through MCP
 
 A client that runs exactly `frely update` (no arguments, no shell syntax) through the device's MCP does not run that command at all. The managed service answers it itself: it starts the same `Upgrader` the web Upgrade button uses (outside the command sandbox, offline release signature required, standalone installations only), retrying for about 30 s while the calling request still holds the maintenance gate. The installation watcher or the Windows restart then switches the service over, so nobody logs in or restarts anything and no sandbox grant or passkey is involved. Package-manager, foreground and source installations fall through to the ordinary command.
+
+## Dead login: refuse before restarting
+
+When the background service is running, `frely update` first renews this computer's login. If the server says the login is no longer valid (`Frely login expired`, none stored), the update stops before changing anything and tells the owner to run `frely login`: restarting into a dead login would leave the service retrying forever and the computer offline. Network or server outages do not block the update. If the new service cannot be verified after the restart, the message now includes its last error and, for a login error, the recovery steps.

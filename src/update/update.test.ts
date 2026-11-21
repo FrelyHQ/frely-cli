@@ -122,6 +122,7 @@ function fixture(active = true) {
   let version = VERSION, running = active;
   const installation = { method: "standalone" as const, entry: "/synthetic/frely", platform: "linux" as const };
   const d: UpdateDependencies = {
+    assertLoginUsable: async () => {},
     serviceWatchesInstallation: async () => true,
     inspectInstallation: async () => installation,
     latestRelease: async () => ({ version: NEW }),
@@ -326,4 +327,11 @@ test("gunzipLimited stops at the output limit", async (t) => {
   await assert.rejects(readFile(join(root, "out")), "a partial output must not be left behind");
   await gunzipLimited(join(root, "bomb.gz"), join(root, "ok"), 6 * 1024 * 1024);
   assert.equal((await readFile(join(root, "ok"))).length, 5 * 1024 * 1024);
+});
+
+test("a dead login refuses the update before anything changes, so the restart cannot take the computer offline", async () => {
+  const { d, calls } = fixture(true);
+  d.assertLoginUsable = async () => { throw new Error("This computer's Frely login is no longer valid. Nothing was changed. Run frely login, then frely update."); };
+  await assert.rejects(() => update(() => {}, d), /Run frely login/);
+  assert.deepEqual(calls, []);
 });

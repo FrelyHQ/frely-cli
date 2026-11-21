@@ -18,6 +18,8 @@ import { acquireMaintenance, MaintenanceBusyError } from "./maintenance.js";
 import { checkReleaseSignature } from "./release-signature.js";
 import { openRelease } from "./fetch-release.js";
 import { rankSources } from "./source-probe.js";
+import { requireLogin } from "../auth.js";
+import { isLoginFailure } from "../mcp-authorization.js";
 
 const execFile = promisify(execFileCallback);
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -181,7 +183,19 @@ async function serviceWatchesInstallation(pid: number): Promise<boolean> {
   return observation?.pid === pid && observation.autoRefresh === true;
 }
 
-const defaults = { serviceWatchesInstallation, inspectInstallation, latestRelease, installedVersion, serviceStatus, serviceCommand, stopMcpService, startMcpService,
+/**
+ * A restart with a dead login leaves the computer offline: the service starts, fails `Frely login expired` and retries forever. Refuse before any change
+ * when the server has said the login is no longer valid; an outage or network error is not a reason to refuse.
+ */
+async function assertLoginUsable(): Promise<void> {
+  try { await requireLogin(); }
+  catch (error) {
+    if (!isLoginFailure(error)) return;
+    throw new Error("This computer's Frely login is no longer valid, so restarting the service into the new version would take it offline. Nothing was changed. Run frely login, then frely update.");
+  }
+}
+
+const defaults = { assertLoginUsable, serviceWatchesInstallation, inspectInstallation, latestRelease, installedVersion, serviceStatus, serviceCommand, stopMcpService, startMcpService,
   readDeviceBinding, readConnectionStatus, acquireMaintenance, prepareStandalone, installPackage, lockInstallation, pause };
 export type UpdateDependencies = typeof defaults;
 
@@ -199,6 +213,7 @@ export async function update(write: (message: string) => void, dependencies: Upd
     const entry = command?.[installation.method === "standalone" ? 0 : 1];
     if (!service.pid || !entry || await realpath(entry).catch(() => entry) !== installation.entry) throw new Error("The running service does not match this installation. Inspect frely doctor -v before updating.");
   }
+  if (service.active) await d.assertLoginUsable();
   const unlock = await d.lockInstallation(installation);
   let prepared: PreparedUpdate | undefined, releaseMaintenance: (() => void) | undefined;
   let attempted = false, stopped = false, preserveRecovery = false, deferredSwitch = false;
@@ -244,7 +259,8 @@ export async function update(write: (message: string) => void, dependencies: Upd
       }
       if (!started) {
         // Authentication/network can prevent ensureDevice and its reporter. Keep a verified installed binary.
-        return { state: "updated", message: `Frely ${release.version} is installed. A service restart was requested, but its new runtime could not be verified. Run frely doctor -v.` };
+        const reason = binding ? (await d.readConnectionStatus(binding))?.lastError : undefined;
+        return { state: "updated", message: `Frely ${release.version} is installed. A service restart was requested, but its new runtime could not be verified${reason ? ` (last error: ${reason})` : ""}. ${reason && /login/iu.test(reason) ? "Run frely login, then frely link on." : "Run frely doctor -v."}` };
       }
       return { state: "updated", message: `Frely ${release.version} is installed; the service is using the new version. ${connected ? "Relay connection verified." : "Relay connection is not yet verified. Run frely doctor."}` };
     }
