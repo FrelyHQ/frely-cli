@@ -11,6 +11,27 @@ ARTIFACT="npm package + standalone binaries"
 DESTINATION="npm registry + GitHub Releases"
 WAIT_FOR_CI="${FRELY_RELEASE_WAIT_FOR_CI:-1}"
 
+# Remote `frely update` only installs a release whose checksums carry the offline signature, and the Actions publish
+# cannot hold that key. Sign the published checksums here, on the machine that holds it, and attach the signatures.
+SIGNING_KEY="${FRELY_RELEASE_SIGNING_KEY:-$HOME/frely-release-signing.pem}"
+sign_published_release() {
+  local sign_tag="${1:-$tag}" sign_dir
+  if [[ ! -f "$SIGNING_KEY" ]]; then
+    echo "WARNING: no release signing key at $SIGNING_KEY; $sign_tag stays unsigned and remote frely update will refuse it" >&2
+    return 0
+  fi
+  sign_dir="$(mktemp -d)"
+  gh release download "$sign_tag" -R FrelyHQ/frely-cli -p '*.sha256' -D "$sign_dir/artifacts"
+  FRELY_RELEASE_SIGNING_KEY="$SIGNING_KEY" node "$ROOT/scripts/release-sign.mjs" "$sign_dir/artifacts" "${sign_tag#v}"
+  gh release upload "$sign_tag" -R FrelyHQ/frely-cli --clobber "$sign_dir"/artifacts/*.sig
+  rm -rf "$sign_dir"
+  echo "signed release $sign_tag"
+}
+if [[ -n "${FRELY_RELEASE_SIGN_ONLY:-}" ]]; then
+  sign_published_release "$FRELY_RELEASE_SIGN_ONLY"
+  exit 0
+fi
+
 usage() {
   cat <<'EOF'
 Usage: ./scripts/release [--version <semver>] [--dry-run]
@@ -205,8 +226,19 @@ if [[ "$WAIT_FOR_CI" == "1" ]] && command -v gh >/dev/null 2>&1 && gh auth statu
     sleep 2
   done
   if [[ -n "$run_id" ]]; then
-    gh run watch "$run_id" --exit-status
+    # A dropped connection ends `gh run watch` early; only the run's own conclusion decides the release.
+    until gh run watch "$run_id" --exit-status; do
+      state="$(gh run view "$run_id" --json status,conclusion --jq '.status + " " + .conclusion' 2>/dev/null || echo "unknown")"
+      case "$state" in
+        "completed success") break ;;
+        completed*) echo "publish workflow $run_id ended: $state" >&2; exit 1 ;;
+      esac
+      echo "lost the publish workflow watch ($state); watching again" >&2
+      sleep 10
+    done
+    sign_published_release
   else
     echo "publish workflow was not observed; tag is pushed and GitHub Actions owns publish verification" >&2
+    echo "after it succeeds, sign the release: FRELY_RELEASE_SIGN_ONLY=$tag scripts/release-package" >&2
   fi
 fi
