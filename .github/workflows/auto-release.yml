@@ -2,7 +2,8 @@ name: Auto release
 
 # （环境：CLI 自动发版, 原因：main 上 CI 通过后自动发新补丁版，不依赖 mbp 在线；
 #   发布仍走 publish.yml（它在发布前会再跑一遍完整 CI），本 workflow 只负责“要不要发、发哪个版本”。
-#   关停：在仓库变量里设 AUTO_RELEASE_DISABLED=true。mbp 上的 ./scripts/release 仍可手动发版；
+#   默认关闭：仓库变量 AUTO_RELEASE_ENABLED=true 才会自动发版（发布签名上线前保持关闭，否则自动发的版本无签名，远程升级会拒绝）。
+#   关停：把 AUTO_RELEASE_ENABLED 删掉，或设 AUTO_RELEASE_DISABLED=true。mbp 上的 ./scripts/release 仍可手动发版；
 #   它推的 “release: vX” 提交会被本 workflow 跳过，tag 已存在也不会重复发布。）
 on:
   workflow_run:
@@ -23,6 +24,7 @@ jobs:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
+      vars.AUTO_RELEASE_ENABLED == 'true' &&
       vars.AUTO_RELEASE_DISABLED != 'true'
     runs-on: ubuntu-24.04
     steps:

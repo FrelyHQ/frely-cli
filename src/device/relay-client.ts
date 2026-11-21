@@ -30,12 +30,15 @@ import type { LocalMcpHub } from "../runtime/local-mcp.js";
 import type { LocalModelsHub } from "../provider/local-models.js";
 import type { RelaySession } from "../runtime/relay-session.js";
 import { openLocalProviderRequest, readLocalProviderBody } from "../provider/local.js";
+import { relayReachable, startStuckWatchdog } from "./stuck-watchdog.js";
 import { forwardCoalesced } from "./stream-coalesce.js";
 
 export interface RelayServeOptions {
   workspace?: string;
   managedService?: boolean;
   restartForUpdate?: () => void;
+  /** Managed service only: called when the relay has been reachable but this service stayed disconnected for 5 minutes. The caller exits so the supervisor restarts it. */
+  restartForStuck?: () => void;
   signal: AbortSignal;
   log?: (message: string) => void;
   /**
@@ -208,6 +211,10 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
   // MCP commands that outlive a connection keep their session and lease here until they finish.
   const carry = createRelayCarry();
   let held: HeldMcp | undefined;
+  // Nothing else pulls a service back that is alive but never reconnects: ask the supervisor for a fresh process.
+  const watchdog = maintenance && options.restartForStuck
+    ? startStuckWatchdog({ busy: () => !maintenance.idle || hasCarriedMcp(carry) || held !== undefined, reachable: () => relayReachable(device.relayUrl), onStuck: options.restartForStuck, signal: options.signal, log })
+    : undefined;
   let carryAuthorization: string | undefined;
   const releaseHeld = async (reason: string) => { const previous = held; held = undefined; await resumeOrRelease(carry, previous, undefined, log, reason); };
   const retryNow = createRetryNow(options.signal);
@@ -289,7 +296,8 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
           AbortSignal.any([options.signal, turn.signal]),
           log,
           (event) => {
-            if (event.type === "connected") { connectedAt = Date.now(); restartSince = undefined; }
+            if (event.type === "connected") { connectedAt = Date.now(); restartSince = undefined; watchdog?.connected(); }
+            if (event.type === "disconnected") watchdog?.disconnected();
             reporter.report(event);
           },
           maintenance,
@@ -326,6 +334,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
         diagnostic(log, selectedTransport ? `relay.disconnected.${selectedTransport.kind}` : "relay.disconnected", {}, error);
         if (isConnectionReplacedClose(error)) log("Another process connected to Frely with this computer's device key; this one retries in a minute. Run only one `frely link` service per computer.");
         reporter.report({ type: "disconnected", error });
+        watchdog?.disconnected();
         if (!retryWithoutDelay) {
           // Only a connection that held resets the backoff; one that drops at once keeps growing it.
           if (connectedAt !== undefined && Date.now() - connectedAt >= RELAY_STABLE_CONNECTION_MS) delayMs = 1000;
@@ -343,7 +352,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
     }
     reporter.report({ type: "stopped" });
     await reporter.flush();
-  } finally { await releaseHeld("stopped"); closeLinkSync(); (await closeRefresh)(); await closeMaintenance?.(); }
+  } finally { watchdog?.stop(); await releaseHeld("stopped"); closeLinkSync(); (await closeRefresh)(); await closeMaintenance?.(); }
 }
 
 /** Closing the previous session must never keep the device offline: after the limit the loop reconnects anyway. */
