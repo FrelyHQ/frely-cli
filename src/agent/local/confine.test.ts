@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { HOSTED_INSTANCE, resolveInstanceEndpoints } from "../../instance.js";
 import { join } from "node:path";
 import test from "node:test";
 import type { CredentialStore } from "../../credential-store.js";
@@ -24,10 +25,12 @@ test("setup gets no model access at all", () => {
 });
 
 test("model calls go to the public gateway for frely.cloud and to the relay itself elsewhere", () => {
-  assert.equal(gatewayOrigin("https://frely.cloud", {}), "https://api.frely.cloud");
-  assert.equal(gatewayOrigin("http://127.0.0.1:3000", {}), "http://127.0.0.1:3000");
-  assert.equal(gatewayOrigin("https://frely.cloud", { FRELY_GATEWAY_URL: "https://gw.example.com/ignored" }), "https://gw.example.com");
-  assert.throws(() => gatewayOrigin("https://frely.cloud", { FRELY_GATEWAY_URL: "http://gw.example.com" }), /HTTPS/u);
+  assert.equal(gatewayOrigin(HOSTED_INSTANCE, {}), "https://api.frely.cloud");
+  assert.equal(gatewayOrigin(resolveInstanceEndpoints("http://127.0.0.1:3000"), {}), "http://127.0.0.1:3000");
+  assert.equal(gatewayOrigin(HOSTED_INSTANCE, { FRELY_GATEWAY_URL: "https://gw.example.com/ignored" }), "https://gw.example.com");
+  assert.throws(() => gatewayOrigin(HOSTED_INSTANCE, { FRELY_GATEWAY_URL: "http://gw.example.com" }), /HTTPS/u);
+  assert.equal(gatewayOrigin(resolveInstanceEndpoints("https://frely.corp.example", { gatewayBaseUrl: "https://gw.corp.example" }), {}), "https://gw.corp.example");
+  assert.equal(gatewayOrigin(resolveInstanceEndpoints("https://frely.corp.example"), {}), "https://frely.corp.example");
 });
 
 test("the API key comes from the environment first, then secure storage", async () => {

@@ -3,8 +3,10 @@ import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import test from "node:test";
+import { HOSTED_INSTANCE, resolveInstanceEndpoints } from "./instance.js";
 import { checkedGatewayUrl, runKeyCommand, writeClaudeCodeSettings } from "./key-setup.js";
 
+const PRIVATE = resolveInstanceEndpoints("https://frely.corp.example", { gatewayBaseUrl: "https://gw.corp.example" });
 const RAW = "sk-secret-value-123";
 const created = async () => ({ apiKey: { id: "key_1", prefix: "sk-secre" }, rawKey: RAW });
 
@@ -13,7 +15,7 @@ async function home(): Promise<string> { return mkdtemp(join(tmpdir(), "frely-ke
 test("setup creates the key, writes Claude Code's settings (0600) and never prints the key", async () => {
   const dir = await home();
   const out: string[] = []; const calls: Array<[string, Record<string, unknown>]> = [];
-  const code = await runKeyCommand(["setup", "claude-code"], { home: dir, hostName: "mbp", out: (t) => out.push(t), call: async (n, i) => { calls.push([n, i]); return created(); } });
+  const code = await runKeyCommand(["setup", "claude-code"], { home: dir, hostName: "mbp", out: (t) => out.push(t), call: async (n, i) => { calls.push([n, i]); return created(); }, instance: HOSTED_INSTANCE });
   assert.equal(code, 0);
   assert.deepEqual(calls, [["keys.create", { name: "Claude Code on mbp" }]]);
   const file = join(dir, ".claude", "settings.json");
@@ -24,7 +26,7 @@ test("setup creates the key, writes Claude Code's settings (0600) and never prin
 
 test("--json prints ids and paths but not the key", async () => {
   const dir = await home(); const out: string[] = [];
-  await runKeyCommand(["setup", "claude-code", "--json", "--name", "ci"], { home: dir, out: (t) => out.push(t), call: created });
+  await runKeyCommand(["setup", "claude-code", "--json", "--name", "ci"], { home: dir, out: (t) => out.push(t), call: created, instance: HOSTED_INSTANCE });
   const printed = JSON.parse(out.join(""));
   assert.equal(printed.keyId, "key_1");
   assert.ok(!out.join("").includes(RAW));
@@ -49,14 +51,18 @@ test("a write failure names the created key but not its value", async () => {
   const dir = await home();
   await mkdir(join(dir, ".claude"));
   await writeFile(join(dir, ".claude", "settings.json"), "[]");
-  await assert.rejects(runKeyCommand(["setup", "claude-code"], { home: dir, out: () => undefined, call: created }), (error: Error) => /key_1/.test(error.message) && !error.message.includes(RAW));
+  await assert.rejects(runKeyCommand(["setup", "claude-code"], { home: dir, out: () => undefined, call: created, instance: HOSTED_INSTANCE }), (error: Error) => /key_1/.test(error.message) && !error.message.includes(RAW));
 });
 
 test("only Frely's gateway may receive the key, and unknown agents or options are refused", async () => {
-  assert.equal(checkedGatewayUrl("https://api.frely.cloud/"), "https://api.frely.cloud");
-  assert.equal(checkedGatewayUrl("http://127.0.0.1:8080"), "http://127.0.0.1:8080");
-  for (const bad of ["https://evil.example", "https://frely.cloud.evil.example", "https://u:p@api.frely.cloud", "http://api.frely.cloud", "nope"]) assert.throws(() => checkedGatewayUrl(bad));
-  const io = { out: () => undefined, call: created };
+  assert.equal(checkedGatewayUrl("https://api.frely.cloud/", HOSTED_INSTANCE), "https://api.frely.cloud");
+  assert.equal(checkedGatewayUrl("http://127.0.0.1:8080", HOSTED_INSTANCE), "http://127.0.0.1:8080");
+  for (const bad of ["https://evil.example", "https://frely.cloud.evil.example", "https://u:p@api.frely.cloud", "http://api.frely.cloud", "nope"]) assert.throws(() => checkedGatewayUrl(bad, HOSTED_INSTANCE));
+  // A private instance accepts its own gateway and relay family, and refuses the hosted one: the key goes only where the login points.
+  assert.equal(checkedGatewayUrl("https://gw.corp.example/", PRIVATE), "https://gw.corp.example");
+  assert.equal(checkedGatewayUrl("https://api.frely.corp.example", PRIVATE), "https://api.frely.corp.example");
+  for (const bad of ["https://api.frely.cloud", "https://gw.corp.example.evil.example", "http://gw.corp.example"]) assert.throws(() => checkedGatewayUrl(bad, PRIVATE));
+  const io = { out: () => undefined, call: created, instance: HOSTED_INSTANCE };
   await assert.rejects(runKeyCommand(["setup", "cursor"], io), /Unsupported agent/);
   await assert.rejects(runKeyCommand(["setup", "claude-code", "--bogus"], io), /Unknown option/);
   await assert.rejects(runKeyCommand(["setup", "claude-code", "--gateway", "https://evil.example"], io), /--gateway/);
@@ -64,7 +70,7 @@ test("only Frely's gateway may receive the key, and unknown agents or options ar
 
 test("an answer without a key writes nothing", async () => {
   const dir = await home();
-  await assert.rejects(runKeyCommand(["setup", "claude-code"], { home: dir, out: () => undefined, call: async () => ({ apiKey: { id: "key_1" } }) }), /did not return a key/);
+  await assert.rejects(runKeyCommand(["setup", "claude-code"], { home: dir, out: () => undefined, call: async () => ({ apiKey: { id: "key_1" } }), instance: HOSTED_INSTANCE }), /did not return a key/);
 });
 
 import { chmod } from "node:fs/promises";
@@ -100,7 +106,7 @@ test("codex setup sets the base URL, lets codex save the key, backs up config an
     await writeFile(join(dir, ".codex", "config.toml"), 'model = "m"\n[mcp_servers.a]\nurl = "u"\n');
     await writeFile(join(dir, ".codex", "auth.json"), '{"auth_mode":"chatgpt"}');
     const out: string[] = [];
-    assert.equal(await runKeyCommand(["setup", "codex"], { home: dir, out: (t) => out.push(t), call: created }), 0);
+    assert.equal(await runKeyCommand(["setup", "codex"], { home: dir, out: (t) => out.push(t), call: created, instance: HOSTED_INSTANCE }), 0);
     assert.equal(await readFile(join(dir, ".codex", "config.toml"), "utf8"), 'model = "m"\nopenai_base_url = "https://api.frely.cloud/v1"\n\n[mcp_servers.a]\nurl = "u"\n');
     assert.equal(JSON.parse(await readFile(join(dir, ".codex", "auth.json"), "utf8")).OPENAI_API_KEY, RAW);
     assert.equal(await readFile(join(dir, ".codex", "auth.json.frely-backup"), "utf8"), '{"auth_mode":"chatgpt"}');
@@ -116,7 +122,7 @@ test("when codex cannot save the key the config is put back and the error names 
   try {
     await mkdir(join(dir, ".codex"));
     await writeFile(join(dir, ".codex", "config.toml"), 'model = "m"\n');
-    await assert.rejects(runKeyCommand(["setup", "codex"], { home: dir, out: () => undefined, call: created }), (error: Error) => /key_1/.test(error.message) && !error.message.includes(RAW));
+    await assert.rejects(runKeyCommand(["setup", "codex"], { home: dir, out: () => undefined, call: created, instance: HOSTED_INSTANCE }), (error: Error) => /key_1/.test(error.message) && !error.message.includes(RAW));
     assert.equal(await readFile(join(dir, ".codex", "config.toml"), "utf8"), 'model = "m"\n');
   } finally { delete process.env.FAKE_CODEX_FAIL; process.env.PATH = saved.path; if (saved.home === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = saved.home; }
 });
