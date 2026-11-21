@@ -8,8 +8,8 @@
 // 4. the relay goes down and comes back: the same process reconnects within 60 s.
 // It writes a unit named frely-mcp.service into the real user's systemd directory, so it only runs in CI (or with FRELY_SMOKE_ALLOW=1).
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { execFileSync, spawn } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
@@ -29,6 +29,7 @@ const base = mkdtempSync(join(tmpdir(), "frely-systemd-smoke-"));
 const home = join(base, "home"), config = join(base, "config"), data = join(base, "data"), state = join(base, "state"), bin = join(base, "bin");
 for (const dir of [home, config, data, state, bin]) mkdirSync(dir, { recursive: true, mode: 0o700 });
 const installed = join(bin, "frely");
+const credentialKey = randomBytes(32).toString("hex");
 const unitDir = join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "systemd", "user");
 const unitPath = join(unitDir, "frely-mcp.service");
 
@@ -45,7 +46,7 @@ function startRelay() {
     if (request.method === "POST" && request.url === "/api/user/device-relay/connect") {
       return body({ websocketUrl: `ws://127.0.0.1:${port}/device-relay`, accessToken: "smoke-grant", expiresAt: "2099-01-01T00:00:00.000Z" });
     }
-    response.writeHead(404); response.end("{}");
+    if (!/\/device-relay\/(trust|mcp)$/u.test(request.url)) console.error("fake relay 404:", request.method, request.url); response.writeHead(404); response.end("{}");
   });
   wss = new WebSocketServer({ server, handleProtocols: () => PROTOCOL });
   wss.on("connection", (socket) => {
@@ -87,9 +88,9 @@ function seedLogin(origin) {
 function writeUnit() {
   mkdirSync(unitDir, { recursive: true });
   // Mirrors systemdUnit() in src/service.ts (Restart=always, RestartSec=3, RestartPreventExitStatus=77); keep them in step.
-  const exec = [installed, "mcp", "serve", "--service-config-home", config, "--service-credential-store", "basic", "--standby"].map((a) => `"${a}"`).join(" ");
+  const exec = [installed, "mcp", "serve", "--service-config-home", config, "--service-credential-store", "encrypted-file", "--standby"].map((a) => `"${a}"`).join(" ");
   writeFileSync(unitPath, `[Unit]\nDescription=Frely Device Relay (smoke)\n\n[Service]\nType=simple\nExecStart=${exec}\nRestart=always\nRestartSec=3\nRestartPreventExitStatus=77\n`
-    + `Environment="HOME=${home}"\nEnvironment="XDG_CONFIG_HOME=${config}"\nEnvironment="XDG_DATA_HOME=${data}"\nEnvironment="XDG_STATE_HOME=${state}"\nEnvironment="FRELY_NO_BROWSER=1"\nEnvironment="PATH=/usr/local/bin:/usr/bin:/bin"\n\n[Install]\nWantedBy=default.target\n`);
+    + `Environment="HOME=${home}"\nEnvironment="XDG_CONFIG_HOME=${config}"\nEnvironment="XDG_DATA_HOME=${data}"\nEnvironment="XDG_STATE_HOME=${state}"\nEnvironment="FRELY_NO_BROWSER=1"\nEnvironment="FRELY_CREDENTIAL_KEY=${credentialKey}"\nEnvironment="PATH=/usr/local/bin:/usr/bin:/bin"\n\n[Install]\nWantedBy=default.target\n`);
 }
 const journal = () => { try { return execFileSync("journalctl", ["--user", "-u", "frely-mcp.service", "--no-pager", "-n", "80"], { encoding: "utf8" }); } catch { return "(no journal)"; } };
 
@@ -97,6 +98,16 @@ let failed = false;
 try {
   await startRelay();
   seedLogin(`http://127.0.0.1:${port}`);
+  // Enroll the device with the new build first: a release before this change enrolls twice concurrently on a fresh start and keeps the wrong key.
+  // From here on the device is enrolled, as every real device is when it is upgraded.
+  const enrollmentArgs = ["mcp", "serve", "--service-config-home", config, "--service-credential-store", "encrypted-file", "--standby"];
+  const enrollment = spawn(newBinary, enrollmentArgs, { stdio: "inherit", env: { PATH: "/usr/local/bin:/usr/bin:/bin", HOME: home, XDG_CONFIG_HOME: config, XDG_DATA_HOME: data, XDG_STATE_HOME: state, FRELY_NO_BROWSER: "1", FRELY_CREDENTIAL_KEY: credentialKey } });
+  const exited = new Promise((r) => enrollment.once("exit", r));
+  await waitFor("device enrolled by the new build", () => seen.length > 0);
+  enrollment.kill("SIGTERM");
+  await Promise.race([exited, sleep(15_000)]);
+  enrollment.kill("SIGKILL");
+  seen.length = 0;
   copyFileSync(oldBinary, installed); chmodSync(installed, 0o755);
   writeUnit();
   systemctl("daemon-reload");

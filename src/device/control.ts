@@ -15,7 +15,13 @@ export interface ConnectionGrant {
   transports: readonly DeviceTransportGrant[];
 }
 
-export async function ensureDevice(): Promise<DeviceBinding> {
+let enrolling: Promise<DeviceBinding> | undefined;
+/** One enrollment at a time per process: the relay loop and the link-claim watcher both call this at a fresh start, and two concurrent enrollments created two device keys (the stored binding then never matched the key). */
+export function ensureDevice(): Promise<DeviceBinding> {
+  return enrolling ??= enrollDevice().finally(() => { enrolling = undefined; });
+}
+
+async function enrollDevice(): Promise<DeviceBinding> {
   const auth = await requireLogin();
   const existing = await readDeviceBinding();
   if (existing && existing.relayUrl === auth.config.relayUrl && existing.userId === auth.user.id) return existing;
