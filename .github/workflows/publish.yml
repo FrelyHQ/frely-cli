@@ -150,6 +150,8 @@ jobs:
   github-release:
     needs: [publish, release-assets]
     runs-on: ubuntu-24.04
+    # The offline signing key lives only in this GitHub Environment's secret FRELY_RELEASE_SIGNING_KEY (PEM, Ed25519). The owner adds it; nobody reads it.
+    environment: release-signing
     permissions:
       contents: write
 
@@ -163,6 +165,21 @@ jobs:
           pattern: release-*
           path: artifacts
           merge-multiple: true
+
+      - name: Sign checksums
+        env:
+          FRELY_RELEASE_SIGNING_KEY_PEM: ${{ secrets.FRELY_RELEASE_SIGNING_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$FRELY_RELEASE_SIGNING_KEY_PEM" ]]; then
+            echo "Environment release-signing has no secret FRELY_RELEASE_SIGNING_KEY; remote frely update refuses unsigned releases." >&2
+            exit 1
+          fi
+          key_file="$(mktemp)"
+          trap 'rm -f "$key_file"' EXIT
+          (umask 077; printf '%s\n' "$FRELY_RELEASE_SIGNING_KEY_PEM" > "$key_file")
+          FRELY_RELEASE_SIGNING_KEY="$key_file" node scripts/release-sign.mjs artifacts "${GITHUB_REF_NAME#v}"
 
       - name: Verify release asset set
         shell: bash
@@ -180,6 +197,8 @@ jobs:
             test -f "artifacts/frely-${target}${suffix}.sha256"
           done
           (cd artifacts && for checksum in frely-*.sha256; do sha256sum -c "$checksum"; done)
+          # Every asset must carry a signature that verifies against the key the CLI trusts.
+          node scripts/release-verify-signatures.mjs artifacts "${GITHUB_REF_NAME#v}"
           # GitHub carries only the gzip of each executable (about 40% of the size); the .sha256 and .sig beside it stay those of the
           # decompressed binary. npm platform packages are built from artifacts/ and keep the original executables.
           mkdir github-assets
@@ -210,6 +229,11 @@ jobs:
             --verify-tag \
             --title "frely-cli $GITHUB_REF_NAME" \
             --generate-notes
+
+      - name: Verify the published release is signed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-verify-signatures.mjs --release "$GITHUB_REF_NAME"
 
 
   platform-packages:

@@ -24,6 +24,7 @@ sign_published_release() {
   gh release download "$sign_tag" -R FrelyHQ/frely-cli -p '*.sha256' -D "$sign_dir/artifacts"
   FRELY_RELEASE_SIGNING_KEY="$SIGNING_KEY" node "$ROOT/scripts/release-sign.mjs" "$sign_dir/artifacts" "${sign_tag#v}"
   gh release upload "$sign_tag" -R FrelyHQ/frely-cli --clobber "$sign_dir"/artifacts/*.sig
+  node "$ROOT/scripts/release-verify-signatures.mjs" --release "$sign_tag"
   rm -rf "$sign_dir"
   echo "signed release $sign_tag"
 }
