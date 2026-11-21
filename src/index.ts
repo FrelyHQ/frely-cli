@@ -38,6 +38,7 @@ import { ensureFrpc } from "./share/frpc.js";
 import { listLocalServices } from "./share/service-state.js";
 import { listLocalProviders } from "./provider/state.js";
 import { API_USAGE, logoutCloud, runApi } from "./cloud.js";
+import { SERVICE_STUCK_EXIT_CODE } from "./device/stuck-watchdog.js";
 import { CONTROLLER_COMMANDS, runControllerCommand } from "./controller/commands.js";
 import { ControllerError } from "./controller/client.js";
 import { LOCAL_USAGE, runAgentLocal } from "./agent/local/command.js";
@@ -955,7 +956,7 @@ async function main(): Promise<void> {
           ...(localMcp ? { localMcp: localMcp.capabilities() } : {}),
         };
       };
-      await serveDeviceRelay({ ...(workspace ? { workspace } : {}), ...(localMcp ? { localMcp } : {}), ...(providerOnly ? {} : { localModels: createLocalModelsHub() }), capabilities, managedService: Boolean(serviceConfigHome), restartForUpdate: stop, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
+      await serveDeviceRelay({ ...(workspace ? { workspace } : {}), ...(localMcp ? { localMcp } : {}), ...(providerOnly ? {} : { localModels: createLocalModelsHub() }), capabilities, managedService: Boolean(serviceConfigHome), restartForUpdate: stop, restartForStuck: () => { process.exitCode = SERVICE_STUCK_EXIT_CODE; stop(); }, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
     } finally {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
