@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { basicCredentialStore as credentialStore, BASIC_CREDENTIAL_BACKEND } from "./credential-basic.js";
+import { DEFAULT_RELAY_ORIGIN, fetchDiscovery, isBuiltInInstance, parseDiscovery, resolveInstanceEndpoints, type DiscoveryDocument, type InstanceEndpoints } from "./instance.js";
 
 export const SERVICE = "frely-cli-basic-v1";
 const SESSION_COOKIE_NAME = "friday_session_token";
@@ -14,23 +15,21 @@ const OAUTH_SCOPE = "openid profile profile:read email offline_access device-rel
 
 // One login, three audiences: the API resource for account/device calls, the Cloud resource for read-only Cloud tools (frely item install,
 // frely api list), and this machine's FreyMCP connection (device tools, Cloud writes) — all approved by the single `frely login`.
-function appendLoginResources(body: URLSearchParams, relayUrl: string): void {
+function appendLoginResources(body: URLSearchParams, relayUrl: string, instance: InstanceEndpoints): void {
   body.append("resource", `${relayUrl}/api`);
   body.append("resource", `${relayUrl}/mcp`);
-  body.append("resource", frelyMcpUrl(relayUrl));
+  body.append("resource", frelyMcpUrl(instance));
 }
 
-/** The address of FreyMCP, the resource the machine's side token is for (mirrors the server: the dedicated MCP host for Frely's own sites). */
-export function frelyMcpUrl(relayUrl: string, env: NodeJS.ProcessEnv = process.env): string {
+/** The address of FreyMCP, the resource the machine's side token is for: the instance's own (see instance.ts). */
+export function frelyMcpUrl(instance: InstanceEndpoints, env: NodeJS.ProcessEnv = process.env): string {
   if (env.FRELY_MCP_URL) return new URL(env.FRELY_MCP_URL).toString();
-  const url = new URL(relayUrl);
-  if (url.hostname === "frely.cloud" || url.hostname === "app.frely.cloud") return "https://mcp.frely.cloud/mcp";
-  return `${url.origin}/mcp/devices`;
+  return instance.mcpUrl;
 }
 const FRELY_MCP_TOKEN_FIELD = "frely_mcp_token";
 /** Set by the relay when the account has no free slot for this computer to sign in as a controller; the login itself still succeeds. */
 const FRELY_CONTROLLER_STATUS_FIELD = "frely_controller_status";
-const DEFAULT_RELAY = "https://frely.cloud";
+const DEFAULT_RELAY = DEFAULT_RELAY_ORIGIN;
 // app.frely.cloud now belongs to the Frely App; logins saved against it move to frely.cloud (see currentRelayConfig).
 const RETIRED_RELAY_HOSTNAME = "app.frely.cloud";
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -49,11 +48,42 @@ export interface PublicUser {
   username?: string;
 }
 
+/** What the login's relay published at /.well-known/frely, kept with the login it was fetched for and never shared with another instance. */
+interface LoginInstance { discovery: DiscoveryDocument; fetchedAt: string }
+
 interface CliConfig {
   version: number;
   relayUrl: string;
   user: PublicUser;
   deviceId?: string;
+  instance?: LoginInstance;
+}
+
+const discoveryAttempts = new Map<string, Promise<DiscoveryDocument | undefined>>();
+
+/** The relay's discovery document, fetched at most once per process; a built-in instance has nothing to discover. */
+function discoveryFor(relayUrl: string): Promise<DiscoveryDocument | undefined> {
+  if (isBuiltInInstance(relayUrl)) return Promise.resolve(undefined);
+  let attempt = discoveryAttempts.get(relayUrl);
+  if (!attempt) { attempt = fetchDiscovery(relayUrl); discoveryAttempts.set(relayUrl, attempt); }
+  return attempt;
+}
+
+async function loginInstanceRecord(relayUrl: string, cached?: LoginInstance): Promise<LoginInstance | undefined> {
+  if (cached) return { discovery: parseDiscovery(cached.discovery), fetchedAt: cached.fetchedAt };
+  const discovery = await discoveryFor(relayUrl);
+  return discovery ? { discovery, fetchedAt: new Date().toISOString() } : undefined;
+}
+
+/** The addresses for a relay (an instance the caller is about to log in to, or has). */
+export async function instanceEndpointsFor(relayUrl: string, cached?: LoginInstance): Promise<InstanceEndpoints> {
+  return resolveInstanceEndpoints(relayUrl, (await loginInstanceRecord(relayUrl, cached))?.discovery);
+}
+
+/** The addresses of the instance this computer is logged in to; with no login, of the relay `--relay` / FRELY_RELAY_URL / the default names. */
+export async function currentInstance(): Promise<InstanceEndpoints> {
+  const config = await readConfig().then(currentRelayConfig).catch(() => undefined);
+  return instanceEndpointsFor(config?.relayUrl ?? normalizeRelayUrl(), config?.instance);
 }
 
 export interface AuthCredential {
@@ -406,7 +436,8 @@ export async function finishDeviceLogin(relayUrl: string, device: DeviceCodeResp
     ...(token.mcpToken ? { mcpToken: token.mcpToken } : {}),
   } satisfies StoredOAuthCredential));
   try {
-    await writeConfig({ version: CONFIG_VERSION, relayUrl, user, deviceId });
+    const instance = await loginInstanceRecord(relayUrl);
+    await writeConfig({ version: CONFIG_VERSION, relayUrl, user, deviceId, ...(instance ? { instance } : {}) });
   } catch (error) {
     await credentialStore.deletePassword(SERVICE, key).catch(() => false);
     throw error;
@@ -431,7 +462,7 @@ function appendSessionBinding(body: URLSearchParams, deviceId?: string | null): 
 }
 
 export async function whoami(): Promise<PublicUser> {
-  const config = await currentRelayConfig(await readConfig());
+  const config = await withInstance(await currentRelayConfig(await readConfig()));
   const credential = await loadCredential(config, true);
   if (!credential) throw new Error("No Frely login is stored. Run `frely login`.");
   const user = await fetchUser(config.relayUrl, credential);
@@ -441,8 +472,8 @@ export async function whoami(): Promise<PublicUser> {
   return user;
 }
 
-export async function requireLogin(): Promise<{ config: { relayUrl: string }; user: PublicUser; credential: AuthCredential; cookie?: string }> {
-  const config = await currentRelayConfig(await readConfig());
+export async function requireLogin(): Promise<{ config: { relayUrl: string; instance: InstanceEndpoints }; user: PublicUser; credential: AuthCredential; cookie?: string }> {
+  const config = await withInstance(await currentRelayConfig(await readConfig()));
   const credential = await loadCredential(config, true);
   if (!credential) throw new Error("No Frely login is stored. Run `frely login`.");
   const user = await fetchUser(config.relayUrl, credential).catch((error) => {
@@ -450,7 +481,7 @@ export async function requireLogin(): Promise<{ config: { relayUrl: string }; us
     throw error;
   });
   if (config.version !== CONFIG_VERSION || user.id !== config.user.id || user.email !== config.user.email || user.name !== config.user.name || user.username !== config.user.username) await writeConfig({ ...config, version: CONFIG_VERSION, user });
-  return { config: { relayUrl: config.relayUrl }, user, credential, ...(credential.scheme === "cookie" ? { cookie: credential.value } : {}) };
+  return { config: { relayUrl: config.relayUrl, instance: resolveInstanceEndpoints(config.relayUrl, config.instance?.discovery) }, user, credential, ...(credential.scheme === "cookie" ? { cookie: credential.value } : {}) };
 }
 
 export async function logout(): Promise<void> {
@@ -583,6 +614,16 @@ async function currentRelayConfig(config: CliConfig): Promise<CliConfig> {
   return migrated;
 }
 
+/** A login made before discovery existed reads its relay's document once and keeps it; a relay that publishes none is asked again next time. */
+async function withInstance(config: CliConfig): Promise<CliConfig> {
+  if (config.instance || isBuiltInInstance(config.relayUrl)) return config;
+  const instance = await loginInstanceRecord(config.relayUrl);
+  if (!instance) return config;
+  const next = { ...config, instance };
+  await writeConfig(next).catch(() => undefined);
+  return next;
+}
+
 export async function readConfig(): Promise<CliConfig> {
   const raw = await readFile(authConfigPath(), "utf8").catch(() => null);
   if (!raw) throw new Error("No Frely login is configured. Run `frely login`.");
@@ -596,12 +637,14 @@ export async function readConfig(): Promise<CliConfig> {
   if (typeof value.relayUrl !== "string" || !value.user || typeof value.user.id !== "string" || typeof value.user.email !== "string") {
     throw new Error("Frely CLI configuration is invalid.");
   }
+  // The stored document is this login's own: later requests in this process (token refresh) use it instead of asking the relay again.
+  if (value.instance) discoveryAttempts.set(value.relayUrl, Promise.resolve(parseDiscovery(value.instance.discovery)));
   return value as CliConfig;
 }
 
 async function requestDeviceCode(relayUrl: string): Promise<DeviceCodeResponse> {
   const codeBody = new URLSearchParams({ client_id: OAUTH_CLIENT_ID, scope: OAUTH_SCOPE });
-  appendLoginResources(codeBody, relayUrl);
+  appendLoginResources(codeBody, relayUrl, await instanceEndpointsFor(relayUrl));
   const response = await fetchWithTimeout(`${relayUrl}/api/auth/device/code`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", origin: relayUrl, accept: "application/json" },
@@ -632,7 +675,7 @@ export async function pollDeviceToken(
   let intervalMs = interval * 1000;
   while (Date.now() < deadline) {
     const body = new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: deviceCode, client_id: OAUTH_CLIENT_ID });
-    appendLoginResources(body, relayUrl);
+    appendLoginResources(body, relayUrl, await instanceEndpointsFor(relayUrl));
     appendSessionBinding(body, deviceId);
     let response: Response;
     try {
@@ -737,7 +780,7 @@ async function refreshOAuthCredential(relayUrl: string, refreshToken: string, de
 
 async function refreshOAuthCredentialOnce(relayUrl: string, refreshToken: string, deviceId?: string | null): Promise<AuthCredential> {
   const body = new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken, client_id: OAUTH_CLIENT_ID });
-  appendLoginResources(body, relayUrl);
+  appendLoginResources(body, relayUrl, await instanceEndpointsFor(relayUrl));
   appendSessionBinding(body, deviceId);
   let status: number;
   let payload: unknown;
@@ -886,14 +929,14 @@ async function refreshStoredCredential(config: CliConfig, started: StoredOAuthCr
 }
 
 /** Refreshes the login now, whatever its expiry, and returns it with the machine's FreyMCP side token — for a request the server refused. */
-export async function refreshLoginCredential(): Promise<{ config: { relayUrl: string }; credential: AuthCredential }> {
-  const config = await currentRelayConfig(await readConfig());
+export async function refreshLoginCredential(): Promise<{ config: { relayUrl: string; instance: InstanceEndpoints }; credential: AuthCredential }> {
+  const config = await withInstance(await currentRelayConfig(await readConfig()));
   const stored = await loadCredential(config, false);
   if (!stored?.refreshToken) throw new Error("Frely login expired. Run `frely login`.");
   const current = parseStoredCredential(await credentialStore.getPassword(SERVICE, accountKey(config.relayUrl)));
   if (!current?.refreshToken) throw new Error("Frely login expired. Run `frely login`.");
   const credential = await refreshStoredCredential(config, current, true);
-  return { config: { relayUrl: config.relayUrl }, credential };
+  return { config: { relayUrl: config.relayUrl, instance: resolveInstanceEndpoints(config.relayUrl, config.instance?.discovery) }, credential };
 }
 
 export function openVerificationUrl(url: string): void {
