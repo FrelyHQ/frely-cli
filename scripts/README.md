@@ -12,6 +12,7 @@
 | 独立二进制验证 | `npm run test:standalone` / `standalone-smoke.mjs` | 先构建对应平台二进制 |
 | 安装器验证 | `npm run test:installer` / `installer-smoke.mjs` | 先构建二进制；离线检查安装和校验和拒绝行为 |
 | CLI 发布 | `./scripts/release` / `release-entry.mjs` / `release-package-local` | 默认 Actions 发布（`release-package` 推 tag 触发 publish.yml，npm 用仓库 secret NPM_TOKEN，无需本机 npm login）；`--executor local` 为应急的本机全量发布 |
+| CLI 自动发版 | `.github/workflows/auto-release.yml` | main 上 CI 通过后，若自上个 vX.Y.Z 起有面向用户的改动（非 docs/*.md/.github），自动补丁版本号 bump、建 tag 并触发 publish.yml；仓库变量 `AUTO_RELEASE_DISABLED=true` 可关停；`release: v*` 提交会被跳过，mbp 手动发版不受影响 |
 | Landing 发布 | `./scripts/release-landing` / `release-landing.mjs` | 通过共享 release-entry 提交独立 tag，由 Pages 发布 |
 | 发布目录 | `release-catalog.mjs` | 定义 CLI / Landing 发布单元 |
 | 发布入口验证 | `node --test scripts/release-entry.test.mjs` | 隔离 Git 仓库，不连接生产 |

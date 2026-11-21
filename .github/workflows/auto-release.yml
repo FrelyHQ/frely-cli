@@ -1,0 +1,78 @@
+name: Auto release
+
+# （环境：CLI 自动发版, 原因：main 上 CI 通过后自动发新补丁版，不依赖 mbp 在线；
+#   发布仍走 publish.yml（它在发布前会再跑一遍完整 CI），本 workflow 只负责“要不要发、发哪个版本”。
+#   关停：在仓库变量里设 AUTO_RELEASE_DISABLED=true。mbp 上的 ./scripts/release 仍可手动发版；
+#   它推的 “release: vX” 提交会被本 workflow 跳过，tag 已存在也不会重复发布。）
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: cut-frely-cli-release
+  cancel-in-progress: false
+
+jobs:
+  auto:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      vars.AUTO_RELEASE_DISABLED != 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Decide, bump, tag and publish
+        env:
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [[ "$head" != "$CI_SHA" ]]; then
+            echo "main moved past the CI-checked commit ($CI_SHA); the newer commit's CI run decides." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ "$(git log -1 --format=%s)" == release:\ v* ]]; then
+            echo "Head is a release commit; nothing to release." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          latest="$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n 1p)"
+          [[ -n "$latest" ]] || { echo "No stable vX.Y.Z tag found." >&2; exit 1; }
+          # Only changes that reach users trigger a release; docs and workflow-only changes do not.
+          relevant="$(git diff --name-only "$latest" HEAD | grep -Ev '(^docs/|\.md$|^\.github/)' || true)"
+          if [[ -z "$relevant" ]]; then
+            echo "No user-facing change since ${latest}; no release." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          IFS=. read -r major minor patch <<<"${latest#v}"
+          version="${major}.${minor}.$((10#$patch + 1))"
+          tag="v${version}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "Tag ${tag} already exists; skipping." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          npm version "$version" --no-git-tag-version --allow-same-version >/dev/null
+          git add package.json package-lock.json
+          git commit -m "release: v${version}"
+          sha="$(git rev-parse HEAD)"
+          # A rejected push (branch protection, or main moved) fails here, before any tag exists.
+          git push origin HEAD:refs/heads/main
+          plan="{\"project\":\"frely-cli\",\"artifact\":\"cli\",\"executor\":\"actions\",\"tag\":\"${tag}\",\"version\":\"${version}\",\"source_sha\":\"${sha}\",\"workflow\":\"publish.yml\"}"
+          git tag --annotate --no-sign "$tag" "$sha" -m "$plan"
+          git push origin "refs/tags/${tag}"
+          gh workflow run publish.yml --ref "$tag"
+          echo "Started publish.yml for ${tag} (from ${latest})." >> "$GITHUB_STEP_SUMMARY"
