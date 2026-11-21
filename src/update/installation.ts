@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { IS_STANDALONE } from "../cli-launch.js";
+import { HOSTED_INSTANCE } from "../instance.js";
 
 const execFile = promisify(execFileCallback);
 export type InstallMethod = "standalone" | "npm" | "bun" | "source" | "unknown";
@@ -116,7 +117,7 @@ export function shellQuote(value: string, windows = false): string {
 }
 
 /** Copyable instructions only: no self-replacement process on Windows. */
-export function manualUpdateCommand(installation: Installation, version: string, serviceActive = false): string {
+export function manualUpdateCommand(installation: Installation, version: string, serviceActive = false, setupUrl: string = HOSTED_INSTANCE.setupUrl): string {
   const windows = installation.platform === "win32";
   const quote = (s: string) => shellQuote(s, windows);
   let command: string;
@@ -124,8 +125,8 @@ export function manualUpdateCommand(installation: Installation, version: string,
     command = `${windows ? "& " : ""}${quote(installation.manager!)} ${packageArguments(installation, version).map(quote).join(" ")}`;
     if (windows) command += "; if ($LASTEXITCODE -ne 0) { throw 'Frely installation failed' }";
   } else if (installation.method === "standalone") {
-    // Served from frely.cloud so the command also works where GitHub is unreachable; the version stays pinned.
-    const base = "https://frely.cloud";
+    // Served by the instance (frely.cloud for the hosted one) so the command also works where GitHub is unreachable; the version stays pinned.
+    const base = setupUrl;
     command = windows
       ? `$env:FRELY_CLI_VERSION = ${quote(version)}; $env:FRELY_INSTALL_DIR = ${quote(dirname(installation.entry))}; $env:FRELY_INSTALL_NO_PROFILE = '1'; & ([scriptblock]::Create((Invoke-WebRequest ${quote(base + "/install.ps1")} -UseBasicParsing).Content))`
       : `curl -fsSL ${quote(base + "/install.sh")} | FRELY_CLI_VERSION=${quote(version)} FRELY_INSTALL_DIR=${quote(dirname(installation.entry))} FRELY_INSTALL_NO_PROFILE=1 sh`;

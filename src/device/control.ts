@@ -5,6 +5,7 @@ import { createConnectionProof, deleteDeviceIdentity, loadOrCreateDeviceIdentity
 import { clearDeviceBinding, readDeviceBinding, writeDeviceBinding, type DeviceBinding } from "./state.js";
 import { VERSION } from "../version.js";
 import { isDeviceTransportKind, type DeviceTransportGrant } from "./transport.js";
+import { trustAnchor } from "../instance.js";
 import { syncTrust, type TrustScope } from "../trust/sync.js";
 import type { SignedTrustRecord } from "../trust/record.js";
 
@@ -121,7 +122,7 @@ export async function refreshAccountTrust(scope: TrustScope): Promise<void> {
       if (!trust.ok) return [];
       const body = object(await responseJson(trust));
       return Array.isArray(body.chain) ? body.chain as SignedTrustRecord[] : [];
-    }, scope);
+    }, scope, trustAnchor(auth.config.instance));
   } catch { /* best effort */ }
 }
 

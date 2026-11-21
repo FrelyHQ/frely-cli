@@ -2,17 +2,17 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { join } from "node:path";
 import { credentialStore as secureCredentialStore, type CredentialStore } from "../../credential-store.js";
 import { sandboxCommandDetailed, sandboxViolationLines } from "../../runtime/sandbox.js";
+import type { InstanceEndpoints } from "../../instance.js";
 import { MODEL_HOST } from "./model-proxy.js";
 import { dataDirOf } from "./store.js";
 
 export const API_KEY_SERVICE = "frely-cli-local-agent-key-v1";
 
-/** Where the Agent's model calls go: the public gateway for frely.cloud, the relay itself elsewhere (development). */
-export function gatewayOrigin(relayUrl: string, env: NodeJS.ProcessEnv = process.env): string {
+/** Where the Agent's model calls go: the logged-in instance's gateway (the relay itself when it names none), unless FRELY_GATEWAY_URL says otherwise. */
+export function gatewayOrigin(instance: InstanceEndpoints, env: NodeJS.ProcessEnv = process.env): string {
   const override = env.FRELY_GATEWAY_URL?.trim();
-  const url = new URL(override || relayUrl);
+  const url = new URL(override || instance.gatewayUrl);
   if (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost", "::1"].includes(url.hostname))) throw new Error("The Frely gateway must use HTTPS outside loopback development.");
-  if (!override && url.hostname === "frely.cloud") return "https://api.frely.cloud";
   return url.origin;
 }
 

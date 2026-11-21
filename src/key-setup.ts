@@ -7,23 +7,22 @@ import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { delimiter, dirname, join } from "node:path";
+import { isInstanceUrl, type InstanceEndpoints } from "./instance.js";
 
 export const KEY_SETUP_AGENTS = ["codex", "claude-code"] as const;
 export type KeySetupAgent = (typeof KEY_SETUP_AGENTS)[number];
-export const DEFAULT_GATEWAY_URL = "https://api.frely.cloud";
 
 type Call = (name: string, input: Record<string, unknown>) => Promise<Record<string, unknown>>;
-export interface KeySetupIo { out: (text: string) => void; call: Call; home?: string; hostName?: string }
+/** `instance` is the one this computer is logged in to: its gateway is the default and the only kind of address `--gateway` may name. */
+export interface KeySetupIo { out: (text: string) => void; call: Call; instance: InstanceEndpoints; home?: string; hostName?: string }
 
 const USAGE = "Usage: frely key setup codex|claude-code [--name <text>] [--gateway <url>] [--json]";
 
-/** Only Frely's own gateway (or a loopback one for tests) may receive this key: the agent will send it there on every request. */
-export function checkedGatewayUrl(value: string): string {
+/** Only the logged-in instance's own gateway (or a loopback one for tests) may receive this key: the agent will send it there on every request. */
+export function checkedGatewayUrl(value: string, instance: InstanceEndpoints): string {
   let url: URL;
   try { url = new URL(value); } catch { throw new Error("--gateway must be a URL."); }
-  const frely = url.protocol === "https:" && (url.hostname === "frely.cloud" || url.hostname.endsWith(".frely.cloud"));
-  const loopback = url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  if (url.username || url.password || url.search || url.hash || !(frely || loopback)) throw new Error("--gateway must be a frely.cloud address without credentials.");
+  if (url.username || url.password || url.search || url.hash || !isInstanceUrl(url, [instance])) throw new Error(`--gateway must be an address of ${new URL(instance.relayOrigin).host} without credentials.`);
   return url.origin;
 }
 
@@ -133,7 +132,7 @@ export async function runKeyCommand(args: readonly string[], io: KeySetupIo): Pr
   const agent = args[1];
   if (!(KEY_SETUP_AGENTS as readonly string[]).includes(agent)) throw new Error(`Unsupported agent "${agent}". Supported: ${KEY_SETUP_AGENTS.join(", ")}. ${USAGE}`);
   for (const arg of args.slice(2)) if (arg.startsWith("--") && !["--name", "--gateway", "--json"].includes(arg)) throw new Error(`Unknown option ${arg}. ${USAGE}`);
-  const gatewayUrl = checkedGatewayUrl(option(args, "--gateway") ?? DEFAULT_GATEWAY_URL);
+  const gatewayUrl = checkedGatewayUrl(option(args, "--gateway") ?? io.instance.gatewayUrl, io.instance);
   const name = option(args, "--name") ?? `Claude Code on ${io.hostName ?? hostname()}`;
   const json = args.includes("--json");
 

@@ -1,4 +1,5 @@
 import test from "node:test";
+import { HOSTED_INSTANCE, trustAnchor } from "./instance.js";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign, subtle, webcrypto } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -58,7 +59,7 @@ async function withDevice(run: (dir: string) => Promise<void>): Promise<void> {
   process.env.XDG_CONFIG_HOME = join(root, "config");
   try {
     setObserveIdentity({ device: DEVICE, deviceKey: "thumb", relayUrl: "https://r.test", userId: "usr_1" });
-    await pinTrustChain([{ record, sig: assertion(TRUST_DOMAIN, record) }], "usr_1", trustDirectory({ relayUrl: "https://r.test", userId: "usr_1" }));
+    await pinTrustChain([{ record, sig: assertion(TRUST_DOMAIN, record) }], "usr_1", trustDirectory({ relayUrl: "https://r.test", userId: "usr_1" }), trustAnchor(HOSTED_INSTANCE));
     forgetSecretDropKeys();
     await run(root);
   } finally {
