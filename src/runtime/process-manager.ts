@@ -47,14 +47,14 @@ export class ProcessManager {
   private readonly processes = new Map<string, ManagedProcess>();
   private readonly operations = new Map<string, Promise<unknown>>();
 
-  async start(command: string, cwd: string, env: NodeJS.ProcessEnv, workspaceRoot: string, pathGrants: readonly string[] = []): Promise<ProcessSnapshot> {
+  async start(command: string, cwd: string, env: NodeJS.ProcessEnv, workspaceRoot: string, pathGrants: readonly string[] = [], signal?: AbortSignal): Promise<ProcessSnapshot> {
     if (this.closed) throw new Error("MCP process manager is closed.");
     if (!command.trim()) throw new Error("command is required.");
     this.pruneExited();
     if (this.processes.size >= MAX_PROCESSES) throw new Error(`At most ${MAX_PROCESSES} managed processes may exist in one MCP session.`);
     // Same late check as run_command (the note has no place in a start result; the next run_command in this workspace reports new findings).
     await checkRememberedGitConfigs(workspaceRoot).catch(() => undefined);
-    const sandboxed = await sandboxCommand(command, workspaceRoot, pathGrants);
+    const sandboxed = await sandboxCommand(command, workspaceRoot, pathGrants, signal);
     const id = randomUUID();
     const child = spawn(sandboxed, { cwd, env, shell: true, stdio: "pipe", detached: process.platform !== "win32", windowsHide: true });
     child.stdout.setEncoding("utf8");

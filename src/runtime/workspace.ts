@@ -369,7 +369,7 @@ export class Workspace {
     // A process that escaped the previous command's cleanup may have written .git/config since: check before anything new runs.
     const late = await checkRememberedGitConfigs(this.root);
     const lateNote = late ? guardNote(late) : undefined;
-    const prepared = await sandboxCommandDetailed(command, this.root, pathGrants, { allowGitConfig: true });
+    const prepared = await sandboxCommandDetailed(command, this.root, pathGrants, { allowGitConfig: true, ...(signal ? { signal } : {}) });
     const guard = prepared.gitConfig ? await GitConfigGuard.snapshot(this.root) : undefined;
     let leftovers = false;
     let outcome: { ok: true; value: { stdout: string; stderr: string } } | { ok: false; error: unknown };

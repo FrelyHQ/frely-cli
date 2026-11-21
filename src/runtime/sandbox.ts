@@ -378,8 +378,11 @@ let wrapQueue: Promise<unknown> = Promise.resolve();
  * switching it back right after the wrap leaves that command's sandbox as it was made and later commands without it. Only the wrap
  * (milliseconds) is queued; the commands themselves run concurrently.
  */
-export function wrapSerialized(manager: WrapManager, base: SandboxRuntimeConfig, wrap: () => Promise<string>, allowGitConfig: boolean): Promise<string> {
+export function wrapSerialized(manager: WrapManager, base: SandboxRuntimeConfig, wrap: () => Promise<string>, allowGitConfig: boolean, options: WrapOptions = {}): Promise<string> {
+  const boundMs = options.boundMs ?? WRAP_BOUND_MS;
+  const startedAt = Date.now();
   const task = async (): Promise<string> => {
+    options.signal?.throwIfAborted();
     if (!allowGitConfig) return wrap();
     manager.updateConfig({ ...base, filesystem: { ...base.filesystem, allowGitConfig: true } as SandboxRuntimeConfig["filesystem"] });
     try {
@@ -389,8 +392,51 @@ export function wrapSerialized(manager: WrapManager, base: SandboxRuntimeConfig,
     }
   };
   const run = wrapQueue.then(task, task);
-  wrapQueue = run.catch(() => undefined);
-  return run;
+  // A wrap that never returns must not hold every later command: the queue moves on after the bound, and each caller gives up then too.
+  wrapQueue = Promise.race([run.catch(() => undefined), delay(boundMs)]);
+  return boundedWrap(run, boundMs, startedAt, options);
+}
+
+/** How long one command may wait for its sandbox wrap (queue wait included) before it fails instead of hanging. */
+export const WRAP_BOUND_MS = 20_000;
+const WRAP_SLOW_MS = 2_000;
+
+export interface WrapOptions {
+  signal?: AbortSignal;
+  boundMs?: number;
+}
+
+const delay = (ms: number): Promise<undefined> => new Promise((resolve) => { setTimeout(() => resolve(undefined), ms).unref?.(); });
+
+function logWrapSlow(startedAt: number, outcome: string): void {
+  process.stderr.write(`frely-cli: sandbox.wrap_slow waitedMs=${Date.now() - startedAt} outcome=${outcome}\n`);
+}
+
+function boundedWrap(run: Promise<string>, boundMs: number, startedAt: number, options: WrapOptions): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    let done = false;
+    const finish = (settle: () => void) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onAbort);
+      settle();
+    };
+    const timer = setTimeout(() => finish(() => {
+      logWrapSlow(startedAt, "timeout");
+      reject(new Error(`the sandbox did not prepare the command within ${Math.round(boundMs / 1000)}s`));
+    }), boundMs);
+    const onAbort = () => finish(() => {
+      logWrapSlow(startedAt, "aborted");
+      reject(options.signal?.reason ?? new Error("aborted"));
+    });
+    if (options.signal?.aborted) return onAbort();
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    run.then(
+      (value) => finish(() => { if (Date.now() - startedAt >= WRAP_SLOW_MS) logWrapSlow(startedAt, "ok"); resolve(value); }),
+      (error) => finish(() => reject(error)),
+    );
+  });
 }
 
 export interface SandboxedCommand {
@@ -403,6 +449,8 @@ export interface SandboxedCommand {
 }
 
 export interface SandboxCommandOptions {
+  /** Abort while the command waits for its sandbox wrap. */
+  signal?: AbortSignal;
   /** run_command only: allow writing the workspace `.git/config` (the caller must run the guard). start_process never sets this. */
   allowGitConfig?: boolean;
 }
@@ -429,15 +477,15 @@ export async function sandboxCommandDetailed(command: string, workspaceRoot: str
   // initialize() fixed allowWrite to the first workspace that ran a command; give every call its own workspace.
   const { allowGitConfig: _unused, ...filesystem } = buildSandboxConfig(workspaceRoot, allowedGroups, { allowGitConfig: gitConfig }).filesystem ?? {};
   try {
-    const wrapped = await wrapSerialized(SandboxManager, baseConfig, () => SandboxManager.wrapWithSandbox(sshProxyPrefix() + command, undefined, { filesystem }, undefined, { commandId, commandText: command }), gitConfig);
+    const wrapped = await wrapSerialized(SandboxManager, baseConfig, () => SandboxManager.wrapWithSandbox(sshProxyPrefix() + command, undefined, { filesystem }, options.signal, { commandId, commandText: command }), gitConfig, options.signal ? { signal: options.signal } : {});
     return { command: wrapped, commandId, gitConfig };
   } catch (error) {
     throw new Error(sandboxUnavailableMessage(`wrapping the command failed: ${errorText(error)}`));
   }
 }
 
-export async function sandboxCommand(command: string, workspaceRoot: string, allowedGroups: readonly string[] = []): Promise<string> {
-  return (await sandboxCommandDetailed(command, workspaceRoot, allowedGroups)).command;
+export async function sandboxCommand(command: string, workspaceRoot: string, allowedGroups: readonly string[] = [], signal?: AbortSignal): Promise<string> {
+  return (await sandboxCommandDetailed(command, workspaceRoot, allowedGroups, signal ? { signal } : {})).command;
 }
 
 /** The violations srt recorded for one wrapped command (proxy denials always; file and socket denials where srt's log monitor runs). */

@@ -18,17 +18,34 @@ export class FairRwScheduler {
     }
   }
 
-  read<T>(work: () => Promise<T>): Promise<T> {
-    return this.enqueue("read", work);
+  /** A job still waiting in the queue when `signal` aborts is dropped and rejected; a job that already started is not interrupted. */
+  read<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.enqueue("read", work, signal);
   }
 
-  write<T>(work: () => Promise<T>): Promise<T> {
-    return this.enqueue("write", work);
+  write<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.enqueue("write", work, signal);
   }
 
-  private enqueue<T>(mode: Mode, work: () => Promise<T>): Promise<T> {
+  private enqueue<T>(mode: Mode, work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      this.queue.push({ mode, work, resolve: resolve as (value: unknown) => void, reject });
+      if (signal?.aborted) return reject(signal.reason ?? new Error("aborted"));
+      const job: Job<unknown> = { mode, work, resolve: resolve as (value: unknown) => void, reject };
+      if (signal) {
+        const onAbort = () => {
+          const index = this.queue.indexOf(job);
+          if (index < 0) return;
+          this.queue.splice(index, 1);
+          reject(signal.reason ?? new Error("aborted"));
+          this.drain();
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        job.work = async () => {
+          signal.removeEventListener("abort", onAbort);
+          return work();
+        };
+      }
+      this.queue.push(job);
       this.drain();
     });
   }

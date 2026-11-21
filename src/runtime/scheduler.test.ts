@@ -37,3 +37,16 @@ test("queued write blocks later reads", async () => {
   await Promise.all([first, write, second]);
   assert.deepEqual(events, ["read1:start", "read1:end", "write:start", "write:end", "read2"]);
 });
+
+test("an aborted queued job is dropped and never runs", async () => {
+  const scheduler = new FairRwScheduler(1);
+  const controller = new AbortController();
+  let ran = false;
+  const first = scheduler.write(async () => { await sleep(30); });
+  const queued = scheduler.write(async () => { ran = true; }, controller.signal);
+  controller.abort(new Error("cancelled"));
+  await assert.rejects(queued, /cancelled/u);
+  await first;
+  await sleep(10);
+  assert.equal(ran, false);
+});

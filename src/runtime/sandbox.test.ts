@@ -338,3 +338,19 @@ test("a Docker socket denial gets only the unsandboxed hint, never a path: grant
   assert.doesNotMatch(hint, /\/var\/run/u);
   assert.equal(hint.match(/request_permission/gu)?.length, 1);
 });
+
+test("a stuck wrap fails after the bound and does not block the next one", async () => {
+  const manager: WrapManager = { updateConfig() {}, wrapWithSandbox: async (c) => `wrapped:${c}` };
+  const base = {} as never;
+  const stuck = wrapSerialized(manager, base, () => new Promise<string>(() => {}), false, { boundMs: 30 });
+  await assert.rejects(stuck, /did not prepare/u);
+  assert.equal(await wrapSerialized(manager, base, () => manager.wrapWithSandbox("next"), false, { boundMs: 30 }), "wrapped:next");
+});
+
+test("an aborted wait for a wrap rejects at once", async () => {
+  const manager: WrapManager = { updateConfig() {}, wrapWithSandbox: async (c) => c };
+  const controller = new AbortController();
+  const waiting = wrapSerialized(manager, {} as never, () => new Promise<string>(() => {}), false, { signal: controller.signal, boundMs: 5000 });
+  controller.abort(new Error("cancelled"));
+  await assert.rejects(waiting, /cancelled/u);
+});

@@ -416,15 +416,15 @@ async function dispatch(
   if (name === "run_command") {
     const command = textArg(args, "command");
     const work = () => workspace.runCommand(command, relativeInput, intArg(args, "timeoutMs", 30000, 100, 120000), signal, pathGrants);
-    return concurrencyArg(args) === "exclusive" ? commandScheduler.write(guarded(work)) : commandScheduler.read(guarded(work));
+    return concurrencyArg(args) === "exclusive" ? commandScheduler.write(guarded(work), signal) : commandScheduler.read(guarded(work), signal);
   }
   if (name === "start_process") {
     const command = textArg(args, "command");
-    return processRead(async () => {
+    return processScheduler.read(guarded(async () => {
       const cwdPath = await workspace.processCwd(relativeInput);
       signal.throwIfAborted();
-      return processes.start(command, cwdPath, safeEnv(), workspace.root, pathGrants);
-    });
+      return processes.start(command, cwdPath, safeEnv(), workspace.root, pathGrants, signal);
+    }), signal);
   }
   throw new Error(`Unknown tool: ${name}`);
 }
