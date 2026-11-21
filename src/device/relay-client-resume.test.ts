@@ -6,7 +6,7 @@ import { DEVICE_RELAY_DEFAULT_MAX_INFLIGHT, DEVICE_RELAY_PROTOCOL, decodeDeviceR
 import type { DeviceRelayEnvelope, DeviceRelayResponse } from "./protocol.js";
 import { McpLease } from "../runtime/mcp-lease.js";
 import type { RelaySession } from "../runtime/relay-session.js";
-import { RELAY_OUTBOX_TTL_MS, createRelayCarry, deliverResponse, resumeOrRelease, serveConnection } from "./relay-client.js";
+import { RELAY_OUTBOX_TTL_MS, closeSessionBounded, createRelayCarry, deliverResponse, resumeOrRelease, serveConnection } from "./relay-client.js";
 
 const deviceId = `drd_${"a".repeat(32)}`;
 const authorizationId = `mca_${"a".repeat(32)}`;
@@ -395,4 +395,17 @@ test("after a drop, the next connection's first capability report carries how th
     lease.close();
     await relayServer.close();
   }
+});
+
+test("closeSessionBounded gives up on a session whose close never returns, so the relay loop can reconnect", async () => {
+  const events: string[] = [];
+  const never = { close: () => new Promise<void>(() => undefined) };
+  const started = Date.now();
+  await closeSessionBounded(never, ((line: string) => { events.push(line); }) as never, 50);
+  assert.ok(Date.now() - started < 2000);
+  assert.match(events.join("\n"), /relay\.session_close_timeout/u);
+});
+
+test("closeSessionBounded returns at once for a session that closes", async () => {
+  await closeSessionBounded({ close: async () => undefined }, (() => undefined) as never, 5000);
 });

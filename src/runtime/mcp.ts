@@ -61,6 +61,9 @@ export function isSelfUpdateCommand(name: string, args: Record<string, unknown>)
   return typeof args.command === "string" && args.command.trim().split(/\s+/u).join(" ") === "frely update";
 }
 
+/** How long closing a session waits for running tool calls before it stops waiting and ends the processes. */
+const ACTIVE_CALLS_DRAIN_MS = 5_000;
+
 function enabledLocalMcps(options: McpRuntimeOptions): string[] {
   try { return options.localMcp ? options.getLocalMcps?.() ?? [] : []; } catch { return []; }
 }
@@ -105,8 +108,15 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
   let cleanupPromise: Promise<void> | undefined;
 
   const cleanup = () => cleanupPromise ??= (async () => {
-    while (activeCalls.size > 0) {
-      await Promise.allSettled([...activeCalls]);
+    // A call whose handler never returns must not hold the session open forever: it would stop the relay loop from reconnecting.
+    const deadline = Date.now() + ACTIVE_CALLS_DRAIN_MS;
+    while (activeCalls.size > 0 && Date.now() < deadline) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        Promise.allSettled([...activeCalls]),
+        new Promise<void>((resolve) => { timer = setTimeout(resolve, Math.max(0, deadline - Date.now())); }),
+      ]);
+      clearTimeout(timer);
     }
     await processes.close();
     unregister?.();

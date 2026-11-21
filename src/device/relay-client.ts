@@ -112,7 +112,7 @@ export async function resumeOrRelease(carry: RelayCarry, held: HeldMcp | undefin
   if (authorizationId !== undefined && held.lease.authorizationId === authorizationId && !held.lease.controller.signal.aborted && hasCarriedMcp(carry)) return held;
   abortCarried(carry, held.session, log, reason);
   held.lease.close();
-  await held.session.close();
+  await closeSessionBounded(held.session, log);
   return undefined;
 }
 
@@ -338,12 +338,23 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
       } finally {
         turn.abort();
         if (session && lease && !options.signal.aborted && !lease.controller.signal.aborted && hasCarriedMcp(carry)) held = { session, lease };
-        else { lease?.close(); await session?.close(); }
+        else { lease?.close(); await closeSessionBounded(session, log); }
       }
     }
     reporter.report({ type: "stopped" });
     await reporter.flush();
   } finally { await releaseHeld("stopped"); closeLinkSync(); (await closeRefresh)(); await closeMaintenance?.(); }
+}
+
+/** Closing the previous session must never keep the device offline: after the limit the loop reconnects anyway. */
+export const SESSION_CLOSE_LIMIT_MS = 10_000;
+export async function closeSessionBounded(session: { close(): Promise<void> } | null, log: DiagnosticLog, limitMs = SESSION_CLOSE_LIMIT_MS): Promise<void> {
+  if (!session) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const closed = session.close().then(() => true, () => true);
+  const timedOut = new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), limitMs); });
+  if (!await Promise.race([closed, timedOut])) diagnostic(log, "relay.session_close_timeout");
+  clearTimeout(timer);
 }
 
 class DeviceTransportConnectionError extends Error {
