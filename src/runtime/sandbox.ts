@@ -397,6 +397,7 @@ export function wrapSerialized(manager: WrapManager, base: SandboxRuntimeConfig,
 
 /** How long preparing one command's sandbox may take, queue included, before the command fails instead of waiting with no output. */
 export const SANDBOX_WRAP_LIMIT_MS = 20_000;
+const SANDBOX_WRAP_SLOW_MS = 2_000;
 
 /** `work`, or a rejection as soon as `signal` aborts: a wait that never ends must not keep a tool call open. */
 export function untilAborted<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -442,9 +443,23 @@ export async function sandboxCommandDetailed(command: string, workspaceRoot: str
   if (allowedGroups.includes(UNSANDBOXED_GROUP)) return { command, gitConfig: false };
   const denied = deniedReadReference(command, allowedGroups);
   if (denied) throw new Error(deniedReadMessage(denied));
+  const startedAt = Date.now();
+  let stage = "start-up";
+  let outcome = "ok";
   const limit = AbortSignal.timeout(SANDBOX_WRAP_LIMIT_MS);
   const signal = options.signal ? AbortSignal.any([options.signal, limit]) : limit;
   const timedOut = () => limit.aborted && !options.signal?.aborted;
+  try {
+    return await prepareSandboxedCommand();
+  } catch (error) {
+    outcome = timedOut() ? "timeout" : options.signal?.aborted ? "aborted" : "error";
+    throw error;
+  } finally {
+    // One line when preparing the sandbox was slow or cut off, naming the step it was in, so a stall can be located from the log.
+    if (outcome !== "ok" || Date.now() - startedAt >= SANDBOX_WRAP_SLOW_MS) process.stderr.write(`frely-cli: sandbox.wrap_slow waitedMs=${Date.now() - startedAt} stage=${stage} outcome=${outcome}\n`);
+  }
+
+  async function prepareSandboxedCommand(): Promise<SandboxedCommand> {
   let init: Init;
   try {
     init = await untilAborted(ensureInitialized(workspaceRoot), signal);
@@ -455,6 +470,7 @@ export async function sandboxCommandDetailed(command: string, workspaceRoot: str
   if (!init.ready || !baseConfig) throw new Error(sandboxUnavailableMessage(init.ready ? "sandbox configuration missing" : init.reason));
   // Without git the guard cannot check the file afterwards, so `.git/config` then stays read-only.
   const gitConfig = options.allowGitConfig === true && await gitConfigGuardAvailable();
+  stage = "wrap";
   const commandId = randomUUID();
   // initialize() fixed allowWrite to the first workspace that ran a command; give every call its own workspace.
   const { allowGitConfig: _unused, ...filesystem } = buildSandboxConfig(workspaceRoot, allowedGroups, { allowGitConfig: gitConfig }).filesystem ?? {};
@@ -465,6 +481,7 @@ export async function sandboxCommandDetailed(command: string, workspaceRoot: str
     if (options.signal?.aborted) throw error;
     if (timedOut()) throw new Error(sandboxUnavailableMessage(`preparing the sandbox took longer than ${SANDBOX_WRAP_LIMIT_MS / 1000} s (another command may still be holding it)`));
     throw new Error(sandboxUnavailableMessage(`wrapping the command failed: ${errorText(error)}`));
+  }
   }
 }
 
