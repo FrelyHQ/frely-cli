@@ -152,6 +152,9 @@ async function autoSyncAgentLinks(args: readonly string[]): Promise<void> {
   process.stderr.write(linkSyncNotice(result));
 }
 
+/** How long the device relay service waits for its subsystems to stop before it exits anyway. */
+const RELAY_SHUTDOWN_LIMIT_MS = 10_000;
+
 async function main(): Promise<void> {
   const args = normalizeLinkArgs(applyDataDir(process.argv.slice(2)));
   const command = args[0];
@@ -957,14 +960,23 @@ async function main(): Promise<void> {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
       controller.abort();
-      await services;
-      await tasks;
-      await taskShares;
-      await piNode?.stop(); // the node keeps running; a restarted service adopts it
-      await localMcp?.close();
+      // A cleanup step that never settles must not keep the old process alive: the supervisor (systemd Restart=always,
+      // launchd KeepAlive) only starts the new version once this process has exited.
+      const cleanup = (async () => {
+        await services;
+        await tasks;
+        await taskShares;
+        await piNode?.stop(); // the node keeps running; a restarted service adopts it
+        await localMcp?.close();
+      })();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const settled = await Promise.race([cleanup.then(() => true, () => true), new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), RELAY_SHUTDOWN_LIMIT_MS); })]);
+      clearTimeout(timer);
+      if (!settled) nodeLog(`Shutdown cleanup did not finish within ${RELAY_SHUTDOWN_LIMIT_MS / 1000} s; exiting anyway.`);
       releaseInstance();
     }
-    return;
+    // Timers and sockets left by any subsystem would otherwise keep the event loop, and with it the old version, running.
+    process.exit(process.exitCode ?? 0);
   }
   if (command === "link" && args[1] === "local") {
     if (args[2] === undefined) { stdout.write(subcommandUsage("link.local")); return; }
@@ -1158,6 +1170,8 @@ main().catch((error) => {
   else process.stderr.write(`${process.argv.includes("--service-config-home") ? `${new Date().toISOString()} ` : ""}${message}\n`);
   process.exitCode = process.platform === "linux" && command === "mcp" && process.argv[3] === "serve" && process.argv.includes("--service-config-home") && isDefinitiveAuthorizationFailure(error)
     ? SERVICE_AUTH_REQUIRED : error instanceof ControllerError ? error.exitCode : 1;
+  // The device relay service must really exit so its supervisor can act on the code; leftover timers would keep it alive.
+  if (command === "mcp" && process.argv[3] === "serve" && process.argv.includes("--service-config-home")) process.exit(process.exitCode);
 });
 
 /** What `frely service` share/list/stop/remove use to reach the account and run frpc. */
