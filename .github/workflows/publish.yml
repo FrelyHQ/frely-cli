@@ -41,8 +41,12 @@ jobs:
     needs: identity
     uses: ./.github/workflows/standalone.yml
 
+  systemd-upgrade:
+    needs: identity
+    uses: ./.github/workflows/systemd-upgrade.yml
+
   release-assets:
-    needs: [verify, standalone]
+    needs: [verify, standalone, systemd-upgrade]
     name: Release asset (${{ matrix.target }})
     # darwin binaries are re-signed by scripts/build-standalone.mjs, which needs codesign (bun's embedded signature is invalid and macOS kills the binary).
     runs-on: ${{ startsWith(matrix.target, 'darwin') && 'macos-latest' || 'ubuntu-24.04' }}
