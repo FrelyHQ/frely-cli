@@ -5,7 +5,7 @@ import { createConnectionProof, deleteDeviceIdentity, loadOrCreateDeviceIdentity
 import { clearDeviceBinding, readDeviceBinding, writeDeviceBinding, type DeviceBinding } from "./state.js";
 import { VERSION } from "../version.js";
 import { isDeviceTransportKind, type DeviceTransportGrant } from "./transport.js";
-import { syncTrust } from "../trust/sync.js";
+import { syncTrust, type TrustScope } from "../trust/sync.js";
 import type { SignedTrustRecord } from "../trust/record.js";
 
 const CLIENT_VERSION = VERSION;
@@ -108,6 +108,23 @@ function mcpSignature(deviceId: string, proof: { issuedAt: string; nonce: string
   };
 }
 
+/**
+ * Pull the account's trust record chain with the stored login and pin it. Best effort: a chain that cannot be fetched or is
+ * refused never stops the caller, and the pin only moves forward. Runs on every connection, direct or through the web app.
+ */
+export async function refreshAccountTrust(scope: TrustScope): Promise<void> {
+  try {
+    const auth = await requireLogin();
+    if (auth.config.relayUrl !== scope.relayUrl || auth.user.id !== scope.userId) return;
+    await syncTrust(async () => {
+      const trust = await relayFetch(auth.config.relayUrl, auth.credential, "/api/user/device-relay/trust", { method: "GET" });
+      if (!trust.ok) return [];
+      const body = object(await responseJson(trust));
+      return Array.isArray(body.chain) ? body.chain as SignedTrustRecord[] : [];
+    }, scope);
+  } catch { /* best effort */ }
+}
+
 export async function currentDevice(): Promise<DeviceBinding | null> {
   const auth = await requireLogin();
   const binding = await readDeviceBinding();
@@ -130,13 +147,7 @@ export async function connectionGrant(binding?: DeviceBinding, mcp?: { authoriza
   const payload = await responseJson(response);
   if (!response.ok) throw new Error(publicError(payload, response.status));
   const record = object(payload);
-  // Best effort: a trust chain that cannot be fetched or is refused must never stop the connection. The pin only moves forward.
-  await syncTrust(async () => {
-    const trust = await relayFetch(auth.config.relayUrl, auth.credential, "/api/user/device-relay/trust", { method: "GET" });
-    if (!trust.ok) return [];
-    const body = object(await responseJson(trust));
-    return Array.isArray(body.chain) ? body.chain as SignedTrustRecord[] : [];
-  }, { relayUrl: device.relayUrl, userId: device.userId }).catch(() => undefined);
+  await refreshAccountTrust({ relayUrl: device.relayUrl, userId: device.userId });
   return { transports: parseConnectionTransports(record) };
 }
 

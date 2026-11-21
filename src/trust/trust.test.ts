@@ -8,7 +8,7 @@ import { jcs } from "./jcs.js";
 import { APPROVAL_DOMAIN, pinTrustChain, pinTrustRecord, readTrust, trustDirectory, TRUST_DOMAIN, trustRecordHash, verifyApproval, verifyTrustRecord, type ApprovalPayload, type SignedTrustRecord, type TrustRecord } from "./record.js";
 import { challengeFor, TrustError, verifyAssertion, type CoseAlg, type Signer, type WebAuthnSignature } from "./webauthn.js";
 import { observeApprovals, observed, setObserveIdentity } from "./observe.js";
-import { heldTrust, syncTrust } from "./sync.js";
+import { heldTrust, readTrustOrRefresh, syncTrust } from "./sync.js";
 
 const b64 = (data: Buffer | string) => Buffer.from(data).toString("base64url");
 const sha = (data: Buffer | string) => createHash("sha256").update(data).digest();
@@ -184,5 +184,28 @@ test("syncTrust keeps one pin per relay and account, treats an empty chain as no
     assert.deepEqual(await syncTrust(async () => [sealed({ ...v1, approvalOrigins: ["https://frely.cloud"] }, a)], { relayUrl: "https://s.test", userId: "usr_1" }), { status: "refused", code: "origin_not_allowed" });
     assert.deepEqual(await syncTrust(async () => [sealed(record(1, null, [a.signer], "usr_9"), a)], mine), { status: "refused", code: "user_mismatch" });
     assert.equal((await heldTrust(mine))?.seq, 1);
+  } finally { if (saved === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = saved; await rm(dir, { recursive: true, force: true }); }
+});
+
+test("readTrustOrRefresh pulls the chain once when nothing is pinned and leaves a held pin alone", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "frely-refresh-"));
+  const saved = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = dir;
+  try {
+    const a = passkey(-7);
+    const scope = { relayUrl: "https://r.test", userId: "usr_1" };
+    let calls = 0;
+    // No chain on the relay yet: one pull, still nothing.
+    assert.equal(await readTrustOrRefresh(scope, async () => { calls++; }), undefined);
+    assert.equal(calls, 1);
+    // A failing pull is not an error, only nothing pinned.
+    assert.equal(await readTrustOrRefresh(scope, async () => { calls++; throw new Error("offline"); }), undefined);
+    // The owner set the chain up after the device connected: the pull pins it and the caller gets it at once.
+    const held = await readTrustOrRefresh(scope, async (s) => { calls++; await syncTrust(async () => [sealed(record(1, null, [a.signer]), a)], s); });
+    assert.equal(held?.pin.seq, 1);
+    assert.equal(calls, 3);
+    // Held already: no pull.
+    assert.equal((await readTrustOrRefresh(scope, async () => { calls++; }))?.pin.seq, 1);
+    assert.equal(calls, 3);
   } finally { if (saved === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = saved; await rm(dir, { recursive: true, force: true }); }
 });
