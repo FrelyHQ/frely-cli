@@ -365,3 +365,34 @@ for (const acknowledged of [false, true]) {
     }
   });
 }
+
+test("after a drop, the next connection's first capability report carries how the computer saw it end, once", async () => {
+  const relayServer = await relay();
+  const lease = new McpLease(authorizationId, Date.now() + 60_000);
+  const carry = createRelayCarry();
+  const abort = new AbortController();
+  const capabilityFrames = (frames: DeviceRelayEnvelope[]) => frames.filter((frame) => frame.type === "device_capabilities");
+  try {
+    const first = relayServer.next();
+    const run1 = settled(serveConnection(relayServer.url, "t", deviceId, fakeSession().session, lease, abort.signal, () => undefined, undefined, undefined, () => ({ ok: true }), carry));
+    const one = await first;
+    await until(() => capabilityFrames(one.frames).length === 1);
+    assert.equal((capabilityFrames(one.frames)[0] as { capabilities: Record<string, unknown> }).capabilities.lastClose, undefined);
+    one.peer.terminate();
+    await run1;
+    assert.equal(typeof carry.lastClose?.durationMs, "number");
+
+    const second = relayServer.next();
+    const run2 = settled(serveConnection(relayServer.url, "t", deviceId, fakeSession().session, lease, abort.signal, () => undefined, undefined, undefined, () => ({ ok: true }), carry));
+    const two = await second;
+    await until(() => capabilityFrames(two.frames).length === 1);
+    const reported = (capabilityFrames(two.frames)[0] as { capabilities: { lastClose?: { durationMs: number } } }).capabilities.lastClose;
+    assert.equal(typeof reported?.durationMs, "number");
+    abort.abort();
+    await run2;
+  } finally {
+    abort.abort();
+    lease.close();
+    await relayServer.close();
+  }
+});

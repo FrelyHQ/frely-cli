@@ -75,6 +75,8 @@ export interface RelayCarry {
   /** Ids written since the last ping; the next ping takes them. */
   readonly unpinged: Set<string>;
   socket?: WebSocket | undefined;
+  /** How the previous connection ended as this computer saw it; sent once in the next connection's first capability report so the relay can pair it with its own record of the drop. */
+  lastClose?: { closeCode?: number; errorCode?: string; heartbeatTimeout?: boolean; durationMs: number } | undefined;
 }
 
 export function createRelayCarry(): RelayCarry {
@@ -443,7 +445,12 @@ export async function serveConnection(
   if (signal.aborted) return;
   // The lease this connection serves under, as this computer sees it: the web compares it with its own record.
   const reported = capabilities;
-  capabilities = reported ? async () => ({ ...(await reported() ?? {}), mcpLease: lease ? lease.state() : null }) : undefined;
+  let closeReported = false;
+  capabilities = reported ? async () => {
+    const lastClose = closeReported ? undefined : carry.lastClose;
+    closeReported = true;
+    return { ...(await reported() ?? {}), mcpLease: lease ? lease.state() : null, ...(lastClose ? { lastClose } : {}) };
+  } : undefined;
   await new Promise<void>((resolve, reject) => {
     const socket = new WebSocket(websocketUrl, DEVICE_RELAY_PROTOCOL, {
       headers: { authorization: `Bearer ${accessToken}`, "x-frely-device-id": deviceId },
@@ -463,6 +470,7 @@ export async function serveConnection(
     let lastFrameAt = connectedAt;
     let lastInboundAt = connectedAt;
     let socketErrorCode: string | undefined;
+    let heartbeatTimedOut = false;
     // Responses written before a ping are delivered once its pong returns (TCP keeps order); then they are no longer kept.
     const pinged = new Map<string, string[]>();
     const ping = () => {
@@ -477,6 +485,7 @@ export async function serveConnection(
     const silenceWatch = setInterval(() => {
       if (Date.now() - lastInboundAt <= RELAY_SILENCE_LIMIT_MS) return;
       diagnostic(log, "relay.heartbeat_timeout", { ageMs: Date.now() - connectedAt, sinceLastPongMs: Date.now() - lastPongAt, sinceLastFrameMs: Date.now() - lastFrameAt, inflight: inflight.size });
+      heartbeatTimedOut = true;
       finish(new DeviceTransportConnectionError("Device transport heartbeat timed out.", true));
     }, RELAY_SILENCE_CHECK_MS);
     silenceWatch.unref?.();
@@ -490,6 +499,12 @@ export async function serveConnection(
       if (!error) diagnostic(log, "relay.closed", { durationMs: Date.now() - connectedAt });
       else if (!signal.aborted) {
         const at = Date.now();
+        carry.lastClose = {
+          ...(error instanceof DeviceTransportConnectionError && error.closeCode !== undefined ? { closeCode: error.closeCode } : {}),
+          ...(socketErrorCode ? { errorCode: socketErrorCode } : {}),
+          ...(heartbeatTimedOut ? { heartbeatTimeout: true } : {}),
+          durationMs: at - connectedAt,
+        };
         diagnostic(log, "relay.socket_closed", {
           ...(error instanceof DeviceTransportConnectionError && error.closeCode !== undefined ? { closeCode: error.closeCode } : {}),
           ...(socketErrorCode ? { socketErrorCode } : {}),
@@ -704,7 +719,7 @@ async function sendCapabilities(socket: WebSocket, capabilities?: () => Record<s
     if (socket.readyState !== WebSocket.OPEN) return;
     // The relay closes the connection on a report over 4 KB: drop the diagnostic fields first, and send nothing rather than too much.
     const size = () => Buffer.byteLength(JSON.stringify(report));
-    if (size() > CAPABILITIES_MAX_BYTES) { delete report.instance; delete report.mcpLease; }
+    if (size() > CAPABILITIES_MAX_BYTES) { delete report.instance; delete report.mcpLease; delete report.lastClose; }
     if (size() > CAPABILITIES_MAX_BYTES) return;
     socket.send(encodeDeviceRelayEnvelope({ protocol: DEVICE_RELAY_PROTOCOL, type: "device_capabilities", id: `caps_${randomBytes(8).toString("hex")}`, capabilities: report }));
   } catch {
