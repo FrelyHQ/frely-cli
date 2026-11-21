@@ -1,0 +1,77 @@
+name: Service upgrade on real systemd
+
+# （环境：CLI 发版门禁, 原因：升级、重连这类“切换时刻”以前只用假依赖测过，从没在真实 systemd 下跑过。
+#   这里装上最近发布的版本作为 systemd 用户服务，换成本次构建，要求 60 秒内旧进程消失、新版本连上假 relay；
+#   再验证 relay 以 4412 断开、relay 重启后同一个进程自己重连。publish.yml 把它作为发版前置条件。）
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'scripts/systemd-upgrade-smoke.mjs'
+      - '.github/workflows/systemd-upgrade.yml'
+      - 'package.json'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  systemd-upgrade:
+    name: Upgrade on systemd (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Start a systemd user manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          uid="$(id -u)"
+          sudo loginctl enable-linger "$USER"
+          sudo systemctl start "user@${uid}.service"
+          echo "XDG_RUNTIME_DIR=/run/user/${uid}" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${uid}/bus" >> "$GITHUB_ENV"
+          export XDG_RUNTIME_DIR="/run/user/${uid}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus"
+          for _ in $(seq 1 30); do
+            state="$(systemctl --user is-system-running 2>/dev/null || true)"
+            [[ "$state" == running || "$state" == degraded ]] && break
+            sleep 1
+          done
+          echo "systemd --user: ${state:-unavailable}"
+          systemctl --user is-system-running || true
+          [[ "$state" == running || "$state" == degraded ]] || { echo "systemd --user is not usable on this runner" >&2; exit 1; }
+
+      - name: Fetch the latest published release (the old version)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p old
+          gh release download -R FrelyHQ/frely-cli -p 'frely-linux-x64.gz' -p 'frely-linux-x64.sha256' -D old
+          gunzip -f old/frely-linux-x64.gz
+          (cd old && sha256sum -c frely-linux-x64.sha256)
+          chmod +x old/frely-linux-x64
+          old/frely-linux-x64 --version
+
+      - run: npm ci --ignore-scripts
+
+      - name: Build the new executable with a different version
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm version 9.9.9-ci.0 --no-git-tag-version
+          npm run build:standalone -- linux-x64
+          artifacts/frely-linux-x64 --version
+
+      - name: Upgrade, relay close and relay restart on real systemd
+        run: node scripts/systemd-upgrade-smoke.mjs old/frely-linux-x64 artifacts/frely-linux-x64
