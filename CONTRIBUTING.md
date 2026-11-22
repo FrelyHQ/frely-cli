@@ -50,6 +50,13 @@ dependencies.
 ## Pull requests
 
 - Keep changes focused and explain user-visible or protocol changes.
+- Upgrade auth and connection-critical dependencies (listed in
+  `scripts/critical-deps.json`: `@anthropic-ai/sandbox-runtime`, `ws`,
+  `@modelcontextprotocol/sdk` and the pinned Bun version) in their own PR,
+  and release them alone. CI fails a PR that mixes them with other dependency
+  changes, and the release flow refuses a range that contains such an upgrade
+  together with other commits: release the other changes first, then the
+  critical upgrade by itself.
 - Add or update documentation when commands, security behavior, or the
   Device Relay contract changes.
 - Do not include credentials, private MCP URLs, access tokens, workspace
