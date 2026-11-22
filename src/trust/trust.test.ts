@@ -8,7 +8,7 @@ import { jcs } from "./jcs.js";
 import { APPROVAL_DOMAIN, pinTrustChain, pinTrustRecord, readTrust, trustDirectory, TRUST_DOMAIN, trustRecordHash, verifyApproval, verifyTrustRecord, type ApprovalPayload, type SignedTrustRecord, type TrustRecord } from "./record.js";
 import { challengeFor, TrustError, verifyAssertion, type CoseAlg, type Signer, type WebAuthnSignature } from "./webauthn.js";
 import { observeApprovals, observed, setObserveIdentity } from "./observe.js";
-import { heldTrust, readTrustOrRefresh, syncTrust } from "./sync.js";
+import { heldTrust, readTrustOrRefresh, readTrustWithReason, syncTrust } from "./sync.js";
 
 const b64 = (data: Buffer | string) => Buffer.from(data).toString("base64url");
 const sha = (data: Buffer | string) => createHash("sha256").update(data).digest();
@@ -207,5 +207,18 @@ test("readTrustOrRefresh pulls the chain once when nothing is pinned and leaves 
     // Held already: no pull.
     assert.equal((await readTrustOrRefresh(scope, async () => { calls++; }))?.pin.seq, 1);
     assert.equal(calls, 3);
+  } finally { if (saved === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = saved; await rm(dir, { recursive: true, force: true }); }
+});
+
+test("a pull that failed is reported as the device's problem, not as a missing owner setup", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "frely-reason-"));
+  const saved = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = dir;
+  try {
+    const scope = { relayUrl: "https://r.test", userId: "usr_1" };
+    assert.equal((await readTrustWithReason(scope, async () => ({ status: "none" }))).problem, null);
+    assert.match((await readTrustWithReason(scope, async () => ({ status: "error", message: "HTTP 401" }))).problem ?? "", /HTTP 401.*frely login/su);
+    assert.match((await readTrustWithReason(scope, async () => ({ status: "refused", code: "trust_rollback" }))).problem ?? "", /refused it \(trust_rollback\)/u);
+    assert.match((await readTrustWithReason(scope, async () => { throw new Error("offline"); })).problem ?? "", /offline/u);
   } finally { if (saved === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = saved; await rm(dir, { recursive: true, force: true }); }
 });
