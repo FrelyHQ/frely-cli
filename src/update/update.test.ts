@@ -335,3 +335,17 @@ test("a dead login refuses the update before anything changes, so the restart ca
   await assert.rejects(() => update(() => {}, d), /Run frely login/);
   assert.deepEqual(calls, []);
 });
+
+test("a pause that never ends is lifted after the limit instead of refusing commands forever", () => {
+  let now = 1_000;
+  const gate = new MaintenanceGate(() => now);
+  gate.pause();
+  now += MaintenanceGate.MAX_PAUSE_MS;
+  assert.throws(() => gate.enter(), /preparing an update/);
+  now += 1;
+  gate.enter()();
+  gate.pause();
+  assert.throws(() => gate.pause(), /Another update/);
+  now += MaintenanceGate.MAX_PAUSE_MS + 1;
+  gate.pause();
+});

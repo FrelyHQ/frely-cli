@@ -5,10 +5,21 @@ import { dirname, join } from "node:path";
 
 /** An existing relay owns this gate; no updater daemon or remote update jobs. */
 export class MaintenanceGate {
+  /** An update never needs admission closed this long. A pause that outlives it is stuck (an install or restart that never finished) and would refuse every command until the service restarts. */
+  static readonly MAX_PAUSE_MS = 5 * 60_000;
   private paused = false;
+  private pausedAt = 0;
   private requests = 0;
   private readonly processes = new Set<() => number>();
+  constructor(private readonly now: () => number = Date.now) {}
+  /** Opens a pause that has outlived MAX_PAUSE_MS; returns true when it did. */
+  private expireStalePause(): boolean {
+    if (!this.paused || this.now() - this.pausedAt <= MaintenanceGate.MAX_PAUSE_MS) return false;
+    this.paused = false;
+    return true;
+  }
   enter(): () => void {
+    this.expireStalePause();
     if (this.paused) throw new Error("Frely is preparing an update. Retry after it completes.");
     return this.track();
   }
@@ -22,8 +33,10 @@ export class MaintenanceGate {
     return () => this.processes.delete(count);
   }
   pause(): void {
+    this.expireStalePause();
     if (this.paused) throw new Error("Another update holds this service.");
     this.paused = true;
+    this.pausedAt = this.now();
   }
   resume(): void { this.paused = false; }
   get idle(): boolean { return this.requests === 0 && [...this.processes].every((count) => count() === 0); }
