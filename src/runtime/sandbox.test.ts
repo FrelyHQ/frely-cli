@@ -362,6 +362,8 @@ test("a call that is exactly `frely update` runs our own executable outside the 
     assert.equal(ownUpdateCommand(other, "linux"), undefined, other);
   }
   assert.equal(ownUpdateCommand("frely update", "win32"), undefined);
+  // Windows has no unsandboxed update shortcut: `ownUpdateCommand` is undefined there, so the call is sandboxed like any other.
+  if (process.platform === "win32") return;
   const previous = process.env.FRELY_SANDBOX;
   try {
     process.env.FRELY_SANDBOX = "";
