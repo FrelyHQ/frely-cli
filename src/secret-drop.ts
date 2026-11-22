@@ -29,7 +29,56 @@ const PATH = /^\/[A-Za-z0-9._@%+=:,/-]{1,1000}$/u;
 const HOST = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const MODE = /^[0-7]{3,4}$/u;
 
-export interface SecretDropTarget { kind: "file" | "ssh_file"; path: string; owner: string; group: string; mode: string; host?: string }
+export const SECRET_DROP_FIELD_TYPES = ["password", "text", "number", "textarea"] as const;
+export const SECRET_DROP_FORMATS = ["raw", "env", "json"] as const;
+export interface SecretDropField { name: string; label: string; type: (typeof SECRET_DROP_FIELD_TYPES)[number]; required: boolean; max?: number }
+export interface SecretDropTarget { kind: "file" | "ssh_file"; path: string; owner: string; group: string; mode: string; host?: string; fields?: SecretDropField[]; format?: (typeof SECRET_DROP_FORMATS)[number] }
+const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/u;
+
+/** Same rules as the relay's own check: the field list is part of what the owner signed, so it is rebuilt byte for byte or refused. */
+function parseFields(t: Record<string, unknown>): { fields?: SecretDropField[]; format?: (typeof SECRET_DROP_FORMATS)[number] } {
+  const bad = (reason: string): never => { throw new Error(`The destination is not allowed: ${reason}.`); };
+  if (t.fields === undefined) { if (t.format !== undefined) bad("format needs fields"); return {}; }
+  if (!Array.isArray(t.fields) || t.fields.length < 1 || t.fields.length > 8) return bad("fields must list 1 to 8 fields");
+  const seen = new Set<string>();
+  const fields = t.fields.map((raw: unknown): SecretDropField => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return bad("a field is not an object");
+    const f = raw as Record<string, unknown>;
+    if (Object.keys(f).some((key) => !["name", "label", "type", "required", "max"].includes(key))) return bad("a field has an unknown property");
+    if (typeof f.name !== "string" || !FIELD_NAME.test(f.name) || seen.has(f.name)) return bad("field names must be unique plain names");
+    seen.add(f.name);
+    if (typeof f.label !== "string" || f.label.trim().length < 1 || f.label.length > 80 || /[\r\n]/u.test(f.label)) return bad("a field label is not one short line");
+    if (!(SECRET_DROP_FIELD_TYPES as readonly unknown[]).includes(f.type)) return bad("unknown field type");
+    if (f.required !== undefined && typeof f.required !== "boolean") return bad("required must be true or false");
+    if (f.max !== undefined && (!Number.isInteger(f.max) || (f.max as number) < 1 || (f.max as number) > 4096)) return bad("max is out of range");
+    return { name: f.name, label: f.label.trim(), type: f.type as SecretDropField["type"], required: f.required !== false, ...(f.max !== undefined ? { max: f.max as number } : {}) };
+  });
+  const format = t.format === undefined ? (fields.length === 1 ? "raw" : "env") : t.format;
+  if (!(SECRET_DROP_FORMATS as readonly unknown[]).includes(format)) return bad("unknown format");
+  if (format === "raw" && fields.length !== 1) return bad("raw needs exactly one field");
+  if (format === "env" && fields.some((f) => f.type === "textarea")) return bad("env cannot hold a multi-line field");
+  return { fields, format: format as (typeof SECRET_DROP_FORMATS)[number] };
+}
+
+/** Checks the decrypted JSON against the signed field list and turns it into the bytes to write: the value itself, NAME=value lines, or JSON. */
+export function renderSecretFields(target: SecretDropTarget, plain: Buffer): Buffer {
+  if (!target.fields) return plain;
+  let values: unknown;
+  try { values = JSON.parse(target.format === "raw" ? JSON.stringify({ [target.fields[0]!.name]: plain.toString("utf8") }) : plain.toString("utf8")); } catch { throw new TrustError("fields_invalid", "The values did not match the requested fields."); }
+  if (!values || typeof values !== "object" || Array.isArray(values)) throw new TrustError("fields_invalid", "The values did not match the requested fields.");
+  const given = values as Record<string, unknown>;
+  const names = new Set(target.fields.map((f) => f.name));
+  if (Object.keys(given).some((key) => !names.has(key))) throw new TrustError("fields_invalid", "The values did not match the requested fields.");
+  const out: Record<string, string> = {};
+  for (const f of target.fields) {
+    const v = given[f.name];
+    if (typeof v !== "string" || (v === "" && f.required) || (f.max !== undefined && v.length > f.max) || (f.type === "number" && v !== "" && !/^-?[0-9]+(\.[0-9]+)?$/u.test(v)) || (f.type !== "textarea" && /[\r\n]/u.test(v))) throw new TrustError("fields_invalid", `The value for ${f.name} was not accepted.`);
+    out[f.name] = v;
+  }
+  if (target.format === "raw") return Buffer.from(out[target.fields[0]!.name]!, "utf8");
+  if (target.format === "json") return Buffer.from(`${JSON.stringify(out, null, 2)}\n`, "utf8");
+  return Buffer.from(Object.entries(out).map(([k, v]) => `${k}=${v}\n`).join(""), "utf8");
+}
 
 /** The destination exactly as the owner signs it; anything outside these shapes is refused (no shell syntax can ride in a path or name). */
 export function parseSecretDropTarget(value: unknown): SecretDropTarget {
@@ -42,7 +91,8 @@ export function parseSecretDropTarget(value: unknown): SecretDropTarget {
   if (typeof t.mode !== "string" || !MODE.test(t.mode) || (Number.parseInt(t.mode, 8) & 0o022) !== 0) return bad("mode must be octal and not writable by group or others");
   if (t.kind === "ssh_file" && (typeof t.host !== "string" || !HOST.test(t.host))) return bad("host must be an ssh alias");
   if (t.kind === "file" && t.host !== undefined) return bad("a local file has no host");
-  return { kind: t.kind, path: t.path, owner: t.owner, group: t.group, mode: t.mode, ...(t.kind === "ssh_file" ? { host: t.host as string } : {}) };
+  if (Object.keys(t).some((key) => !["kind", "path", "owner", "group", "mode", "host", "fields", "format"].includes(key))) return bad("unknown property");
+  return { kind: t.kind, path: t.path, owner: t.owner, group: t.group, mode: t.mode, ...(t.kind === "ssh_file" ? { host: t.host as string } : {}), ...parseFields(t) };
 }
 
 /** What the owner's passkey signature covers besides the drop itself: destination, this device's one-use key and the exact ciphertext. */
@@ -150,7 +200,10 @@ export async function applySecretDrop(args: Record<string, unknown>, deps: Secre
   if (payload.grant.kind !== SECRET_DROP_GRANT || payload.grant.mode !== "once" || payload.grant.resource !== dropId || payload.id !== dropId) throw new TrustError("wrong_grant");
   if (payload.ctl !== undefined || payload.scope !== undefined) throw new TrustError("approval_invalid");
   if (payload.bind?.tool !== SECRET_DROP_APPLY_TOOL || payload.bind.cmdHash !== secretDropBinding({ dropId, target, epk: key.epk, ciphertext })) throw new TrustError("bind_mismatch");
-  const secret = decrypt(ciphertext, key, dropId);
+  const decrypted = decrypt(ciphertext, key, dropId);
+  let secret: Buffer;
+  try { secret = renderSecretFields(target, decrypted); } catch (error) { decrypted.fill(0); throw error; }
+  if (secret !== decrypted) decrypted.fill(0);
   try {
     const { command, args: argv } = writerCommand(target);
     const result = await (deps.run ?? defaultRunner)(command, argv, secret);
