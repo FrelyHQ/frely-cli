@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { setObserveIdentity } from "./trust/observe.js";
 import { APPROVAL_DOMAIN, pinTrustChain, TRUST_DOMAIN, trustDirectory, trustRecordHash, type ApprovalPayload, type TrustRecord } from "./trust/record.js";
 import { challengeFor, type Signer, type WebAuthnSignature } from "./trust/webauthn.js";
-import { applySecretDrop, forgetSecretDropKeys, parseSecretDropTarget, prepareSecretDrop, secretDropBinding, writerCommand, type SecretDropTarget } from "./secret-drop.js";
+import { applySecretDrop, forgetSecretDropKeys, parseSecretDropTarget, renderSecretFields, prepareSecretDrop, secretDropBinding, writerCommand, type SecretDropTarget } from "./secret-drop.js";
 
 const ORIGIN = "https://approve.frely.cloud";
 const b64 = (data: Buffer | string | Uint8Array) => Buffer.from(data).toString("base64url");
@@ -204,4 +204,24 @@ test("prepare refuses a bad id and caps the number of open drops", () => {
   for (let i = 0; i < 32; i += 1) prepareSecretDrop({ dropId: `sdrop_cap${String(i).padStart(6, "0")}` });
   assert.throws(() => prepareSecretDrop({ dropId: "sdrop_overflow00" }), /Too many/u);
   forgetSecretDropKeys();
+});
+
+test("a field list is checked against the decrypted values and rendered as env, json or raw", () => {
+  const base = { kind: "file", path: "/etc/app/env", owner: "root", group: "root", mode: "0600" };
+  const fields = [{ name: "USER", label: "User", type: "text", required: true }, { name: "PORT", label: "Port", type: "number", required: false, max: 5 }];
+  const env = parseSecretDropTarget({ ...base, fields });
+  assert.equal(env.format, "env");
+  assert.equal(renderSecretFields(env, Buffer.from(JSON.stringify({ USER: "a", PORT: "80" }))).toString(), "USER=a\nPORT=80\n");
+  const json = parseSecretDropTarget({ ...base, fields, format: "json" });
+  assert.deepEqual(JSON.parse(renderSecretFields(json, Buffer.from(JSON.stringify({ USER: "a", PORT: "" }))).toString()), { USER: "a", PORT: "" });
+  const raw = parseSecretDropTarget({ ...base, fields: [fields[0]] });
+  assert.equal(renderSecretFields(raw, Buffer.from("tok")).toString(), "tok");
+  const plain = Buffer.from("legacy");
+  assert.equal(renderSecretFields(parseSecretDropTarget(base), plain), plain);
+  for (const bad of [{ USER: "" }, { USER: "a", PORT: "x" }, { USER: "a", PORT: "123456" }, { USER: "a\nB=1" }, { USER: "a", OTHER: "1" }, { USER: 1 }]) {
+    assert.throws(() => renderSecretFields(env, Buffer.from(JSON.stringify(bad))), /not accepted|did not match/u);
+  }
+  assert.throws(() => renderSecretFields(env, Buffer.from("not json")), /did not match/u);
+  assert.throws(() => parseSecretDropTarget({ ...base, fields: [fields[0], fields[0]] }), /not allowed/u);
+  assert.throws(() => parseSecretDropTarget({ ...base, fields: [{ ...fields[0], type: "checkbox" }] }), /not allowed/u);
 });
