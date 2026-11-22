@@ -128,3 +128,91 @@ test("permission wait --then runs the original command once approved", async () 
   assert.equal(result.code, 7);
   assert.equal((await run(["permission", "wait", "not valid!"], () => text({}))).code, EXIT.cli);
 });
+
+import { mkdir, stat } from "node:fs/promises";
+import { basename, dirname } from "node:path";
+import { Workspace } from "../runtime/workspace.js";
+import { createHash } from "node:crypto";
+import { useTransferIo } from "./commands.js";
+import { prepareLocalUpload } from "../local-transfer.js";
+
+const PRESIGNED = "https://storage.example/obj?X-Amz-Signature=SECRET";
+const sha = (value: string) => createHash("sha256").update(value).digest("hex");
+const view = { id: "tr_1", name: "pic.png", bytes: 5, expiresAt: "2026-12-01T00:00:00Z", visibility: "self", url: "https://frely.cloud/f/abc123" };
+
+test("put uploads a local file, completes it and prints the short link without the presigned address", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "frely-put-"));
+  await writeFile(join(dir, "pic.png"), "hello");
+  const uploads: Array<{ url: string; headers?: Record<string, string> }> = [];
+  const restore = useTransferIo({ prepare: async (path) => ({ ...(await prepareLocalUpload(path)), send: async (target) => { uploads.push(target); } }) });
+  try {
+    const reply = (name: string, input: Record<string, unknown>) => input.action === "upload_link" ? text({ id: "tr_1", upload: { url: PRESIGNED, method: "PUT", headers: { "content-type": "image/png" } } }) : text(view);
+    const result = await run(["put", join(dir, "pic.png")], reply);
+    assert.equal(result.code, EXIT.ok);
+    assert.equal(result.out.split("\n")[0], "https://frely.cloud/f/abc123");
+    assert.ok(!result.out.includes("SECRET") && !result.err.includes("SECRET"));
+    assert.deepEqual(result.calls.map((call) => call.input.action), ["upload_link", "complete"]);
+    assert.deepEqual(result.calls[0]!.input, { action: "upload_link", name: "pic.png", bytes: 5, sha256: sha("hello") });
+    assert.equal(uploads[0]!.url, PRESIGNED);
+    const json = await run(["put", join(dir, "pic.png"), "--json"], reply);
+    assert.deepEqual(JSON.parse(json.out), { url: view.url, id: "tr_1", name: "pic.png", bytes: 5, expiresAt: view.expiresAt, visibility: "self" });
+    assert.ok(!json.out.includes("SECRET"));
+  } finally { restore(); }
+});
+
+test("put of device:path asks the relay to pull the file, and a missing local file is a usage error", async () => {
+  const sent = await run(["put", "box:out/a.png"], () => text(view));
+  assert.deepEqual(sent.calls[0]!.input, { action: "send", device: "box", path: "out/a.png" });
+  assert.match(sent.out, /^https:\/\/frely\.cloud\/f\/abc123/u);
+  const missing = await run(["put", "/nonexistent/file.bin"], () => text(view));
+  assert.equal(missing.code, EXIT.cli);
+  assert.equal(missing.calls.length, 0);
+  assert.equal((await run(["put"], () => text({}))).code, EXIT.cli);
+});
+
+test("get downloads with the checked size and sha256, and refuses to overwrite", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "frely-get-"));
+  const seen: Array<{ url: string; expected: { bytes: number; sha256: string }; overwrite: boolean }> = [];
+  const restore = useTransferIo({ download: async (path, target, expected, overwrite) => {
+    seen.push({ url: target.url, expected, overwrite });
+    await mkdir(dirname(path), { recursive: true });
+    const workspace = await Workspace.open(dirname(path));
+    await workspace.writeStream(basename(path), (async function* () { yield Buffer.from("hello"); })(), overwrite, expected);
+  } });
+  try {
+    const reply = () => text({ ...view, sha256: sha("hello"), download: { url: PRESIGNED } });
+    const destination = join(dir, "sub", "out.png");
+    const first = await run(["get", "tr_1", destination], reply);
+    assert.equal(first.code, EXIT.ok);
+    assert.equal(await readFile(destination, "utf8"), "hello");
+    assert.ok(!first.out.includes("SECRET"));
+    assert.deepEqual(seen[0], { url: PRESIGNED, expected: { bytes: 5, sha256: sha("hello") }, overwrite: false });
+    const again = await run(["get", "tr_1", destination], reply);
+    assert.equal(again.code, EXIT.cli);
+    assert.match(again.err, /--overwrite/u);
+    assert.equal(seen.length, 1);
+    assert.equal((await run(["get", "tr_1", destination, "--overwrite"], reply)).code, EXIT.ok);
+    assert.equal(seen[1]!.overwrite, true);
+    await mkdir(join(dir, "x"), { recursive: true });
+    assert.ok((await stat(join(dir, "x"))).isDirectory());
+  } finally { restore(); }
+});
+
+test("get to a device uses transfer receive", async () => {
+  const result = await run(["get", "tr_1", "box:in/a.png", "--overwrite"], () => text({ ok: true }));
+  assert.deepEqual(result.calls[0]!.input, { action: "receive", id: "tr_1", device: "box", path: "in/a.png", overwrite: true });
+  assert.equal(result.code, EXIT.ok);
+});
+
+test("files lists, deletes and validates the share scope", async () => {
+  const listed = await run(["files"], () => text({ transfers: [view] }));
+  assert.match(listed.out, /ID\tNAME\tSIZE\tVISIBILITY\tEXPIRES\tURL/u);
+  assert.match(listed.out, /tr_1\tpic\.png\t5 B\tself\t2026-12-01T00:00:00Z\thttps:\/\/frely\.cloud\/f\/abc123/u);
+  assert.deepEqual((await run(["files", "rm", "tr_1"], () => text({}))).calls[0]!.input, { action: "delete", id: "tr_1" });
+  assert.deepEqual((await run(["files", "share", "tr_1", "--scope", "team"], () => text({}))).calls[0]!.input, { action: "share", id: "tr_1", scope: "team" });
+  for (const bad of [["files", "share", "tr_1"], ["files", "share", "tr_1", "--scope", "public"], ["files", "rm"], ["files", "bogus"]]) {
+    const result = await run(bad, () => text({}));
+    assert.equal(result.code, EXIT.cli, bad.join(" "));
+    assert.equal(result.calls.length, 0);
+  }
+});
