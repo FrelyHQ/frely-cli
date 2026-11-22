@@ -21,7 +21,7 @@ function fixture(t, packageVersion = "1.2.3") {
   git("config", "user.name", "Release Test"); git("config", "user.email", "test@example.invalid");
   git("remote", "add", "origin", remote);
   mkdirSync(join(repo,"scripts"));
-  for (const file of ["release-entry.mjs","release-catalog.mjs"]) cpSync(join(scripts,file),join(repo,"scripts",file));
+  for (const file of ["release-entry.mjs","release-catalog.mjs","critical-deps.mjs","critical-deps.json"]) cpSync(join(scripts,file),join(repo,"scripts",file));
   for (const artifact of catalog.artifacts) if (artifact.packagePath) {
     mkdirSync(dirname(join(repo,artifact.packagePath)),{recursive:true});
     writeFileSync(join(repo,artifact.packagePath), JSON.stringify({name:"release-test", version:packageVersion}));
@@ -179,4 +179,16 @@ test("landingReminder flags install script changes newer than the latest landing
   const fake = (changed) => (...args) => args[0] === "tag" ? "landing/v0.2.0\nlanding/v0.1.0" : changed;
   assert.match(landingReminder(fake("install.ps1\nstart.sh")), /install\.ps1, start\.sh changed since landing\/v0\.2\.0.*release-landing/);
   assert.equal(landingReminder(fake("")), null);
+});
+
+test("tag admission refuses a release range that mixes a critical dependency upgrade with other commits", t => {
+  const f=fixture(t);
+  f.git("tag","-a","v1.2.2","-m","previous");
+  writeFileSync(join(f.repo,"other"),"feature"); f.git("add","."); f.git("commit","-m","feature");
+  writeFileSync(join(f.repo,"package.json"),JSON.stringify({name:"release-test",version:"1.2.3",dependencies:{ws:"8.1.0"}}));
+  f.git("add","."); f.git("commit","-m","upgrade ws"); f.git("push","origin","main");
+  f.git("tag","-a",f.tag,"-m","release"); f.git("push","origin","refs/tags/"+f.tag);
+  const result=f.invoke(["--validate-tag",f.tag]);
+  assert.notEqual(result.status,0);
+  assert.match(result.stderr,/upgrades ws together with 1 other commit/);
 });

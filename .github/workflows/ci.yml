@@ -11,6 +11,27 @@ permissions:
   contents: read
 
 jobs:
+  critical-deps:
+    name: Critical dependencies upgrade alone
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Compare dependencies between base and head
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/critical-deps.mjs pr "$BASE_SHA" "$HEAD_SHA"
+
   native-credentials-macos:
     name: Native credentials (macOS, GitHub-hosted)
     runs-on: macos-latest

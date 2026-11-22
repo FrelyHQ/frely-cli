@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { catalog } from "./release-catalog.mjs";
+import { assertReleaseRangeSplit } from "./critical-deps.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const semver = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$/;
@@ -123,6 +124,7 @@ function validateTag(tag) {
   run("git", ["merge-base", "--is-ancestor", sha, "refs/remotes/origin/main"]);
   assertPackage(artifact, version);
   assertVersionSource(artifact, version, sha);
+  if (artifact.id === "cli") assertReleaseRangeSplit(sha, { currentTag: tag });
   const result = { project: catalog.project, artifact: artifact.id, executor: "actions", tag, version, source_sha: sha };
   if (process.env.GITHUB_OUTPUT) for (const [key, value] of Object.entries(result)) appendFileSync(process.env.GITHUB_OUTPUT, key + "=" + value + "\n");
   console.log("RELEASE_PLAN_JSON=" + JSON.stringify(result));
@@ -172,9 +174,11 @@ export function main(args = process.argv.slice(2), entryArtifact = catalog.defau
     fail("--purge-cache requires the local Frely landing executor");
   if (options["no-wait"] && !(catalog.project === "frely-cli" && artifact.id === "cli" && executor === "actions"))
     fail("--no-wait is supported by the Actions CLI publisher only");
+  if (executor === "local") assertClean();
+  if (executor === "local" || artifact.id === "cli") run("git", ["fetch", "origin", "main", "--tags"]);
+  // Every CLI release starts here (local, release-package, or the tag that publish.yml re-validates), so refuse a mixed critical-dependency range before any of them runs.
+  if (artifact.id === "cli") assertReleaseRangeSplit(executor === "local" ? "HEAD" : "refs/remotes/origin/main");
   if (executor === "local") {
-    assertClean();
-    run("git", ["fetch", "origin", "main", "--tags"]);
     options.version ||= nextVersion(artifact);
     assertVersionSource(artifact, options.version, git("rev-parse", "HEAD"));
   }
