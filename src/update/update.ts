@@ -1,3 +1,4 @@
+import { currentInstance } from "../auth.js";
 import { createHash } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import { chmod, copyFile, lstat, mkdir, mkdtemp, open, readdir, readFile, realpath, rename, rm } from "node:fs/promises";
@@ -206,7 +207,7 @@ export async function update(write: (message: string) => void, dependencies: Upd
   const release = await d.latestRelease(installation);
   if (compareVersions(release.version, VERSION) <= 0) return { state: "current", message: `Frely ${VERSION} is up to date.` };
   const service = await d.serviceStatus();
-  if (installation.platform === "win32") return { state: "manual", message: `Update ${VERSION} → ${release.version}. Finish any running Frely tasks, then run this command in a local PowerShell terminal:\n\n${manualUpdateCommand(installation, release.version, service.active)}\n\nAfter installation, run frely doctor. No files or services were changed by frely update.` };
+  if (installation.platform === "win32") return { state: "manual", message: `Update ${VERSION} → ${release.version}. Finish any running Frely tasks, then run this command in a local PowerShell terminal:\n\n${manualUpdateCommand(installation, release.version, service.active, (await currentInstance()).setupUrl)}\n\nAfter installation, run frely doctor. No files or services were changed by frely update.` };
   if (!["darwin", "linux"].includes(installation.platform)) throw new Error("This platform requires a manual update.");
   if (service.active) {
     const command = await d.serviceCommand();

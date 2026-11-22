@@ -1,4 +1,5 @@
 import test from "node:test";
+import { HOSTED_INSTANCE, trustAnchor } from "../instance.js";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
@@ -59,7 +60,7 @@ function approval(workspace: string, maxSteps = 2) {
 test("start verifies the signed scope, runs one step as a remote pi task, and a retried start returns the same run", async () => {
   await withDevice(async (work) => {
     // Pin with a proper first-version signature.
-    await pinTrustChain([{ record, sig: trustSig(record) }], "usr_1", trustDirectory({ relayUrl: "https://r.test", userId: "usr_1" }));
+    await pinTrustChain([{ record, sig: trustSig(record) }], "usr_1", trustDirectory({ relayUrl: "https://r.test", userId: "usr_1" }), trustAnchor(HOSTED_INSTANCE));
     const spawned: string[] = [];
     const deps = { spawnWorker: (runId: string) => { spawned.push(runId); } };
     const args = { action: "start", runKey: "run_abcdef01", todoId: "td_1", instruction: "Say hello", cwd: work, sites: ["github.com"] };
@@ -81,7 +82,7 @@ test("start verifies the signed scope, runs one step as a remote pi task, and a 
 
 test("start without a valid passkey approval or outside the folder starts nothing", async () => {
   await withDevice(async (work) => {
-    await pinTrustChain([{ record, sig: trustSig(record) }], "usr_1", trustDirectory({ relayUrl: "https://r.test", userId: "usr_1" }));
+    await pinTrustChain([{ record, sig: trustSig(record) }], "usr_1", trustDirectory({ relayUrl: "https://r.test", userId: "usr_1" }), trustAnchor(HOSTED_INSTANCE));
     const spawned: string[] = [];
     const deps = { spawnWorker: (runId: string) => { spawned.push(runId); } };
     const base = { action: "start", todoId: "td_1", instruction: "x", cwd: work, sites: [] };

@@ -2,7 +2,8 @@ import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { inspectAuth, normalizeRelayUrl, requireLogin } from "../../auth.js";
+import { currentInstance, inspectAuth, normalizeRelayUrl, requireLogin } from "../../auth.js";
+import type { InstanceEndpoints } from "../../instance.js";
 import { cliLaunchArguments } from "../../cli-launch.js";
 import { credentialStore } from "../../credential-store.js";
 import { ControllerError, EXIT } from "../../controller/client.js";
@@ -81,6 +82,7 @@ async function add(args: string[], io: LocalIo, deps: ApprovalDeps): Promise<num
   const requested = value(args, "--name");
   if (requested !== undefined) assertSlug(requested);
   const relayUrl = normalizeRelayUrl((await inspectAuth().catch(() => null))?.relayUrl);
+  const instance = await currentInstance();
   const unavailable = sandboxUnavailableReason();
   if (unavailable) return fail(`Agents run on this computer only inside the Frely sandbox, and it cannot run here (${unavailable}). On Linux install bubblewrap, socat and ripgrep; Windows is not supported.`, EXIT.tool);
 
@@ -112,7 +114,7 @@ async function add(args: string[], io: LocalIo, deps: ApprovalDeps): Promise<num
 
   if (record.setup && !record.setupDone) {
     io.err(`Running setup inside the sandbox: ${record.setup}\n`);
-    const code = await runSetup(record, relayUrl, io);
+    const code = await runSetup(record, instance, io);
     if (code !== 0) return fail(`Setup failed (exit ${code}). Fix it or remove the Agent with frely service remove ${record.slug}, then run add again.`, EXIT.tool);
   }
   await writeRecord({ ...record, setupDone: true });
@@ -131,8 +133,8 @@ async function withApprovals(record: LocalAgentRecord, io: LocalIo, deps: Approv
   return next;
 }
 
-async function runSetup(record: LocalAgentRecord, relayUrl: string, io: LocalIo): Promise<number> {
-  restrictSandboxNetwork({ allowedDomains: [new URL(gatewayOrigin(relayUrl)).hostname, ...approvedHosts(record)] });
+async function runSetup(record: LocalAgentRecord, instance: InstanceEndpoints, io: LocalIo): Promise<number> {
+  restrictSandboxNetwork({ allowedDomains: [new URL(gatewayOrigin(instance)).hostname, ...approvedHosts(record)] });
   await mkdir(`${record.workspace}/.cache`, { recursive: true });
   try {
     const { child, violations } = await spawnConfined(record.setup!, record.workspace, agentEnv(record.workspace, { model: false }));
@@ -183,7 +185,7 @@ async function start(args: string[], io: LocalIo, deps: ApprovalDeps): Promise<n
 /** The two things a start needs besides the download: a login and a key for the model calls. Said now, not in a log file. */
 async function preflight(record: LocalAgentRecord): Promise<void> {
   const login = await requireLogin().catch(() => fail("Frely login is required. Run `frely login`."));
-  if (!await readApiKey(gatewayOrigin(login.config.relayUrl))) {
+  if (!await readApiKey(gatewayOrigin(login.config.instance))) {
     fail(`${record.slug} needs a Frely API key for its model calls. Create one at ${login.config.relayUrl}/user/keys, then run: frely service key --api-key-stdin`);
   }
 }
@@ -250,7 +252,7 @@ async function remove(args: string[], io: LocalIo): Promise<number> {
 }
 
 async function key(args: string[], io: LocalIo): Promise<number> {
-  const origin = gatewayOrigin((await requireLogin().catch(() => fail("Frely login is required. Run `frely login`."))).config.relayUrl);
+  const origin = gatewayOrigin((await requireLogin().catch(() => fail("Frely login is required. Run `frely login`."))).config.instance);
   if (flag(args, "--clear")) { await credentialStore.deletePassword(API_KEY_SERVICE, origin); io.out("The saved API key was removed.\n"); return EXIT.ok; }
   if (!flag(args, "--api-key-stdin")) return fail("Usage: frely service key --api-key-stdin | --clear");
   const secret = await io.readSecret();

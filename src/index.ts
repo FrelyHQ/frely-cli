@@ -15,7 +15,7 @@ import { runWorkspaceCommand } from "./workspace-command.js";
 import { McpLease } from "./runtime/mcp-lease.js";
 import { join, resolve } from "node:path";
 import { stdin, stdout } from "node:process";
-import { inspectAuth, loginDevice, logout, normalizeRelayUrl, requireLogin, initEmailDeviceLogin, completeEmailDeviceLogin, savePendingEmailChallenge, readPendingEmailChallenge, deletePendingEmailChallenge, startOrResumeEmailLogin, waitEmailDeviceLogin, EmailLoginTimeout, localDeviceId, finishDeviceLogin, readConfig, resumeDeviceLogin, openVerificationUrl } from "./auth.js";
+import { currentInstance, inspectAuth, loginDevice, logout, normalizeRelayUrl, requireLogin, initEmailDeviceLogin, completeEmailDeviceLogin, savePendingEmailChallenge, readPendingEmailChallenge, deletePendingEmailChallenge, startOrResumeEmailLogin, waitEmailDeviceLogin, EmailLoginTimeout, localDeviceId, finishDeviceLogin, readConfig, resumeDeviceLogin, openVerificationUrl } from "./auth.js";
 import { basicCredentialStore as credentialStore } from "./credential-basic.js";
 import { doctor, formatDoctor } from "./diagnostics.js";
 import { ensureDevice } from "./device/control.js";
@@ -225,7 +225,7 @@ async function main(): Promise<void> {
 
   if (command === "key") {
     if (args[1] === undefined) { stdout.write(subcommandUsage("key")); return; }
-    process.exitCode = await runKeyCommand(args.slice(1), { out: (text) => { stdout.write(text); }, call: (name, input) => callCloudToolAwaiting(name, input) });
+    process.exitCode = await runKeyCommand(args.slice(1), { out: (text) => { stdout.write(text); }, call: (name, input) => callCloudToolAwaiting(name, input), instance: await currentInstance() });
     return;
   }
 

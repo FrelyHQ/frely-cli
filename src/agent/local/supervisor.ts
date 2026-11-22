@@ -19,7 +19,7 @@ export async function superviseAgent(slug: string): Promise<number> {
   if (!record) throw new SupervisorError(`No local Agent named ${slug}. Add it with frely service add.`);
   if (!record.setupDone) throw new SupervisorError(`${slug} was not set up yet. Run frely service add again to finish.`);
   const login = await requireLogin().catch(() => { throw new SupervisorError("Frely login is required. Run `frely login`."); });
-  const origin = gatewayOrigin(login.config.relayUrl);
+  const origin = gatewayOrigin(login.config.instance);
   const apiKey = await readApiKey(origin);
   if (!apiKey) throw new SupervisorError(`${slug} needs a Frely API key for its model calls. Create one at ${login.config.relayUrl}/user/keys, then run: frely service key --api-key-stdin`);
 

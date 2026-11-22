@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
-import { normalizeRelayUrl } from "./auth.js";
+import { currentInstance, normalizeRelayUrl } from "./auth.js";
+import { HOSTED_INSTANCE, isInstanceUrl } from "./instance.js";
 import { credentialStore as secureCredentialStore, type CredentialStore } from "./credential-store.js";
 import { readManagedSkill } from "./skill/managed.js";
 import { SKILL_API_KEY_SERVICE } from "./skill/access.js";
@@ -31,7 +32,7 @@ export async function getKeyBudget(input: {
     if (!installed) throw new KeyBudgetError("target_not_installed", "The Frely Skill target is not installed.");
     if (installed.authMode !== "api-key") throw new KeyBudgetError("api_key_required", "This Agent uses account login and has no Key budget.");
     const origin = new URL(installed.manifestUrl);
-    if (origin.username || origin.password || origin.hash || !(origin.protocol === "https:" && (origin.hostname === "frely.cloud" || origin.hostname.endsWith(".frely.cloud")) || origin.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname))) {
+    if (!isInstanceUrl(origin, [await currentInstance(), HOSTED_INSTANCE])) {
       throw new KeyBudgetError("input_invalid", "Installed Skill credential destination is invalid.");
     }
     relayUrl = origin.origin;
