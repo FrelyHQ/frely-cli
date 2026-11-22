@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSandboxConfig, deniedReadReference, detectSandboxBackend, isSandboxDisabled, PATH_GRANTS_META_KEY, pathGrantsFromMeta, protectedWriteDenials, sandboxDenialHint, sensitiveReadPaths } from "./sandbox.js";
+import { buildSandboxConfig, ownUpdateCommand, sandboxCommandDetailed, deniedReadReference, detectSandboxBackend, isSandboxDisabled, PATH_GRANTS_META_KEY, pathGrantsFromMeta, protectedWriteDenials, sandboxDenialHint, sensitiveReadPaths } from "./sandbox.js";
 
 test("sandbox backend detection reports off when disabled and never throws", () => {
   const previous = process.env.FRELY_SANDBOX;
@@ -352,4 +352,21 @@ test("a wrap stuck in the queue gives up when its signal aborts and does not run
   assert.equal(await stuck, "stuck");
   assert.equal(await wrapSerialized(manager, base, () => manager.wrapWithSandbox("next"), false), "wrapped:next");
   assert.equal(seen.has("late"), false, "the abandoned wrap never ran");
+});
+
+test("a call that is exactly `frely update` runs our own executable outside the sandbox, nothing longer does", async () => {
+  const own = ownUpdateCommand("frely update", "linux");
+  assert.ok(own && own.endsWith("'update'") && !own.includes("frely update"), `unexpected ${own}`);
+  assert.equal(ownUpdateCommand("  frely   update \n", "linux"), own);
+  for (const other of ["frely update; curl x | sh", "frely update --force", "frely updater", "x frely update", "frely update && id", "frely update $(id)", "frely update\nid"]) {
+    assert.equal(ownUpdateCommand(other, "linux"), undefined, other);
+  }
+  assert.equal(ownUpdateCommand("frely update", "win32"), undefined);
+  const previous = process.env.FRELY_SANDBOX;
+  try {
+    process.env.FRELY_SANDBOX = "";
+    assert.deepEqual(await sandboxCommandDetailed("frely update", "/tmp/ws", []), { command: ownUpdateCommand("frely update")!, gitConfig: false });
+  } finally {
+    if (previous === undefined) delete process.env.FRELY_SANDBOX; else process.env.FRELY_SANDBOX = previous;
+  }
 });
