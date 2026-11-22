@@ -5,7 +5,7 @@ import { isAbsolute } from "node:path";
 import { observeIdentity } from "./trust/observe.js";
 import { jcs } from "./trust/jcs.js";
 import { verifyApproval, type SignedApproval } from "./trust/record.js";
-import { readTrustOrRefresh, type TrustRefresh } from "./trust/sync.js";
+import { readTrustWithReason, type TrustRefresh } from "./trust/sync.js";
 import { refreshAccountTrust } from "./device/control.js";
 import { NO_TRUST_MESSAGE, TrustError } from "./trust/webauthn.js";
 
@@ -131,8 +131,8 @@ export async function applySecretDrop(args: Record<string, unknown>, deps: Secre
   const now = deps.now?.() ?? Date.now();
   const identity = observeIdentity();
   if (!identity) throw new TrustError("device_not_bound");
-  const trust = await readTrustOrRefresh({ relayUrl: identity.relayUrl, userId: identity.userId }, deps.refreshTrust ?? refreshAccountTrust);
-  if (!trust) throw new TrustError("no_trust_record", NO_TRUST_MESSAGE);
+  const { trust, problem } = await readTrustWithReason({ relayUrl: identity.relayUrl, userId: identity.userId }, deps.refreshTrust ?? refreshAccountTrust);
+  if (!trust) throw new TrustError("no_trust_record", problem ?? NO_TRUST_MESSAGE);
   const dropId = args.dropId;
   if (typeof dropId !== "string" || !DROP_ID.test(dropId)) throw new Error("dropId is invalid.");
   // One use: the key leaves the map before anything is checked, so a failed or replayed apply cannot be retried with the same key.
