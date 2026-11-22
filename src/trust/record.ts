@@ -8,11 +8,11 @@ import { challengeFor, TrustError, verifyAssertion, type Signer, type WebAuthnSi
 export const TRUST_DOMAIN = "frely.trust.v1";
 export const APPROVAL_DOMAIN = "frely.approval.v1";
 /**
- * The only relying party and signing origin a device accepts, whatever a record says. Without this a first version served by a
- * compromised cloud could list the main site as an approval origin, and signatures made there would count.
+ * The only relying party and signing origin a device accepts for an instance, whatever a record says (`trustAnchor(instance)`, from
+ * instance.ts). Without this a first version served by a compromised cloud could list another site as an approval origin, and signatures
+ * made there would count. The anchor comes from the instance the account is logged in to, never from the record itself.
  */
-export const TRUST_RP_ID = "frely.cloud";
-export const TRUST_APPROVAL_ORIGINS: readonly string[] = ["https://approve.frely.cloud"];
+export interface TrustAnchor { rpId: string; approvalOrigins: readonly string[] }
 
 export interface TrustRecord {
   typ: "frely.trust.v1";
@@ -29,20 +29,20 @@ export interface TrustPin { seq: number; hash: string; user: string }
 
 export const trustRecordHash = (record: TrustRecord): string => createHash("sha256").update(jcs(record)).digest("base64url");
 
-function shape(record: TrustRecord): void {
+function shape(record: TrustRecord, anchor: TrustAnchor): void {
   if (record?.typ !== TRUST_DOMAIN || typeof record.user !== "string" || !Number.isSafeInteger(record.seq) || record.seq < 1) throw new TrustError("record_invalid");
   if (record.seq === 1 ? record.prev !== null : typeof record.prev !== "string") throw new TrustError("record_invalid");
-  if (record.rpId !== TRUST_RP_ID) throw new TrustError("rp_id_not_allowed");
-  if (!Array.isArray(record.approvalOrigins) || record.approvalOrigins.length !== TRUST_APPROVAL_ORIGINS.length || !record.approvalOrigins.every((origin, index) => origin === TRUST_APPROVAL_ORIGINS[index])) throw new TrustError("origin_not_allowed");
+  if (record.rpId !== anchor.rpId) throw new TrustError("rp_id_not_allowed");
+  if (!Array.isArray(record.approvalOrigins) || record.approvalOrigins.length !== anchor.approvalOrigins.length || !record.approvalOrigins.every((origin, index) => origin === anchor.approvalOrigins[index])) throw new TrustError("origin_not_allowed");
   if (!Array.isArray(record.signers) || record.signers.length < 1 || record.signers.length > 32) throw new TrustError("record_invalid");
 }
 
 /**
  * Check a new trust record version. The first version signs itself; every later one is signed by a signer of the previous
- * version and must chain to it. `pin` is what this device already holds (none on first bind).
+ * version and must chain to it. `pin` is what this device already holds (none on first bind); `anchor` is the instance's.
  */
-export function verifyTrustRecord(next: SignedTrustRecord, previous: TrustRecord | undefined, pin?: TrustPin): TrustPin {
-  shape(next.record);
+export function verifyTrustRecord(next: SignedTrustRecord, previous: TrustRecord | undefined, pin: TrustPin | undefined, anchor: TrustAnchor): TrustPin {
+  shape(next.record, anchor);
   if (pin && next.record.user !== pin.user) throw new TrustError("user_mismatch");
   const hash = trustRecordHash(next.record);
   if (pin) {
@@ -71,9 +71,9 @@ export async function readTrust(directory = trustDirectory()): Promise<{ pin: Tr
 }
 
 /** Pin a verified record. Rollbacks and forks throw before anything is written. */
-export async function pinTrustRecord(next: SignedTrustRecord, directory = trustDirectory()): Promise<TrustPin> {
+export async function pinTrustRecord(next: SignedTrustRecord, directory: string, anchor: TrustAnchor): Promise<TrustPin> {
   const held = await readTrust(directory);
-  const pin = verifyTrustRecord(next, held?.record, held?.pin);
+  const pin = verifyTrustRecord(next, held?.record, held?.pin, anchor);
   if (!held || pin.seq > held.pin.seq) {
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await writeFile(join(directory, "record.json"), JSON.stringify({ pin, record: next.record }), { mode: 0o600 });
@@ -86,7 +86,7 @@ export async function pinTrustRecord(next: SignedTrustRecord, directory = trustD
  * Pin the newest version of a user's chain. The chain is walked from what the device already holds (or from version 1), so
  * every version is checked against its predecessor, never only the newest. A first pin must belong to `userId` (the bound account).
  */
-export async function pinTrustChain(chain: readonly SignedTrustRecord[], userId: string, directory = trustDirectory()): Promise<TrustPin | undefined> {
+export async function pinTrustChain(chain: readonly SignedTrustRecord[], userId: string, directory: string, anchor: TrustAnchor): Promise<TrustPin | undefined> {
   const held = await readTrust(directory);
   if (held && held.pin.user !== userId) throw new TrustError("user_mismatch");
   let pin = held?.pin, previous = held?.record, newest: SignedTrustRecord | undefined;
@@ -95,7 +95,7 @@ export async function pinTrustChain(chain: readonly SignedTrustRecord[], userId:
   for (const version of ordered) {
     if (version.record.user !== userId) throw new TrustError("user_mismatch");
     if (pin && version.record.seq < pin.seq) continue;
-    pin = verifyTrustRecord(version, previous, pin);
+    pin = verifyTrustRecord(version, previous, pin, anchor);
     previous = version.record;
     newest = version;
   }

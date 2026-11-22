@@ -31,14 +31,14 @@ export interface LoginMcpSession {
 export async function loginMcpSession(): Promise<LoginMcpSession> {
   const { config, credential } = await requireLogin();
   if (!credential.mcpToken) throw new ControllerError("This computer needs a fresh sign-in to control your Frely devices. Run `frely login` again.", EXIT.auth);
-  return { mcpUrl: frelyMcpUrl(config.relayUrl), mcpToken: credential.mcpToken };
+  return { mcpUrl: frelyMcpUrl(config.instance), mcpToken: credential.mcpToken };
 }
 
 /** A refused FreyMCP token is replaced by refreshing the login, which mints a fresh side token for this machine. */
 async function refreshLoginMcpSession(): Promise<LoginMcpSession> {
   const { config, credential } = await refreshLoginCredential();
   if (!credential.mcpToken) throw new ControllerError("This computer needs a fresh sign-in to control your Frely devices. Run `frely login` again.", EXIT.auth);
-  return { mcpUrl: frelyMcpUrl(config.relayUrl), mcpToken: credential.mcpToken };
+  return { mcpUrl: frelyMcpUrl(config.instance), mcpToken: credential.mcpToken };
 }
 
 /** True for a permission_status call with wait=true, which the server holds open for up to 50 seconds before it answers. */

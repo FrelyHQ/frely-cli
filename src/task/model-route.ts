@@ -41,7 +41,7 @@ export interface RouteDeps {
 async function defaultGateway(): Promise<{ origin: string; key: string } | { reason: string }> {
   const login = await requireLogin().catch(() => null);
   if (!login) return { reason: "not signed in to Frely (run frely login)" };
-  const origin = gatewayOrigin(login.config.relayUrl);
+  const origin = gatewayOrigin(login.config.instance);
   const key = await readApiKey(origin);
   return key ? { origin, key } : { reason: `no Frely API key (create one at ${login.config.relayUrl}/user/keys, then run frely service key --api-key-stdin)` };
 }

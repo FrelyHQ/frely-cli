@@ -1,7 +1,8 @@
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { canonicalFolder } from "./agent-links.js";
-import { LOGIN_REFRESH_UNAVAILABLE, requireLogin } from "../auth.js";
+import { currentInstance, LOGIN_REFRESH_UNAVAILABLE, requireLogin } from "../auth.js";
+import { HOSTED_INSTANCE, isInstanceUrl, type InstanceEndpoints } from "../instance.js";
 import { credentialStore as secureCredentialStore, type CredentialStore } from "../credential-store.js";
 import { remoteAgentMcpInvoker, remoteAgentTaskClient, SkillInvocationError, type AgentTurnResult, type CallerItem, type CallerToolDefinition, type RemoteAgentMcpInvoker, type RemoteAgentTaskClient, type SkillInvocationResult } from "./router.js";
 import {
@@ -76,7 +77,7 @@ export async function resolveAgentTarget(target: string, relayUrl: string, home 
   if (installed) return installed.distributionId;
   const signedIn = resolveSignedIn === undefined ? null : await resolveSignedIn(`${match[1]}/${match[2]}${match[3] ? "@" + match[3] : ""}`);
   if (signedIn !== null) return signedIn;
-  return (await fetchManifest(agentManifestUrl(`${match[1]}/${match[2]}`, relayUrl), fetchFn)).id;
+  return (await fetchManifest(agentManifestUrl(`${match[1]}/${match[2]}`, relayUrl), fetchFn, await trustedInstances())).id;
 }
 
 export async function installSkillAdapter(input: {
@@ -92,7 +93,8 @@ export async function installSkillAdapter(input: {
   readonly credentialStore?: CredentialStore;
 }) {
   const fetchFn = input.fetchFn ?? fetch;
-  const manifest = input.manifest !== undefined ? parseManifest(input.manifest, normalizedFrelyUrl(input.manifestUrl, "invalid_manifest_url")) : await fetchManifest(input.manifestUrl, fetchFn);
+  const instances = await trustedInstances();
+  const manifest = input.manifest !== undefined ? parseManifest(input.manifest, normalizedFrelyUrl(input.manifestUrl, "invalid_manifest_url", instances), instances) : await fetchManifest(input.manifestUrl, fetchFn, instances);
   const home = input.home ?? homedir();
   const existing = await readManagedSkill(manifest.id, home);
   const slug = existing?.slug ?? (manifest.installName === undefined ? skillSlug(manifest.name) : installDirName(manifest.installName));
@@ -349,8 +351,8 @@ export function publicSkillAccessError(error: unknown): Readonly<Record<string, 
   return Object.freeze({ ok: false, error: Object.freeze({ code: "unexpected_error", message: error instanceof Error ? error.message : "Unexpected error" }) });
 }
 
-async function fetchManifest(value: string, fetchFn: typeof fetch): Promise<PublicAgentManifest> {
-  const url = normalizedFrelyUrl(value, "invalid_manifest_url");
+async function fetchManifest(value: string, fetchFn: typeof fetch, instances: readonly InstanceEndpoints[]): Promise<PublicAgentManifest> {
+  const url = normalizedFrelyUrl(value, "invalid_manifest_url", instances);
   let response: Response;
   try {
     response = await fetchFn(url, {
@@ -369,19 +371,19 @@ async function fetchManifest(value: string, fetchFn: typeof fetch): Promise<Publ
   let payload: unknown;
   try { payload = JSON.parse(text); }
   catch { throw new SkillAccessError("manifest_invalid", "Frely manifest is not valid JSON."); }
-  return parseManifest(payload, url);
+  return parseManifest(payload, url, instances);
 }
 
-function parseManifest(value: unknown, sourceUrl: URL): PublicAgentManifest {
+function parseManifest(value: unknown, sourceUrl: URL, instances: readonly InstanceEndpoints[]): PublicAgentManifest {
   const root = record(value);
   const urls = record(root?.urls);
   if (!root || root.schemaVersion !== MANIFEST_SCHEMA || typeof root.id !== "string" || !DISTRIBUTION_ID.test(root.id) || typeof root.modelId !== "string" || root.modelId.length < 1 || root.modelId.length > 256 || typeof root.version !== "string" || typeof root.name !== "string" || root.name.length < 1 || root.name.length > 120 || !(root.description === null || typeof root.description === "string") || !Array.isArray(root.capabilities) || !urls || typeof urls.manifest !== "string" || typeof urls.mcp !== "string") {
     throw new SkillAccessError("manifest_invalid", "Frely manifest shape is invalid.");
   }
-  const canonical = normalizedFrelyUrl(urls.manifest, "manifest_invalid");
+  const canonical = normalizedFrelyUrl(urls.manifest, "manifest_invalid", instances);
   // The manifest answers under its install name however it was asked for (id, name or a former username), so only the origin is compared.
   if (canonical.origin !== sourceUrl.origin || !canonical.pathname.startsWith("/api/public/agents/")) throw new SkillAccessError("manifest_invalid", "Frely manifest canonical URL does not match the requested URL.");
-  const mcp = normalizedFrelyUrl(urls.mcp, "manifest_invalid");
+  const mcp = normalizedFrelyUrl(urls.mcp, "manifest_invalid", instances);
   const expectedMcpPath = `/mcp/${encodeURIComponent(root.modelId)}`;
   if (mcp.pathname !== expectedMcpPath || mcp.search) throw new SkillAccessError("manifest_invalid", "Frely MCP URL does not match the published model identity.");
   const capabilities = root.capabilities.map(parseCapability);
@@ -428,15 +430,16 @@ function hostAction(host: SkillHost): string {
   return "Restart or reload the Agent session if it was already running so it rescans Skills.";
 }
 
-function normalizedFrelyUrl(value: string, code: "invalid_manifest_url" | "manifest_invalid"): URL {
+/** A manifest or MCP URL must sit on the instance the user is logged in to (or the hosted one), or on loopback for development. */
+function normalizedFrelyUrl(value: string, code: "invalid_manifest_url" | "manifest_invalid", instances: readonly InstanceEndpoints[]): URL {
   let url: URL;
   try { url = new URL(value); } catch { throw new SkillAccessError(code, "Frely URL is invalid."); }
   if (url.username || url.password || url.hash) throw new SkillAccessError(code, "Frely URL is invalid.");
-  const loopback = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
-  const frely = url.hostname === "frely.cloud" || url.hostname.endsWith(".frely.cloud");
-  if (!(url.protocol === "https:" && (frely || loopback)) && !(url.protocol === "http:" && loopback)) throw new SkillAccessError(code, "Frely URL must use a Frely HTTPS host or loopback development host.");
+  if (!isInstanceUrl(url, instances)) throw new SkillAccessError(code, "Frely URL must use the HTTPS host of your Frely instance or a loopback development host.");
   return url;
 }
+
+const trustedInstances = async (): Promise<InstanceEndpoints[]> => [await currentInstance(), HOSTED_INSTANCE];
 
 function assertDistributionId(value: string): void { if (!DISTRIBUTION_ID.test(value)) throw new SkillAccessError("target_not_installed", "Frely distribution id is invalid."); }
 function record(value: unknown): Record<string, unknown> | null { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null; }

@@ -4,6 +4,7 @@ import { createHash, generateKeyPairSync, sign, type KeyObject } from "node:cryp
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { HOSTED_INSTANCE, resolveInstanceEndpoints, trustAnchor } from "../instance.js";
 import { jcs } from "./jcs.js";
 import { APPROVAL_DOMAIN, pinTrustChain, pinTrustRecord, readTrust, trustDirectory, TRUST_DOMAIN, trustRecordHash, verifyApproval, verifyTrustRecord, type ApprovalPayload, type SignedTrustRecord, type TrustRecord } from "./record.js";
 import { challengeFor, TrustError, verifyAssertion, type CoseAlg, type Signer, type WebAuthnSignature } from "./webauthn.js";
@@ -13,6 +14,7 @@ import { heldTrust, readTrustOrRefresh, readTrustWithReason, syncTrust } from ".
 const b64 = (data: Buffer | string) => Buffer.from(data).toString("base64url");
 const sha = (data: Buffer | string) => createHash("sha256").update(data).digest();
 const ORIGIN = "https://approve.frely.cloud";
+const ANCHOR = trustAnchor(HOSTED_INSTANCE);
 
 interface Passkey { signer: Signer; privateKey: KeyObject }
 function passkey(alg: CoseAlg, label = alg.toString()): Passkey {
@@ -68,19 +70,19 @@ const sealed = (r: TrustRecord, key: Passkey): SignedTrustRecord => ({ record: r
 test("trust record chain: genesis self-signs, later versions are signed by the previous signers, rollback and fork are refused", () => {
   const a = passkey(-7), b = passkey(-8);
   const v1 = record(1, null, [a.signer]);
-  const pin1 = verifyTrustRecord(sealed(v1, a), undefined);
+  const pin1 = verifyTrustRecord(sealed(v1, a), undefined, undefined, ANCHOR);
   const v2 = record(2, v1, [a.signer, b.signer]);
-  assert.throws(() => verifyTrustRecord(sealed(v2, b), v1, pin1), /signer_unknown/u);
-  const pin2 = verifyTrustRecord(sealed(v2, a), v1, pin1);
+  assert.throws(() => verifyTrustRecord(sealed(v2, b), v1, pin1, ANCHOR), /signer_unknown/u);
+  const pin2 = verifyTrustRecord(sealed(v2, a), v1, pin1, ANCHOR);
   assert.equal(pin2.seq, 2);
   const v3 = record(3, v2, [b.signer]);
-  assert.equal(verifyTrustRecord(sealed(v3, b), v2, pin2).seq, 3);
-  assert.throws(() => verifyTrustRecord(sealed(v1, a), undefined, pin2), /rollback/u);
+  assert.equal(verifyTrustRecord(sealed(v3, b), v2, pin2, ANCHOR).seq, 3);
+  assert.throws(() => verifyTrustRecord(sealed(v1, a), undefined, pin2, ANCHOR), /rollback/u);
   const fork = record(2, v1, [b.signer]);
-  assert.throws(() => verifyTrustRecord(sealed(fork, a), v1, pin2), /fork/u);
-  assert.throws(() => verifyTrustRecord(sealed(record(3, v1, [a.signer]), a), v1, pin2), /chain_broken/u);
-  assert.throws(() => verifyTrustRecord(sealed(record(1, null, [a.signer], "usr_2"), a), undefined, pin1), /user_mismatch/u);
-  assert.throws(() => verifyTrustRecord(sealed(record(1, null, [a.signer]), b), undefined), /signer_unknown/u);
+  assert.throws(() => verifyTrustRecord(sealed(fork, a), v1, pin2, ANCHOR), /fork/u);
+  assert.throws(() => verifyTrustRecord(sealed(record(3, v1, [a.signer]), a), v1, pin2, ANCHOR), /chain_broken/u);
+  assert.throws(() => verifyTrustRecord(sealed(record(1, null, [a.signer], "usr_2"), a), undefined, pin1, ANCHOR), /user_mismatch/u);
+  assert.throws(() => verifyTrustRecord(sealed(record(1, null, [a.signer]), b), undefined, undefined, ANCHOR), /signer_unknown/u);
 });
 
 test("pinTrustRecord stores the pin on first bind and keeps it across a rollback attempt", async () => {
@@ -88,9 +90,9 @@ test("pinTrustRecord stores the pin on first bind and keeps it across a rollback
   try {
     const a = passkey(-7);
     const v1 = record(1, null, [a.signer]), v2 = record(2, v1, [a.signer]);
-    await pinTrustRecord(sealed(v1, a), dir);
-    await pinTrustRecord(sealed(v2, a), dir);
-    await assert.rejects(pinTrustRecord(sealed(v1, a), dir), /rollback/u);
+    await pinTrustRecord(sealed(v1, a), dir, ANCHOR);
+    await pinTrustRecord(sealed(v2, a), dir, ANCHOR);
+    await assert.rejects(pinTrustRecord(sealed(v1, a), dir, ANCHOR), /rollback/u);
     assert.equal((await readTrust(dir))?.pin.seq, 2);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
@@ -125,7 +127,7 @@ test("observation mode counts valid and invalid approvals and never throws", asy
     setObserveIdentity({ device, deviceKey: "thumb", relayUrl: "https://r.test", userId: "usr_1" });
     const call = (list: unknown) => ({ params: { _meta: { "frely/approvals": list } } });
     assert.deepEqual(await observeApprovals(call([approval(rec, key)])), { seen: 1, valid: 0, failures: ["no_trust_record"] });
-    await pinTrustChain([sealed(rec, key)], "usr_1", trustDirectory({ relayUrl: "https://r.test", userId: "usr_1" }));
+    await pinTrustChain([sealed(rec, key)], "usr_1", trustDirectory({ relayUrl: "https://r.test", userId: "usr_1" }), ANCHOR);
     const before = { ...observed };
     const lines: string[] = [];
     const result = await observeApprovals(call([approval(rec, key), approval(rec, key, {}, { flags: 0x01 }), "junk"]), (line) => lines.push(line));
@@ -138,7 +140,7 @@ test("observation mode counts valid and invalid approvals and never throws", asy
 
 test("a record may only name the fixed rpId and approval origin, so a served first version cannot make the main site a signer", () => {
   const a = passkey(-7);
-  const code = (r: TrustRecord) => { try { verifyTrustRecord(sealed(r, a), undefined); return "ok"; } catch (error) { return (error as TrustError).code; } };
+  const code = (r: TrustRecord) => { try { verifyTrustRecord(sealed(r, a), undefined, undefined, ANCHOR); return "ok"; } catch (error) { return (error as TrustError).code; } };
   assert.equal(code(record(1, null, [a.signer])), "ok");
   assert.equal(code({ ...record(1, null, [a.signer]), approvalOrigins: ["https://frely.cloud"] }), "origin_not_allowed");
   assert.equal(code({ ...record(1, null, [a.signer]), approvalOrigins: [ORIGIN, "https://frely.cloud"] }), "origin_not_allowed");
@@ -151,18 +153,18 @@ test("pinTrustChain walks every version, requires the bound account on first pin
     const a = passkey(-7), b = passkey(-8);
     const v1 = record(1, null, [a.signer]), v2 = record(2, v1, [a.signer, b.signer]), v3 = record(3, v2, [b.signer]);
     const chain = [sealed(v1, a), sealed(v2, a), sealed(v3, b)];
-    await assert.rejects(pinTrustChain(chain, "usr_other", dir), /user_mismatch/u);
+    await assert.rejects(pinTrustChain(chain, "usr_other", dir, ANCHOR), /user_mismatch/u);
     assert.equal(await readTrust(dir), undefined);
-    await assert.rejects(pinTrustChain(chain.slice(1), "usr_1", dir), /chain_broken/u);
+    await assert.rejects(pinTrustChain(chain.slice(1), "usr_1", dir, ANCHOR), /chain_broken/u);
     // A newest version without its predecessors is not enough.
-    assert.equal((await pinTrustChain([chain[0]!, chain[2]!], "usr_1", dir).catch((error) => (error as TrustError).code)), "chain_broken");
-    assert.equal((await pinTrustChain(chain, "usr_1", dir))?.seq, 3);
-    assert.equal((await pinTrustChain(chain.slice(0, 2), "usr_1", dir))?.seq, 3);
+    assert.equal((await pinTrustChain([chain[0]!, chain[2]!], "usr_1", dir, ANCHOR).catch((error) => (error as TrustError).code)), "chain_broken");
+    assert.equal((await pinTrustChain(chain, "usr_1", dir, ANCHOR))?.seq, 3);
+    assert.equal((await pinTrustChain(chain.slice(0, 2), "usr_1", dir, ANCHOR))?.seq, 3);
     assert.equal((await readTrust(dir))?.pin.seq, 3);
     const forked = [sealed(v1, a), sealed(v2, a), sealed(record(3, v2, [a.signer]), a)];
-    await assert.rejects(pinTrustChain(forked, "usr_1", dir), /fork/u);
+    await assert.rejects(pinTrustChain(forked, "usr_1", dir, ANCHOR), /fork/u);
     // A shorter chain from the relay is not an attack and not progress: the pin stays.
-    assert.equal((await pinTrustChain([sealed(v1, a)], "usr_1", dir))?.seq, 3);
+    assert.equal((await pinTrustChain([sealed(v1, a)], "usr_1", dir, ANCHOR))?.seq, 3);
     assert.equal((await readTrust(dir))?.pin.seq, 3);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
@@ -174,15 +176,15 @@ test("syncTrust keeps one pin per relay and account, treats an empty chain as no
   try {
     const a = passkey(-7);
     const v1 = record(1, null, [a.signer]), mine = { relayUrl: "https://r.test", userId: "usr_1" }, other = { relayUrl: "https://r.test", userId: "usr_2" };
-    assert.deepEqual(await syncTrust(async () => [], mine), { status: "none" });
-    const pinned = await syncTrust(async () => [sealed(v1, a)], mine);
+    assert.deepEqual(await syncTrust(async () => [], mine, ANCHOR), { status: "none" });
+    const pinned = await syncTrust(async () => [sealed(v1, a)], mine, ANCHOR);
     assert.equal(pinned.status, "pinned");
     assert.equal((await heldTrust(mine))?.seq, 1);
     assert.equal(await heldTrust(other), undefined);
     // A different account on the same device gets its own pin instead of a permanent user_mismatch.
-    assert.equal((await syncTrust(async () => [sealed(record(1, null, [a.signer], "usr_2"), a)], other)).status, "pinned");
-    assert.deepEqual(await syncTrust(async () => [sealed({ ...v1, approvalOrigins: ["https://frely.cloud"] }, a)], { relayUrl: "https://s.test", userId: "usr_1" }), { status: "refused", code: "origin_not_allowed" });
-    assert.deepEqual(await syncTrust(async () => [sealed(record(1, null, [a.signer], "usr_9"), a)], mine), { status: "refused", code: "user_mismatch" });
+    assert.equal((await syncTrust(async () => [sealed(record(1, null, [a.signer], "usr_2"), a)], other, ANCHOR)).status, "pinned");
+    assert.deepEqual(await syncTrust(async () => [sealed({ ...v1, approvalOrigins: ["https://frely.cloud"] }, a)], { relayUrl: "https://s.test", userId: "usr_1" }, ANCHOR), { status: "refused", code: "origin_not_allowed" });
+    assert.deepEqual(await syncTrust(async () => [sealed(record(1, null, [a.signer], "usr_9"), a)], mine, ANCHOR), { status: "refused", code: "user_mismatch" });
     assert.equal((await heldTrust(mine))?.seq, 1);
   } finally { if (saved === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = saved; await rm(dir, { recursive: true, force: true }); }
 });
@@ -201,7 +203,7 @@ test("readTrustOrRefresh pulls the chain once when nothing is pinned and leaves 
     // A failing pull is not an error, only nothing pinned.
     assert.equal(await readTrustOrRefresh(scope, async () => { calls++; throw new Error("offline"); }), undefined);
     // The owner set the chain up after the device connected: the pull pins it and the caller gets it at once.
-    const held = await readTrustOrRefresh(scope, async (s) => { calls++; await syncTrust(async () => [sealed(record(1, null, [a.signer]), a)], s); });
+    const held = await readTrustOrRefresh(scope, async (s) => { calls++; await syncTrust(async () => [sealed(record(1, null, [a.signer]), a)], s, ANCHOR); });
     assert.equal(held?.pin.seq, 1);
     assert.equal(calls, 3);
     // Held already: no pull.
@@ -221,4 +223,16 @@ test("a pull that failed is reported as the device's problem, not as a missing o
     assert.match((await readTrustWithReason(scope, async () => ({ status: "refused", code: "trust_rollback" }))).problem ?? "", /refused it \(trust_rollback\)/u);
     assert.match((await readTrustWithReason(scope, async () => { throw new Error("offline"); })).problem ?? "", /offline/u);
   } finally { if (saved === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = saved; await rm(dir, { recursive: true, force: true }); }
+});
+
+test("a private instance's trust records are held to that instance's own relying party and approval origin, not the hosted one's", async () => {
+  const a = passkey(-7);
+  const priv = trustAnchor(resolveInstanceEndpoints("https://frely.corp.example", { approvalOrigin: "https://approve.corp.example", passkeyRpId: "corp.example" }));
+  const own = { ...record(1, null, [a.signer]), rpId: "corp.example", approvalOrigins: ["https://approve.corp.example"] };
+  const sig = assert_(a, TRUST_DOMAIN, own, { origin: "https://approve.corp.example", rpId: "corp.example" });
+  assert.equal(verifyTrustRecord({ record: own, sig }, undefined, undefined, priv).seq, 1);
+  // The same record is refused by a device bound to the hosted instance, and a hosted record by one bound to the private instance.
+  assert.throws(() => verifyTrustRecord({ record: own, sig }, undefined, undefined, ANCHOR), /rp_id_not_allowed/u);
+  assert.throws(() => verifyTrustRecord(sealed(record(1, null, [a.signer]), a), undefined, undefined, priv), /rp_id_not_allowed/u);
+  assert.throws(() => verifyTrustRecord({ record: { ...own, approvalOrigins: ["https://approve.corp.example", "https://evil.example"] }, sig }, undefined, undefined, priv), /origin_not_allowed/u);
 });

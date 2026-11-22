@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { authConfigPath, inspectAuth, LOGIN_REFRESH_UNAVAILABLE, login, refreshLockTiming, loginDevice, logout, normalizeRelayUrl, requireLogin } from "./auth.js";
+import { authConfigPath, currentInstance, frelyMcpUrl, inspectAuth, LOGIN_REFRESH_UNAVAILABLE, login, refreshLockTiming, loginDevice, logout, normalizeRelayUrl, requireLogin } from "./auth.js";
 import { credentialStore } from "./credential-store.js";
 import { basicCredentialStore } from "./credential-basic.js";
 import { useMemoryCredentialStore } from "./test-support.js";
@@ -499,3 +499,88 @@ test("a refused login shows the reason Frely sent", async (t) => {
   await assert.rejects(pollDeviceToken("https://frely.cloud", { device_code: "d", user_code: "U", verification_uri: "https://frely.cloud/device", verification_uri_complete: "https://frely.cloud/device?g=U", expires_in: 60, interval: 1 }), /was denied: This account is frozen\./u);
 });
 
+
+test("a private relay's discovery document is read at login, kept with the login and used for its addresses", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "frely-cli-discovery-"));
+  const oldFetch = globalThis.fetch;
+  const previous = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, FRELY_NO_BROWSER: process.env.FRELY_NO_BROWSER, FRELY_RELAY_URL: process.env.FRELY_RELAY_URL, FRELY_MCP_URL: process.env.FRELY_MCP_URL };
+  const restore = useMemoryCredentialStore();
+  process.env.XDG_CONFIG_HOME = directory;
+  process.env.FRELY_NO_BROWSER = "1";
+  delete process.env.FRELY_RELAY_URL; delete process.env.FRELY_MCP_URL;
+  t.after(async () => {
+    restore(); globalThis.fetch = oldFetch;
+    for (const [name, value] of Object.entries(previous)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+    await rm(directory, { recursive: true, force: true });
+  });
+  const relay = "https://discovery-login.example";
+  let discoveryCalls = 0;
+  const resources: string[] = [];
+  globalThis.fetch = async (url, options) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/.well-known/frely") { discoveryCalls++; return Response.json({ gatewayBaseUrl: "https://gw.discovery-login.example", mcpBaseUrl: "https://mcp.discovery-login.example/mcp", approvalOrigin: "https://approve.discovery-login.example", passkeyRpId: "discovery-login.example", future: 1 }); }
+    if (path === "/api/auth/device/code") { resources.push(...new URLSearchParams(String(options?.body)).getAll("resource")); return Response.json({ device_code: "c", user_code: "SYNTH", verification_uri: `${relay}/device`, verification_uri_complete: `${relay}/device?g=SYNTH`, expires_in: 300, interval: 1 }); }
+    if (path === "/api/auth/oauth2/token") return Response.json({ access_token: "synthetic-basic", refresh_token: "synthetic-refresh", token_type: "bearer", expires_in: 3600 });
+    if (path === "/api/auth/me") return Response.json({ user: { id: "user_test", email: "user@example.com" } });
+    throw new Error("Unexpected synthetic endpoint");
+  };
+  await login(relay);
+  assert.deepEqual(resources, [`${relay}/api`, `${relay}/mcp`, "https://mcp.discovery-login.example/mcp"]);
+  const saved = JSON.parse(await readFile(authConfigPath(), "utf8"));
+  assert.deepEqual(saved.instance.discovery, { gatewayBaseUrl: "https://gw.discovery-login.example", mcpBaseUrl: "https://mcp.discovery-login.example/mcp", approvalOrigin: "https://approve.discovery-login.example", passkeyRpId: "discovery-login.example" });
+  const callsAtLogin = discoveryCalls;
+  const { config } = await requireLogin();
+  assert.equal(config.instance.gatewayUrl, "https://gw.discovery-login.example");
+  assert.equal(config.instance.rpId, "discovery-login.example");
+  assert.equal(frelyMcpUrl(config.instance, {}), "https://mcp.discovery-login.example/mcp");
+  assert.equal(frelyMcpUrl(config.instance, { FRELY_MCP_URL: "https://override.example/mcp" }), "https://override.example/mcp");
+  assert.equal((await currentInstance()).approvalOrigin, "https://approve.discovery-login.example");
+  assert.equal(discoveryCalls, callsAtLogin, "the stored document is used, the relay is not asked again");
+});
+
+test("a private relay that publishes no discovery document keeps working with its own addresses", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "frely-cli-nodiscovery-"));
+  const oldFetch = globalThis.fetch;
+  const previous = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, FRELY_NO_BROWSER: process.env.FRELY_NO_BROWSER, FRELY_RELAY_URL: process.env.FRELY_RELAY_URL, FRELY_MCP_URL: process.env.FRELY_MCP_URL };
+  const restore = useMemoryCredentialStore();
+  process.env.XDG_CONFIG_HOME = directory;
+  process.env.FRELY_NO_BROWSER = "1";
+  delete process.env.FRELY_RELAY_URL; delete process.env.FRELY_MCP_URL;
+  t.after(async () => {
+    restore(); globalThis.fetch = oldFetch;
+    for (const [name, value] of Object.entries(previous)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+    await rm(directory, { recursive: true, force: true });
+  });
+  const relay = "https://no-discovery.example";
+  globalThis.fetch = async (url) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/.well-known/frely") return new Response("not found", { status: 404 });
+    if (path === "/api/auth/device/code") return Response.json({ device_code: "c", user_code: "SYNTH", verification_uri: `${relay}/device`, verification_uri_complete: `${relay}/device?g=SYNTH`, expires_in: 300, interval: 1 });
+    if (path === "/api/auth/oauth2/token") return Response.json({ access_token: "synthetic-basic", refresh_token: "synthetic-refresh", token_type: "bearer", expires_in: 3600 });
+    if (path === "/api/auth/me") return Response.json({ user: { id: "user_test", email: "user@example.com" } });
+    throw new Error("Unexpected synthetic endpoint");
+  };
+  await login(relay);
+  assert.equal(JSON.parse(await readFile(authConfigPath(), "utf8")).instance, undefined);
+  const { config } = await requireLogin();
+  assert.equal(config.instance.mcpUrl, `${relay}/mcp/devices`);
+  assert.equal(config.instance.gatewayUrl, relay);
+  assert.equal(config.instance.approvalOrigin, relay);
+});
+
+test("the hosted relay is never asked for a discovery document", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "frely-cli-hosted-"));
+  const oldFetch = globalThis.fetch;
+  const previous = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, FRELY_RELAY_URL: process.env.FRELY_RELAY_URL };
+  process.env.XDG_CONFIG_HOME = directory;
+  delete process.env.FRELY_RELAY_URL;
+  t.after(async () => {
+    globalThis.fetch = oldFetch;
+    for (const [name, value] of Object.entries(previous)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+    await rm(directory, { recursive: true, force: true });
+  });
+  globalThis.fetch = async () => { throw new Error("no network expected"); };
+  const instance = await currentInstance();
+  assert.equal(instance.gatewayUrl, "https://api.frely.cloud");
+  assert.equal(frelyMcpUrl(instance, {}), "https://mcp.frely.cloud/mcp");
+});

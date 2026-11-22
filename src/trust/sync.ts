@@ -1,4 +1,4 @@
-import { pinTrustChain, readTrust, trustDirectory, type SignedTrustRecord, type TrustPin, type TrustRecord } from "./record.js";
+import { pinTrustChain, readTrust, trustDirectory, type SignedTrustRecord, type TrustAnchor, type TrustPin, type TrustRecord } from "./record.js";
 import { TrustError } from "./webauthn.js";
 
 export interface TrustScope { relayUrl: string; userId: string }
@@ -9,11 +9,11 @@ export type TrustSyncResult = { status: "pinned"; pin: TrustPin } | { status: "n
  * a refused chain (wrong origin, wrong account, rollback, fork) leaves the earlier pin untouched. An account without a chain
  * is not an error: nothing can be approved by signature until the Owner sets one up.
  */
-export async function syncTrust(fetchChain: () => Promise<readonly SignedTrustRecord[]>, scope: TrustScope): Promise<TrustSyncResult> {
+export async function syncTrust(fetchChain: () => Promise<readonly SignedTrustRecord[]>, scope: TrustScope, anchor: TrustAnchor): Promise<TrustSyncResult> {
   const chain = await fetchChain();
   if (chain.length === 0) return { status: "none" };
   try {
-    const pin = await pinTrustChain(chain, scope.userId, trustDirectory(scope));
+    const pin = await pinTrustChain(chain, scope.userId, trustDirectory(scope), anchor);
     return pin ? { status: "pinned", pin } : { status: "none" };
   } catch (error) {
     if (error instanceof TrustError) return { status: "refused", code: error.code };

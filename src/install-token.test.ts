@@ -4,6 +4,7 @@ import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { authConfigPath, finishDeviceLogin, installTokenError, readConfig, redeemInstallToken, requireLogin } from "./auth.js";
+import { resolveInstanceEndpoints } from "./instance.js";
 import { mcpStartLogin, takeInstallToken, type McpStartLoginDeps } from "./mcp-command.js";
 import { assertSystemdUserManager, ensureLinger } from "./service.js";
 import { useMemoryCredentialStore } from "./test-support.js";
@@ -60,7 +61,7 @@ test("an install token signs in without a browser and preapproves device MCP", a
   const mcp = redeemed.mcp as { keyThumbprint: string; workspace: string; days: number };
   assert.deepEqual({ workspace: mcp.workspace, days: mcp.days }, { workspace, days: 30 });
   assert.equal(typeof mcp.keyThumbprint, "string");
-  assert.deepEqual(calls, ["/api/auth/device/code", "/api/auth/device/install/redeem", "/api/auth/oauth2/token", "/api/auth/me"]);
+  assert.deepEqual(calls, ["/.well-known/frely", "/api/auth/device/code", "/api/auth/device/install/redeem", "/api/auth/oauth2/token", "/api/auth/me"]);
   assert.equal(result.workspace, workspace);
   assert.equal(result.days, "30");
   assert.equal(result.preset?.preapproval, "synthetic-preapproval");
@@ -77,7 +78,7 @@ test("an install token replaces an existing login", async (t) => {
   const calls = useSyntheticRelay(t, () => Response.json({ state: "signed_in", user: { id: "user_test", email: "user@example.com" }, mcpPreapproval: "synthetic-preapproval" }));
   const messages: string[] = [];
   const result = await mcpStartLogin({ installToken: TOKEN, workspace, notify: (message) => { messages.push(message); } }, {
-    requireLogin: async () => ({ config: { relayUrl: "https://test.invalid" }, user: { id: "user_a", email: "a@example.com" }, credential: { scheme: "bearer", value: "synthetic" } }),
+    requireLogin: async () => ({ config: { relayUrl: "https://test.invalid", instance: resolveInstanceEndpoints("https://test.invalid") }, user: { id: "user_a", email: "a@example.com" }, credential: { scheme: "bearer", value: "synthetic" } }),
     loginDevice: noBrowser, redeemInstallToken, finishDeviceLogin,
     readConfig: async () => ({ relayUrl: "https://test.invalid", user: { id: "user_a", email: "a@example.com" } }) as Awaited<ReturnType<typeof readConfig>>,
   });
@@ -89,7 +90,7 @@ test("an install token replaces an existing login", async (t) => {
 
 test("without an install token an existing login is kept", async () => {
   const result = await mcpStartLogin({ notify: () => {} }, {
-    requireLogin: async () => ({ config: { relayUrl: "https://test.invalid" }, user: { id: "user_a", email: "a@example.com" }, credential: { scheme: "bearer", value: "synthetic" } }),
+    requireLogin: async () => ({ config: { relayUrl: "https://test.invalid", instance: resolveInstanceEndpoints("https://test.invalid") }, user: { id: "user_a", email: "a@example.com" }, credential: { scheme: "bearer", value: "synthetic" } }),
     loginDevice: noBrowser,
     redeemInstallToken: async () => { throw new Error("must not redeem"); },
     finishDeviceLogin: async () => { throw new Error("must not poll"); },
