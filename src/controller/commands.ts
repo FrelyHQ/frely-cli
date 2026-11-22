@@ -1,10 +1,12 @@
 import { spawn } from "node:child_process";
-import { readFile, stat, writeFile } from "node:fs/promises";
-import { intOption, parseArgs, requireRemote, type ParsedArgs } from "./args.js";
+import { lstat, readFile, stat, writeFile } from "node:fs/promises";
+import { basename, resolve } from "node:path";
+import { intOption, parseArgs, parseTarget, requireRemote, type ParsedArgs } from "./args.js";
+import { downloadToLocalFile, prepareLocalUpload, type LocalUpload } from "../local-transfer.js";
 import { waitForApproval, type ApprovalRef, type ApprovalWaitOptions } from "./approval-wait.js";
 import { openController, outcomeOf, resultData, resultText, ControllerError, EXIT, type Controller, type Outcome, type ToolResult } from "./client.js";
 
-export const CONTROLLER_COMMANDS: ReadonlySet<string> = new Set(["devices", "run", "ps", "logs", "kill", "read", "ls", "grep", "edit", "tools", "call", "permission"]);
+export const CONTROLLER_COMMANDS: ReadonlySet<string> = new Set(["devices", "run", "ps", "logs", "kill", "read", "ls", "grep", "edit", "put", "get", "files", "tools", "call", "permission"]);
 export interface Output { out(text: string): void; err(text: string): void }
 
 export const CONTROLLER_USAGE = `Control your Frely devices from this computer.
@@ -20,6 +22,11 @@ export const CONTROLLER_USAGE = `Control your Frely devices from this computer.
   frely permission request <device> --resource <name> --reason <text> --command <text> [--cwd <dir>] [--mode once|window|authorization]
   frely permission confirm <code> [A|B|C]        Finish an approval by authenticator or emailed code
   frely permission wait <short code> [--then '<command>'] [--timeout <s>]
+  frely put <local file | device:path> [--json]  Share a file or image as a link (https://frely.cloud/f/<code>); prints the link first
+  frely get <id> [<local path> | <device>:<path>] [--overwrite]   Fetch a shared file to this computer or a device
+  frely files                                    List shared files (id, name, size, visibility, expiry, link)
+  frely files rm <id>                            Delete a shared file
+  frely files share <id> --scope self|team|link  Who can open the link
   frely tools [--json]                           What the server offers, with its own instructions
   frely call <tool> [--json '<object>' | --input <file>]   Any tool by name
 
@@ -101,6 +108,9 @@ export async function runControllerCommand(args: readonly string[], io: Output):
       case "ls": return await ls(rest, io);
       case "grep": return await grep(rest, io);
       case "edit": return await edit(rest, io);
+      case "put": return await putCommand(rest, io);
+      case "get": return await getCommand(rest, io);
+      case "files": return await filesCommand(rest, io);
       case "tools": return await toolsCommand(rest, io);
       case "call": return await callCommand(rest, io);
       default: throw new ControllerError(`Unknown command ${command}.\n${CONTROLLER_USAGE}`, EXIT.cli);
@@ -234,6 +244,145 @@ async function edit(args: string[], io: Output): Promise<number> {
     input = { device, path, edits };
   }
   return toolCall(io, parsed, "edit_file", input);
+}
+
+/** Test seam: replaces the HTTP upload and download of local files. Never set in production. */
+let transferIo = { prepare: prepareLocalUpload, download: downloadToLocalFile };
+export function useTransferIo(replacement: Partial<typeof transferIo>): () => void {
+  const previous = transferIo;
+  transferIo = { ...transferIo, ...replacement };
+  return () => { transferIo = previous; };
+}
+
+export const SHARE_SCOPES = ["self", "team", "link"] as const;
+const num = (value: unknown): number | undefined => typeof value === "number" && Number.isFinite(value) ? value : undefined;
+const sizeText = (bytes: number | undefined) => bytes === undefined ? "-" : bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KiB` : `${(bytes / 1048576).toFixed(1)} MiB`;
+
+/** One transfer call; a result that is not plain success is shown as the other commands show it, and the exit code is returned instead of the data. */
+async function transferStep(controller: Controller, input: Record<string, unknown>, parsed: ParsedArgs, io: Output): Promise<{ data: Record<string, unknown> } | { code: number }> {
+  const result = await controller.call("transfer", input);
+  const outcome = outcomeOf(result);
+  const data = resultData(result);
+  if (outcome.exitCode !== EXIT.ok || !data) return { code: await emit(shownOf(result), outcome.exitCode !== EXIT.ok ? outcome : { exitCode: EXIT.tool, note: "The transfer service answered without data." }, parsed, io) };
+  return { data };
+}
+
+/** The part of a transfer view the commands print. The presigned upload and download addresses are never part of it. */
+function viewOf(data: Record<string, unknown>): Record<string, unknown> {
+  const view = (data.transfer && typeof data.transfer === "object" ? data.transfer : data) as Record<string, unknown>;
+  return { url: view.url ?? null, id: view.id ?? null, name: view.name ?? null, bytes: view.bytes ?? null, expiresAt: view.expiresAt ?? null, visibility: view.visibility ?? null };
+}
+
+function showView(view: Record<string, unknown>): Shown {
+  const text = [asText(view.url) || asText(view.id), `id: ${asText(view.id)}`, `name: ${asText(view.name)}`, `size: ${sizeText(num(view.bytes))}`, `expires: ${asText(view.expiresAt) || "-"}`, `visibility: ${asText(view.visibility) || "-"}`].join("\n");
+  return { text, result: view as ToolResult };
+}
+
+function presigned(data: Record<string, unknown>, key: "upload" | "download"): { url: string; method?: string; headers?: Record<string, string> } {
+  const part = data[key] as { url?: unknown; method?: unknown; headers?: unknown } | undefined;
+  if (!part || typeof part.url !== "string") throw new ControllerError(`The transfer service gave no ${key} address.`, EXIT.tool);
+  const headers = part.headers && typeof part.headers === "object" ? Object.fromEntries(Object.entries(part.headers as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === "string")) : undefined;
+  return { url: part.url, ...(typeof part.method === "string" ? { method: part.method } : {}), ...(headers ? { headers } : {}) };
+}
+
+/** A failure of the local file or the storage service, without the presigned address that may be in the library's message. */
+function transferFailure(error: unknown, exitCode: number): ControllerError {
+  if (error instanceof ControllerError) return error;
+  const message = error instanceof Error ? error.message : String(error);
+  return new ControllerError(message.replace(/https?:\/\/\S+/gu, "<address>"), exitCode);
+}
+
+async function putCommand(args: string[], io: Output): Promise<number> {
+  const parsed = parseArgs(args, { flags: COMMON_FLAGS, values: COMMON_VALUES });
+  if (parsed.positionals.length !== 1) throw new ControllerError("Usage: frely put <local file | device:path> [--json]", EXIT.cli);
+  const target = parseTarget(parsed.positionals[0]!);
+  return withController(io, async (controller) => {
+    let data: Record<string, unknown>;
+    if (target.device !== null) {
+      const step = await transferStep(controller, { action: "send", device: target.device, path: target.path }, parsed, io);
+      if ("code" in step) return step.code;
+      data = step.data;
+    } else {
+      let local: LocalUpload;
+      try { local = await transferIo.prepare(target.path); } catch (error) { throw transferFailure(error, EXIT.cli); }
+      const prepared = local;
+      const link = await transferStep(controller, { action: "upload_link", name: prepared.name, bytes: prepared.bytes, sha256: prepared.sha256 }, parsed, io);
+      if ("code" in link) return link.code;
+      const id = asText(link.data.id) || asText((link.data.transfer as { id?: unknown } | undefined)?.id);
+      if (!id) throw new ControllerError("The transfer service gave no file id.", EXIT.tool);
+      const upload = presigned(link.data, "upload");
+      if (upload.method !== undefined && upload.method.toUpperCase() !== "PUT") throw new ControllerError("The transfer service asked for an upload method this CLI does not use.", EXIT.tool);
+      try { await local.send({ url: upload.url, ...(upload.headers ? { headers: upload.headers } : {}) }, new AbortController().signal); }
+      catch (error) { throw transferFailure(error, EXIT.tool); }
+      const done = await transferStep(controller, { action: "complete", id }, parsed, io);
+      if ("code" in done) return done.code;
+      data = done.data;
+    }
+    return emit(showView(viewOf(data)), { exitCode: EXIT.ok }, parsed, io);
+  });
+}
+
+async function getCommand(args: string[], io: Output): Promise<number> {
+  const parsed = parseArgs(args, { flags: [...COMMON_FLAGS, "--overwrite"], values: COMMON_VALUES });
+  if (parsed.positionals.length < 1 || parsed.positionals.length > 2) throw new ControllerError("Usage: frely get <id> [<local path> | <device>:<path>] [--overwrite]", EXIT.cli);
+  const [id, destination] = parsed.positionals as [string, string | undefined];
+  const overwrite = parsed.flags.has("--overwrite");
+  const target = destination === undefined ? null : parseTarget(destination);
+  return withController(io, async (controller) => {
+    if (target?.device) {
+      const step = await transferStep(controller, { action: "receive", id, device: target.device, path: target.path, overwrite }, parsed, io);
+      if ("code" in step) return step.code;
+      return emit({ text: `Saved ${id} to ${target.device}:${target.path}`, result: step.data as ToolResult }, { exitCode: EXIT.ok }, parsed, io);
+    }
+    const link = await transferStep(controller, { action: "download_link", id }, parsed, io);
+    if ("code" in link) return link.code;
+    let view = viewOf(link.data);
+    let bytes = num(view.bytes), sha256 = asText((link.data.transfer as { sha256?: unknown } | undefined)?.sha256 ?? link.data.sha256);
+    if (bytes === undefined || !sha256) {
+      const listed = await transferStep(controller, { action: "list" }, parsed, io);
+      if ("code" in listed) return listed.code;
+      const found = transferRows(listed.data).find((row) => row.id === id);
+      view = found ? viewOf(found) : view;
+      bytes = num(found?.bytes); sha256 = asText(found?.sha256);
+    }
+    if (bytes === undefined || !sha256) throw new ControllerError("The transfer service did not say the file's size and SHA-256, so it cannot be checked.", EXIT.tool);
+    const full = resolve(target?.path ?? basename(asText(view.name) || id));
+    if (!overwrite && await lstat(full).then(() => true, () => false)) throw new ControllerError(`${full} already exists. Choose another path or add --overwrite.`, EXIT.cli);
+    const download = presigned(link.data, "download");
+    try {
+      await transferIo.download(full, { url: download.url }, { bytes, sha256 }, overwrite, new AbortController().signal);
+    } catch (error) { throw transferFailure(error, EXIT.tool); }
+    return emit({ text: `Saved ${full} (${sizeText(bytes)}, sha256 ${sha256})`, result: { path: full, bytes, sha256 } as ToolResult }, { exitCode: EXIT.ok }, parsed, io);
+  });
+}
+
+function transferRows(data: Record<string, unknown>): Array<Record<string, unknown>> {
+  const list = [data.transfers, data.files, data.items].find(Array.isArray);
+  return (list ?? []) as Array<Record<string, unknown>>;
+}
+
+async function filesCommand(args: string[], io: Output): Promise<number> {
+  const [action, ...rest] = args;
+  if (action === "rm" || action === "share") {
+    const parsed = parseArgs(rest, { flags: COMMON_FLAGS, values: action === "share" ? [...COMMON_VALUES, "--scope"] : COMMON_VALUES });
+    if (parsed.positionals.length !== 1) throw new ControllerError(action === "rm" ? "Usage: frely files rm <id>" : "Usage: frely files share <id> --scope self|team|link", EXIT.cli);
+    const id = parsed.positionals[0]!;
+    if (action === "rm") return toolCall(io, parsed, "transfer", { action: "delete", id });
+    const scope = parsed.values.get("--scope");
+    if (!scope || !(SHARE_SCOPES as readonly string[]).includes(scope)) throw new ControllerError("--scope must be self, team or link.", EXIT.cli);
+    return toolCall(io, parsed, "transfer", { action: "share", id, scope });
+  }
+  if (action !== undefined && !action.startsWith("--")) throw new ControllerError("Usage: frely files [rm <id> | share <id> --scope self|team|link]", EXIT.cli);
+  const parsed = parseArgs(args, { flags: COMMON_FLAGS, values: COMMON_VALUES });
+  if (parsed.positionals.length !== 0) throw new ControllerError("Usage: frely files [rm <id> | share <id> --scope self|team|link]", EXIT.cli);
+  return withController(io, async (controller) => {
+    const result = await controller.call("transfer", { action: "list" });
+    const outcome = outcomeOf(result);
+    const data = resultData(result);
+    if (outcome.exitCode !== EXIT.ok || !data) return emit(shownOf(result), outcome, parsed, io);
+    const rows = transferRows(data).map((row) => `${asText(row.id)}\t${asText(row.name)}\t${sizeText(num(row.bytes))}\t${asText(row.visibility) || "-"}\t${asText(row.expiresAt) || "-"}\t${asText(row.url) || "-"}`);
+    return emit({ text: ["ID\tNAME\tSIZE\tVISIBILITY\tEXPIRES\tURL", ...rows].join("\n"), result }, outcome, parsed, io);
+  });
 }
 
 async function toolsCommand(args: string[], io: Output): Promise<number> {
