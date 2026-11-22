@@ -413,6 +413,18 @@ export function untilAborted<T>(work: Promise<T>, signal?: AbortSignal): Promise
   });
 }
 
+/**
+ * `frely update` replaces the installed executable and restarts the service, so it cannot run inside the command sandbox (it must write the
+ * install directory) and the install directory must never be sandbox-writable (a command could swap the binary). The command is exactly our own
+ * code, so a call whose whole text is `frely update` runs this very executable by absolute path without the sandbox. Anything longer
+ * (`frely update; ...`, other arguments) stays sandboxed, and the PATH is not consulted, so a `frely` in the workspace is never run unsandboxed.
+ */
+export function ownUpdateCommand(command: string, platform: NodeJS.Platform = process.platform): string | undefined {
+  if (platform === "win32" || !/^\s*frely\s+update\s*$/u.test(command)) return undefined;
+  const quote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+  return cliLaunchArguments(process.argv[1] ?? "", ["update"]).map(quote).join(" ");
+}
+
 export interface SandboxedCommand {
   /** The command to spawn with `shell: true`. */
   command: string;
@@ -441,6 +453,8 @@ export async function sandboxCommandDetailed(command: string, workspaceRoot: str
   if (isSandboxDisabled()) return { command, gitConfig: false };
   // The owner opened raw outbound connections for this call, which the sandbox cannot offer without losing its other limits.
   if (allowedGroups.includes(UNSANDBOXED_GROUP)) return { command, gitConfig: false };
+  const update = ownUpdateCommand(command);
+  if (update) return { command: update, gitConfig: false };
   const denied = deniedReadReference(command, allowedGroups);
   if (denied) throw new Error(deniedReadMessage(denied));
   const startedAt = Date.now();
