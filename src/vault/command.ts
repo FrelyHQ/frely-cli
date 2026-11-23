@@ -10,6 +10,8 @@ export interface VaultCommandIo {
   /** Runs bw attached to the owner's terminal (prompts and answers go straight to them). Resolves with the exit code, or null when bw is missing. */
   interactive?: (args: string[], env: Record<string, string>) => Promise<number | null>;
   run?: BwRunner;
+  /** Installs the Bitwarden CLI in the owner's terminal when bw is missing. Resolves with the exit code, or null when there is no way to install it here. */
+  install?: () => Promise<number | null>;
 }
 
 const USAGE = "Usage: frely vault login [--server <url>] | frely vault status | frely vault lock";
@@ -17,6 +19,14 @@ const USAGE = "Usage: frely vault login [--server <url>] | frely vault status | 
 const attached = (args: string[], env: Record<string, string>): Promise<number | null> => new Promise((resolve) => {
   try { mkdirSync(env.BITWARDENCLI_APPDATA_DIR ?? bitwardenDataDir(), { recursive: true, mode: 0o700 }); } catch { /* bw reports a folder it cannot use */ }
   const child = spawn("bw", args, { stdio: "inherit", env });
+  child.on("error", () => resolve(null));
+  child.on("close", (code) => resolve(code));
+});
+
+/** On macOS with Homebrew, `brew install bitwarden-cli` in the owner's terminal; elsewhere there is no installer to use (null). */
+const brewInstall = (): Promise<number | null> => new Promise((resolve) => {
+  if (process.platform !== "darwin") { resolve(null); return; }
+  const child = spawn("brew", ["install", "bitwarden-cli"], { stdio: "inherit" });
   child.on("error", () => resolve(null));
   child.on("close", (code) => resolve(code));
 });
@@ -39,6 +49,13 @@ export async function runVaultCommand(args: readonly string[], io: VaultCommandI
     const interactive = io.interactive ?? attached;
     // The terminal is needed for the prompts, so this is the one bw call that is not --nointeraction; TERM is passed for that reason only.
     const env = bwEnv(process.env.TERM ? { TERM: process.env.TERM } : {});
+    // bw is needed for everything below; install it first when it is missing, so login is the owner's only step.
+    if ((await run(["--version"], bwEnv(), 30_000)).missing) {
+      io.out("The Bitwarden CLI (bw) is not installed. Installing it with: brew install bitwarden-cli\n");
+      const installed = await (io.install ?? brewInstall)();
+      if (installed === null) { io.out(`${INSTALL_HINT}\n`); return 1; }
+      if (installed !== 0) return failed(io, "brew install bitwarden-cli did not finish. Install it yourself (brew install bitwarden-cli, or see https://bitwarden.com/help/cli/), then run frely vault login again.");
+    }
     io.out(`Signing in to the dedicated Bitwarden account. Data folder: ${bitwardenDataDir()}\n`);
     if (server && await interactive(["config", "server", server], env) !== 0) return failed(io, "bw could not set the server.");
     const code = await interactive(["login"], env);

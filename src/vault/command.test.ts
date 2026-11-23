@@ -13,14 +13,30 @@ test("vault login runs bw config server and bw login in the owner's terminal, th
   });
   assert.equal(code, 0);
   assert.deepEqual(attached, [["config", "server", "https://vault.example.com"], ["login"]]);
-  assert.deepEqual(ran, [["lock", "--nointeraction"]]);
+  assert.deepEqual(ran, [["--version"], ["lock", "--nointeraction"]]);
+});
+
+test("vault login installs bw first when it is missing, and stops when it cannot be installed", async () => {
+  const attached: string[][] = [];
+  let installs = 0;
+  const missing = async (args: string[]) => ({ code: null, stdout: "", stderr: "", missing: args[0] === "--version" });
+  assert.equal(await runVaultCommand(["login"], { out: () => undefined, run: missing, install: async () => { installs += 1; return 0; }, interactive: async (args) => { attached.push(args); return 0; } }), 0);
+  assert.equal(installs, 1);
+  assert.deepEqual(attached, [["login"]]);
+  const out: string[] = [];
+  assert.equal(await runVaultCommand(["login"], { out: (text) => out.push(text), run: missing, install: async () => null, interactive: async () => { throw new Error("login must not start"); } }), 1);
+  assert.match(out.join(""), /brew install bitwarden-cli/u);
+  out.length = 0;
+  assert.equal(await runVaultCommand(["login"], { out: (text) => out.push(text), run: missing, install: async () => 1, interactive: async () => { throw new Error("login must not start"); } }), 1);
+  assert.match(out.join(""), /did not finish/u);
 });
 
 test("vault login refuses a non-https server and says how to install bw when it is missing", async () => {
   await assert.rejects(runVaultCommand(["login", "--server", "http://vault.example.com"], { out: () => undefined }), /https/u);
   await assert.rejects(runVaultCommand(["login", "--server"], { out: () => undefined }), /needs a URL/u);
   const out: string[] = [];
-  assert.equal(await runVaultCommand(["login"], { out: (text) => out.push(text), interactive: async () => null }), 1);
+  const present = async () => ({ code: 0, stdout: "", stderr: "" });
+  assert.equal(await runVaultCommand(["login"], { out: (text) => out.push(text), run: present, interactive: async () => null }), 1);
   assert.match(out.join(""), /brew install bitwarden-cli/u);
 });
 
