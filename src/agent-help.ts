@@ -64,6 +64,7 @@ export const COMMANDS = [
   { id: "service.share.http", usage: "frely service share --type http --port <n> [--ttl <hours>] [--rewrite-host] [--json]", auth: "account", effect: "remote-write", purpose: "Make a web service on this computer (http://127.0.0.1:<port>) reachable from the Internet by a private link through Frely's relay, until Ctrl+C or expiry (at most 24 hours). Needs the owner's approval in the browser each time (an approval link and code are printed; the command waits and continues by itself). The relay allowance is a plan limit per UTC week; --rewrite-host sends Host: localhost to dev servers that refuse other names. Not the same as `frely service share model` (local models) or `frely tunnel` (command sandbox)." },
   { id: "service.share", usage: "frely service share --type mcp|a2a --port <n> [--label <text>] [--background] [--json] | frely service share model [ollama|openai-compatible] [--url <http://host:port/v1>] [--models <a,b>] [--name <text>] [--slot <slot-id> | --creator] [--key-stdin] [--max-concurrent <n>] [--json]", auth: "account", effect: "remote-write", purpose: "`share model` publishes the models of a local model server (Ollama, LM Studio, vLLM, llama.cpp, or a gateway on a private network address that you confirm by typing yes in a terminal) and prints the AccessPoint made for each model (price 0 until you set one; put it in a Plan to sell it). It uses one personal Provider slot, or the Creator Provider limit; an unfinished share is resumed by running it again. Otherwise: connect an MCP server or A2A Agent that runs on this computer (127.0.0.1:<port>) to Frely so you can sell it, without a public address: only Frely's own cloud can reach it, the port never leaves this computer, and Frely never supplies a target. Runs until Ctrl+C, or with --background the device background service keeps it connected. Prints this week's remaining relay allowance; relayed traffic counts against the weekly relay allowance." },
   { id: "tunnel", usage: "frely tunnel <host>:<port> [--local-port N]", auth: "none", effect: "local-execution", purpose: "Run inside a sandboxed command (run_command): listen on 127.0.0.1:<local-port> (default: the same port) and forward each TCP connection to host:port through the command sandbox's proxy, so database and redis clients connect to 127.0.0.1 without turning the sandbox off. Start it in the same command as the client, for example `frely tunnel db.example.com:5432 & sleep 1; psql -h 127.0.0.1 ...`. Prints the local address and runs until killed." },
+  { id: "vault", usage: "frely vault login [--server <url>] | frely vault status | frely vault lock", auth: "none", effect: "local-write", purpose: "`login` is run once by the user in a terminal on this computer (interactive: do not run it for them): it signs the Bitwarden CLI (bw, brew install bitwarden-cli) in to a dedicated account in Frely's protected data folder. Afterwards unlock with secret_drop target kind vault_unlock and log in to sites with the site_login tool. `status` shows the bw login state; `lock` is not available yet (the vault locks itself after 8 hours)." },
   { id: "sandbox.proxy", usage: "frely sandbox proxy [<http://host:port> [--no-proxy <list>] | --clear]", auth: "none", effect: "local-write", purpose: "Show, save or remove the HTTP(S) proxy that the command sandbox forwards its network traffic to (your own proxy, for example Clash). Without one saved it uses the HTTPS_PROXY / HTTP_PROXY / ALL_PROXY of the CLI process and, on macOS, the system proxy. Your proxy settings are never changed. Takes effect when the MCP service restarts." },
   { id: "devices", usage: "frely devices [--add] [--json]", auth: "login", effect: "read", purpose: "List your Frely devices with online state and workspaces (list_devices). --add prints a one-time install command for a new computer." },
   { id: "run", usage: "frely run <device> [--cwd <dir>] [--timeout <s>] [--background] -- <command> [--json] [--out <file>]", auth: "login", effect: "remote-execution", purpose: "Run a shell command on a device inside its sandbox and print its output; --background returns a process id. The command's own failure is exit code 2." },
@@ -120,7 +121,7 @@ export function agentHelp() {
 
 /** Group key per command id, in the order the summary lists them. Keys are what `frely help --agent --json <group>` accepts. */
 const AGENT_GROUPS: readonly { key: string; title: string; test: (id: string) => boolean }[] = [
-  { key: "account", title: "Account and CLI", test: (id) => ["login", "logout", "uninstall", "doctor", "update", "help"].includes(id) },
+  { key: "account", title: "Account and CLI", test: (id) => ["login", "logout", "uninstall", "doctor", "update", "help", "vault"].includes(id) },
   { key: "api", title: "Account API", test: (id) => id === "api" },
   { key: "items", title: "Marketplace items", test: (id) => id.startsWith("item.") },
   { key: "runs", title: "Runs on this computer", test: (id) => ["runs", "result", "cancel"].includes(id) },
@@ -181,6 +182,7 @@ function groupOf(command: CommandEntry): string {
 
 /** One-line summaries where the first sentence of `purpose` does not read well alone. */
 const SUMMARY_OVERRIDES: Readonly<Record<string, string>> = {
+  vault: "Bitwarden sign-in for site_login",
   "key.setup": "Set up a new Frely key in Codex or Claude Code without showing it",
   "todo.list": "List your cloud todos",
   "todo.show": "Show a todo and its plan",
@@ -275,6 +277,7 @@ const GROUPS: readonly { title: string; ids: readonly string[] }[] = [
   { title: "Todos", ids: ["todo.list", "todo.show", "todo.add", "todo.update", "todo.plan", "todo.step"] },
   { title: "Providers", ids: ["provider.add", "provider.list", "provider.remove", "provider.key"] },
   { title: "Services", ids: ["service.share", "service.share.http", "service.local", "service.manage"] },
+  { title: "Bitwarden site login", ids: ["vault"] },
   { title: "Command sandbox", ids: ["tunnel", "sandbox.proxy"] },
   { title: "API", ids: ["api"] },
 ];
@@ -340,6 +343,7 @@ const SHORT_USAGE: Readonly<Record<string, string>> = {
   "service.share.http": "frely service share --type http --port <n> [--ttl <hours>]",
   "service.share": "frely service share --type mcp|a2a --port <n> | model [ollama|openai-compatible]",
   "service.manage": "frely service list|stop|remove (shared services and local Agents)",
+  vault: "frely vault login [--server <url>] | status | lock",
   tunnel: "frely tunnel <host>:<port> [--local-port N]",
   "sandbox.proxy": "frely sandbox proxy [<url> [--no-proxy <list>] | --clear]",
   api: "frely api list|describe|call",

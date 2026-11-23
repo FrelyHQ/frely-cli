@@ -9,8 +9,10 @@ import { join } from "node:path";
 import { setObserveIdentity } from "./trust/observe.js";
 import { APPROVAL_DOMAIN, pinTrustChain, TRUST_DOMAIN, trustDirectory, trustRecordHash, type ApprovalPayload, type TrustRecord } from "./trust/record.js";
 import { challengeFor, type Signer, type WebAuthnSignature } from "./trust/webauthn.js";
-import { applySecretDrop, forgetSecretDropKeys, parseSecretDropTarget, renderSecretFields, prepareSecretDrop, secretDropBinding, writerCommand, type SecretDropTarget } from "./secret-drop.js";
+import { applySecretDrop, forgetSecretDropKeys, parseSecretDropTarget as parseAnyTarget, renderSecretFields, prepareSecretDrop, secretDropBinding, writerCommand, type SecretDropFileTarget as SecretDropTarget, type SecretDropTarget as AnySecretDropTarget } from "./secret-drop.js";
 
+/** The tests below build file targets; the vault_unlock kind has its own tests. */
+const parseSecretDropTarget = (value: unknown) => parseAnyTarget(value) as SecretDropTarget;
 const ORIGIN = "https://approve.frely.cloud";
 const b64 = (data: Buffer | string | Uint8Array) => Buffer.from(data).toString("base64url");
 const sha = (data: Buffer | string) => createHash("sha256").update(data).digest();
@@ -42,7 +44,7 @@ async function browserEncrypt(epk: string, dropId: string, secret: string): Prom
 
 const target = (over: Partial<SecretDropTarget> = {}): SecretDropTarget => ({ kind: "file", path: "/tmp/x/ghcr-token", owner: "root", group: "root", mode: "0600", ...over });
 
-function approval(args: { epk: string; ciphertext: string; target: SecretDropTarget }, over: Partial<ApprovalPayload> = {}, bind?: string) {
+function approval(args: { epk: string; ciphertext: string; target: AnySecretDropTarget }, over: Partial<ApprovalPayload> = {}, bind?: string) {
   const now = Date.now();
   const payload: ApprovalPayload = {
     typ: APPROVAL_DOMAIN, id: DROP, user: "usr_1", trust: trustRecordHash(record), trustSeq: 1, device: DEVICE, deviceKey: "thumb", authz: null,
@@ -224,4 +226,44 @@ test("a field list is checked against the decrypted values and rendered as env, 
   assert.throws(() => renderSecretFields(env, Buffer.from("not json")), /did not match/u);
   assert.throws(() => parseSecretDropTarget({ ...base, fields: [fields[0], fields[0]] }), /not allowed/u);
   assert.throws(() => parseSecretDropTarget({ ...base, fields: [{ ...fields[0], type: "checkbox" }] }), /not allowed/u);
+});
+
+const VAULT_TARGET = { kind: "vault_unlock" } as const;
+
+test("vault_unlock target: only kind is accepted, and its signed binding is a fixed value the relay pins too", () => {
+  assert.deepEqual(parseAnyTarget({ kind: "vault_unlock" }), VAULT_TARGET);
+  for (const extra of [{ path: "/etc/x" }, { owner: "root" }, { host: "h" }, { fields: [] }, { format: "raw" }, { mode: "0600" }]) assert.throws(() => parseAnyTarget({ kind: "vault_unlock", ...extra }), /not allowed/u);
+  assert.throws(() => parseAnyTarget({ kind: "vault" }), /not allowed/u);
+  const epk = b64(Buffer.alloc(32, 7));
+  assert.equal(secretDropBinding({ dropId: DROP, target: VAULT_TARGET, epk, ciphertext: "AAAA" }), "ch7_81y5TWvy1wKZAGg9hY8orLoxju02gNiLRYIq2RI");
+});
+
+test("vault_unlock: the decrypted value goes to the vault once, not to a writer; the receipt has only the lock time and the buffer is zeroed", async () => {
+  await withDevice(async () => {
+    const { epk } = prepareSecretDrop({ dropId: DROP });
+    const ciphertext = await browserEncrypt(epk, DROP, SECRET);
+    let writes = 0;
+    const seen: Buffer[] = [];
+    const unlockVault = async (master: Buffer) => { assert.equal(master.toString("utf8"), SECRET); seen.push(master); return { locksAt: "2026-11-23T20:00:00.000Z" }; };
+    const receipt = await applySecretDrop({ dropId: DROP, target: VAULT_TARGET, epk, ciphertext, approval: approval({ epk, ciphertext, target: VAULT_TARGET }) }, { run: async () => { writes += 1; return { code: 0, stdout: "", stderr: "" }; }, unlockVault });
+    assert.deepEqual(receipt, { status: "unlocked", locksAt: "2026-11-23T20:00:00.000Z" });
+    assert.equal(writes, 0);
+    assert.equal(seen[0]!.every((byte) => byte === 0), true);
+  });
+});
+
+test("vault_unlock: a failure never carries the value, and a signature for another destination is still refused", async () => {
+  await withDevice(async () => {
+    const { epk } = prepareSecretDrop({ dropId: DROP });
+    const ciphertext = await browserEncrypt(epk, DROP, SECRET);
+    const unlockVault = async (): Promise<{ locksAt: string }> => { throw new Error(`bw said ${SECRET} is wrong`); };
+    const message = await refusal(applySecretDrop({ dropId: DROP, target: VAULT_TARGET, epk, ciphertext, approval: approval({ epk, ciphertext, target: VAULT_TARGET }) }, { unlockVault }));
+    assert.equal(message.includes(SECRET), false);
+    assert.match(message, /\[hidden\]/u);
+    const again = prepareSecretDrop({ dropId: DROP });
+    const ct2 = await browserEncrypt(again.epk, DROP, SECRET);
+    let called = 0;
+    assert.equal(await refusal(applySecretDrop({ dropId: DROP, target: VAULT_TARGET, epk: again.epk, ciphertext: ct2, approval: approval({ epk: again.epk, ciphertext: ct2, target: target() }) }, { unlockVault: async () => { called += 1; return { locksAt: "x" }; } })), "bind_mismatch");
+    assert.equal(called, 0);
+  });
 });

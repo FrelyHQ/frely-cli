@@ -8,6 +8,7 @@ import { verifyApproval, type SignedApproval } from "./trust/record.js";
 import { readTrustWithReason, type TrustRefresh } from "./trust/sync.js";
 import { refreshAccountTrust } from "./device/control.js";
 import { NO_TRUST_MESSAGE, TrustError } from "./trust/webauthn.js";
+import { unlockVault } from "./vault/bitwarden.js";
 
 /**
  * Secret drop: the owner pastes a secret on the approval site, bound to one destination, and this device writes it there with a fixed
@@ -32,7 +33,10 @@ const MODE = /^[0-7]{3,4}$/u;
 export const SECRET_DROP_FIELD_TYPES = ["password", "text", "number", "textarea"] as const;
 export const SECRET_DROP_FORMATS = ["raw", "env", "json"] as const;
 export interface SecretDropField { name: string; label: string; type: (typeof SECRET_DROP_FIELD_TYPES)[number]; required: boolean; max?: number }
-export interface SecretDropTarget { kind: "file" | "ssh_file"; path: string; owner: string; group: string; mode: string; host?: string; fields?: SecretDropField[]; format?: (typeof SECRET_DROP_FORMATS)[number] }
+export interface SecretDropFileTarget { kind: "file" | "ssh_file"; path: string; owner: string; group: string; mode: string; host?: string; fields?: SecretDropField[]; format?: (typeof SECRET_DROP_FORMATS)[number] }
+/** Unlocks the Bitwarden vault on this computer; the value is its master password and goes to `unlockVault`, never to a file. */
+export interface SecretDropVaultUnlockTarget { kind: "vault_unlock" }
+export type SecretDropTarget = SecretDropFileTarget | SecretDropVaultUnlockTarget;
 const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/u;
 
 /** Same rules as the relay's own check: the field list is part of what the owner signed, so it is rebuilt byte for byte or refused. */
@@ -61,7 +65,7 @@ function parseFields(t: Record<string, unknown>): { fields?: SecretDropField[]; 
 }
 
 /** Checks the decrypted JSON against the signed field list and turns it into the bytes to write: the value itself, NAME=value lines, or JSON. */
-export function renderSecretFields(target: SecretDropTarget, plain: Buffer): Buffer {
+export function renderSecretFields(target: SecretDropFileTarget, plain: Buffer): Buffer {
   if (!target.fields) return plain;
   let values: unknown;
   try { values = JSON.parse(target.format === "raw" ? JSON.stringify({ [target.fields[0]!.name]: plain.toString("utf8") }) : plain.toString("utf8")); } catch { throw new TrustError("fields_invalid", "The values did not match the requested fields."); }
@@ -85,7 +89,8 @@ export function parseSecretDropTarget(value: unknown): SecretDropTarget {
   const bad = (reason: string): never => { throw new Error(`The destination is not allowed: ${reason}.`); };
   if (!value || typeof value !== "object" || Array.isArray(value)) return bad("it is not an object");
   const t = value as Record<string, unknown>;
-  if (t.kind !== "file" && t.kind !== "ssh_file") return bad("kind must be file or ssh_file");
+  if (t.kind === "vault_unlock") return Object.keys(t).length === 1 ? { kind: "vault_unlock" } : bad("unknown property");
+  if (t.kind !== "file" && t.kind !== "ssh_file") return bad("kind must be file, ssh_file or vault_unlock");
   if (typeof t.path !== "string" || !PATH.test(t.path) || !isAbsolute(t.path) || t.path.endsWith("/") || t.path.slice(1).split("/").some((part) => part === "." || part === ".." || part === "")) return bad("path must be an absolute file path without dot segments");
   if (typeof t.owner !== "string" || !ACCOUNT.test(t.owner) || typeof t.group !== "string" || !ACCOUNT.test(t.group)) return bad("owner and group must be plain account names");
   if (typeof t.mode !== "string" || !MODE.test(t.mode) || (Number.parseInt(t.mode, 8) & 0o022) !== 0) return bad("mode must be octal and not writable by group or others");
@@ -160,7 +165,7 @@ export const WRITE_SCRIPT = [
 const shQuote = (value: string): string => `'${value.replace(/'/gu, `'\\''`)}'`;
 
 /** The argv of the writer: local (through `sudo -n` unless the file belongs to this very account) or over an ssh alias. */
-export function writerCommand(target: SecretDropTarget, self = userInfo().username, root = process.getuid?.() === 0): { command: string; args: string[] } {
+export function writerCommand(target: SecretDropFileTarget, self = userInfo().username, root = process.getuid?.() === 0): { command: string; args: string[] } {
   const params = [target.path, target.owner, target.group, target.mode];
   if (target.kind === "ssh_file") {
     return { command: "ssh", args: ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "--", target.host!, ["sudo", "-n", "sh", "-c", shQuote(WRITE_SCRIPT), "sh", ...params.map(shQuote)].join(" ")] };
@@ -169,7 +174,7 @@ export function writerCommand(target: SecretDropTarget, self = userInfo().userna
   return plain ? { command: "sh", args: ["-c", WRITE_SCRIPT, "sh", ...params] } : { command: "sudo", args: ["-n", "sh", "-c", WRITE_SCRIPT, "sh", ...params] };
 }
 
-export interface SecretDropDeps { run?: SecretDropRunner; now?: () => number; refreshTrust?: TrustRefresh }
+export interface SecretDropDeps { run?: SecretDropRunner; now?: () => number; refreshTrust?: TrustRefresh; unlockVault?: (secret: Buffer) => Promise<{ locksAt: string }> }
 
 /** Never returns anything that could carry the value; stderr is scrubbed again against the plaintext as a last guard. */
 const scrub = (text: string, secret: Buffer): string => {
@@ -201,6 +206,15 @@ export async function applySecretDrop(args: Record<string, unknown>, deps: Secre
   if (payload.ctl !== undefined || payload.scope !== undefined) throw new TrustError("approval_invalid");
   if (payload.bind?.tool !== SECRET_DROP_APPLY_TOOL || payload.bind.cmdHash !== secretDropBinding({ dropId, target, epk: key.epk, ciphertext })) throw new TrustError("bind_mismatch");
   const decrypted = decrypt(ciphertext, key, dropId);
+  if (target.kind === "vault_unlock") {
+    // Not a file: the value is the vault's master password. It goes to bw once and is zeroed here; the receipt carries only the lock time.
+    try {
+      const { locksAt } = await (deps.unlockVault ?? unlockVault)(decrypted);
+      return { status: "unlocked", locksAt };
+    } catch (error) {
+      throw new Error(scrub(error instanceof Error ? error.message : "The vault could not be unlocked.", decrypted));
+    } finally { decrypted.fill(0); }
+  }
   let secret: Buffer;
   try { secret = renderSecretFields(target, decrypted); } catch (error) { decrypted.fill(0); throw error; }
   if (secret !== decrypted) decrypted.fill(0);

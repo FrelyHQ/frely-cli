@@ -62,6 +62,7 @@ import { detectSandboxBackend } from "./runtime/sandbox.js";
 import { LocalMcpHub, loadManualEntries } from "./runtime/local-mcp.js";
 import { reportedWorkspaceInfo } from "./runtime/workspace-registry.js";
 import { VERSION } from "./version.js";
+import { runVaultCommand } from "./vault/command.js";
 import { agentHelpView, cliUsage, linkUsage, subcommandUsage } from "./agent-help.js";
 import { grantInactive, mcpStartLogin, normalizeLinkArgs, startMcp, takeInstallToken } from "./mcp-command.js";
 import { remoteLocked, remoteState, setLinkOnPending, setRemoteLock } from "./remote-lock.js";
@@ -234,6 +235,12 @@ async function main(): Promise<void> {
   if (command === "todo") {
     if (args[1] === undefined) { stdout.write(subcommandUsage("todo")); return; }
     process.exitCode = await runTodoCommand(args.slice(1), { out: (text) => { stdout.write(text); }, call: callCloudTool });
+    return;
+  }
+
+  if (command === "vault") {
+    if (args[1] === undefined) { stdout.write(subcommandUsage("vault")); return; }
+    process.exitCode = await runVaultCommand(args.slice(1), { out: (text) => { stdout.write(text); } });
     return;
   }
 
