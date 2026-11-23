@@ -1,14 +1,13 @@
 import { spawn } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 /**
  * The Bitwarden vault behind `site_login`: a dedicated account the owner logged in once with `frely vault login`. The master password
  * arrives through a secret drop (`vault_unlock`), is used for one `bw unlock` and is not kept. The session key lives only in this
- * module's variables and in one 0600 file inside the bw data directory (below ~/.config/frely, hidden from the AI's commands), so a
- * restart of the service or an upgrade of frely-cli keeps the vault unlocked until VAULT_TTL_MS is over. It is never put in the
- * environment of a command the AI runs. `frely vault lock` deletes the file, which locks the running service too. Every bw call is non-interactive, has stdin on /dev/null and a timeout, so a locked vault cannot hang it.
+ * module's variables (this process's memory): it is never written to disk, never put in the environment of a command the AI runs, and
+ * dropped after VAULT_TTL_MS. Every bw call is non-interactive, has stdin on /dev/null and a timeout, so a locked vault cannot hang it.
  */
 export const VAULT_TTL_MS = 8 * 60 * 60_000;
 const BW_TIMEOUT_MS = 30_000;
@@ -48,33 +47,6 @@ export const defaultBwRunner: BwRunner = (args, env, timeoutMs) => new Promise((
   child.on("close", (code) => finish({ code, stdout, stderr, timedOut }));
 });
 
-export interface SessionRecord { session: string; lockAt: number }
-/** Where the unlocked session survives restarts. The file store is the real one; tests inject a memory one. */
-export interface SessionStore { load(): SessionRecord | null; save(record: SessionRecord): void; clear(): void }
-
-const SESSION_FILE = "session.json";
-export function fileSessionStore(dir: string = bitwardenDataDir()): SessionStore {
-  const file = join(dir, SESSION_FILE);
-  return {
-    load() {
-      try {
-        const parsed = JSON.parse(readFileSync(file, "utf8")) as Partial<SessionRecord>;
-        return typeof parsed.session === "string" && parsed.session && typeof parsed.lockAt === "number" ? { session: parsed.session, lockAt: parsed.lockAt } : null;
-      } catch { return null; }
-    },
-    save(record) {
-      try {
-        mkdirSync(dir, { recursive: true, mode: 0o700 });
-        const tmp = `${file}.${process.pid}.tmp`;
-        writeFileSync(tmp, JSON.stringify(record), { mode: 0o600 });
-        chmodSync(tmp, 0o600);
-        renameSync(tmp, file);
-      } catch { /* the unlock still works in memory; it just will not survive a restart */ }
-    },
-    clear() { try { rmSync(file, { force: true }); } catch { /* nothing to remove */ } },
-  };
-}
-
 export interface VaultStatus { status: "locked" | "unlocked"; locksAt?: string }
 export interface FoundLogin { status: "found"; username: string; password: string; totp?: string }
 export type FindLoginResult = FoundLogin | { status: "no_login_found" } | { status: "ambiguous" };
@@ -85,7 +57,6 @@ export interface VaultDeps {
   /** Starts the auto-lock timer; returns its cancel. Tests drive this by hand. */
   schedule?: (fn: () => void, ms: number) => () => void;
   env?: NodeJS.ProcessEnv;
-  store?: SessionStore;
 }
 
 const defaultSchedule = (fn: () => void, ms: number): (() => void) => { const timer = setTimeout(fn, ms); timer.unref(); return () => clearTimeout(timer); };
@@ -97,14 +68,11 @@ export function createVault(deps: VaultDeps = {}) {
   const now = deps.now ?? Date.now;
   const schedule = deps.schedule ?? defaultSchedule;
   const env = deps.env ?? process.env;
-  const store = deps.store ?? fileSessionStore(bitwardenDataDir(env));
   let session: string | null = null;
   let lockAt = 0;
   let cancelTimer: (() => void) | null = null;
 
-  const forget = (): void => { session = null; lockAt = 0; cancelTimer?.(); cancelTimer = null; };
-  const drop = (): void => { forget(); store.clear(); };
-  const arm = (): void => { cancelTimer?.(); cancelTimer = schedule(() => { void lock(); }, Math.max(0, lockAt - now())); };
+  const drop = (): void => { session = null; lockAt = 0; cancelTimer?.(); cancelTimer = null; };
   const locksAt = (): string => new Date(lockAt).toISOString();
 
   async function lock(): Promise<void> {
@@ -128,21 +96,11 @@ export function createVault(deps: VaultDeps = {}) {
     drop();
     session = key;
     lockAt = now() + VAULT_TTL_MS;
-    arm();
-    store.save({ session, lockAt });
+    cancelTimer = schedule(() => { void lock(); }, VAULT_TTL_MS);
     return { locksAt: locksAt() };
   }
 
-  /** The session file is the truth: another process (a restarted service, `frely vault lock`) may have changed it since this one last looked. */
-  function sync(): void {
-    const saved = store.load();
-    if (!saved) { if (session) forget(); return; }
-    if (saved.lockAt <= now()) { store.clear(); forget(); return; }
-    if (saved.session !== session || saved.lockAt !== lockAt) { session = saved.session; lockAt = saved.lockAt; arm(); }
-  }
-
   function status(): VaultStatus {
-    sync();
     if (session && now() >= lockAt) { void lock(); }
     return session ? { status: "unlocked", locksAt: locksAt() } : { status: "locked" };
   }
