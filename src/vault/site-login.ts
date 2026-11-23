@@ -51,61 +51,65 @@ export function parseLoginUrl(value: unknown): URL {
  * returning selectors or values. Credentials are read from the credential FIFO and typed straight into the page.
  */
 export function buildLoginScript(input: { url: string; originFifo: string; credFifo: string }): string {
-  return `const fs = require("node:fs");
+  // ego lite runs this as an ESM module in its own Node runtime with `taskSpace` and the Page API in scope (see `ego-browser skill`).
+  return `const fs = await import("node:fs/promises");
 const URL_TO_OPEN = ${JSON.stringify(input.url)};
 const ORIGIN_FIFO = ${JSON.stringify(input.originFifo)};
 const CRED_FIFO = ${JSON.stringify(input.credFifo)};
-const FIND_FIELDS = ${JSON.stringify(FIND_FIELDS)};
-const FIND_CODE = ${JSON.stringify(FIND_CODE)};
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const report = (status, origin, usedTotp) => console.log(JSON.stringify({ status, origin, usedTotp }));
+const findFields = () => ${FIND_FIELDS};
+const findCode = () => ${FIND_CODE};
 
-async function waitFor(page, expression, tries) {
-  for (let i = 0; i < tries; i++) { const found = await page.evaluate(expression); if (found && (found.pw || found.user)) return found; await sleep(500); }
-  return await page.evaluate(expression);
+// Pressing Enter in a field does not submit every form when driven over CDP, so the form's own submit button is clicked when there is one.
+async function submit(page, field, hasButton) {
+  if (hasButton) await page.click("[data-frely-submit]", { label: "submit login" });
+  else await page.press(field, "Enter");
 }
 
-(async () => {
-  const task = await TaskSpace.open(${JSON.stringify(TASK_SPACE)});
-  let origin = "";
-  let usedTotp = false;
-  try {
-    const page = await task.newPage();
-    await page.goto(URL_TO_OPEN);
-    await page.waitForLoadState();
-    origin = new URL(await page.url()).origin;
-    fs.writeFileSync(ORIGIN_FIFO, origin);
-    const cred = JSON.parse(fs.readFileSync(CRED_FIFO, "utf8"));
-    if (!cred.ok) { report(cred.status || "no_login_found", origin, false); return; }
-    let found = await waitFor(page, FIND_FIELDS, 6);
-    if (found.pw > 1) { report("no_form", origin, false); return; }
+async function waitFor(page, tries) {
+  for (let i = 0; i < tries; i++) { const found = await page.evaluate(findFields); if (found && (found.pw || found.user)) return found; await sleep(500); }
+  return await page.evaluate(findFields);
+}
+
+const task = await taskSpace(${JSON.stringify(TASK_SPACE)});
+let origin = "";
+let usedTotp = false;
+try {
+  const page = task.page("p1") ?? (await task.pages())[0];
+  await page.goto(URL_TO_OPEN);
+  origin = new URL(await page.url()).origin;
+  await fs.writeFile(ORIGIN_FIFO, origin);
+  const cred = JSON.parse(await fs.readFile(CRED_FIFO, "utf8"));
+  if (!cred.ok) { report(cred.status || "no_login_found", origin, false); }
+  else {
+    let found = await waitFor(page, 6);
     if (!found.pw && found.user) {
       await page.fill("[data-frely-user]", cred.username);
-      await page.press("[data-frely-user]", "Enter");
+      await submit(page, "[data-frely-user]", found.submit);
       await sleep(1500);
-      found = await waitFor(page, FIND_FIELDS, 10);
+      found = await waitFor(page, 10);
     }
-    if (found.pw !== 1) { report("no_form", origin, false); return; }
-    if (found.user && !(await page.evaluate("document.querySelector('[data-frely-user]') !== null && document.querySelector('[data-frely-user]').value !== ''"))) await page.fill("[data-frely-user]", cred.username);
-    await page.fill("[data-frely-pw]", cred.password);
-    await page.press("[data-frely-pw]", "Enter");
-    await sleep(2500);
-    if (cred.totp) {
-      const code = await page.evaluate(FIND_CODE);
-      if (code) { await page.fill("[data-frely-code]", cred.totp); await page.press("[data-frely-code]", "Enter"); usedTotp = true; await sleep(2000); }
+    if (found.pw !== 1) { report("no_form", origin, false); }
+    else {
+      if (found.user && !found.userFilled) await page.fill("[data-frely-user]", cred.username);
+      await page.fill("[data-frely-pw]", cred.password);
+      await submit(page, "[data-frely-pw]", found.submit);
+      await sleep(2500);
+      const code = cred.totp ? await page.evaluate(findCode) : null;
+      if (code && code.found) { await page.fill("[data-frely-code]", cred.totp); await submit(page, "[data-frely-code]", code.submit); usedTotp = true; await sleep(2000); }
+      report("submitted", origin, usedTotp);
     }
-    report("submitted", origin, usedTotp);
-  } finally {
-    await task.finish({ keep: [] });
   }
-})().catch(() => { report("no_form", "", false); });
+} catch { report("no_form", origin, false); }
+finally { await task.finish({ keep: [] }); }
 `;
 }
 
 /** Marks the one visible password box and its user name box on the page and says how many there are; returns counts, never values. */
 const FIND_FIELDS = `(() => {
   const visible = (el) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none" && !el.disabled && !el.readOnly; };
-  for (const el of document.querySelectorAll("[data-frely-pw],[data-frely-user]")) { el.removeAttribute("data-frely-pw"); el.removeAttribute("data-frely-user"); }
+  for (const el of document.querySelectorAll("[data-frely-pw],[data-frely-user],[data-frely-submit]")) { el.removeAttribute("data-frely-pw"); el.removeAttribute("data-frely-user"); el.removeAttribute("data-frely-submit"); }
   const passwords = [...document.querySelectorAll("input[type=password]")].filter(visible);
   const pw = passwords[0] || null;
   const scope = pw ? (pw.form || document) : document;
@@ -115,13 +119,20 @@ const FIND_FIELDS = `(() => {
   if (!user && !pw) user = texts[0] || null;
   if (pw) pw.setAttribute("data-frely-pw", "1");
   if (user) user.setAttribute("data-frely-user", "1");
-  return { pw: passwords.length, user: user ? 1 : 0 };
+  const form = (pw || user) ? (pw || user).form : null;
+  const button = form ? [...form.querySelectorAll("button[type=submit],input[type=submit],button:not([type])")].filter(visible)[0] : null;
+  if (button) button.setAttribute("data-frely-submit", "1");
+  return { pw: passwords.length, user: user ? 1 : 0, userFilled: !!(user && user.value), submit: !!button };
 })()`;
 
 const FIND_CODE = `(() => {
   const el = [...document.querySelectorAll("input[autocomplete=one-time-code],input[inputmode=numeric]")].find((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && !e.disabled; });
-  if (el) el.setAttribute("data-frely-code", "1");
-  return !!el;
+  for (const old of document.querySelectorAll("[data-frely-submit]")) old.removeAttribute("data-frely-submit");
+  if (!el) return { found: false, submit: false };
+  el.setAttribute("data-frely-code", "1");
+  const button = el.form ? [...el.form.querySelectorAll("button[type=submit],input[type=submit],button:not([type])")].find((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 && !b.disabled; }) : null;
+  if (button) button.setAttribute("data-frely-submit", "1");
+  return { found: true, submit: !!button };
 })()`;
 
 const run = promisify(execFile);

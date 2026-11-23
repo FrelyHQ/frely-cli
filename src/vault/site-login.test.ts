@@ -37,7 +37,7 @@ test("the script embeds the URL and FIFO paths only as JSON strings, and compile
   const hostile = `https://example.com/";process.exit(1);//\n </script>\`\${x}`;
   const fifo = `/tmp/a b/"q"\\origin`;
   const script = buildLoginScript({ url: hostile, originFifo: fifo, credFifo: "/tmp/cred" });
-  new Script(script);
+  new Script(`(async () => {\n${script}\n})`); // ego runs it as a module with top-level await
   assert.ok(script.includes(`const URL_TO_OPEN = ${JSON.stringify(hostile)};`));
   assert.ok(script.includes(`const ORIGIN_FIFO = ${JSON.stringify(fifo)};`));
   assert.equal(script.replace(JSON.stringify(hostile), "").includes("process.exit"), false);
