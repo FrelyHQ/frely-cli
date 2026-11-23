@@ -146,7 +146,7 @@ test("the data directory follows the config home, which is inside the folders th
   assert.deepEqual(Object.keys(bwEnv({}, { PATH: "/p", HOME: "/h", FOO: "x" })).sort(), ["BITWARDENCLI_APPDATA_DIR", "HOME", "PATH"]);
 });
 
-test("the real password pipe is a 0700-folder FIFO that a reader gets the first line from, and it is removed on close", async () => {
+test("the real password pipe is a 0700-folder FIFO that a reader gets the first line from, and it is removed on close", { skip: process.platform === "win32" && "FIFOs are POSIX-only; the vault runs on macOS." }, async () => {
   const { existsSync, statSync } = await import("node:fs");
   const { readFile } = await import("node:fs/promises");
   const pipe = await defaultPasswordPipe();
@@ -158,7 +158,7 @@ test("the real password pipe is a 0700-folder FIFO that a reader gets the first 
   assert.equal(existsSync(pipe.path), false);
 });
 
-test("a bw that never opens the pipe does not hang the unlock, and the password is not left anywhere", async () => {
+test("a bw that never opens the pipe does not hang the unlock, and the password is not left anywhere", { skip: process.platform === "win32" && "FIFOs are POSIX-only; the vault runs on macOS." }, async () => {
   const { existsSync } = await import("node:fs");
   const real = await defaultPasswordPipe();
   let path = "";
