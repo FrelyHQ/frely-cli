@@ -82,3 +82,9 @@ test("device relay capabilities envelope round trips within 4KB", () => {
   assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...report, capabilities: ["not", "an", "object"] })));
   assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...report, capabilities: { blob: "x".repeat(8_192) } })));
 });
+
+test("migrate is a bare envelope like upgrade", () => {
+  const migrate = { protocol: DEVICE_RELAY_PROTOCOL, type: "migrate" as const, id: "mig_0123456789abcdef" };
+  assert.deepEqual(decodeDeviceRelayEnvelope(encodeDeviceRelayEnvelope(migrate)), migrate);
+  assert.throws(() => decodeDeviceRelayEnvelope(JSON.stringify({ ...migrate, extra: 1 })), /frame_invalid/);
+});

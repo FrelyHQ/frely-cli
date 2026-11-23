@@ -30,6 +30,13 @@ export type DeviceRelayUpgrade = {
   id: string;
 };
 
+/** Relay -> device: this relay instance is being replaced. Open a new connection to the same URL first, then close this one. Carries no parameters. */
+export type DeviceRelayMigrate = {
+  protocol: typeof DEVICE_RELAY_PROTOCOL;
+  type: "migrate";
+  id: string;
+};
+
 export type DeviceRelayResponse = {
   protocol: typeof DEVICE_RELAY_PROTOCOL;
   type: "response";
@@ -68,7 +75,7 @@ export type DeviceRelayStreamEnd = {
 
 export type DeviceRelayMcpDisabled = { protocol: typeof DEVICE_RELAY_PROTOCOL; type: "mcp_disabled"; id: string };
 
-export type DeviceRelayEnvelope = DeviceRelayMcpDisabled | DeviceRelayRequest | DeviceRelayResponse | DeviceRelayCancel | DeviceRelayStreamStart | DeviceRelayStreamChunk | DeviceRelayStreamEnd | DeviceRelayCapabilities | DeviceRelayUpgrade;
+export type DeviceRelayEnvelope = DeviceRelayMcpDisabled | DeviceRelayRequest | DeviceRelayResponse | DeviceRelayCancel | DeviceRelayStreamStart | DeviceRelayStreamChunk | DeviceRelayStreamEnd | DeviceRelayCapabilities | DeviceRelayUpgrade | DeviceRelayMigrate;
 
 export class DeviceRelayProtocolError extends Error {
   constructor(readonly code: "frame_invalid" | "frame_too_large" | "duplicate_request" | "inflight_limit") {
@@ -115,7 +122,7 @@ export function validateDeviceRelayEnvelope(value: unknown): asserts value is De
     if (Buffer.byteLength(JSON.stringify(record.capabilities)) > 4096) throw new DeviceRelayProtocolError("frame_invalid");
     return;
   }
-  if (record.type === "upgrade") {
+  if (record.type === "upgrade" || record.type === "migrate") {
     exactKeys(record, ["protocol", "type", "id"]);
     return;
   }
