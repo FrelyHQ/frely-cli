@@ -171,3 +171,28 @@ test("a bw that never opens the pipe does not hang the unlock, and the password 
   await assert.rejects(vault.unlock(Buffer.from(MASTER)), /did not unlock/u);
   assert.equal(existsSync(path), false);
 });
+
+test("with a bw stand-in on PATH the real runner and pipe unlock without the password in the environment or arguments", { skip: process.platform === "win32" && "FIFOs are POSIX-only; the vault runs on macOS." }, async () => {
+  const { chmodSync, mkdtempSync, writeFileSync, readFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "fake-bw-"));
+  const seen = join(dir, "seen");
+  // Like bw: `status` answers locked, `unlock --passwordfile F --raw` reads the first line of F, checks it, prints a session key; env and argv are logged.
+  writeFileSync(join(dir, "bw"), `#!/bin/sh
+echo "$@" >> "${seen}.args"; env >> "${seen}.env"
+case "$1" in
+  status) echo '{"status":"locked"}';;
+  unlock) read line < "$3"; if [ "$line" = "${MASTER}" ]; then echo ${SESSION}; else echo bad >&2; exit 1; fi;;
+  *) exit 0;;
+esac
+`);
+  chmodSync(join(dir, "bw"), 0o755);
+  const vault = createVault({ schedule: () => () => undefined, env: { PATH: `${dir}:/usr/bin:/bin`, HOME: dir, XDG_CONFIG_HOME: join(dir, "cfg") } });
+  const master = Buffer.from(MASTER);
+  const receipt = await vault.unlock(master);
+  assert.equal(vault.status().status, "unlocked");
+  assert.ok(receipt.locksAt);
+  const logged = readFileSync(`${seen}.args`, "utf8") + readFileSync(`${seen}.env`, "utf8");
+  assert.equal(logged.includes(MASTER), false);
+  assert.match(logged, /unlock --passwordfile .*\/pw --raw --nointeraction/u);
+});
