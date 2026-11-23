@@ -10,6 +10,9 @@ export const TRANSFER_MAX_BYTES = 100 * 1024 * 1024;
 export const TRANSFER_META_KEY = "frely/transfer";
 export const TRANSFER_TOOLS = new Set(["transfer_prepare", "transfer_upload", "transfer_download", "transfer_p2p_info", "transfer_p2p_listen", "transfer_p2p_send", "transfer_p2p_status", "transfer_p2p_cancel"]);
 
+/** The object stores Frely signs links for (the same two the web app's CSP allows). Plan gap G4 is closed by this list: a link to any other host is refused. */
+export const TRANSFER_STORE_HOST_SUFFIXES = [".r2.cloudflarestorage.com", ".s3.bitiful.net"] as const;
+
 const TIMEOUT_MS = 10 * 60_000;
 const HEADER_NAMES = /^(?:content-type|x-amz-[a-z0-9-]+)$/u;
 
@@ -25,12 +28,18 @@ export interface TransferTarget {
   trustedTestHosts?: readonly string[];
 }
 
-/** https only, public addresses only, one connection pinned to the checked address, no redirects, no credentials in the URL. */
+export function isTransferStoreHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return TRANSFER_STORE_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix) && host.length > suffix.length);
+}
+
+/** https only, only Frely's object stores, public addresses only, one connection pinned to the checked address, no redirects, no credentials in the URL. */
 async function connect(target: TransferTarget, method: "PUT" | "GET", headers: Record<string, string>, signal: AbortSignal, body?: AsyncIterable<Buffer>): Promise<IncomingMessage> {
   let url: URL;
   try { url = new URL(target.url); } catch { throw new Error("The transfer URL is not valid."); }
   const trusted = target.trustedTestHosts?.includes(url.hostname) === true;
   if (url.protocol !== "https:") throw new Error("Transfers use https only.");
+  if (!isTransferStoreHost(url.hostname)) throw new Error("Transfer links must point to Frely's file storage.");
   if (!trusted && url.port && url.port !== "443") throw new Error("Transfers use port 443 only.");
   const { address } = await checkedTarget(url, { signal, ...(target.resolve ? { resolve: target.resolve } : {}), ...(target.trustedTestHosts ? { trustedTestHosts: target.trustedTestHosts } : {}) });
   const family = isIP(address) === 6 ? 6 : 4;

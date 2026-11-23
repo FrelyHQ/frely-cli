@@ -162,7 +162,7 @@ test("put uploads a local file, completes it and prints the short link without t
 
 test("put of device:path asks the relay to pull the file, and a missing local file is a usage error", async () => {
   const sent = await run(["put", "box:out/a.png"], () => text(view));
-  assert.deepEqual(sent.calls[0]!.input, { action: "send", device: "box", path: "out/a.png" });
+  assert.deepEqual(sent.calls[0]!.input, { action: "put", device: "box", path: "out/a.png" });
   assert.match(sent.out, /^https:\/\/frely\.cloud\/f\/abc123/u);
   const missing = await run(["put", "/nonexistent/file.bin"], () => text(view));
   assert.equal(missing.code, EXIT.cli);
@@ -200,7 +200,7 @@ test("get downloads with the checked size and sha256, and refuses to overwrite",
 
 test("get to a device uses transfer receive", async () => {
   const result = await run(["get", "tr_1", "box:in/a.png", "--overwrite"], () => text({ ok: true }));
-  assert.deepEqual(result.calls[0]!.input, { action: "receive", id: "tr_1", device: "box", path: "in/a.png", overwrite: true });
+  assert.deepEqual(result.calls[0]!.input, { action: "get", id: "tr_1", device: "box", path: "in/a.png", overwrite: true });
   assert.equal(result.code, EXIT.ok);
 });
 
