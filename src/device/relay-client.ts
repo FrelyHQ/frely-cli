@@ -60,10 +60,15 @@ export interface RelayServeOptions {
 interface InflightRequest {
   request: DeviceRelayRequest;
   controller: AbortController;
+  /** The connection the request arrived on; its response goes back there while that socket is open. */
+  socket?: WebSocket | undefined;
 }
 
 /** A response is kept for the next connection this long; the relay holds its caller for 60 s, so later is useless. */
 export const RELAY_OUTBOX_TTL_MS = 130_000;
+/** After a migrate the old connection is closed once its own requests are answered, or after this long. */
+export const RELAY_MIGRATE_DRAIN_CAP_MS = 130_000;
+const RELAY_MIGRATE_DRAIN_CHECK_MS = 250;
 
 /**
  * State that survives a dropped connection: MCP commands keep running and report on the next one.
@@ -144,13 +149,15 @@ function writeTracked(carry: RelayCarry, socket: WebSocket, entry: { envelope: D
   prune(carry.unacked, log);
   carry.unacked.delete(entry.envelope.id);
   carry.unacked.set(entry.envelope.id, entry);
-  carry.unpinged.add(entry.envelope.id);
+  // A draining old connection is not the one pings are tracked on, so its writes are only resent, never counted as proven.
+  if (socket === carry.socket) carry.unpinged.add(entry.envelope.id);
   bound(carry.unacked, log);
 }
 
 /** Sends on the current connection, or keeps the response (bounded) for the next one. */
 export function deliverResponse(carry: RelayCarry, envelope: DeviceRelayResponse, log: DiagnosticLog): void {
-  const socket = carry.socket;
+  const origin = carry.inflight.get(envelope.id)?.socket;
+  const socket = origin?.readyState === WebSocket.OPEN ? origin : carry.socket;
   if (socket && socket.readyState === WebSocket.OPEN) { writeTracked(carry, socket, { envelope, at: Date.now() }, log); return; }
   let kept = envelope;
   try { encodeDeviceRelayEnvelope(envelope); }
@@ -303,6 +310,11 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
           maintenance,
           options.capabilities,
           carry,
+          async () => {
+            const next = await obtainGrant(device, authorization, lease, options.workspace, log, turn);
+            const transport = selectDeviceTransport(next.transports, selectedTransport?.kind);
+            return { websocketUrl: transport.websocketUrl, accessToken: transport.accessToken };
+          },
         );
         preferredTransport = undefined;
         delayMs = 1000;
@@ -462,16 +474,22 @@ export async function serveConnection(
   maintenance?: MaintenanceGate,
   capabilities?: () => Record<string, unknown> | Promise<Record<string, unknown>> | undefined,
   carry: RelayCarry = createRelayCarry(),
+  /** Credentials for the connection a `migrate` frame asks for; defaults to the ones this connection used. */
+  migrateGrant: () => Promise<{ websocketUrl: string; accessToken: string }> = async () => ({ websocketUrl, accessToken }),
+  /** Internal: this connection is the replacement of a migrating one; it takes over once its capability report is out. */
+  migrating = false,
+  onReady?: () => void,
 ): Promise<void> {
   if (signal.aborted) return;
   // The lease this connection serves under, as this computer sees it: the web compares it with its own record.
   const reported = capabilities;
   let closeReported = false;
-  capabilities = reported ? async () => {
+  capabilities = async () => {
     const lastClose = closeReported ? undefined : carry.lastClose;
     closeReported = true;
-    return { ...(await reported() ?? {}), mcpLease: lease ? lease.state() : null, ...(lastClose ? { lastClose } : {}) };
-  } : undefined;
+    // relayMigrate: the relay may send `migrate` instead of closing with 1012.
+    return { ...(await reported?.() ?? {}), relayMigrate: true, mcpLease: lease ? lease.state() : null, ...(lastClose ? { lastClose } : {}) };
+  };
   await new Promise<void>((resolve, reject) => {
     const socket = new WebSocket(websocketUrl, DEVICE_RELAY_PROTOCOL, {
       headers: { authorization: `Bearer ${accessToken}`, "x-frely-device-id": deviceId },
@@ -511,8 +529,48 @@ export async function serveConnection(
     }, RELAY_SILENCE_CHECK_MS);
     silenceWatch.unref?.();
     // Device-local MCP servers come and go, so the report is refreshed while connected.
-    const capabilityTimer = capabilities ? setInterval(() => { void sendCapabilities(socket, capabilities); }, 60_000) : undefined;
-    capabilityTimer?.unref?.();
+    const capabilityTimer = setInterval(() => { void sendCapabilities(socket, capabilities); }, 60_000);
+    capabilityTimer.unref?.();
+
+    // Zero-drop release: the replacement connection is opened and made current before this one is closed.
+    let migration: Promise<void> | undefined;
+    let migrationReady = false;
+    let plannedClose = false;
+    let drainTimer: ReturnType<typeof setInterval> | undefined;
+    let capTimer: ReturnType<typeof setTimeout> | undefined;
+    const closeMigrated = (reason: string) => {
+      if (plannedClose || finished) return;
+      plannedClose = true;
+      diagnostic(log, "relay.migrated", { durationMs: Date.now() - migrationStartedAt, inflight: ownInflight() });
+      socket.close(1000, "migrated");
+    };
+    let migrationStartedAt = 0;
+    const ownInflight = () => { let count = 0; for (const item of inflight.values()) if (item.socket === socket) count++; return count; };
+    const migrate = () => {
+      if (migration) return;
+      migrationStartedAt = Date.now();
+      let ready: () => void = () => undefined;
+      const started = new Promise<void>((resolve) => { ready = resolve; });
+      migration = (async () => {
+        const next = await migrateGrant();
+        await serveConnection(next.websocketUrl, next.accessToken, deviceId, session, lease, signal, log, report, maintenance, reported, carry, migrateGrant, true, ready);
+      })();
+      const current = migration;
+      void started.then(() => {
+        if (finished || migration !== current) return;
+        migrationReady = true;
+        drainTimer = setInterval(() => { if (ownInflight() === 0) closeMigrated("drained"); }, RELAY_MIGRATE_DRAIN_CHECK_MS);
+        drainTimer.unref?.();
+        capTimer = setTimeout(() => closeMigrated("drain_cap"), RELAY_MIGRATE_DRAIN_CAP_MS);
+        capTimer.unref?.();
+      });
+      current.then(() => { if (migrationReady) finish(); }, (error) => {
+        if (migrationReady) { finish(error); return; }
+        // The replacement never came up: keep serving here; the old relay closes with 1012 later and the usual retry applies.
+        diagnostic(log, "relay.migrate_failed", { durationMs: Date.now() - migrationStartedAt }, error);
+        if (migration === current) migration = undefined;
+      });
+    };
 
     const finish = (error?: unknown) => {
       if (finished) return;
@@ -536,15 +594,19 @@ export async function serveConnection(
       unregisterOutput?.();
       clearInterval(heartbeat);
       clearInterval(silenceWatch);
-      if (capabilityTimer) clearInterval(capabilityTimer);
+      clearInterval(capabilityTimer);
+      if (drainTimer) clearInterval(drainTimer);
+      if (capTimer) clearTimeout(capTimer);
       if (carry.socket === socket) carry.socket = undefined;
       // MCP commands keep running when only the connection dropped (same lease, not stopping); their results go out on the next one.
       const keepMcp = !signal.aborted && session !== null && lease !== null && !lease.controller.signal.aborted;
-      const carried = keepMcp ? [...inflight.values()].filter((item) => item.request.method === "mcp" && !item.controller.signal.aborted).length : 0;
+      // Requests that arrived on another connection that is still open (the old or the new side of a migrate) are not ours to cancel.
+      const own = [...inflight].filter(([, item]) => item.socket === socket || item.socket?.readyState !== WebSocket.OPEN);
+      const carried = keepMcp ? own.filter(([, item]) => item.request.method === "mcp" && !item.controller.signal.aborted).length : 0;
       if (carried > 0) diagnostic(log, "relay.inflight_carried", { inflight: carried, durationMs: Date.now() - connectedAt });
       // The relay answers these callers with "cancelled"; a retry here could repeat a mutation, so only record them.
-      if (inflight.size > carried) diagnostic(log, "relay.inflight_cancelled", { inflight: inflight.size - carried, durationMs: Date.now() - connectedAt }, error);
-      for (const [id, item] of inflight) {
+      if (own.length > carried) diagnostic(log, "relay.inflight_cancelled", { inflight: own.length - carried, durationMs: Date.now() - connectedAt }, error);
+      for (const [id, item] of own) {
         if (keepMcp && item.request.method === "mcp") continue;
         cancelled.add(id);
         item.controller.abort();
@@ -554,7 +616,9 @@ export async function serveConnection(
       lease?.controller.signal.removeEventListener("abort", onLeaseAbort);
       socket.removeAllListeners();
       if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.terminate();
-      if (error) reject(error); else resolve();
+      // After a migrate this connection's outcome is the replacement's: the loop must not start a third one.
+      if (migration) migration.then(resolve, reject);
+      else if (error) reject(error); else resolve();
     };
     const onAbort = () => finish();
     signal.addEventListener("abort", onAbort, { once: true });
@@ -562,14 +626,20 @@ export async function serveConnection(
     // The relay learns at once why this computer stopped, instead of at the next periodic report.
     const onLeaseAbort = () => { report({ type: "mcp_disabled" }); void sendCapabilities(socket, capabilities); };
     lease?.controller.signal.addEventListener("abort", onLeaseAbort, { once: true });
-    socket.once("open", () => {
+    const opened = () => {
       carry.socket = socket;
       flushOutbox(carry, socket, log);
       diagnostic(log, "relay.connected");
       report({ type: "connected" });
       if (lease?.controller.signal.aborted) report({ type: "mcp_disabled" });
-      void sendCapabilities(socket, capabilities);
+      if (!migrating) void sendCapabilities(socket, capabilities);
       ping();
+      onReady?.();
+    };
+    socket.once("open", () => {
+      // A replacement announces itself before it takes any traffic from the old connection.
+      if (migrating) void sendCapabilities(socket, capabilities).then(() => { if (!finished) opened(); });
+      else opened();
     });
     socket.on("ping", () => { lastPingAt = lastInboundAt = Date.now(); });
     socket.on("pong", (data: Buffer) => {
@@ -584,7 +654,7 @@ export async function serveConnection(
       finish(new DeviceTransportConnectionError("Device transport WebSocket failed.", true));
     });
     socket.once("close", (code, reason) => {
-      if (signal.aborted) finish();
+      if (signal.aborted || plannedClose) finish();
       else finish(closedTransportError(code, reason));
     });
     socket.on("message", (data) => {
@@ -592,7 +662,7 @@ export async function serveConnection(
       // WebSocket peers may deliver the same JSON envelope as either a text
       // or a binary frame. `rawDataBuffer` normalizes both forms before the
       // protocol validator parses the JSON.
-      void handleFrame(rawDataBuffer(data), socket, carry, session, lease, log, maintenance, capabilities).catch((error) => { diagnostic(log, "relay.frame_failed", {}, error); finish(error); });
+      void handleFrame(rawDataBuffer(data), socket, carry, session, lease, log, maintenance, capabilities, migrate).catch((error) => { diagnostic(log, "relay.frame_failed", {}, error); finish(error); });
     });
   });
 }
@@ -606,6 +676,7 @@ async function handleFrame(
   log: DiagnosticLog,
   maintenance?: MaintenanceGate,
   capabilitiesSource?: () => Record<string, unknown> | Promise<Record<string, unknown>> | undefined,
+  onMigrate?: () => void,
 ): Promise<void> {
   const { inflight, cancelled } = carry;
   const envelope = decodeDeviceRelayEnvelope(data);
@@ -619,6 +690,7 @@ async function handleFrame(
     void sendCapabilities(socket, capabilitiesSource);
     return;
   }
+  if (envelope.type === "migrate") { onMigrate?.(); return; }
   if (envelope.type === "cancel") {
     carry.outbox.delete(envelope.id);
     carry.unacked.delete(envelope.id);
@@ -637,7 +709,7 @@ async function handleFrame(
   try { release = maintenance?.enter(); }
   catch { send(socket, errorResponse(envelope.id, "upgrade_in_progress", "Frely is preparing an update. Retry after it completes."), log); return; }
   const controller = new AbortController();
-  inflight.set(envelope.id, { request: envelope, controller });
+  inflight.set(envelope.id, { request: envelope, controller, socket });
   const operation = envelope.method === "provider"
     ? executeProviderRequest(envelope, socket, controller.signal, cancelled, log)
     : executeMcpRequest(envelope, session, lease, log).then((payload) => {

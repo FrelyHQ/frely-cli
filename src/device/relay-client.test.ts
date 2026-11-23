@@ -192,7 +192,7 @@ test("device reports capabilities once per connection", async () => {
     });
     assert.equal(reported.type, "device_capabilities");
     // The lease this connection serves under rides along, so the web can tell a lease that ended on the computer.
-    assert.deepEqual((reported as { capabilities: Record<string, unknown> }).capabilities, { app: { installed: true, version: "0.4.0" }, sandbox: "none",
+    assert.deepEqual((reported as { capabilities: Record<string, unknown> }).capabilities, { app: { installed: true, version: "0.4.0" }, sandbox: "none", relayMigrate: true,
       mcpLease: { id: `mca_${"a".repeat(32)}`, expiresAt: new Date(lease.expiresAt).toISOString(), active: true } });
 
   } finally {
