@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { siteLoginAvailable } from "../vault/site-login.js";
 import { createMcpServer, LOCAL_MCP_TOOLS } from "./mcp.js";
 
 test("MCP client can list and call frely-cli tools", async () => {
@@ -16,12 +17,13 @@ test("MCP client can list and call frely-cli tools", async () => {
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   try {
     const tools = await client.listTools();
-    assert.deepEqual(tools.tools.map((tool) => tool.name), ["read", "edit_file", "web_fetch", "process"]);
+    // site_login is listed only where ego lite is installed (macOS with ego-browser), so the expectation follows the host.
+    assert.deepEqual(tools.tools.map((tool) => tool.name), [...(siteLoginAvailable() ? ["site_login"] : []), "read", "edit_file", "web_fetch", "process"]);
     assert.equal(tools.tools.find((tool) => tool.name === "read")?.annotations?.readOnlyHint, true);
     assert.equal(tools.tools.find((tool) => tool.name === "edit_file")?.annotations?.destructiveHint, true);
     const hints = new Map<string, [boolean, boolean, boolean]>([
       ["read", [true, false, false]], ["edit_file", [false, true, false]], ["web_fetch", [true, false, true]], ["process", [false, true, true]],
-      ["local_mcp_list", [true, false, false]], ["local_mcp_call", [false, true, true]],
+      ["site_login", [false, false, true]], ["local_mcp_list", [true, false, false]], ["local_mcp_call", [false, true, true]],
     ]);
     for (const listed of [...tools.tools, ...LOCAL_MCP_TOOLS]) {
       const { readOnlyHint, destructiveHint, openWorldHint } = listed.annotations ?? {};
