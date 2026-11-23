@@ -173,7 +173,7 @@ test("the session file is 0600 and gone after clear", async () => {
   const dir = join(mkdtempSync(join(tmpdir(), "vault-")), "bitwarden");
   const store = fileSessionStore(dir);
   store.save({ session: SESSION, lockAt: 42 });
-  assert.equal(statSync(join(dir, "session.json")).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal(statSync(join(dir, "session.json")).mode & 0o777, 0o600);
   assert.deepEqual(store.load(), { session: SESSION, lockAt: 42 });
   store.clear();
   assert.equal(existsSync(join(dir, "session.json")), false);
