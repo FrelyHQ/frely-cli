@@ -1,5 +1,8 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import { mkdirSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -11,6 +14,7 @@ import { join } from "node:path";
  */
 export const VAULT_TTL_MS = 8 * 60 * 60_000;
 const BW_TIMEOUT_MS = 30_000;
+const execFileAsync = promisify(execFile);
 export const INSTALL_HINT = "The Bitwarden CLI (bw) is not installed on this computer. Install it with: brew install bitwarden-cli";
 export const LOGIN_HINT = "Bitwarden is not logged in on this computer. Ask the user to run `frely vault login` in a terminal on this computer once.";
 export const LOCKED_HINT = "The vault is locked. Call secret_drop with target {\"kind\":\"vault_unlock\"} on this device and give the user the link.";
@@ -51,7 +55,25 @@ export interface VaultStatus { status: "locked" | "unlocked"; locksAt?: string }
 export interface FoundLogin { status: "found"; username: string; password: string; totp?: string }
 export type FindLoginResult = FoundLogin | { status: "no_login_found" } | { status: "ambiguous" };
 
+/** Hands the master password to `bw unlock --passwordfile` through a FIFO: no environment variable, no command-line argument, no file on disk. */
+export interface PasswordPipe { path: string; feed(master: Buffer, signal: AbortSignal): Promise<void>; close(): Promise<void> }
+export type PasswordPipeFactory = () => Promise<PasswordPipe>;
+
+export const defaultPasswordPipe: PasswordPipeFactory = async () => {
+  const dir = await mkdtemp(join(tmpdir(), "frely-vault-"));
+  const path = join(dir, "pw");
+  try { await execFileAsync("mkfifo", ["-m", "600", path]); } catch (error) { await rm(dir, { recursive: true, force: true }); throw error; }
+  const { writeFifo } = await import("./site-login.js");
+  return {
+    path,
+    // bw reads the first line; the newline ends it. The copy is zeroed by writeFifo.
+    feed: (master, signal) => writeFifo(path, Buffer.concat([master, Buffer.from("\n")]), signal),
+    close: () => rm(dir, { recursive: true, force: true }),
+  };
+};
+
 export interface VaultDeps {
+  pipe?: PasswordPipeFactory;
   run?: BwRunner;
   now?: () => number;
   /** Starts the auto-lock timer; returns its cancel. Tests drive this by hand. */
@@ -68,6 +90,7 @@ export function createVault(deps: VaultDeps = {}) {
   const now = deps.now ?? Date.now;
   const schedule = deps.schedule ?? defaultSchedule;
   const env = deps.env ?? process.env;
+  const makePipe = deps.pipe ?? defaultPasswordPipe;
   let session: string | null = null;
   let lockAt = 0;
   let cancelTimer: (() => void) | null = null;
@@ -86,7 +109,20 @@ export function createVault(deps: VaultDeps = {}) {
     let state: unknown;
     try { state = (JSON.parse(status.stdout) as { status?: unknown }).status; } catch { state = undefined; }
     if (state === "unauthenticated") throw new Error(LOGIN_HINT);
-    const result = await run(["unlock", "--passwordenv", "BW_PASSWORD", "--raw", "--nointeraction"], bwEnv({ BW_PASSWORD: master.toString("utf8") }, env), BW_TIMEOUT_MS);
+    // The password goes through a FIFO, never through bw's environment or arguments. If bw ends before it opens the pipe, the feed is stopped with it.
+    const pipe = await makePipe();
+    const stop = new AbortController();
+    let result: BwResult;
+    let feed: Promise<void> = Promise.resolve();
+    try {
+      feed = pipe.feed(master, stop.signal);
+      feed.catch(() => undefined);
+      result = await run(["unlock", "--passwordfile", pipe.path, "--raw", "--nointeraction"], bwEnv({}, env), BW_TIMEOUT_MS);
+    } finally {
+      stop.abort(new Error("bw finished."));
+      await feed.catch(() => undefined);
+      await pipe.close().catch(() => undefined);
+    }
     if (result.missing) throw new Error(INSTALL_HINT);
     const key = result.stdout.trim();
     if (result.code !== 0 || !key) {
