@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { basicCredentialStore as credentialStore, BASIC_CREDENTIAL_BACKEND } from "./credential-basic.js";
 import { DEFAULT_RELAY_ORIGIN, fetchDiscovery, isBuiltInInstance, parseDiscovery, resolveInstanceEndpoints, type DiscoveryDocument, type InstanceEndpoints } from "./instance.js";
@@ -98,6 +98,7 @@ export interface AuthCredential {
 }
 
 const SESSION_BINDING_DEVICE_ID_PARAM = "session_binding_device_id";
+const SESSION_BINDING_DEVICE_NAME_PARAM = "session_binding_device_name";
 const SESSION_BINDING_ID_FIELD = "frely_cli_session_id";
 const LOCAL_DEVICE_ID_PREFIX = "frd_local_";
 
@@ -458,6 +459,9 @@ export function localDeviceId(existing?: string | null): string {
 function appendSessionBinding(body: URLSearchParams, deviceId?: string | null): void {
   if (typeof deviceId === "string" && deviceId.length > 0) {
     body.set(SESSION_BINDING_DEVICE_ID_PARAM, deviceId);
+    // The machine's host name lets the web console name this login's connection; the relay only labels it, never trusts it.
+    const name = hostname().trim();
+    if (name) body.set(SESSION_BINDING_DEVICE_NAME_PARAM, name.slice(0, 64));
   }
 }
 

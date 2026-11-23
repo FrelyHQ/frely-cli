@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { authConfigPath, currentInstance, frelyMcpUrl, inspectAuth, LOGIN_REFRESH_UNAVAILABLE, login, refreshLockTiming, loginDevice, logout, normalizeRelayUrl, requireLogin } from "./auth.js";
 import { credentialStore } from "./credential-store.js";
@@ -79,6 +79,7 @@ test("login binds the session to the local device id when the Relay returns a se
   const result = await loginDevice("https://test.invalid");
   assert.equal(result.sessionBound, true);
   assert.match(tokenBody, /session_binding_device_id=frd_local_/);
+  assert.equal(new URLSearchParams(tokenBody).get("session_binding_device_name"), hostname().trim().slice(0, 64));
   const stored = await basicCredentialStore.getPassword("frely-cli-basic-v1", "https://test.invalid");
   assert.equal(JSON.parse(stored!).sessionBindingId, "cli_sess_abc123");
   const config = JSON.parse(await readFile(authConfigPath(), "utf8"));
