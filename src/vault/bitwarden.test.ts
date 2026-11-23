@@ -2,7 +2,7 @@ import test from "node:test";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { safeEnv } from "../runtime/workspace.js";
-import { bitwardenDataDir, bwEnv, createVault, INSTALL_HINT, LOCKED_HINT, LOGIN_HINT, VAULT_TTL_MS, VaultLockedError, type BwResult } from "./bitwarden.js";
+import { bitwardenDataDir, bwEnv, createVault, fileSessionStore, type SessionRecord, type SessionStore, INSTALL_HINT, LOCKED_HINT, LOGIN_HINT, VAULT_TTL_MS, VaultLockedError, type BwResult } from "./bitwarden.js";
 
 const MASTER = "master-password-for-tests";
 const SESSION = "session-key-for-tests";
@@ -12,13 +12,16 @@ function fake(handler: (args: string[], env: Record<string, string>) => Partial<
   const calls: Call[] = [];
   let clock = 1_000_000;
   const timers: Array<{ fn: () => void; ms: number; cancelled: boolean }> = [];
+  let saved: SessionRecord | null = null;
+  const store: SessionStore = { load: () => saved, save: (record) => { saved = record; }, clear: () => { saved = null; } };
   const vault = createVault({
+    store,
     run: async (args, env) => { calls.push({ args, env }); return { code: 0, stdout: "", stderr: "", ...handler(args, env) }; },
     now: () => clock,
     schedule: (fn, ms) => { const timer = { fn, ms, cancelled: false }; timers.push(timer); return () => { timer.cancelled = true; }; },
     env: { PATH: "/usr/bin", HOME: "/home/test", XDG_CONFIG_HOME: "/home/test/.config", SECRET_TOKEN: "do-not-pass", ...extra.env },
   });
-  return { vault, calls, timers, advance: (ms: number) => { clock += ms; } };
+  return { vault, calls, timers, store, advance: (ms: number) => { clock += ms; } };
 }
 
 const item = (id: string, uris: string[], over: Record<string, unknown> = {}) => ({ id, type: 1, login: { username: `user-${id}`, password: `pass-${id}`, totp: null, uris: uris.map((uri) => ({ uri })), ...over } });
@@ -141,4 +144,38 @@ test("the data directory follows the config home, which is inside the folders th
   assert.equal(bitwardenDataDir({ XDG_CONFIG_HOME: "/data/acct" }, "/h"), join("/data/acct", "frely", "bitwarden"));
   assert.equal(bitwardenDataDir({}, "/h"), join("/h", ".config", "frely", "bitwarden"));
   assert.deepEqual(Object.keys(bwEnv({}, { PATH: "/p", HOME: "/h", FOO: "x" })).sort(), ["BITWARDENCLI_APPDATA_DIR", "HOME", "PATH"]);
+});
+
+test("the unlocked session survives a restart until the TTL, and a lock anywhere locks everyone", async () => {
+  const first = fake(unlocked([]));
+  await first.vault.unlock(Buffer.from(MASTER));
+  assert.equal(first.store.load()!.session, SESSION);
+  const calls: string[][] = [];
+  const second = createVault({ store: first.store, now: () => 1_000_000 + 60_000, schedule: () => () => undefined, run: async (args) => { calls.push(args); return { code: 0, stdout: JSON.stringify([item("1", ["https://a.example"])]), stderr: "" }; } });
+  assert.equal(second.status().status, "unlocked");
+  assert.equal((await second.findLogin("https://a.example")).status, "found");
+  assert.equal(calls.some((args) => args[0] === "unlock"), false);
+  first.store.clear();
+  assert.equal(second.status().status, "locked");
+});
+
+test("an expired session file is ignored and removed", () => {
+  let r: SessionRecord | null = { session: SESSION, lockAt: 500 };
+  const store: SessionStore = { load: () => r, save: (x) => { r = x; }, clear: () => { r = null; } };
+  const vault = createVault({ store, now: () => 1_000, schedule: () => () => undefined, run: async () => ({ code: 0, stdout: "", stderr: "" }) });
+  assert.equal(vault.status().status, "locked");
+  assert.equal(store.load(), null);
+});
+
+test("the session file is 0600 and gone after clear", async () => {
+  const { mkdtempSync, statSync, existsSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = join(mkdtempSync(join(tmpdir(), "vault-")), "bitwarden");
+  const store = fileSessionStore(dir);
+  store.save({ session: SESSION, lockAt: 42 });
+  assert.equal(statSync(join(dir, "session.json")).mode & 0o777, 0o600);
+  assert.deepEqual(store.load(), { session: SESSION, lockAt: 42 });
+  store.clear();
+  assert.equal(existsSync(join(dir, "session.json")), false);
+  assert.equal(store.load(), null);
 });

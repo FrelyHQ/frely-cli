@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { bitwardenDataDir, bwEnv, defaultBwRunner, INSTALL_HINT, type BwRunner } from "./bitwarden.js";
+import { bitwardenDataDir, bwEnv, defaultBwRunner, fileSessionStore, INSTALL_HINT, type BwRunner, type SessionStore } from "./bitwarden.js";
 
 // `frely vault login|status|lock`: the one terminal step of Bitwarden site login. `login` points bw at the dedicated account's data directory
 // (inside the folders the command sandbox hides from the AI) and lets the owner sign in there; the master password is typed into bw itself.
@@ -10,6 +10,9 @@ export interface VaultCommandIo {
   /** Runs bw attached to the owner's terminal (prompts and answers go straight to them). Resolves with the exit code, or null when bw is missing. */
   interactive?: (args: string[], env: Record<string, string>) => Promise<number | null>;
   run?: BwRunner;
+  /** The unlocked-session file the running service also reads. */
+  store?: SessionStore;
+  now?: () => number;
   /** Installs the Bitwarden CLI in the owner's terminal when bw is missing. Resolves with the exit code, or null when there is no way to install it here. */
   install?: () => Promise<number | null>;
 }
@@ -71,12 +74,17 @@ export async function runVaultCommand(args: readonly string[], io: VaultCommandI
     if (result.missing) { io.out(`${INSTALL_HINT}\n`); return 1; }
     let state = "unknown";
     try { const parsed = JSON.parse(result.stdout) as { status?: unknown }; if (typeof parsed.status === "string") state = parsed.status; } catch { /* reported as unknown */ }
-    io.out(`Bitwarden account: ${state === "unauthenticated" ? "not logged in (run frely vault login)" : "logged in"}\nData folder: ${bitwardenDataDir()}\nThe unlock itself lives in the running service's memory and is not shown here; it ends 8 hours after the owner unlocked.\n`);
+    const saved = (io.store ?? fileSessionStore()).load();
+    const unlocked = saved && saved.lockAt > (io.now ?? Date.now)() ? `unlocked until ${new Date(saved.lockAt).toISOString()}` : "locked";
+    io.out(`Bitwarden account: ${state === "unauthenticated" ? "not logged in (run frely vault login)" : "logged in"}\nVault: ${unlocked}\nData folder: ${bitwardenDataDir()}\n`);
     return result.code === 0 ? 0 : 1;
   }
   if (sub === "lock") {
-    io.out("frely vault lock cannot reach the running service yet. The vault locks itself 8 hours after it was unlocked; stopping the service (frely mcp service stop) forgets it at once.\n");
-    return 1;
+    // Deleting the session file locks the running service too: it checks the file on every use.
+    (io.store ?? fileSessionStore()).clear();
+    await run(["lock", "--nointeraction"], bwEnv(), 30_000).catch(() => undefined);
+    io.out("The vault is locked. The AI needs a new vault_unlock to log in to sites again.\n");
+    return 0;
   }
   io.out(`${USAGE}\n`);
   return sub === undefined ? 0 : 1;

@@ -40,12 +40,20 @@ test("vault login refuses a non-https server and says how to install bw when it 
   assert.match(out.join(""), /brew install bitwarden-cli/u);
 });
 
-test("vault status reports bw's own state and vault lock says it is not available yet", async () => {
+test("vault status shows the unlocked-until time from the session file and vault lock deletes it", async () => {
   const out: string[] = [];
-  const run = async () => ({ code: 0, stdout: JSON.stringify({ status: "unauthenticated" }), stderr: "" });
-  assert.equal(await runVaultCommand(["status"], { out: (text) => out.push(text), run }), 0);
-  assert.match(out.join(""), /not logged in/u);
+  const run = async () => ({ code: 0, stdout: JSON.stringify({ status: "locked" }), stderr: "" });
+  let saved: { session: string; lockAt: number } | null = { session: "s", lockAt: 2_000_000 };
+  const store = { load: () => saved, save: () => undefined, clear: () => { saved = null; } };
+  assert.equal(await runVaultCommand(["status"], { out: (text) => out.push(text), run, store, now: () => 1_000_000 }), 0);
+  assert.match(out.join(""), /unlocked until 1970-01-01T00:33:20/u);
   out.length = 0;
-  assert.equal(await runVaultCommand(["lock"], { out: (text) => out.push(text) }), 1);
-  assert.match(out.join(""), /locks itself 8 hours/u);
+  assert.equal(await runVaultCommand(["lock"], { out: (text) => out.push(text), run, store }), 0);
+  assert.equal(saved, null);
+  assert.equal(await runVaultCommand(["status"], { out: (text) => out.push(text), run, store }), 0);
+  assert.match(out.join(""), /Vault: locked/u);
+  const loggedOut = async () => ({ code: 0, stdout: JSON.stringify({ status: "unauthenticated" }), stderr: "" });
+  out.length = 0;
+  assert.equal(await runVaultCommand(["status"], { out: (text) => out.push(text), run: loggedOut, store }), 0);
+  assert.match(out.join(""), /not logged in/u);
 });
