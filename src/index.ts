@@ -75,6 +75,7 @@ import { SKILL_HOSTS, type SkillHost, type SkillScope } from "./skill/managed.js
 import { CloudItemError, CloudToolError, installCloudItem, parseItemRef, trustCloudItem } from "./skill/cloud-item.js";
 import { installGithubItem } from "./skill/github-item.js";
 import { checkItemUpdates, updateCloudItem } from "./skill/item-update.js";
+import { publishSkillFolder } from "./skill/publish.js";
 import { linkSyncNotice, syncAgentLinks } from "./skill/link-sync.js";
 import { runSealedScript } from "./skill/sealed-run.js";
 import { installEntrySkill, ensureEntrySkill } from "./skill/entry.js";
@@ -91,6 +92,7 @@ import { runUninstall } from "./uninstall.js";
 
 
 
+const ITEM_PUBLISH_USAGE = "Usage: frely item publish <folder> [--slug <slug>] [--premium <path>]... [--json]";
 const ITEM_INSTALL_USAGE = "Usage: frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|workbuddy|codebuddy|generic] [--scope global|project] [--dir <path>] [--gift <code>] [--email <address>] [--no-wait] [--no-browser] [--replace] [--api-key-stdin] [--json]";
 
 /**
@@ -328,6 +330,8 @@ async function main(): Promise<void> {
     const installedFoldersOf = async (target: string): Promise<InstallRecord[] | null> => {
       const atFolder = await installAt(target);
       if (atFolder) return [atFolder];
+      // A folder on disk that Frely did not install is "not installed": no account lookup (a path is not an item name), so skills can ask offline.
+      if (await stat(target).then((info) => info.isDirectory(), () => false)) return [];
       if (/^creator_distribution_[a-f0-9]{24}$/u.test(target) || await findManagedSkillByInstallName(target).catch(() => null)) return null;
       const found = await resolveItem(target, callCloudTool).catch((error: unknown) => { if (error instanceof ItemNotFoundError) return null; throw error; });
       if (found === null || found.kind === "agent") return null;
@@ -400,6 +404,25 @@ async function main(): Promise<void> {
       const target = args[2];
       if (!target) throw new Error("Usage: frely item run <script> [args...]");
       process.exitCode = await runSealedScript({ target, args: args.slice(3), call: callCloudTool });
+      return;
+    }
+    if (args[1] === "publish") {
+      const folder = args[2];
+      if (!folder || folder.startsWith("-")) throw new Error(ITEM_PUBLISH_USAGE);
+      const premium: string[] = [];
+      let slug: string | undefined;
+      for (let i = 3; i < args.length; i++) {
+        const arg = args[i]!;
+        if (arg === "--json") continue;
+        const value = args[i + 1];
+        if ((arg !== "--slug" && arg !== "--premium") || value === undefined || value.startsWith("--")) throw new Error(`Unknown or incomplete option ${arg} for frely item publish.\n${ITEM_PUBLISH_USAGE}`);
+        if (arg === "--slug") slug = value; else premium.push(value);
+        i++;
+      }
+      const value = await publishSkillFolder({ folder, ...(slug === undefined ? {} : { slug }), premium, call: callCloudTool });
+      if (args.includes("--json")) { stdout.write(`${JSON.stringify({ ok: true, ...value, install: `frely item install ${value.installName}` })}\n`); return; }
+      stdout.write(`${value.unchanged ? `Unchanged: ${value.installName} stays at v${value.version}` : `${value.created ? "Published" : "Published new version of"} ${value.installName} (v${value.version})`}, ${value.fileCount} file${value.fileCount === 1 ? "" : "s"}${value.hasScripts ? ", contains scripts" : ""}.\nInstall: frely item install ${value.installName}\n`);
+      for (const notice of value.notices) stdout.write(`${notice}\n`);
       return;
     }
     if (args[1] === "update") {
