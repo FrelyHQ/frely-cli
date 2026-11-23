@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import { chmod, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { Script } from "node:vm";
 import { LOCKED_HINT, VaultLockedError, type FindLoginResult } from "./bitwarden.js";
 import { buildLoginScript, parseLoginUrl, readFifo, siteLogin, siteLoginAvailable, writeFifo, type EgoRun } from "./site-login.js";
+
+/** site_login hands credentials over FIFOs, which exist only on POSIX; the tool itself is offered only on macOS. */
+const FIFO = { skip: process.platform === "win32" && "FIFOs are POSIX-only; site_login runs on macOS." };
 
 const USER = "wyatt@example.com";
 const PASS = "correct horse battery staple";
@@ -45,7 +48,7 @@ test("the script embeds the URL and FIFO paths only as JSON strings, and compile
   assert.match(script, /frely-site-login/u);
 });
 
-test("a login is handed over through the FIFO and the receipt carries no credential, URL path or page text", async () => {
+test("a login is handed over through the FIFO and the receipt carries no credential, URL path or page text", FIFO, async () => {
   const seen: Parameters<typeof fakeEgo>[1] = {};
   const lookups: string[] = [];
   const receipt = await siteLogin("https://example.com/account/login?token=abc", { isUnlocked: unlocked, findLogin: async (origin) => { lookups.push(origin); return found; }, runEgo: fakeEgo("https://example.com", seen) });
@@ -60,7 +63,7 @@ test("a login is handed over through the FIFO and the receipt carries no credent
   assert.equal(existsSync(seen.dir!), false, "the temporary folder is removed");
 });
 
-test("a page that ended up on another host or on http gets no credentials", async () => {
+test("a page that ended up on another host or on http gets no credentials", FIFO, async () => {
   for (const landed of ["https://evil.example.net", "http://example.com", "https://example.com.evil.test", "not a url"]) {
     const seen: Parameters<typeof fakeEgo>[1] = {};
     let looked = 0;
@@ -72,7 +75,7 @@ test("a page that ended up on another host or on http gets no credentials", asyn
   }
 });
 
-test("no saved login and several saved logins are reported, never guessed", async () => {
+test("no saved login and several saved logins are reported, never guessed", FIFO, async () => {
   for (const status of ["no_login_found", "ambiguous"] as const) {
     const seen: Parameters<typeof fakeEgo>[1] = {};
     const receipt = await siteLogin("https://example.com", { isUnlocked: unlocked, findLogin: async () => ({ status }), runEgo: fakeEgo("https://example.com", seen) });
@@ -81,12 +84,12 @@ test("no saved login and several saved logins are reported, never guessed", asyn
   }
 });
 
-test("an unknown answer from the script becomes no_form and a TOTP is only claimed with a submitted form", async () => {
+test("an unknown answer from the script becomes no_form and a TOTP is only claimed with a submitted form", FIFO, async () => {
   const odd = async (run: EgoRun) => { await sleep(10); await writeFifo(run.originFifo, Buffer.from("https://example.com"), run.signal); await readFifo(run.credFifo, run.signal); return { code: 0, stdout: JSON.stringify({ status: "<script>", usedTotp: true }) }; };
   assert.deepEqual(await siteLogin("https://example.com", { isUnlocked: unlocked, findLogin: async () => found, runEgo: odd }), { status: "no_form", site: "https://example.com", usedTotp: false });
 });
 
-test("a locked vault answers with the unlock instructions and never starts the browser", async () => {
+test("a locked vault answers with the unlock instructions and never starts the browser", FIFO, async () => {
   let started = 0;
   const runEgo = async () => { started += 1; return { code: 0, stdout: "" }; };
   await assert.rejects(siteLogin("https://example.com", { isUnlocked: () => false, runEgo }), (error: Error) => error.message === LOCKED_HINT && /vault_unlock/u.test(error.message));
@@ -94,7 +97,7 @@ test("a locked vault answers with the unlock instructions and never starts the b
   await assert.rejects(siteLogin("https://example.com", { isUnlocked: unlocked, findLogin: async () => { throw new VaultLockedError(); }, runEgo: fakeEgo("https://example.com") }), (error: Error) => error.message === LOCKED_HINT);
 });
 
-test("a script that hangs is stopped at the timeout and a script that dies early ends the call; the folder is removed both times", async () => {
+test("a script that hangs is stopped at the timeout and a script that dies early ends the call; the folder is removed both times", FIFO, async () => {
   let dir = "";
   let aborted = false;
   const hang = async (run: EgoRun) => { dir = dirname(run.originFifo); await new Promise<void>((resolve) => run.signal.addEventListener("abort", () => { aborted = true; resolve(); })); return { code: null, stdout: "" }; };
@@ -114,7 +117,7 @@ test("the tool is offered on macOS with ego-browser on PATH and nowhere else", a
     assert.equal(siteLoginAvailable("darwin", dir), false);
     await writeFile(join(dir, "ego-browser"), "#!/bin/sh\n");
     await chmod(join(dir, "ego-browser"), 0o755);
-    assert.equal(siteLoginAvailable("darwin", `/nonexistent:${dir}`), true);
+    assert.equal(siteLoginAvailable("darwin", `/nonexistent${delimiter}${dir}`), true);
     assert.equal(siteLoginAvailable("linux", dir), false);
     assert.equal(siteLoginAvailable("win32", dir), false);
   } finally { await rm(dir, { recursive: true, force: true }); }

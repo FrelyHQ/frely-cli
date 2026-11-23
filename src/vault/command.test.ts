@@ -8,7 +8,7 @@ test("vault login runs bw config server and bw login in the owner's terminal, th
   const out: string[] = [];
   const code = await runVaultCommand(["login", "--server", "https://vault.example.com"], {
     out: (text) => out.push(text),
-    interactive: async (args, env) => { attached.push(args); assert.match(env.BITWARDENCLI_APPDATA_DIR ?? "", /frely\/bitwarden$/u); return 0; },
+    interactive: async (args, env) => { attached.push(args); assert.match(env.BITWARDENCLI_APPDATA_DIR ?? "", /frely[\\/]bitwarden$/u); return 0; },
     run: async (args) => { ran.push(args); return { code: 0, stdout: "", stderr: "" }; },
   });
   assert.equal(code, 0);

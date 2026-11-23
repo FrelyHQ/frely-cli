@@ -1,4 +1,5 @@
 import test from "node:test";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import { safeEnv } from "../runtime/workspace.js";
 import { bitwardenDataDir, bwEnv, createVault, INSTALL_HINT, LOCKED_HINT, LOGIN_HINT, VAULT_TTL_MS, VaultLockedError, type BwResult } from "./bitwarden.js";
@@ -47,7 +48,7 @@ test("unlock runs bw non-interactively with a minimal environment; the master pa
   const unlock = calls.find((call) => call.args[0] === "unlock")!;
   assert.deepEqual(unlock.args, ["unlock", "--passwordenv", "BW_PASSWORD", "--raw", "--nointeraction"]);
   assert.deepEqual(Object.keys(unlock.env).sort(), ["BITWARDENCLI_APPDATA_DIR", "BW_PASSWORD", "HOME", "NODE_EXTRA_CA_CERTS", "PATH"]);
-  assert.equal(unlock.env.BITWARDENCLI_APPDATA_DIR, "/home/test/.config/frely/bitwarden");
+  assert.equal(unlock.env.BITWARDENCLI_APPDATA_DIR, join("/home/test", ".config", "frely", "bitwarden"));
   assert.equal(unlock.env.BW_PASSWORD, MASTER);
   assert.equal(calls.filter((call) => "BW_PASSWORD" in call.env).length, 1);
   assert.equal(JSON.stringify(calls.map((call) => call.args)).includes(MASTER), false);
@@ -137,7 +138,7 @@ test("neither the master password nor the session key is in the environment comm
 });
 
 test("the data directory follows the config home, which is inside the folders the sandbox hides", () => {
-  assert.equal(bitwardenDataDir({ XDG_CONFIG_HOME: "/data/acct" }, "/h"), "/data/acct/frely/bitwarden");
-  assert.equal(bitwardenDataDir({}, "/h"), "/h/.config/frely/bitwarden");
+  assert.equal(bitwardenDataDir({ XDG_CONFIG_HOME: "/data/acct" }, "/h"), join("/data/acct", "frely", "bitwarden"));
+  assert.equal(bitwardenDataDir({}, "/h"), join("/h", ".config", "frely", "bitwarden"));
   assert.deepEqual(Object.keys(bwEnv({}, { PATH: "/p", HOME: "/h", FOO: "x" })).sort(), ["BITWARDENCLI_APPDATA_DIR", "HOME", "PATH"]);
 });
