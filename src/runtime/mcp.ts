@@ -1,6 +1,7 @@
 import { lstat } from "node:fs/promises";
 import { runTodoDispatch, TODO_DISPATCH_TOOL } from "../task/todo-dispatch.js";
 import { applySecretDrop, prepareSecretDrop, SECRET_DROP_APPLY_TOOL, SECRET_DROP_PREPARE_TOOL } from "../secret-drop.js";
+import { siteLogin, siteLoginAvailable, SITE_LOGIN_TOOL } from "../vault/site-login.js";
 import { homedir } from "node:os";
 import { dirname, sep } from "node:path";
 import { createHash } from "node:crypto";
@@ -81,6 +82,9 @@ export const LOCAL_MCP_TOOLS = [
  */
 export const LOCAL_MODELS_TOOL = tool("local_models", "Use a model server running on this device (Ollama, LM Studio, vLLM, llama.cpp, mltf) through Frely. action=list probes loopback OpenAI-compatible servers (the given url, else the usual ports 11434, 1234, 8000, 8080) and lists their models plus the local models already shared. action=share publishes the server's models (all of them, or `models`) as a Frely Provider, which uses one Provider slot of the account (without a free slot it counts against the Creator Plan Provider limit). Shared models then appear in models_list marked local: true; they run on this device at no Credit cost and suit low-priority, slow-ok tasks. The device must stay online.", { action: { type: "string", enum: ["list", "share"] }, url: stringSchema("Loopback OpenAI-compatible base URL such as http://127.0.0.1:1234/v1. Required for share; for list it limits the probe to that server."), models: { type: "array", maxItems: 256, items: { type: "string", maxLength: 256 }, description: "Model ids to share; omit to share every model the server reports." }, name: stringSchema("Provider name shown in Frely (at most 128 characters)") }, { readOnly: false, destructive: false, openWorld: true, idempotent: false });
 
+/** Logs in to a site with the user's Bitwarden vault; listed only where ego lite can run (macOS with ego-browser installed). */
+export const SITE_LOGIN = tool(SITE_LOGIN_TOOL, "Log in to a website in ego lite with the login the user saved in their Frely Bitwarden vault. You never see the password; you get only whether it was submitted. If the vault is locked, call secret_drop with target {\"kind\":\"vault_unlock\"} on this device and give the user the link.", { url: stringSchema("The https URL of the login page") }, { readOnly: false, destructive: false, openWorld: true, idempotent: false });
+
 export async function createMcpServer(workspaceInput: string, options: McpRuntimeOptions = {}): Promise<Server> {
   const p2p = new P2pTransfers();
   // Ensure the primary workspace is registered
@@ -141,6 +145,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
     ...(options.localMcp ? LOCAL_MCP_TOOLS : []),
     ...(options.localModels ? [LOCAL_MODELS_TOOL] : []),
+    ...(siteLoginAvailable() ? [SITE_LOGIN] : []),
     tool("read", "Read the workspace. action=list lists a directory, or returns type/size/mtime for a file; read returns a UTF-8 file (max 1 MiB), or lines startLine..endLine; encoding=base64 returns any file as base64 with its sha256, encoding=image returns a png/jpeg/gif/webp the model can see (both max 1 MiB); search finds `query` in file contents; find matches file names (*, **, ?); roots lists workspace roots. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { action: { type: "string", enum: ["list", "read", "search", "find", "roots"] }, path: stringSchema("Relative path", "."), encoding: { type: "string", enum: ["utf8", "base64", "image"], default: "utf8" }, startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, query: { type: "string" }, regex: boolSchema(false), caseSensitive: boolSchema(false), maxResults: intSchema(100, 1, 1000), contextLines: intSchema(0, 0, 10) }, { readOnly: true, destructive: false, openWorld: false }),
     tool("edit_file", "Change a UTF-8 workspace file: `content` atomically writes the whole file, creating parent directories (overwrite=true to replace one); `contentBase64` does the same for binary data (max 1 MiB decoded); `edits` replaces line ranges. Delete, move and mkdir with process. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { path: stringSchema("Relative path"), content: { type: "string" }, contentBase64: { type: "string" }, overwrite: boolSchema(false), edits: { type: "array", minItems: 1, maxItems: 100, items: { type: "object", additionalProperties: false, required: ["startLine", "endLine", "replacement"], properties: { startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, replacement: { type: "string" } } } } }, { readOnly: false, destructive: true, openWorld: false, idempotent: false }),
     tool("web_fetch", "Read a public http(s) URL (GET or HEAD, ports 80, 443) from this device's network; private addresses are refused. Read-only: it cannot send a request body. Returns status, content type and body text up to maxBytes. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { url: { type: "string" }, method: { type: "string", enum: ["GET", "HEAD"], default: "GET" }, headers: { type: "object", additionalProperties: { type: "string" } }, maxBytes: intSchema(262144, 1, 1048576), timeoutMs: intSchema(30000, 100, 120000) }, { readOnly: true, destructive: false, openWorld: true }),
@@ -167,6 +172,10 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
         if (!callArgs || typeof callArgs !== "object" || Array.isArray(callArgs)) throw new Error("arguments must be an object.");
         const result = await options.localMcp.call(enabled, textArg(args, "server"), textArg(args, "tool"), callArgs as Record<string, unknown>, { timeoutMs: intArg(args, "timeoutMs", 60000, 100, 120000), signal });
         return result as { content: Array<{ type: "text"; text: string }>; isError?: boolean };
+      }
+      if (name === SITE_LOGIN.name) {
+        if (!siteLoginAvailable()) throw new Error("site_login needs ego-browser on this computer (macOS).");
+        return { content: [{ type: "text" as const, text: JSON.stringify(await siteLogin(args.url, { signal: AbortSignal.any([lifecycle.signal, extra.signal]) })) }] };
       }
       if (name === LOCAL_MODELS_TOOL.name) {
         if (!options.localModels) throw new Error("Sharing local models is not available on this connection.");
