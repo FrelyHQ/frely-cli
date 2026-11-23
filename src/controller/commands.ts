@@ -299,7 +299,7 @@ async function putCommand(args: string[], io: Output): Promise<number> {
   return withController(io, async (controller) => {
     let data: Record<string, unknown>;
     if (target.device !== null) {
-      const step = await transferStep(controller, { action: "send", device: target.device, path: target.path }, parsed, io);
+      const step = await transferStep(controller, { action: "put", device: target.device, path: target.path }, parsed, io);
       if ("code" in step) return step.code;
       data = step.data;
     } else {
@@ -330,7 +330,7 @@ async function getCommand(args: string[], io: Output): Promise<number> {
   const target = destination === undefined ? null : parseTarget(destination);
   return withController(io, async (controller) => {
     if (target?.device) {
-      const step = await transferStep(controller, { action: "receive", id, device: target.device, path: target.path, overwrite }, parsed, io);
+      const step = await transferStep(controller, { action: "get", id, device: target.device, path: target.path, overwrite }, parsed, io);
       if ("code" in step) return step.code;
       return emit({ text: `Saved ${id} to ${target.device}:${target.path}`, result: step.data as ToolResult }, { exitCode: EXIT.ok }, parsed, io);
     }

@@ -7,6 +7,7 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMcpServer } from "./mcp.js";
+import { isTransferStoreHost, transferDownload, transferUpload } from "./transfer.js";
 import { Workspace } from "./workspace.js";
 
 async function withClient(run: (client: Client, root: string) => Promise<void>) {
@@ -38,12 +39,34 @@ test("transfer_upload and transfer_download refuse http, private and loopback ta
     for (const name of ["transfer_upload", "transfer_download"]) {
       const result = await client.callTool({ name, arguments: { path: name === "transfer_upload" ? "a.bin" : "b.bin", url, bytes: 5, sha256 }, _meta: gate });
       assert.equal(result.isError, true, `${name} ${url}`);
-      assert.match(text(result), /turned off/u);
+      assert.match(text(result), url.startsWith("http:") ? /https only/u : /file storage/u, `${name} ${url}`);
     }
   }
   const header = await client.callTool({ name: "transfer_upload", arguments: { path: "a.bin", url: "https://example.com/x", headers: { authorization: "x" }, bytes: 5, sha256 }, _meta: gate });
   assert.equal(header.isError, true);
 }));
+
+test("only Frely's object-store hosts pass the host check, and they still go through the public-address check", async () => {
+  assert.equal(isTransferStoreHost("acct.r2.cloudflarestorage.com"), true);
+  assert.equal(isTransferStoreHost("bucket.s3.bitiful.net"), true);
+  for (const host of ["r2.cloudflarestorage.com", "evil.com", "x.r2.cloudflarestorage.com.evil.com", "notr2.cloudflarestorage.com", "localhost"]) assert.equal(isTransferStoreHost(host), false, host);
+  const root = await mkdtemp(join(tmpdir(), "frely-cli-transfer-host-"));
+  try {
+    await writeFile(join(root, "a.bin"), "hello");
+    const workspace = await Workspace.open(root);
+    const expected = { bytes: 5, sha256: createHash("sha256").update("hello").digest("hex") };
+    const signal = new AbortController().signal;
+    const refused = /file storage/u;
+    await assert.rejects(transferUpload(workspace, "a.bin", { url: "https://evil.example.com/x", resolve: async () => ["93.184.216.34"] }, expected, signal), refused);
+    await assert.rejects(transferDownload(workspace, "b.bin", { url: "https://evil.example.com/x", resolve: async () => ["93.184.216.34"], trustedTestHosts: ["evil.example.com"] }, expected, false, signal), refused);
+    // An allowed host passes the host check and is then stopped by the address check (the resolver says private), so nothing is connected.
+    const target = { url: "https://acct.r2.cloudflarestorage.com/x", resolve: async () => ["10.0.0.5"] };
+    await assert.rejects(transferUpload(workspace, "a.bin", target, expected, signal), (error: Error) => !refused.test(error.message));
+    await assert.rejects(transferDownload(workspace, "b.bin", target, expected, false, signal), (error: Error) => !refused.test(error.message));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("transfer_prepare refuses empty, oversize-looking and non-regular files", () => withClient(async (client, root) => {
   await writeFile(join(root, "empty"), "");
