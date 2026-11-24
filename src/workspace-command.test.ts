@@ -89,3 +89,16 @@ test("workspace changes ask the confirm hook first and stop when it refuses", as
   await assert.rejects(() => runWorkspaceCommand({ args: ["link", "workspace", "add", extra], primary: launch, write: () => undefined, confirm: async () => { throw new Error("denied"); } }), /denied/);
   assert.deepEqual(JSON.parse(await run(launch, "list", "--json")), { primary: launch, workspaces: [launch] });
 });
+
+test("an impossible change is refused before the owner is asked to approve it", async () => {
+  const only = await dir("frely-ws-precheck-");
+  let asked = 0;
+  const confirm = async () => { asked += 1; };
+  await assert.rejects(() => runWorkspaceCommand({ args: ["link", "workspace", "remove", only], primary: only, write: () => undefined, confirm }), /Cannot remove the only workspace/);
+  await assert.rejects(() => runWorkspaceCommand({ args: ["link", "workspace", "remove", join(only, "nope")], primary: only, write: () => undefined, confirm }), /Workspace not registered/);
+  await assert.rejects(() => runWorkspaceCommand({ args: ["link", "workspace", "add", join(only, "missing")], primary: only, write: () => undefined, confirm }), /ENOENT/);
+  assert.equal(asked, 0);
+  const extra = await dir("frely-ws-precheck-extra-");
+  await runWorkspaceCommand({ args: ["link", "workspace", "add", extra], primary: only, write: () => undefined, confirm });
+  assert.equal(asked, 1);
+});
