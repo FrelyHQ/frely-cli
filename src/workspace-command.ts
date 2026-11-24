@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
-import { changeWorkspaces, readWorkspaceState, type WorkspaceOperation, type WorkspaceState } from "./runtime/workspace-registry.js";
+import { changeWorkspaces, checkWorkspaceChange, readWorkspaceState, type WorkspaceOperation, type WorkspaceState } from "./runtime/workspace-registry.js";
 
 export interface WorkspaceCommandInput {
   args: string[];
@@ -25,6 +25,8 @@ export async function runWorkspaceCommand({ args, primary: primaryInput, write, 
     const path = resolve(args[3]!);
     // `add --primary` registers the folder if needed and makes it the primary workspace.
     const change: WorkspaceOperation = action === "add" && args.includes("--primary") ? "primary" : action;
+    // Refuse an impossible change before the owner is asked: an approval is single-use, so approving a change that then fails would force a second one.
+    await checkWorkspaceChange(change, path, launch);
     await confirm?.({ action: change, path });
     const state = await changeWorkspaces(change, path, launch);
     const done = change === "add" ? "Added workspace" : change === "remove" ? "Removed workspace" : "Primary workspace is now";
@@ -35,5 +37,6 @@ export async function runWorkspaceCommand({ args, primary: primaryInput, write, 
 }
 
 function format(state: WorkspaceState): string {
+  if (state.workspaces.length === 0) return "No workspaces are shared. Add one with frely link workspace add <path>.\n";
   return state.workspaces.map((root) => `${root === state.primary ? "* " : "  "}${root}${root === state.primary ? " (primary)" : ""}\n`).join("");
 }
