@@ -72,7 +72,7 @@ export async function ensureWorkspaceRegistered(input: string): Promise<void> {
 export type WorkspaceOperation = "add" | "remove" | "primary";
 
 export interface WorkspaceState {
-  /** The first workspace in the list; the launch workspace of the MCP authorization until the owner changes the list. */
+  /** The first workspace in the list (empty when the owner removed every workspace); the launch workspace of the MCP authorization until the owner changes the list. */
   primary: string;
   /** Every workspace the device serves, primary first; never truncated (unlike the capability report). */
   workspaces: string[];
@@ -96,10 +96,10 @@ async function realDirectory(input: string): Promise<string> {
 
 /** The primary workspace is simply the first one in the list, so it always exists. */
 function stateOf(registry: WorkspaceRegistry, fallback: string): WorkspaceState {
-  const workspaces = registry.ordered === true && registry.roots.length > 0
+  const workspaces = registry.ordered === true
     ? [...registry.roots]
     : fallback ? [fallback, ...registry.roots.filter((root) => root !== fallback)] : [...registry.roots];
-  return { primary: workspaces[0] ?? fallback, workspaces, rev: registry.rev ?? 0 };
+  return { primary: workspaces[0] ?? (registry.ordered === true ? "" : fallback), workspaces, rev: registry.rev ?? 0 };
 }
 
 /** The full, untruncated configuration. `fallbackPrimary` is the launch workspace of the MCP authorization. */
@@ -122,8 +122,7 @@ async function applyChange(registry: WorkspaceRegistry, op: WorkspaceOperation, 
     if (/[\x00-\x1f\x7f]/u.test(path)) throw new Error("Workspace path contains control characters.");
     const index = registry.roots.indexOf(path);
     if (index < 0) throw new Error(`Workspace not registered: ${path}`);
-    // Removing the first one promotes the next; the last workspace cannot go, so a primary always exists.
-    if (registry.roots.length === 1) throw new Error(`Cannot remove the only workspace (${path}). Add another one first.`);
+    // Removing the first one promotes the next. Removing the last one is allowed: the device then serves no workspace until one is added.
     registry.roots.splice(index, 1);
   } else {
     const path = await realDirectory(input);

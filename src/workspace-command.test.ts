@@ -49,14 +49,17 @@ test("workspace add accepts nested and containing directories", async () => {
   assert.ok((JSON.parse(await run(primary, "list", "--json")) as { workspaces: string[] }).workspaces.includes(inner));
 });
 
-test("workspace remove forgets another folder; the last workspace cannot be removed", async () => {
+test("workspace remove forgets another folder, including the last one", async () => {
   const primary = await dir("frely-ws-rm-primary-");
   const extra = await dir("frely-ws-rm-extra-");
   await run(primary, "add", extra);
   await run(primary, "remove", extra);
   assert.deepEqual(JSON.parse(await run(primary, "list", "--json")).workspaces, [primary]);
   await assert.rejects(() => run(primary, "remove", extra), /Workspace not registered/);
-  await assert.rejects(() => run(primary, "remove", primary), /Cannot remove the only workspace/);
+  assert.match(await run(primary, "remove", primary), /No workspaces are shared/);
+  assert.deepEqual(JSON.parse(await run(primary, "list", "--json")), { primary: "", workspaces: [] });
+  await run(primary, "add", extra);
+  assert.deepEqual(JSON.parse(await run(primary, "list", "--json")), { primary: extra, workspaces: [extra] });
 });
 
 test("the primary workspace is the first one: add --primary moves an existing folder to the front, and removing the first promotes the next", async () => {
@@ -94,7 +97,7 @@ test("an impossible change is refused before the owner is asked to approve it", 
   const only = await dir("frely-ws-precheck-");
   let asked = 0;
   const confirm = async () => { asked += 1; };
-  await assert.rejects(() => runWorkspaceCommand({ args: ["link", "workspace", "remove", only], primary: only, write: () => undefined, confirm }), /Cannot remove the only workspace/);
+  await assert.rejects(() => runWorkspaceCommand({ args: ["link", "workspace", "add", only], primary: only, write: () => undefined, confirm }), /already registered/);
   await assert.rejects(() => runWorkspaceCommand({ args: ["link", "workspace", "remove", join(only, "nope")], primary: only, write: () => undefined, confirm }), /Workspace not registered/);
   await assert.rejects(() => runWorkspaceCommand({ args: ["link", "workspace", "add", join(only, "missing")], primary: only, write: () => undefined, confirm }), /ENOENT/);
   assert.equal(asked, 0);

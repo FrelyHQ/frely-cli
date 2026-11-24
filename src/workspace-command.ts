@@ -37,5 +37,6 @@ export async function runWorkspaceCommand({ args, primary: primaryInput, write, 
 }
 
 function format(state: WorkspaceState): string {
+  if (state.workspaces.length === 0) return "No workspaces are shared. Add one with frely link workspace add <path>.\n";
   return state.workspaces.map((root) => `${root === state.primary ? "* " : "  "}${root}${root === state.primary ? " (primary)" : ""}\n`).join("");
 }
