@@ -27,7 +27,8 @@ jobs:
           node-version: 24
           # Not on the maintainer's Mac: its persistent ~/.npm is several GB and the post step would upload all of it.
           cache: ${{ (matrix.os == 'macos-latest' && !github.event.pull_request.head.repo.fork) && ' ' || 'npm' }}
-      - uses: oven-sh/setup-bun@v2
+      - name: Use the pinned Bun on the runner, else download it
+        uses: ./.github/actions/pinned-bun
         with:
           bun-version: 1.4.0
       - name: Install without dependency lifecycle scripts

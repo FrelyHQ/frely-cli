@@ -1,0 +1,54 @@
+name: Pinned Bun
+description: >-
+  Use the pinned Bun already installed on a self-hosted runner and download it only when it is missing. With download
+  "false" a missing or wrong Bun fails the job at once instead of reaching the network. A downloaded copy is also kept
+  in ~/.bun/versions/<version>, because other repositories' CI on the same machine reinstall ~/.bun/bin with their own
+  Bun version.
+inputs:
+  bun-version:
+    description: Exact Bun version, such as 1.4.5.
+    required: true
+  download:
+    description: '"true" downloads Bun with oven-sh/setup-bun when the runner has no matching copy; "false" fails instead.'
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - name: Find the pinned Bun on the runner
+      id: local
+      shell: bash
+      env:
+        WANT: ${{ inputs.bun-version }}
+        DOWNLOAD: ${{ inputs.download }}
+      run: |
+        set -euo pipefail
+        # A self-hosted PATH can hold another Bun first, so check each candidate.
+        for candidate in "$HOME/.bun/versions/$WANT/bin/bun" "$(command -v bun 2>/dev/null || true)" "$HOME/.bun/bin/bun"; do
+          [ -n "$candidate" ] && [ -x "$candidate" ] || continue
+          if [ "$("$candidate" --version 2>/dev/null || true)" = "$WANT" ]; then
+            dirname "$candidate" >> "$GITHUB_PATH"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Using Bun $WANT at $candidate"
+            exit 0
+          fi
+        done
+        if [ "$DOWNLOAD" != "true" ]; then
+          echo "::error::Bun $WANT is not installed on this runner. Install it into ~/.bun/versions/$WANT/bin/bun on this machine."
+          exit 1
+        fi
+    - name: Download Bun
+      if: steps.local.outputs.found != 'true'
+      uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+      with:
+        bun-version: ${{ inputs.bun-version }}
+    - name: Keep the downloaded Bun for later runs
+      if: steps.local.outputs.found != 'true' && runner.environment == 'self-hosted'
+      shell: bash
+      env:
+        WANT: ${{ inputs.bun-version }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$HOME/.bun/versions/$WANT/bin"
+        cp "$(command -v bun)" "$HOME/.bun/versions/$WANT/bin/bun.tmp"
+        mv "$HOME/.bun/versions/$WANT/bin/bun.tmp" "$HOME/.bun/versions/$WANT/bin/bun"
+        ln -sf bun "$HOME/.bun/versions/$WANT/bin/bunx"
