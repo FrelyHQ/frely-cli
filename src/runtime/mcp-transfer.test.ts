@@ -7,7 +7,7 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMcpServer } from "./mcp.js";
-import { isTransferStoreHost, transferDownload, transferUpload } from "./transfer.js";
+import { checkedTransferHeaders, isTransferStoreHost, transferDownload, transferUpload } from "./transfer.js";
 import { Workspace } from "./workspace.js";
 
 async function withClient(run: (client: Client, root: string) => Promise<void>) {
@@ -101,3 +101,9 @@ test("read encoding=base64 or image over 1 MiB suggests frely put", () => withCl
     assert.match(text(result), /frely put/u);
   }
 }));
+
+test("the relay's signed content-length is accepted and dropped; other headers stay checked", () => {
+  assert.deepEqual(checkedTransferHeaders({ "content-length": "12", "Content-Type": "image/png" }), { "content-type": "image/png" });
+  assert.throws(() => checkedTransferHeaders({ "content-length": "12x" }), /not allowed/u);
+  assert.throws(() => checkedTransferHeaders({ authorization: "x" }), /not allowed/u);
+});
