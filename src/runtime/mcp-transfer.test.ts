@@ -7,6 +7,7 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMcpServer } from "./mcp.js";
+import { preferredAddress } from "./web-fetch.js";
 import { checkedTransferHeaders, isTransferStoreHost, transferDownload, transferUpload } from "./transfer.js";
 import { Workspace } from "./workspace.js";
 
@@ -106,4 +107,9 @@ test("the relay's signed content-length is accepted and dropped; other headers s
   assert.deepEqual(checkedTransferHeaders({ "content-length": "12", "Content-Type": "image/png" }), { "content-type": "image/png" });
   assert.throws(() => checkedTransferHeaders({ "content-length": "12x" }), /not allowed/u);
   assert.throws(() => checkedTransferHeaders({ authorization: "x" }), /not allowed/u);
+});
+
+test("the pinned address is IPv4 when the host has one", () => {
+  assert.equal(preferredAddress(["2606:4700:113::1", "104.18.2.3"]), "104.18.2.3");
+  assert.equal(preferredAddress(["2606:4700:113::1"]), "2606:4700:113::1");
 });

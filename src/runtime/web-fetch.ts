@@ -115,6 +115,11 @@ async function resolveHost(hostname: string, options: WebFetchOptions): Promise<
   return (await dnsLookup(hostname, { all: true })).map((entry) => entry.address);
 }
 
+/** The connection is pinned to one address, so there is no fallback to another family. An IPv4 address is the safer pick: computers with a half-working IPv6 route (a proxy or VPN) refuse the IPv6 one. */
+export function preferredAddress(addresses: readonly string[]): string {
+  return addresses.find((address) => isIP(address) === 4) ?? addresses[0]!;
+}
+
 export async function checkedTarget(url: URL, options: WebFetchOptions): Promise<{ address: string }> {
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Only http and https URLs can be fetched.");
   if (url.username || url.password) throw new Error("URLs with embedded credentials are not allowed.");
@@ -129,7 +134,7 @@ export async function checkedTarget(url: URL, options: WebFetchOptions): Promise
   if (!trusted && addresses.some((address) => isBlockedAddress(address) && !opened(address))) {
     throw new Error("This address is on a private or local network, which this Agent has not been allowed to reach. The owner can allow it for this Agent in Frely > Connections.");
   }
-  return { address: addresses[0]! };
+  return { address: preferredAddress(addresses) };
 }
 
 function readText(contentType: string | null, bytes: Buffer): string {
