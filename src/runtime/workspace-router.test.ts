@@ -137,3 +137,8 @@ test("resolveWorkspacePair: moves across a nested boundary use the deepest commo
 
   assert.throws(() => resolveWorkspacePair(workspaces, join(child, "a"), join(other, "b")), /same workspace/);
 });
+
+test("resolveWorkspace: with no workspace shared, the error says so instead of listing an empty set", () => {
+  assert.throws(() => resolveWorkspace(new Map(), "src/file.ts"), /No workspace is shared on this computer/);
+  assert.throws(() => resolveWorkspace(new Map(), "/abs/file.ts"), /No workspace is shared on this computer/);
+});
