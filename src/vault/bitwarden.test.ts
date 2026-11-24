@@ -2,7 +2,7 @@ import test from "node:test";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { safeEnv } from "../runtime/workspace.js";
-import { bitwardenDataDir, bwEnv, createVault, INSTALL_HINT, LOCKED_HINT, LOGIN_HINT, VAULT_TTL_MS, VaultLockedError, type BwResult } from "./bitwarden.js";
+import { defaultPasswordPipe, bitwardenDataDir, bwEnv, createVault, INSTALL_HINT, LOCKED_HINT, LOGIN_HINT, VAULT_TTL_MS, VaultLockedError, type BwResult } from "./bitwarden.js";
 
 const MASTER = "master-password-for-tests";
 const SESSION = "session-key-for-tests";
@@ -12,13 +12,16 @@ function fake(handler: (args: string[], env: Record<string, string>) => Partial<
   const calls: Call[] = [];
   let clock = 1_000_000;
   const timers: Array<{ fn: () => void; ms: number; cancelled: boolean }> = [];
+  const fed: string[] = [];
+  let pipeClosed = 0;
   const vault = createVault({
+    pipe: async () => ({ path: "/tmp/fake-pw-fifo", feed: async (master) => { fed.push(Buffer.from(master).toString("utf8")); }, close: async () => { pipeClosed += 1; } }),
     run: async (args, env) => { calls.push({ args, env }); return { code: 0, stdout: "", stderr: "", ...handler(args, env) }; },
     now: () => clock,
     schedule: (fn, ms) => { const timer = { fn, ms, cancelled: false }; timers.push(timer); return () => { timer.cancelled = true; }; },
     env: { PATH: "/usr/bin", HOME: "/home/test", XDG_CONFIG_HOME: "/home/test/.config", SECRET_TOKEN: "do-not-pass", ...extra.env },
   });
-  return { vault, calls, timers, advance: (ms: number) => { clock += ms; } };
+  return { vault, calls, timers, fed, pipe: { get closed() { return pipeClosed; } }, advance: (ms: number) => { clock += ms; } };
 }
 
 const item = (id: string, uris: string[], over: Record<string, unknown> = {}) => ({ id, type: 1, login: { username: `user-${id}`, password: `pass-${id}`, totp: null, uris: uris.map((uri) => ({ uri })), ...over } });
@@ -39,19 +42,19 @@ test("bw missing and bw logged out give the owner a next step", async () => {
   assert.equal(loggedOut.vault.status().status, "locked");
 });
 
-test("unlock runs bw non-interactively with a minimal environment; the master password is only in the unlock call's environment", async () => {
-  const { vault, calls } = fake(unlocked([]), { env: { NODE_EXTRA_CA_CERTS: "/etc/ca.pem" } });
+test("unlock runs bw non-interactively with a minimal environment; the master password goes only through the password pipe", async () => {
+  const { vault, calls, fed, pipe } = fake(unlocked([]), { env: { NODE_EXTRA_CA_CERTS: "/etc/ca.pem" } });
   const receipt = await vault.unlock(Buffer.from(MASTER));
   assert.equal(receipt.locksAt, new Date(1_000_000 + VAULT_TTL_MS).toISOString());
   assert.equal(VAULT_TTL_MS, 8 * 3600_000);
   for (const call of calls) assert.ok(call.args.includes("--nointeraction"), call.args.join(" "));
   const unlock = calls.find((call) => call.args[0] === "unlock")!;
-  assert.deepEqual(unlock.args, ["unlock", "--passwordenv", "BW_PASSWORD", "--raw", "--nointeraction"]);
-  assert.deepEqual(Object.keys(unlock.env).sort(), ["BITWARDENCLI_APPDATA_DIR", "BW_PASSWORD", "HOME", "NODE_EXTRA_CA_CERTS", "PATH"]);
+  assert.deepEqual(unlock.args, ["unlock", "--passwordfile", "/tmp/fake-pw-fifo", "--raw", "--nointeraction"]);
+  assert.deepEqual(Object.keys(unlock.env).sort(), ["BITWARDENCLI_APPDATA_DIR", "HOME", "NODE_EXTRA_CA_CERTS", "PATH"]);
   assert.equal(unlock.env.BITWARDENCLI_APPDATA_DIR, join("/home/test", ".config", "frely", "bitwarden"));
-  assert.equal(unlock.env.BW_PASSWORD, MASTER);
-  assert.equal(calls.filter((call) => "BW_PASSWORD" in call.env).length, 1);
-  assert.equal(JSON.stringify(calls.map((call) => call.args)).includes(MASTER), false);
+  assert.deepEqual(fed, [MASTER]);
+  assert.equal(pipe.closed, 1);
+  assert.equal(JSON.stringify(calls).includes(MASTER), false);
   assert.equal(vault.status().status, "unlocked");
 });
 
@@ -141,4 +144,55 @@ test("the data directory follows the config home, which is inside the folders th
   assert.equal(bitwardenDataDir({ XDG_CONFIG_HOME: "/data/acct" }, "/h"), join("/data/acct", "frely", "bitwarden"));
   assert.equal(bitwardenDataDir({}, "/h"), join("/h", ".config", "frely", "bitwarden"));
   assert.deepEqual(Object.keys(bwEnv({}, { PATH: "/p", HOME: "/h", FOO: "x" })).sort(), ["BITWARDENCLI_APPDATA_DIR", "HOME", "PATH"]);
+});
+
+test("the real password pipe is a 0700-folder FIFO that a reader gets the first line from, and it is removed on close", { skip: process.platform === "win32" && "FIFOs are POSIX-only; the vault runs on macOS." }, async () => {
+  const { existsSync, statSync } = await import("node:fs");
+  const { readFile } = await import("node:fs/promises");
+  const pipe = await defaultPasswordPipe();
+  const reader = readFile(pipe.path, "utf8");
+  await pipe.feed(Buffer.from(MASTER), new AbortController().signal);
+  assert.equal(await reader, `${MASTER}\n`);
+  assert.equal(statSync(pipe.path).isFIFO(), true);
+  await pipe.close();
+  assert.equal(existsSync(pipe.path), false);
+});
+
+test("a bw that never opens the pipe does not hang the unlock, and the password is not left anywhere", { skip: process.platform === "win32" && "FIFOs are POSIX-only; the vault runs on macOS." }, async () => {
+  const { existsSync } = await import("node:fs");
+  const real = await defaultPasswordPipe();
+  let path = "";
+  const vault = createVault({
+    pipe: async () => { path = real.path; return real; },
+    run: async (args) => args[0] === "status" ? { code: 0, stdout: JSON.stringify({ status: "locked" }), stderr: "" } : { code: 1, stdout: "", stderr: "failed" },
+    schedule: () => () => undefined,
+    env: { PATH: "/usr/bin", HOME: "/home/test" },
+  });
+  await assert.rejects(vault.unlock(Buffer.from(MASTER)), /did not unlock/u);
+  assert.equal(existsSync(path), false);
+});
+
+test("with a bw stand-in on PATH the real runner and pipe unlock without the password in the environment or arguments", { skip: process.platform === "win32" && "FIFOs are POSIX-only; the vault runs on macOS." }, async () => {
+  const { chmodSync, mkdtempSync, writeFileSync, readFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "fake-bw-"));
+  const seen = join(dir, "seen");
+  // Like bw: `status` answers locked, `unlock --passwordfile F --raw` reads the first line of F, checks it, prints a session key; env and argv are logged.
+  writeFileSync(join(dir, "bw"), `#!/bin/sh
+echo "$@" >> "${seen}.args"; env >> "${seen}.env"
+case "$1" in
+  status) echo '{"status":"locked"}';;
+  unlock) read line < "$3"; if [ "$line" = "${MASTER}" ]; then echo ${SESSION}; else echo bad >&2; exit 1; fi;;
+  *) exit 0;;
+esac
+`);
+  chmodSync(join(dir, "bw"), 0o755);
+  const vault = createVault({ schedule: () => () => undefined, env: { PATH: `${dir}:/usr/bin:/bin`, HOME: dir, XDG_CONFIG_HOME: join(dir, "cfg") } });
+  const master = Buffer.from(MASTER);
+  const receipt = await vault.unlock(master);
+  assert.equal(vault.status().status, "unlocked");
+  assert.ok(receipt.locksAt);
+  const logged = readFileSync(`${seen}.args`, "utf8") + readFileSync(`${seen}.env`, "utf8");
+  assert.equal(logged.includes(MASTER), false);
+  assert.match(logged, /unlock --passwordfile .*\/pw --raw --nointeraction/u);
 });
