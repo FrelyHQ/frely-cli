@@ -56,6 +56,7 @@ export function resolveWorkspacePair(
 }
 
 function requireAbsolute(workspaces: Map<string, Workspace>, input: string): void {
+  if (workspaces.size === 0) throw new Error("No workspace is shared on this computer. The owner can add one on the web console or with frely link workspace add <path>.");
   if (!isAbsolute(input) || input === ".") {
     const roots = Array.from(workspaces.keys()).join("\n  ");
     throw new Error(
