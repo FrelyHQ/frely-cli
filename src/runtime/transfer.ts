@@ -33,6 +33,21 @@ export function isTransferStoreHost(hostname: string): boolean {
   return TRANSFER_STORE_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix) && host.length > suffix.length);
 }
 
+/**
+ * The headers the relay signed for a link. content-length is signed too (the relay presigns the PUT with the exact size), but the CLI sets it from
+ * the file it opened, so the relay's copy is dropped here instead of refused; the store rejects the upload if the two ever differ.
+ */
+export function checkedTransferHeaders(headers: Record<string, string> | undefined): Record<string, string> {
+  const sent: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    const lower = name.toLowerCase();
+    if (lower === "content-length" && /^\d+$/u.test(value)) continue;
+    if (!HEADER_NAMES.test(lower) || /[\r\n]/u.test(name + value)) throw new Error(`Header ${JSON.stringify(name.slice(0, 40))} is not allowed.`);
+    sent[lower] = value;
+  }
+  return sent;
+}
+
 /** https only, only Frely's object stores, public addresses only, one connection pinned to the checked address, no redirects, no credentials in the URL. */
 async function connect(target: TransferTarget, method: "PUT" | "GET", headers: Record<string, string>, signal: AbortSignal, body?: AsyncIterable<Buffer>): Promise<IncomingMessage> {
   let url: URL;
@@ -43,11 +58,7 @@ async function connect(target: TransferTarget, method: "PUT" | "GET", headers: R
   if (!trusted && url.port && url.port !== "443") throw new Error("Transfers use port 443 only.");
   const { address } = await checkedTarget(url, { signal, ...(target.resolve ? { resolve: target.resolve } : {}), ...(target.trustedTestHosts ? { trustedTestHosts: target.trustedTestHosts } : {}) });
   const family = isIP(address) === 6 ? 6 : 4;
-  const sent: Record<string, string> = {};
-  for (const [name, value] of Object.entries(target.headers ?? {})) {
-    if (!HEADER_NAMES.test(name.toLowerCase()) || /[\r\n]/u.test(name + value)) throw new Error(`Header ${JSON.stringify(name.slice(0, 40))} is not allowed.`);
-    sent[name.toLowerCase()] = value;
-  }
+  const sent = checkedTransferHeaders(target.headers);
   return new Promise((resolve, reject) => {
     const request = httpsRequest({
       hostname: url.hostname, port: url.port || undefined, path: `${url.pathname}${url.search}`, method,
