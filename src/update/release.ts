@@ -122,7 +122,7 @@ export async function latestRelease(installation: Installation, request: typeof 
     .catch((error: unknown) => { failed.push(`${new URL(registry).hostname}: ${reason(error)}`); throw error; }));
   try {
     const first = await Promise.any(answers);
-    const grace = new Promise<string[]>((resolve) => setTimeout(() => resolve([]), REGISTRY_GRACE_MS).unref());
+    const grace = new Promise<string[]>((resolve) => setTimeout(() => resolve([]), REGISTRY_GRACE_MS));
     const rest = await Promise.race([Promise.allSettled(answers).then((all) => all.flatMap((r) => r.status === "fulfilled" ? [r.value] : [])), grace]);
     const version = [first, ...rest].reduce((best, v) => compareVersions(v, best) > 0 ? v : best);
     return { version, sources: releaseSources(version, asset) };
