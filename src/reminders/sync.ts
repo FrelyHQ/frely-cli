@@ -26,6 +26,11 @@ export async function readEnabled(): Promise<boolean> {
 }
 export const writeEnabled = (enabled: boolean): Promise<void> => writeTaskJson(configPath(), { enabled });
 
+/** Read-only check: the tool is installed and may read Reminders. */
+export async function checkReminderAccess(run: Reminders = remindersCli): Promise<void> {
+  await run(["show-lists", "--format", "json"]).catch((error: Error) => { if (/ENOENT/u.test(error.message)) throw new Error("The reminders tool is not installed. Run: brew install keith/formulae/reminders-cli"); throw error; });
+}
+
 /** Creates the "Frely" list when it is missing. Fails with a readable message when the tool is missing or access is not given. */
 export async function setupReminders(run: Reminders = remindersCli): Promise<{ created: boolean }> {
   if (process.platform !== "darwin") throw new Error("Apple Reminders works on macOS only.");
