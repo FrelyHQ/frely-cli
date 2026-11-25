@@ -30,7 +30,7 @@ export interface ManagerDeps {
 
 export const defaultManagerDeps: ManagerDeps = {
   spawnWorker: (runId) => {
-    const launch = cliLaunchArguments(process.argv[1] ?? "", ["task", "__worker", runId]);
+    const launch = cliLaunchArguments(process.argv[1] ?? "", ["task", "local", "__worker", runId]);
     spawn(launch[0]!, launch.slice(1), { detached: true, stdio: "ignore", windowsHide: true, env: process.env }).unref();
   },
 };

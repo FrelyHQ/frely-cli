@@ -22,6 +22,8 @@ export function normalizeLinkArgs(input: readonly string[]): string[] {
     return checkOptions(args, args[1]);
   }
   if (args[0] !== "link") return args;
+  // Not about remote control itself: their own commands parse their arguments.
+  if (args[1] === "computer" || args[1] === "proxy" || args[1] === "tunnel") return args;
   if (args.slice(1).some((arg) => arg === "--help" || arg === "-h") || args[1] === "help") return ["link", "help"];
   if (!args[1]) return ["link", "help"];
   if (!["workspace", "local", "on", "off", "status"].includes(args[1])) throw new Error("Unknown link command. Run frely link --help.");

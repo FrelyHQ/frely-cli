@@ -1,5 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
+import { getAgent } from "../agents/registry.js";
 import { approveSites, type ApprovalDeps } from "../agent/local/approvals.js";
 import { ControllerError, EXIT } from "../controller/client.js";
 import { buildDefinition, buildSchedule, getDefinition, listDefinitions, removeDefinition, saveDefinition, updateDefinitions, type TaskDefinition } from "./definition.js";
@@ -15,7 +16,7 @@ export interface TaskIo {
 }
 
 export const TASK_USAGE = `Usage:
-  frely task add <name> [--cwd <dir>] [--net <site>]... [--env K=V]... [--timeout <seconds>] [--model <name> [--fallback-model <name>]...] [--cron "<m h dom mon dow>" [--tz <zone>]] [--replace] [--pi] -- <command...>
+  frely task add <name> [--cwd <dir>] [--net <site>]... [--env K=V]... [--timeout <seconds>] [--model <name> [--fallback-model <name>]...] [--cron "<m h dom mon dow>" [--tz <zone>]] [--replace] [--agent pi|codex|claude-code] -- <command or prompt...>
   frely task list [--json]
   frely task show <name> [--json]
   frely task remove <name>
@@ -44,7 +45,7 @@ function values(args: readonly string[], name: string): string[] {
 }
 const value = (args: readonly string[], name: string): string | undefined => values(args, name).at(-1);
 
-const FLAGS_WITH_VALUE = new Set(["--workspace", "--description", "--cwd", "--net", "--env", "--timeout", "--cron", "--tz", "--wait-sec", "--lines", "--task", "--model", "--fallback-model"]);
+const FLAGS_WITH_VALUE = new Set(["--workspace", "--description", "--cwd", "--net", "--env", "--timeout", "--cron", "--tz", "--wait-sec", "--lines", "--task", "--model", "--fallback-model", "--agent"]);
 function positional(args: readonly string[]): string[] {
   const out: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -67,7 +68,7 @@ function parseEnv(items: readonly string[]): Record<string, string> {
   return env;
 }
 
-function waitMs(args: readonly string[]): number {
+export function waitMs(args: readonly string[]): number {
   const seconds = value(args, "--wait-sec");
   if (seconds === undefined) return 100_000;
   const parsed = Number(seconds);
@@ -152,9 +153,11 @@ async function add(args: string[], io: TaskIo): Promise<number> {
   const command = commandWords.length === 1 ? commandWords[0]! : commandWords.map(shellQuote).join(" ");
   const model = value(options, "--model");
   const fallbacks = values(options, "--fallback-model");
+  const agentName = value(options, "--agent");
+  const agent = agentName === undefined ? undefined : getAgent(agentName).id;
   if (fallbacks.length > 0 && model === undefined) return fail("--fallback-model needs --model.");
   let definition = buildDefinition({
-    name, command, cwd, network: values(options, "--net"), ...(has(options, "--pi") ? { runner: "pi" as const, worktree: true } : {}), env: parseEnv(values(options, "--env")),
+    name, command, cwd, network: values(options, "--net"), ...(agent === undefined ? {} : { runner: agent, worktree: true }), env: parseEnv(values(options, "--env")),
     ...(timeout === undefined ? {} : { timeoutSec: Number(timeout) }),
     ...(model === undefined ? {} : { model }), ...(fallbacks.length > 0 ? { fallbackModels: fallbacks } : {}),
   }, previous);
@@ -234,8 +237,13 @@ async function approve(args: string[], io: TaskIo, deps: ApprovalDeps = {}): Pro
 }
 
 async function start(args: string[], io: TaskIo, deps: { manager?: ManagerDeps; approval?: ApprovalDeps }): Promise<number> {
-  const definition = await requireDefinition(positional(args)[0]);
-  if (io.interactive && definition.network.some((host) => !approvedSites(definition).includes(host))) await approve([definition.name], io, deps.approval);
+  return startSavedTask(positional(args)[0], args, io, deps);
+}
+
+/** Starts a saved task (asking for its sites first when a person is at the terminal) and prints the run, waiting with `--wait`. `frely agent run` shares this. */
+export async function startSavedTask(name: string | undefined, args: readonly string[], io: TaskIo, deps: { manager?: ManagerDeps; approval?: ApprovalDeps }, options: { approveAlways?: boolean } = {}): Promise<number> {
+  const definition = await requireDefinition(name);
+  if ((io.interactive || options.approveAlways === true) && definition.network.some((host) => !approvedSites(definition).includes(host))) await approve([definition.name], io, deps.approval);
   const record = await startTask(definition.name, { trigger: "manual" }, deps.manager ?? defaultManagerDeps);
   io.err(`Run ${record.runId} started. It keeps going if this command is cut off: frely result ${record.runId} --wait\n`);
   if (!has(args, "--wait")) { io.out(`${JSON.stringify(await describeRun(record), null, has(args, "--json") ? undefined : 2)}\n`); return EXIT.ok; }

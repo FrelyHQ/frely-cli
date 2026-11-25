@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import type { RunnerId } from "./definition.js";
 import type { TaskRunRecord, TaskRunSnapshot } from "./run-store.js";
 
 /** What the worker passes a runner. */
@@ -17,17 +18,21 @@ export interface RunnerPlan {
   readonly command: string;
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
+  /** Text written to the program's stdin (the task text of an agent). */
+  readonly stdin?: string;
 }
 
 export interface Runner {
-  readonly id: "script" | "pi";
+  readonly id: RunnerId;
   /** Runs before the sandboxed program starts: set up a worktree, say. */
   prepare(context: RunnerContext): Promise<RunnerPlan & { readonly patch?: Partial<TaskRunRecord> }>;
   /** Runs after it ended: collect the answer and the diff. */
-  /** A runner that works through something other than a sandboxed command (pi: the Pi Node) does it here instead of the sandbox step. */
+  /** A runner that works through something other than a sandboxed command does it here instead of the sandbox step. */
   execute?(context: RunnerContext, signal: AbortSignal): Promise<{ readonly code: number; readonly patch?: Partial<TaskRunRecord> }>;
   /** The model endpoint must listen on loopback TCP because the program is not inside the sandbox. */
   readonly loopbackModel?: boolean;
+  /** The task's `model` is a name the program understands itself (an agent's own model): no model proxy is opened for it. */
+  readonly nativeModel?: boolean;
   finish?(context: RunnerContext, exit: { readonly code: number | null; readonly output: string }): Promise<Partial<TaskRunRecord>>;
 }
 

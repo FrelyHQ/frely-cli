@@ -5,11 +5,12 @@ import { terminateProcessTree } from "../runtime/process-tree.js";
 import { restrictSandboxNetwork, sandboxCommandDetailed, sandboxViolationLines, shutdownSandbox } from "../runtime/sandbox.js";
 import { logTail, LOG_LIMIT_BYTES, readTaskRun, runsDir, taskLogPath, writeTaskRun, type TaskRunRecord } from "./run-store.js";
 import { openTaskModel, type ModelStats, type OpenedModel } from "./model-route.js";
-import { createPiRunner } from "./pi-runner.js";
+import { createAgentRunner } from "../agents/runner.js";
+import { runnableAgents } from "../agents/registry.js";
 import { scriptRunner, type Runner, type RunnerContext } from "./runner.js";
 
 /** Runners the worker can run. `registerRunner` replaces one (tests). */
-const runners = new Map<string, Runner>([["script", scriptRunner], ["pi", createPiRunner()]]);
+const runners = new Map<string, Runner>([["script", scriptRunner], ...runnableAgents().map((agent): [string, Runner] => [agent.id, createAgentRunner(agent)])]);
 export function registerRunner(runner: Runner): void { runners.set(runner.id, runner); }
 
 /** What a worker needs beyond the run record. Tests stand in for these. */
@@ -45,7 +46,7 @@ export async function executeTaskRun(runId: string, signal: AbortSignal = new Ab
     let model: RunnerContext["model"];
     let domains: string[] = [...record.snapshot.sites];
     let mitm: { socketPath: string; domains: readonly string[] } | undefined;
-    if (record.snapshot.model !== undefined && deps.openModel) {
+    if (record.snapshot.model !== undefined && deps.openModel && !runner.nativeModel) {
       const opened = await deps.openModel(record, note, runner.loopbackModel ? { tcp: true } : {});
       if (opened) {
         model = { baseUrl: opened.baseUrl, name: opened.name };
@@ -71,7 +72,8 @@ export async function executeTaskRun(runId: string, signal: AbortSignal = new Ab
     await mkdir(`${plan.cwd}/.cache`, { recursive: true }).catch(() => undefined);
     note(`${record.snapshot.name} started (${record.snapshot.runner}, task folder ${plan.cwd}${domains.length ? `, sites: ${domains.join(", ")}` : ""}).`);
     const wrapped = await sandboxCommandDetailed(plan.command, plan.cwd);
-    const child = spawn(wrapped.command, { cwd: plan.cwd, env: plan.env as NodeJS.ProcessEnv, shell: true, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32", windowsHide: true });
+    const child = spawn(wrapped.command, { cwd: plan.cwd, env: plan.env as NodeJS.ProcessEnv, shell: true, stdio: [plan.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"], detached: process.platform !== "win32", windowsHide: true });
+    if (plan.stdin !== undefined) { child.stdin?.on("error", () => undefined); child.stdin?.end(plan.stdin); }
     child.stdout?.on("data", (data: Buffer) => write(data.toString("utf8")));
     child.stderr?.on("data", (data: Buffer) => write(data.toString("utf8")));
     let timedOut = false;

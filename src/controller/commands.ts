@@ -7,6 +7,28 @@ import { waitForApproval, type ApprovalRef, type ApprovalWaitOptions } from "./a
 import { openController, outcomeOf, resultData, resultText, ControllerError, EXIT, type Controller, type Outcome, type ToolResult } from "./client.js";
 
 export const CONTROLLER_COMMANDS: ReadonlySet<string> = new Set(["devices", "run", "ps", "logs", "kill", "read", "ls", "grep", "edit", "put", "get", "files", "tools", "call", "permission"]);
+
+const DEVICE_VERBS = new Set(["run", "ps", "logs", "kill", "read", "ls", "grep", "edit", "permission"]);
+const FILE_VERBS = new Set(["put", "get", "rm", "share"]);
+
+/** `frely device ...` and `frely file ...` as the arguments `runControllerCommand` takes; undefined when no verb (or an unknown one) was given. */
+export function controllerArguments(group: "device" | "file", args: readonly string[]): string[] | undefined {
+  const [verb, ...rest] = args;
+  if (verb === undefined || verb === "help" || verb === "--help" || verb === "-h") return undefined;
+  if (group === "device") {
+    if (verb === "list") return ["devices", ...rest];
+    if (verb === "add") return ["devices", "--add", ...rest];
+    if (DEVICE_VERBS.has(verb)) return [verb, ...rest];
+  } else {
+    if (verb === "list") return ["files", ...rest];
+    if (verb === "put" || verb === "get") return [verb, ...rest];
+    if (verb === "rm" || verb === "share") return ["files", verb, ...rest];
+  }
+  throw new ControllerError(`Unknown ${group} command ${JSON.stringify(verb)}. Run frely ${group} --help.`, EXIT.cli);
+}
+
+/** A Frely account operation is named group.action (keys.create); anything else is a FrelyMCP tool. */
+export const isAccountToolName = (name: string): boolean => /^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/u.test(name);
 export interface Output { out(text: string): void; err(text: string): void }
 
 export const CONTROLLER_USAGE = `Control your Frely devices from this computer.
