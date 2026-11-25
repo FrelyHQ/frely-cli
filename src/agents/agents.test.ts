@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,10 +21,11 @@ import { createAgentRunner, promptOf, summarizeDiff } from "./runner.js";
 
 let root: string;
 let previousSandbox: string | undefined;
-before(async () => { root = await mkdtemp(join(tmpdir(), "frely-agents-test-")); previousSandbox = process.env.FRELY_SANDBOX; process.env.FRELY_SANDBOX = "off"; });
+before(async () => { root = await realpath(await mkdtemp(join(tmpdir(), "frely-agents-test-"))); previousSandbox = process.env.FRELY_SANDBOX; process.env.FRELY_SANDBOX = "off"; });
 beforeEach(async () => { process.env.XDG_CONFIG_HOME = await mkdtemp(join(root, "config-")); });
 after(async () => { if (previousSandbox === undefined) delete process.env.FRELY_SANDBOX; else process.env.FRELY_SANDBOX = previousSandbox; await rm(root, { recursive: true, force: true }); });
 
+const posixOnly = { skip: process.platform === "win32" && "These tasks run POSIX shell commands; tasks need the Unix sandbox." };
 const none = async () => ({ installed: false });
 const present = (...ids: string[]) => async (binary: string) => (ids.some((id) => getAgent(id).binary === binary) ? { installed: true, path: `/bin/${binary}`, version: "1.0.0" } : { installed: false });
 
@@ -99,7 +100,7 @@ async function runWith(adapter: typeof codexAdapter, program: string, folder: st
   return waitForTaskRun(started.runId, 20_000, 50);
 }
 
-test("a codex task sends the prompt on stdin and returns the last message from the output file", async () => {
+test("a codex task sends the prompt on stdin and returns the last message from the output file", posixOnly, async () => {
   const folder = await mkdtemp(join(root, "work-"));
   const seen = join(folder, "..", "seen-codex.txt");
   const program = await fakeAgent(`out=""; while [ $# -gt 0 ]; do if [ "$1" = "-o" ]; then out="$2"; fi; shift; done; cat > ${seen}; printf 'hello from codex' > "$out"`);
@@ -111,7 +112,7 @@ test("a codex task sends the prompt on stdin and returns the last message from t
   assert.equal(record.modelUsed, undefined, "an agent's own model is not routed through the model proxy");
 });
 
-test("a claude-code task reads the JSON result, and an agent that prints nothing is a failure to say so", async () => {
+test("a claude-code task reads the JSON result, and an agent that prints nothing is a failure to say so", posixOnly, async () => {
   const folder = await mkdtemp(join(root, "work-"));
   const record = await runWith(claudeCodeAdapter, await fakeAgent(`cat > /dev/null; echo '{"type":"result","result":"done it","session_id":"s9"}'`), folder);
   assert.equal(record.status, "completed");
@@ -136,7 +137,7 @@ function repo(): string {
   return dir;
 }
 
-test("a worktree run keeps the agent's changes in a worktree and reports a diff; the task folder stays untouched", async () => {
+test("a worktree run keeps the agent's changes in a worktree and reports a diff; the task folder stays untouched", posixOnly, async () => {
   const folder = repo();
   const record = await runWith(piAdapter, await fakeAgent(`cat > /dev/null; echo changed > new-file.txt; echo done`), folder, { worktree: true });
   assert.equal(record.status, "completed", JSON.stringify(record.error));
@@ -146,7 +147,7 @@ test("a worktree run keeps the agent's changes in a worktree and reports a diff;
   assert.equal(existsSync(join(folder, "new-file.txt")), false);
 });
 
-test("a read run drops its worktree, a none run uses an empty folder, a worktree needs a git folder", async () => {
+test("a read run drops its worktree, a none run uses an empty folder, a worktree needs a git folder", posixOnly, async () => {
   const folder = repo();
   registerRunner(createAgentRunner(piAdapter, { find: async () => await fakeAgent(`cat > /dev/null; pwd > ${join(root, "cwd.txt")}; echo x > scratch.txt; echo ok`) }));
   await saveDefinition(buildDefinition({ name: "t", runner: "pi", command: "x", cwd: folder }));
@@ -196,7 +197,7 @@ test("frely agent list|status|run say what is installed and refuse what cannot r
   assert.match(help.out(), /frely agent run <id>/u);
 });
 
-test("frely agent run saves one task per agent, starts it and can wait for the answer", async () => {
+test("frely agent run saves one task per agent, starts it and can wait for the answer", posixOnly, async () => {
   const folder = await mkdtemp(join(root, "work-"));
   registerRunner(createAgentRunner(piAdapter, { find: async () => await fakeAgent("cat > /dev/null; echo ran") }));
   const h = io();
