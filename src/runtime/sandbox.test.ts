@@ -25,6 +25,11 @@ test("a path grant reopens only its own group and never the Frely credential dir
   assert.equal(buildSandboxConfig("/work", ["ssh"]).filesystem?.denyRead?.includes("~/.ssh"), false);
 });
 
+test("a home grant still leaves user services, autostart, global git config and ~/.local/bin unwritable", () => {
+  const denied = protectedWriteDenials(["path:~/"]);
+  for (const path of ["~/.config/systemd", "~/.config/environment.d", "~/.config/autostart", "~/.gitconfig", "~/.config/git", "~/.local/bin"]) assert.ok(denied.includes(path), path);
+});
+
 test("the Admin session directory is closed to commands until friday-admin is approved, then readable and writable", () => {
   assert.ok(sensitiveReadPaths().includes("~/.config/friday-relay"));
   assert.ok(protectedWriteDenials([]).includes("~/.config/friday-relay"));
@@ -60,6 +65,8 @@ test("custom writable paths: any absolute directory, protected paths only when n
     "path:/", "path:", "path:~", "path:relative/dir", "path:/opt/../etc", "path:~/a/../.ssh", "path:/tmp\0/x", `path:/${"a".repeat(150)}`,
     // Frely's own credentials can never be granted; sub-paths of a protected path need the protected path itself.
     "path:~/.config/frely", "path:~/.config/frely/devices", "path:~/.ssh/keys", `path:${join(home, ".aws", "config")}`, "path:~/Library/LaunchAgents/x",
+    // Places run outside the sandbox later: user services and their environment, autostart, global git config, ~/.local/bin.
+    "path:~/.config/systemd/user", "path:~/.config/environment.d/frely", "path:~/.config/autostart/x", "path:~/.config/git/hooks", "path:~/.local/bin/tools",
   ];
   for (const name of refused) assert.equal(customWritePath(name), undefined, name);
   // A parent of a protected path is a normal grant (the protection is applied by protectedWriteDenials); so is the home directory.
