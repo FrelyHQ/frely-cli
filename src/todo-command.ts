@@ -100,6 +100,7 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
     else {
       if (one(parsed, "--title") !== undefined) input.title = one(parsed, "--title");
       if (one(parsed, "--description") !== undefined) input.description = one(parsed, "--description");
+      if (one(parsed, "--executor") !== undefined) input.executor = oneOf(["pi", "codex"] as const, one(parsed, "--executor")!, "--executor");
       if (one(parsed, "--status")) input.status = oneOf(TODO_STATUSES, one(parsed, "--status")!, "--status");
       if (Object.keys(input).length === 1) throw new Error("Nothing to update: pass --title, --description or --status.");
     }
@@ -118,24 +119,24 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
   if (action === "step") {
     const sub = rest[0];
     if (sub === "add") {
-      const parsed = parseTodoArgs(rest.slice(1), ["--device"]);
+      const parsed = parseTodoArgs(rest.slice(1), ["--device", "--executor"]);
       const [todoId, ...words] = parsed.positional;
       const instruction = words.join(" ").trim();
       if (!todoId || !instruction) throw new Error("Usage: frely todo step add <todoId> <instruction> [--device <id>] [--json]");
-      const result = await io.call("todo.step_add", { todoId, instruction, ...(one(parsed, "--device") ? { deviceId: one(parsed, "--device") } : {}) }) as { steps?: Step[] };
+      const result = await io.call("todo.step_add", { todoId, instruction, ...(one(parsed, "--device") ? { deviceId: one(parsed, "--device") } : {}), ...(one(parsed, "--executor") ? { executor: oneOf(["pi", "codex"] as const, one(parsed, "--executor")!, "--executor") } : {}) }) as { steps?: Step[] };
       emit(result, parsed.json, () => (result.steps ?? []).map(stepLine).join(""));
       return 0;
     }
     if (sub === "update") {
-      const parsed = parseTodoArgs(rest.slice(1), ["--instruction", "--device", "--status", "--result"]);
+      const parsed = parseTodoArgs(rest.slice(1), ["--instruction", "--device", "--executor", "--status", "--result"]);
       const [todoId, stepId] = parsed.positional;
-      if (!todoId || !stepId) throw new Error("Usage: frely todo step update <todoId> <stepId> [--instruction <t>] [--device <id>] [--status pending|succeeded|failed|skipped|cancelled] [--result <text>] [--json]");
+      if (!todoId || !stepId) throw new Error("Usage: frely todo step update <todoId> <stepId> [--instruction <t>] [--device <id>] [--executor pi|codex] [--status pending|succeeded|failed|skipped|cancelled] [--result <text>] [--json]");
       const input: Record<string, unknown> = { todoId, stepId };
       if (one(parsed, "--instruction") !== undefined) input.instruction = one(parsed, "--instruction");
       if (one(parsed, "--device") !== undefined) input.deviceId = one(parsed, "--device");
       if (one(parsed, "--status")) input.status = oneOf(TODO_STEP_STATUSES, one(parsed, "--status")!, "--status");
       if (one(parsed, "--result") !== undefined) input.resultSummary = one(parsed, "--result");
-      if (Object.keys(input).length === 2) throw new Error("Nothing to update: pass --instruction, --device, --status or --result.");
+      if (Object.keys(input).length === 2) throw new Error("Nothing to update: pass --instruction, --device, --executor, --status or --result.");
       const result = await io.call("todo.step_update", input) as { step?: Step };
       emit(result, parsed.json, () => stepLine(result.step ?? {}));
       return 0;
