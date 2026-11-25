@@ -77,7 +77,9 @@ export function approvalOf(error: { code?: unknown; url?: unknown; approvalCode?
 export async function rerunAfterApproval(first: CallResult, call: (input: Record<string, unknown>) => Promise<CallResult>, input: Record<string, unknown>,
   wait: (ref: ApprovalRef, timeoutMs: number) => Promise<ApprovalOutcome>, now: () => number = Date.now,
   /** What to say when the owner has not answered by the end of the wait; a command that takes no --wait says to run it again. */
-  stillWaiting = "Still waiting for the owner. Run the same command with --wait to keep waiting."): Promise<CallResult> {
+  stillWaiting = "Still waiting for the owner. Run the same command with --wait to keep waiting.",
+  /** Called with the new refusal when an approved permission is followed by a confirmation (an older relay asks for both), before that one is waited for too. */
+  onChained?: (next: CallResult) => void): Promise<CallResult> {
   const start = toolError(first);
   if (!start || (start.code !== "permission_required" && start.code !== "confirmation_required")) return first;
   const approvalCode = start.code === "confirmation_required" && typeof start.approvalCode === "string" ? start.approvalCode : undefined;
@@ -93,7 +95,13 @@ export async function rerunAfterApproval(first: CallResult, call: (input: Record
       : outcome.status === "error" ? outcome.message + "\n" : `The request was ${outcome.status}.\n`);
     return first;
   }
-  return call(approvalCode ? { ...input, approvalCode } : input);
+  const again = await call(approvalCode ? { ...input, approvalCode } : input);
+  // At most one chained wait: only a permission can lead to a confirmation, and the confirmation's own repeat is the last.
+  if (shortCode && toolError(again)?.code === "confirmation_required") {
+    onChained?.(again);
+    return rerunAfterApproval(again, call, input, wait, now, stillWaiting);
+  }
+  return again;
 }
 
 export const API_USAGE = `Frely API — call your Frely account's business operations (keys, credits, orders, Creator items…).
@@ -301,17 +309,24 @@ export async function callCloudToolAwaiting(name: string, input: Record<string, 
   try {
     const call = (arguments_: Record<string, unknown>) => controller.call("frely_call", { tool: name, arguments: arguments_ }) as Promise<CallResult>;
     let result = await call(input);
-    const hint = permissionHint(result, "install");
-    if (hint) {
-      const approval = approvalOf(toolError(result) ?? {});
+    // This command waits for the owner itself, so the generic hint's "run the call again" does not apply: print each approval once and say to keep it running.
+    const announce = (refused: CallResult) => {
+      const approval = approvalOf(toolError(refused) ?? {});
       if (approval) onApproval?.(approval);
-      // This command waits for the owner itself, so the generic hint's "run the call again" does not apply: say to keep it running.
-      process.stderr.write((approval ? `${approval.summary ? approval.summary + "\n" : ""}Approve this in your browser:\n${approval.url}\nCode: ${approval.code.slice(0, 4)}-${approval.code.slice(4)}\n` : hint + "\n")
+      process.stderr.write((approval ? `${approval.summary ? approval.summary + "\n" : ""}Approve this in your browser:\n${approval.url}\nCode: ${approval.code.slice(0, 4)}-${approval.code.slice(4)}\n` : permissionHint(refused, "install") + "\n")
         + `Keep this command running (up to ${WAIT_MAX_MS / 60_000} minutes): it continues by itself once the owner approves. If it has already ended, run the same command again.\n`);
+    };
+    if (permissionHint(result, "install")) {
+      announce(result);
       result = await rerunAfterApproval(result, call, input, (ref, timeoutMs) => wait(controller, ref, timeoutMs), Date.now,
-        "The owner has not answered yet. Run the same command again to keep waiting.");
+        "The owner has not answered yet. Run the same command again to keep waiting.", announce);
     }
-    return cloudToolResult(result, true);
+    try { return cloudToolResult(result, true); }
+    catch (error) {
+      // This command takes no approval code: an identical rerun reuses the same pending confirmation.
+      if (error instanceof ApprovalRequiredError) throw new ApprovalRequiredError(error.code, { ...error.approval, then: "repeat" });
+      throw error;
+    }
   } finally { await controller.close().catch(() => undefined); }
 }
 

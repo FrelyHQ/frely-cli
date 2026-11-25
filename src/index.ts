@@ -1001,7 +1001,8 @@ async function main(): Promise<void> {
     const deviceId = metadata?.grant.deviceId;
     // A change to what AI clients can reach is confirmed by the owner first: the same approval (a code on the web console) every other account write uses.
     // It names this computer, the operation and the path; the change runs here only after it is approved, and fails closed when it is not.
-    const announce = (approval: Approval) => { process.stderr.write(`Approve this workspace change: ${approval.url}\nCode: ${approval.code.slice(0, 4)}-${approval.code.slice(4)}\n`); openVerificationUrl(approval.url); };
+    // callCloudToolAwaiting prints the link and code itself (once, whatever the approval is for); this only opens the page.
+    const announce = (approval: Approval) => { openVerificationUrl(approval.url); };
     await runWorkspaceCommand({ args, primary: metadata?.grant.workspace ?? null, write: (text) => { stdout.write(text); },
       confirm: async ({ action, path }) => {
         if (!deviceId) throw new Error("MCP is not enabled. Run frely link on.");
