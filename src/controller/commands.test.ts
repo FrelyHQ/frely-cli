@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { Controller, ToolResult } from "./client.js";
-import { runControllerCommand, useControllerOpener, waitForPermission } from "./commands.js";
+import { controllerArguments, runControllerCommand, useControllerOpener, waitForPermission } from "./commands.js";
 import { EXIT } from "./client.js";
 
 const text = (value: unknown, extra: Partial<ToolResult> = {}): ToolResult => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }], ...extra });
@@ -44,7 +44,7 @@ test("run sends the command and ends with 2 when the remote command failed", asy
 test("a device that needs approval ends with 3 and the wait command", async () => {
   const result = await run(["permission", "request", "box", "--resource", "ssh", "--reason", "deploy", "--command", "ssh host true", "--no-wait"], () => text("Approval required", { structuredContent: { status: "pending", device: "box", approveUrl: "https://frely.test/device?g=QWERTY", shortCode: "QWERTY" } }));
   assert.equal(result.code, EXIT.approval);
-  assert.match(result.err, /frely permission wait QWERTY/u);
+  assert.match(result.err, /frely device permission wait QWERTY/u);
   assert.deepEqual(result.calls[0]!.input, { device: "box", resource: "ssh", reason: "deploy", command: "ssh host true" });
 });
 
@@ -166,10 +166,11 @@ test("put uploads a local file, completes it and prints the short link without t
 test("drop asks for a drop code, returns the script in --json and refuses unsafe file hints", async () => {
   const claimUrl = "https://frely.test/api/drop/abc";
   const reply = () => text({ code: "abc", expiresAt: "2026-12-01T00:00:00Z", claimUrl, completeUrl: `${claimUrl}/complete` });
+  assert.deepEqual(controllerArguments("file", ["drop", "report.csv"]), ["drop", "report.csv"]);
   const shown = await run(["drop", "report.csv"], reply);
   assert.deepEqual(shown.calls[0]!.input, { action: "drop_link" });
   assert.match(shown.out, /f='report\.csv'/u);
-  assert.match(shown.out, /When it finishes, the file shows in: frely files/u);
+  assert.match(shown.out, /When it finishes, the file shows in: frely file list/u);
   assert.equal(JSON.parse((await run(["drop", "--json"], reply)).out).script.includes(claimUrl), true);
   const unsafe = await run(["drop", 'bad"name'], reply);
   assert.equal(unsafe.code, EXIT.cli);
@@ -198,7 +199,7 @@ test("drop prints a runnable script and refuses unsafe file hints", { skip: proc
   assert.match(calls[0]!, /hello world\.txt/u);
   assert.match(calls[1]!, /-T.*hello world\.txt.*https:\/\/upload\.test\/object/u);
   assert.match(calls[2]!, /POST.*\/complete/u);
-  assert.match(result.out, /When it finishes, the file shows in: frely files/u);
+  assert.match(result.out, /When it finishes, the file shows in: frely file list/u);
   const json = await run(["drop", "FILE", "--json"], reply);
   assert.equal(JSON.parse(json.out).script.includes(claimUrl), true);
   const unsafe = await run(["drop", 'bad"name'], reply);

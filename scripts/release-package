@@ -11,13 +11,13 @@ ARTIFACT="npm package + standalone binaries"
 DESTINATION="npm registry + GitHub Releases"
 WAIT_FOR_CI="${FRELY_RELEASE_WAIT_FOR_CI:-1}"
 
-# Remote `frely update` only installs a release whose checksums carry the offline signature, and the Actions publish
+# Remote `frely self update` only installs a release whose checksums carry the offline signature, and the Actions publish
 # cannot hold that key. Sign the published checksums here, on the machine that holds it, and attach the signatures.
 SIGNING_KEY="${FRELY_RELEASE_SIGNING_KEY:-$HOME/frely-release-signing.pem}"
 sign_published_release() {
   local sign_tag="${1:-$tag}" sign_dir
   if [[ ! -f "$SIGNING_KEY" ]]; then
-    echo "WARNING: no release signing key at $SIGNING_KEY; $sign_tag stays unsigned and remote frely update will refuse it" >&2
+    echo "WARNING: no release signing key at $SIGNING_KEY; $sign_tag stays unsigned and remote frely self update will refuse it" >&2
     return 0
   fi
   sign_dir="$(mktemp -d)"

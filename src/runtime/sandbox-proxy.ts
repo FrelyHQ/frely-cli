@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
  *
  * srt gives sandboxed commands its own proxy and dials the network from the CLI process. A user who reaches the internet only through
  * a local proxy has that setting in their shell, which a background service never sees, so downloads inside the sandbox fail. The
- * address is taken, first match wins, from: the value saved with `frely sandbox proxy <url>`, the proxy variables of this process,
+ * address is taken, first match wins, from: the value saved with `frely link proxy <url>`, the proxy variables of this process,
  * and on macOS the system proxy (`scutil --proxy`). The user's own proxy settings are only read, never changed.
  *
  * srt 0.0.77 (`network.parentProxy`) takes `{ http, https, noProxy }`, accepts http:// and https:// proxy URLs only (a bare host:port
@@ -36,7 +36,7 @@ export function usableProxyUrl(value: string | undefined): string | undefined {
   }
 }
 
-/** The value `frely sandbox proxy` saved, or undefined. */
+/** The value `frely link proxy` saved, or undefined. */
 export function readSavedProxy(path: string = sandboxSettingsPath()): UpstreamProxy | undefined {
   try {
     const value = (JSON.parse(readFileSync(path, "utf8")) as { proxy?: { url?: unknown; noProxy?: unknown } }).proxy;
@@ -107,7 +107,7 @@ export function resolveUpstreamProxy(options: { saved?: UpstreamProxy | undefine
 }
 
 /**
- * `frely sandbox proxy [<url> [--no-proxy <list>] | --clear]`: show, save or remove the proxy used by the command sandbox.
+ * `frely link proxy [<url> [--no-proxy <list>] | --clear]`: show, save or remove the proxy used by the command sandbox.
  * Returns true when the saved value changed, so the caller restarts a running background service to apply it.
  */
 export async function runSandboxProxyCommand(args: readonly string[], write: (text: string) => void): Promise<boolean> {
@@ -127,7 +127,7 @@ export async function runSandboxProxyCommand(args: readonly string[], write: (te
     write(effective ? `In use when the sandbox starts: ${redact(effective.https ?? effective.http)}${saved ? "" : " (from this environment or the system settings)"}\n` : "In use when the sandbox starts: none (direct connections).\n");
     return false;
   }
-  if (rest.length !== 1) throw new Error("Usage: frely sandbox proxy [<http://host:port> [--no-proxy <list>] | --clear]");
+  if (rest.length !== 1) throw new Error("Usage: frely link proxy [<http://host:port> [--no-proxy <list>] | --clear]");
   await saveProxy({ url: rest[0]!, ...(noProxy ? { noProxy } : {}) });
   write(`Sandbox proxy saved: ${redact(rest[0])}.\n`);
   return true;

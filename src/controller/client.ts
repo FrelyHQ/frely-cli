@@ -80,7 +80,7 @@ export function mcpFetch(initial: LoginMcpSession, options: { refresh?: (session
 }
 
 export interface Controller {
-  /** The server's own instructions (how to use the tools), printed first by `frely tools`. */
+  /** The server's own instructions (how to use the tools), printed first by `frely api list`. */
   instructions(): string | undefined;
   tools(): Promise<Array<{ name: string; description?: string | undefined; inputSchema?: unknown; annotations?: { readOnlyHint?: boolean | undefined } | undefined }>>;
   call(name: string, args: Record<string, unknown>): Promise<ToolResult>;
@@ -148,7 +148,7 @@ export function outcomeOf(result: ToolResult): Outcome {
     const code = typeof data.shortCode === "string" ? data.shortCode : null;
     const lines = [`Approval needed${typeof data.device === "string" ? ` on ${data.device}` : ""}.`];
     if (typeof data.approveUrl === "string") lines.push(`Approve here: ${data.approveUrl}`);
-    if (code) lines.push(`After the owner approves, or to wait for it in the background: frely permission wait ${code}`);
+    if (code) lines.push(`After the owner approves, or to wait for it in the background: frely device permission wait ${code}`);
     return { exitCode: EXIT.approval, note: lines.join("\n") };
   }
   if (result.isError !== true) return { exitCode: EXIT.ok };

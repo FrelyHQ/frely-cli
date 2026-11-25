@@ -58,7 +58,7 @@ export interface TaskRunRecord {
   readonly worktreePath?: string;
   readonly branch?: string;
   readonly diffSummary?: string;
-  /** The owner dealt with the worktree changes of a remote call (`frely task handled`); until then they count toward the unhandled limit. */
+  /** The owner dealt with the worktree changes of a remote call (`frely task local handled`); until then they count toward the unhandled limit. */
   readonly handledAt?: string;
   readonly error?: Readonly<{ code: string; message: string }>;
   /** The sandbox blocked these (a site the task needs but was not approved for). */
@@ -162,7 +162,7 @@ export async function resolveTaskRun(target: string | undefined, name?: string):
     if (latest === undefined) throw new Error("There are no task runs on this computer.");
     return latest;
   }
-  if (!isTaskRunId(target)) throw new Error("Use a run id from `frely runs`, or --last.");
+  if (!isTaskRunId(target)) throw new Error("Use a run id from `frely result list`, or --last.");
   const record = await readTaskRun(target);
   if (record === null) throw new Error("This run is not on this computer (runs are removed after 14 days).");
   return record;

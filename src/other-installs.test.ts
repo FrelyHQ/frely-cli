@@ -29,7 +29,7 @@ test("each other copy comes with the command that removes only that copy", () =>
   assert.equal(removalCommand("/opt/other/run.sh", "linux"), null);
   const [note] = otherInstallNotes([{ path: nvm, version: "0.23.38", unsafeRefresh: false }], "darwin");
   assert.match(note!, /Remove it with: '\/Users\/w\/\.nvm\/versions\/node\/v24\.14\.1\/bin\/npm' uninstall -g/u);
-  assert.doesNotMatch(note!, /frely uninstall/u);
+  assert.doesNotMatch(note!, /frely self uninstall/u);
   assert.equal(removalCommand("C:\\Users\\w\\AppData\\Roaming\\npm\\node_modules\\frely-cli\\dist\\index.js", "win32"), 'npm uninstall -g --prefix "C:\\Users\\w\\AppData\\Roaming\\npm" frely-cli');
   assert.equal(removalCommand("C:\\tools\\frely.exe", "win32"), 'del "C:\\tools\\frely.exe"');
 });

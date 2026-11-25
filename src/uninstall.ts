@@ -431,17 +431,17 @@ export interface UninstallIo {
   interactive: boolean;
 }
 
-/** Entry point for `frely uninstall`. Returns the process exit code. */
+/** Entry point for `frely self uninstall`. Returns the process exit code. */
 export async function runUninstall(args: string[], io: UninstallIo, deps: UninstallDeps = defaultDeps()): Promise<number> {
   const unknown = args.filter((arg) => arg !== "--yes" && arg !== "--json");
-  if (unknown.length > 0) throw new Error("Usage: frely uninstall [--yes] [--json]");
+  if (unknown.length > 0) throw new Error("Usage: frely self uninstall [--yes] [--json]");
   const yes = args.includes("--yes");
   const json = args.includes("--json");
   // A command run through device MCP is a child of the service this command would stop.
-  if (await runsInsideService(deps)) throw new Error("`frely uninstall` stops the background service that is running this command. Run it in a terminal on this computer instead. Nothing was changed.");
+  if (await runsInsideService(deps)) throw new Error("`frely self uninstall` stops the background service that is running this command. Run it in a terminal on this computer instead. Nothing was changed.");
   const plan = await buildPlan(deps);
   if (!yes && (json || !io.interactive || !io.prompt)) {
-    io.write(json ? `${JSON.stringify({ ok: false, confirmed: false, plan: planView(plan) })}\n` : `${formatPlan(plan)}\nNothing was removed. Run \`frely uninstall --yes\` to remove everything above.\n`);
+    io.write(json ? `${JSON.stringify({ ok: false, confirmed: false, plan: planView(plan) })}\n` : `${formatPlan(plan)}\nNothing was removed. Run \`frely self uninstall --yes\` to remove everything above.\n`);
     return 1;
   }
   if (!yes) {

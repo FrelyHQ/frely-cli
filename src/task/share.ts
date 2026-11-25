@@ -55,17 +55,17 @@ export async function shareRefusal(definition: TaskDefinition, options: Pick<Sha
  */
 export async function shareTask(name: string, options: ShareOptions, write: (text: string) => void, deps: ShareDeps = {}): Promise<TaskShare> {
   const definition = await getDefinition(name);
-  if (!definition) throw new Error(`No task named ${name}. See frely task list.`);
+  if (!definition) throw new Error(`No task named ${name}. See frely task local list.`);
   if (!WORKSPACES.includes(options.workspace)) throw new Error(`The workspace must be ${WORKSPACES.join(", ")}.`);
   if (definition.runner === "script" && options.workspace !== "none") throw new Error("A script task runs in its own folder; leave --workspace out for it.");
   const refusal = await shareRefusal(definition, options, deps.providers);
   if (refusal) throw new Error(refusal);
-  const bound = definition.runner === "pi" && options.workspace !== "none";
+  const bound = definition.runner !== "script" && options.workspace !== "none";
   if (!options.interactive) throw new Error("Sharing needs the owner at a terminal on this computer: the approval cannot be answered remotely.");
   const summary = [
     `Share task ${definition.name} (${definition.runner}, definition ${definition.hash.slice(0, 12)}) as an A2A service?`,
-    `  Callers send only a text request. The ${definition.runner === "pi" ? "instructions" : "command"}, folder and limits stay as defined.`,
-    definition.runner === "pi" ? `  Workspace: ${options.workspace}${options.workspace === "none" ? " (a one-time empty folder)" : options.workspace === "read" ? " (callers get answers about the project; it is not changed)" : " (a git worktree per call; nothing is committed to your main branch or pushed)"}.` : "",
+    `  Callers send only a text request. The ${definition.runner !== "script" ? "instructions" : "command"}, folder and limits stay as defined.`,
+    definition.runner !== "script" ? `  Workspace: ${options.workspace}${options.workspace === "none" ? " (a one-time empty folder)" : options.workspace === "read" ? " (callers get answers about the project; it is not changed)" : " (a git worktree per call; nothing is committed to your main branch or pushed)"}.` : "",
     bound ? "  Callers can read your project's content through the answers: keep the service private to yourself and your Team unless you accept that for everyone who can call it." : "",
     definition.model ? `  Model ${definition.model}: ${options.chargeMyCredit ? "calls may use the Frely gateway and deduct model fees from your Credit." : "runs on a model registered on this computer."}` : "",
     "  One call runs at a time, three more wait; further calls are answered busy and nothing is charged.",

@@ -195,7 +195,7 @@ export async function serveDeviceRelay(options: RelayServeOptions): Promise<void
   setObserveIdentity({ device: device.deviceId, deviceKey: device.keyThumbprint, relayUrl: device.relayUrl, userId: device.userId });
   const reporter = connectionReporter(device, options.workspace);
   const maintenance = options.managedService ? new MaintenanceGate() : undefined;
-  // The socket lets `frely update` drain the service; Windows has no unix sockets, so there the gate is only used in-process.
+  // The socket lets `frely self update` drain the service; Windows has no unix sockets, so there the gate is only used in-process.
   const closeMaintenance = maintenance && process.platform !== "win32" ? await serveMaintenance(maintenance) : undefined;
   void removeLegacyAutoUpdate();
   // Windows: a swap that was blocked earlier is finished now, before this process holds anything. This process keeps the old code, so restart into the new one.

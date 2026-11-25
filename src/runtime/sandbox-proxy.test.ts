@@ -75,7 +75,7 @@ test("the saved proxy round-trips, is private to the owner, and a bad value is r
   }
 });
 
-test("frely sandbox proxy shows, saves and clears the value without printing a password", async () => {
+test("frely link proxy shows, saves and clears the value without printing a password", async () => {
   const dir = mkdtempSync(join(tmpdir(), "frely-proxy-"));
   const previous = process.env.XDG_CONFIG_HOME;
   process.env.XDG_CONFIG_HOME = dir;

@@ -13,7 +13,7 @@ test("a permission_required failure becomes a one-line hint with the console lin
 
 test("a permission_required hint with a short code says how to wait in the background", () => {
   const hint = permissionHint(failure({ code: "permission_required", need: "write", group: "agents", shortCode: "ABCDEFGH", url: "https://frely.cloud/device?g=ABCDEFGH" }));
-  assert.match(hint ?? "", /frely permission wait ABCDEFGH/);
+  assert.match(hint ?? "", /frely device permission wait ABCDEFGH/);
 });
 
 test("other failures, successes and non-https links give no hint", () => {

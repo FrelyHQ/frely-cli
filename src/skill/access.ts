@@ -261,7 +261,7 @@ export async function invokeInstalledAgent(input: InstalledAgentInput & {
     if (result.state === "failed" || result.state === "canceled") throw new SkillInvocationError("remote_call_failed");
     return Object.freeze({ ok: true, distributionId: record.distributionId, modelId: record.modelId, text: result.text, ...(result.usage ? { usage: result.usage } : {}) });
   } catch (error) {
-    // The caller gave up (Ctrl-C, `frely cancel`): stop the task at Frely too, so it does not keep running and billing.
+    // The caller gave up (Ctrl-C, `frely result cancel`): stop the task at Frely too, so it does not keep running and billing.
     if (taskId !== undefined && input.signal?.aborted) await tasks.cancel({ ...target, taskId }).catch(() => undefined);
     throw remoteCallError(error, record.authMode);
   }

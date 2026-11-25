@@ -14,5 +14,5 @@
   "installOnlyUnix": "curl -fsSL https://frely.cloud/install.sh | sh",
   "installOnlyWindows": "curl.exe -fsSLo \"$env:TEMP\\frely-install.ps1\" https://frely.cloud/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:TEMP\\frely-install.ps1\"",
   "login": "frely login --email <you@example.com>",
-  "skillInstall": "frely skill install --host <claude-code|codex|pi|generic>"
+  "skillInstall": "frely agent setup"
 }

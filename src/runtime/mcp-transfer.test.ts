@@ -94,12 +94,12 @@ test("writeStream checks size and sha256 before the file appears, and honours ov
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("read encoding=base64 or image over 1 MiB suggests frely put", () => withClient(async (client, root) => {
+test("read encoding=base64 or image over 1 MiB suggests frely file put", () => withClient(async (client, root) => {
   await writeFile(join(root, "big.png"), Buffer.alloc(1024 * 1024 + 1));
   for (const encoding of ["base64", "image"]) {
     const result = await client.callTool({ name: "read", arguments: { action: "read", path: "big.png", encoding } });
     assert.equal(result.isError, true);
-    assert.match(text(result), /frely put/u);
+    assert.match(text(result), /frely file put/u);
   }
 }));
 

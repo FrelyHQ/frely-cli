@@ -44,7 +44,7 @@ export class MaintenanceGate {
 
 /** The service could not be drained now (calls or child processes are running). Nothing was changed. */
 export class MaintenanceBusyError extends Error {
-  constructor() { super("The service is busy or cannot enter maintenance. Finish its tasks, then run frely update in a local terminal."); }
+  constructor() { super("The service is busy or cannot enter maintenance. Finish its tasks, then run frely self update in a local terminal."); }
 }
 
 export function maintenancePath(pid: number): string {

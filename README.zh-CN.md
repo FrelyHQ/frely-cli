@@ -63,7 +63,7 @@ npm install --global --ignore-scripts frely-cli@latest
 
 ```sh
 frely login --email <you@example.com>   # 再运行：frely login --code <6 位验证码> [--host <host>] [--link on]（同时安装 Skill；--link on 同时开启远程控制）
-frely skill install --host <claude-code|codex|pi|workbuddy|codebuddy|generic>
+frely agent setup
 ```
 
 ### 在网页Agent上添加FrelyMCP
@@ -84,17 +84,18 @@ frely skill install --host <claude-code|codex|pi|workbuddy|codebuddy|generic>
 
 | 命令 | 作用 |
 | --- | --- |
-| `frely skill install --host <host>` | 为 Agent 宿主（`claude-code`、`codex`、`pi` 或 `generic`）安装 `frely` Skill。 |
+| `frely agent setup [<id>]` | 为本机的 Agent（`pi`、`codex`、`claude-code`）安装 `frely` Skill，并链接到它们读取 Skill 的位置。 |
+| `frely agent list` / `frely agent run <id> "<任务>"` | 查看本机装了哪些编码 Agent（`pi`、`codex`、`claude-code`），并在 Frely 沙箱里用其中一个执行一次任务。Frely 不安装也不内置 Agent。 |
 | `frely link on` | 开启远程控制：需要时登录，在浏览器里批准这台电脑，启动后台服务并输出 MCP URL。可重复运行：授权过期会续期，服务停了会启动。 |
 | `frely link off` | 关闭远程控制：撤销所有客户端的访问，并在本机锁定，之后只有在这台电脑上运行 `frely link on` 才能重新开启。后台服务会卸载；有本地 Provider 时继续运行。 |
 | `frely link status` | 显示远程控制是开启、关闭还是尚未开启，以及 MCP URL、工作区、到期时间和服务状态。 |
 | `frely link workspace add <path>` | 共享另一个文件夹。`frely link workspace list` 列出全部。 |
-| `frely doctor` | 检查登录、安装、服务和连接。`-v` 显示详情。 |
-| `frely update` | 原地升级到最新版本。 |
+| `frely doctor` | 检查登录、安装、服务和连接（只读）。`-v` 显示详情；`frely doctor computer`、`frely doctor agent` 分别检查电脑控制与本机 Agent。 |
+| `frely self update` | 原地升级到最新版本。 |
 | `frely login` / `frely logout` | 登录或退出 Frely 账号。 |
-| `frely sandbox proxy <url>` | 让命令沙箱的网络流量转发到你自己的 HTTP(S) 代理。未设置时使用 CLI 进程的 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`，macOS 上还会读系统代理。`--clear` 删除。正在运行的后台服务会自动重启以生效。 |
-| `frely tunnel <host>:<port>` | 在沙箱命令内使用：监听 `127.0.0.1`，把 TCP 连接经沙箱转发到 `host:port`，供数据库、redis 客户端使用。`--local-port N` 指定本地端口。 |
-| `frely uninstall` | 从这台电脑移除 Frely（先列出全部内容）。 |
+| `frely link proxy <url>` | 让命令沙箱的网络流量转发到你自己的 HTTP(S) 代理。未设置时使用 CLI 进程的 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`，macOS 上还会读系统代理。`--clear` 删除。正在运行的后台服务会自动重启以生效。 |
+| `frely link tunnel <host>:<port>` | 在沙箱命令内使用：监听 `127.0.0.1`，把 TCP 连接经沙箱转发到 `host:port`，供数据库、redis 客户端使用。`--local-port N` 指定本地端口。 |
+| `frely self uninstall` | 从这台电脑移除 Frely（先列出全部内容）。 |
 
 全部命令和参数见[命令参考](https://cli.frely.cloud/docs/help/commands/)。`frely help --agent --json` 输出完整的机器可读契约。
 

@@ -10,7 +10,7 @@ import { ComputerToolset } from "./toolset.js";
 
 export { COMPUTER_MCP_NAME };
 
-/** The local key of the two-key rule: computer use is on unless `frely computer off` vetoed it; checked on every list and call. */
+/** The local key of the two-key rule: computer use is on unless `frely link computer off` vetoed it; checked on every list and call. */
 export async function computerLocallyEnabled(): Promise<boolean> {
   return !(await computerLocallyVetoed());
 }
@@ -20,7 +20,7 @@ export function createComputerToolset(): ComputerToolset {
   return new ComputerToolset({ backend: new StdioOcuBackend(ocuBinaryPath(), installOcuRuntime), isLocallyEnabled: computerLocallyEnabled, runDoctor: () => runOcuDoctor() });
 }
 
-/** MCP server over the guarded toolset. Local MCP forwarding starts it as a stdio server (`frely computer mcp`). */
+/** MCP server over the guarded toolset. Local MCP forwarding starts it as a stdio server (`frely link computer mcp`). */
 export function createComputerMcpServer(toolset: ComputerToolset): Server {
   const server = new Server({ name: "frely-computer", version: VERSION }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: await toolset.listTools() }));
