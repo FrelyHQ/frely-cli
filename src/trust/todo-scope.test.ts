@@ -102,3 +102,17 @@ test("only a passkey todo_scope approval counts: other grants, bad signatures, e
     assert.equal(await run(approval(work, { trust: "stale" })), "trust_mismatch");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("codex steps need a scope the owner signed for codex; a scope without executors allows pi only", async () => {
+  const { root, work, ctx } = await setup();
+  try {
+    const run = (a: ReturnType<typeof approval>, executor?: string) => code(authorizeTodoStep(a, ctx, { todoId: "td_1", stepKey: `k${Math.random()}`, cwd: work, sites: [], ...(executor === undefined ? {} : { executor }) }));
+    const plain = approval(work, {}, { maxSteps: 50 });
+    assert.equal(await run(plain), "ok");
+    assert.equal(await run(plain, "pi"), "ok");
+    assert.equal(await run(plain, "codex"), "executor_not_allowed");
+    const signed = approval(work, {}, { maxSteps: 50, executors: ["codex", "pi"] });
+    assert.equal(await run(signed, "codex"), "ok");
+    assert.equal(await run(approval(work, {}, { maxSteps: 50, executors: ["claude"] }), "pi"), "scope_invalid");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

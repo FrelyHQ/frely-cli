@@ -47,11 +47,11 @@ const trustSig = (r: TrustRecord): WebAuthnSignature => {
   return { kind: "webauthn", credId: signer.credId, authData: b64(authData), clientData: b64(clientData), signature: b64(sign("sha256", Buffer.concat([authData, sha(clientData)]), pair.privateKey)) };
 };
 
-function approval(workspace: string, maxSteps = 2) {
+function approval(workspace: string, maxSteps = 2, executors?: string[]) {
   const now = Date.now();
   const payload: ApprovalPayload = {
     typ: APPROVAL_DOMAIN, id: "tdsc_1", user: "usr_1", trust: trustRecordHash(record), trustSeq: 1, device: DEVICE, deviceKey: "thumb", authz: null,
-    grant: { kind: TODO_SCOPE_GRANT, resource: "td_1", mode: "authorization" }, scope: { todo: "td_1", deviceName: "mbp", workspace, sites: ["github.com"], maxSteps },
+    grant: { kind: TODO_SCOPE_GRANT, resource: "td_1", mode: "authorization" }, scope: { todo: "td_1", deviceName: "mbp", workspace, sites: ["github.com"], ...(executors ? { executors } : {}), maxSteps },
     iat: new Date(now).toISOString(), nbf: new Date(now).toISOString(), exp: new Date(now + 3600_000).toISOString(),
   };
   return { payload, sig: assertion(payload) };
@@ -92,5 +92,20 @@ test("start without a valid passkey approval or outside the folder starts nothin
     await assert.rejects(runTodoDispatch({ ...base, runKey: "run_forged01", cwd: tmpdir() }, { [TODO_SCOPE_META_KEY]: forged }, deps), /challenge_mismatch/u);
     assert.equal(spawned.length, 0);
     assert.deepEqual(await listTaskRuns(), []);
+  });
+});
+
+test("a codex step runs as a codex task only under a scope signed for codex; an unsigned scope refuses it", async () => {
+  await withDevice(async (work) => {
+    await pinTrustChain([{ record, sig: trustSig(record) }], "usr_1", trustDirectory({ relayUrl: "https://r.test", userId: "usr_1" }), trustAnchor(HOSTED_INSTANCE));
+    const spawned: string[] = [];
+    const deps = { spawnWorker: (runId: string) => { spawned.push(runId); } };
+    const args = { action: "start", todoId: "td_1", instruction: "Fix the typo", cwd: work, sites: [], executor: "codex" };
+    await assert.rejects(runTodoDispatch({ ...args, runKey: "run_codex001" }, { [TODO_SCOPE_META_KEY]: approval(work) }, deps), /executor_not_allowed/u);
+    await assert.rejects(runTodoDispatch({ ...args, runKey: "run_codex002", executor: "claude" }, { [TODO_SCOPE_META_KEY]: approval(work, 2, ["pi", "codex"]) }, deps), /executor must be/u);
+    assert.equal(spawned.length, 0);
+    const started = await runTodoDispatch({ ...args, runKey: "run_codex003" }, { [TODO_SCOPE_META_KEY]: approval(work, 2, ["codex", "pi"]) }, deps);
+    assert.equal(started.status, "running");
+    assert.equal((await listTaskRuns())[0]!.snapshot.runner, "codex");
   });
 });

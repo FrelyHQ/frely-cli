@@ -83,12 +83,14 @@ export async function runTodoDispatch(args: Record<string, unknown>, meta: unkno
     if (!approval || typeof approval !== "object") throw new TrustError("approval_missing");
     const sites = Array.isArray(args.sites) ? args.sites.filter((site): site is string => typeof site === "string") : [];
     const now = deps.now?.() ?? Date.now();
+    // The agent that runs the step is part of what the owner signed for: a device default or a named agent must be in the scope.
+    if (args.executor !== undefined && args.executor !== null && !isAgentId(args.executor)) throw new Error("executor must be an installed-agent id such as pi, codex or claude-code.");
+    const runner = isAgentId(args.executor) ? args.executor : await (deps.defaultAgent ?? defaultAgentId)();
     const authorization = await authorizeTodoStep(approval, { record: trust.record, device: identity.device, deviceKey: identity.deviceKey, counterDirectory: directory, now }, {
-      todoId: text(args, "todoId", 128), stepKey: runKey, cwd: text(args, "cwd", 1024), sites,
+      todoId: text(args, "todoId", 128), stepKey: runKey, cwd: text(args, "cwd", 1024), sites, executor: runner,
     });
     const name = `todo-${createHash("sha256").update(runKey).digest("hex").slice(0, 24)}`;
     const remaining = Math.floor((Date.parse(authorization.expiresAt) - now) / 1000);
-    const runner = isAgentId(args.executor) ? args.executor : await (deps.defaultAgent ?? defaultAgentId)();
     const definition = buildDefinition({
       name, runner, command: text(args, "instruction", MAX_INSTRUCTION_BYTES), cwd: args.cwd as string, network: sites,
       timeoutSec: Math.max(1, Math.min(MAX_STEP_SECONDS, remaining)), ...(typeof args.model === "string" && args.model ? { model: args.model } : {}),

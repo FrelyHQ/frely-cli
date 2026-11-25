@@ -85,6 +85,8 @@ import { redeemGift } from "./skill/gift.js";
 import { callRemoteTool, connectRemoteMcp, installRemoteMcpSkill, isNotASkill, listRemoteTools, mcpClientConfig, parseMcpName, RemoteMcpError } from "./skill/remote-mcp.js";
 import { callCloudTool, callCloudToolAwaiting } from "./cloud.js";
 import { runTodoCommand } from "./todo-command.js";
+import { runRemindersCommand } from "./reminders/command.js";
+import { superviseReminders } from "./reminders/sync.js";
 import { claimInstall, ItemNotFoundError, resolveItem, type ResolvedItem } from "./skill/resolve.js";
 import { ApprovalRequiredError, type Approval } from "./skill/cloud-item.js";
 import { createInterface } from "node:readline/promises";
@@ -287,6 +289,7 @@ async function main(): Promise<void> {
       process.exitCode = await runTaskCommand(args.slice(2), taskIo);
       return;
     }
+    if (args[1] === "reminders") { process.exitCode = await runRemindersCommand(args.slice(2), { out: (text) => { stdout.write(text); }, call: callCloudTool }); return; }
     if (args[1] === undefined) { stdout.write(subcommandUsage("task")); return; }
     process.exitCode = await runTodoCommand(args.slice(1), { out: (text) => { stdout.write(text); }, call: callCloudTool });
     return;
@@ -945,6 +948,7 @@ async function main(): Promise<void> {
     // Scheduled tasks (`frely task local add --cron`): the clock lives here; each run is a detached worker that does not depend on this connection.
     const taskShares = providerOnly ? Promise.resolve() : superviseTaskShares({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Shared tasks stopped: ${error instanceof Error ? error.message : String(error)}`));
     const tasks = providerOnly ? Promise.resolve() : superviseTasks({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Tasks stopped: ${error instanceof Error ? error.message : String(error)}`));
+    const reminders = providerOnly ? Promise.resolve() : superviseReminders({ signal: controller.signal, log: nodeLog, call: callCloudTool }).catch((error) => nodeLog(`Reminders stopped: ${error instanceof Error ? error.message : String(error)}`));
     try {
       const capabilities = async () => {
         const install = await readAppInstall().then((value) => value, () => null);
@@ -972,6 +976,7 @@ async function main(): Promise<void> {
       const cleanup = (async () => {
         await services;
         await tasks;
+        await reminders;
         await taskShares;
         await piNode?.stop(); // the node keeps running; a restarted service adopts it
         await localMcp?.close();

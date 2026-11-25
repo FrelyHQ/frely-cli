@@ -1,5 +1,6 @@
 import { chmod, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { isAbsolute, join, sep } from "node:path";
+import { isAgentId } from "../agents/registry.js";
 import { verifyApproval, type ApprovalPayload, type SignedApproval, type TrustRecord } from "./record.js";
 import { TrustError } from "./webauthn.js";
 
@@ -15,7 +16,7 @@ const MAX_STEPS = 100;
 const MAX_SITES = 20;
 const SITE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/u;
 
-export interface TodoStepRequest { todoId: string; stepKey: string; cwd: string; sites: readonly string[] }
+export interface TodoStepRequest { todoId: string; stepKey: string; cwd: string; sites: readonly string[]; executor?: string }
 export interface TodoAuthContext { record: TrustRecord; device: string; deviceKey: string; counterDirectory: string; now?: number }
 export interface TodoAuthorization { approvalId: string; scope: NonNullable<ApprovalPayload["scope"]>; expiresAt: string; stepsUsed: number; duplicate: boolean }
 
@@ -23,6 +24,7 @@ function shapedScope(payload: ApprovalPayload): NonNullable<ApprovalPayload["sco
   const scope = payload.scope;
   if (!scope || typeof scope.todo !== "string" || typeof scope.workspace !== "string" || !isAbsolute(scope.workspace) || scope.workspace.includes("\0")) throw new TrustError("scope_invalid");
   if (!Array.isArray(scope.sites) || scope.sites.length > MAX_SITES || !scope.sites.every((site) => typeof site === "string" && SITE.test(site))) throw new TrustError("scope_invalid");
+  if (scope.executors !== undefined && (!Array.isArray(scope.executors) || scope.executors.length < 1 || !scope.executors.every((item) => isAgentId(item)))) throw new TrustError("scope_invalid");
   if (!Number.isSafeInteger(scope.maxSteps) || scope.maxSteps < 1 || scope.maxSteps > MAX_STEPS) throw new TrustError("scope_invalid");
   return scope;
 }
@@ -76,6 +78,8 @@ export async function authorizeTodoStep(approval: SignedApproval, context: TodoA
   if (!(await insideWorkspace(scope.workspace, request.cwd))) throw new TrustError("outside_workspace");
   const allowed = new Set(scope.sites);
   if (!request.sites.every((site) => allowed.has(site))) throw new TrustError("site_not_allowed");
+  // A scope signed before executors existed allows pi only; the owner has to sign for codex.
+  if (!(scope.executors ?? ["pi"]).includes(request.executor ?? "pi")) throw new TrustError("executor_not_allowed");
   if (typeof request.stepKey !== "string" || request.stepKey.length < 1 || request.stepKey.length > 128) throw new TrustError("approval_invalid");
   const { used, duplicate } = await reserve(context.counterDirectory, payload.id, payload.exp, request.stepKey, scope.maxSteps, now);
   return { approvalId: payload.id, scope, expiresAt: payload.exp, stepsUsed: used, duplicate };
