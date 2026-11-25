@@ -50,16 +50,16 @@ export interface McpRuntimeOptions {
   /** Probes and shares loopback model servers from the daemon process. Without it (stdio mode) the local_models tool stays hidden. */
   localModels?: LocalModelsHub;
   /**
-   * Managed service only. Called when a client runs exactly `frely update`: the service upgrades itself (outside the command sandbox, release signature required,
+   * Managed service only. Called when a client runs exactly `frely self update`: the service upgrades itself (outside the command sandbox, release signature required,
    * idle-only) and switches over without anyone logging in. Resolves true when it took the request; false runs the command as usual.
    */
   requestUpgrade?: () => Promise<boolean>;
 }
 
-/** True for the exact command `frely update` (surrounding and repeated whitespace ignored); anything else, including extra arguments or shell syntax, is an ordinary command. */
+/** True for the exact command `frely self update` (surrounding and repeated whitespace ignored); anything else, including extra arguments or shell syntax, is an ordinary command. */
 export function isSelfUpdateCommand(name: string, args: Record<string, unknown>): boolean {
   if (!(name === "run_command" || (name === "process" && args.action === "run"))) return false;
-  return typeof args.command === "string" && args.command.trim().split(/\s+/u).join(" ") === "frely update";
+  return typeof args.command === "string" && args.command.trim().split(/\s+/u).join(" ") === "frely self update";
 }
 
 /** How long closing a session waits for running tool calls before it stops waiting and ends the processes. */
@@ -395,7 +395,7 @@ async function dispatch(
     if (args.encoding !== "base64" && args.encoding !== "image") throw new Error("encoding must be one of utf8, base64, image.");
     return read(async () => {
       const file = await workspace.readFileBytes(relativeInput).catch((error: unknown) => {
-        if (error instanceof Error && /exceeds 1 MiB/u.test(error.message)) throw new Error(`${error.message} Do not send it through the model: run \`frely put <file>\` to share it as a link (https://frely.cloud/f/<code>) and give the user that link.`);
+        if (error instanceof Error && /exceeds 1 MiB/u.test(error.message)) throw new Error(`${error.message} Do not send it through the model: run \`frely file put <file>\` to share it as a link (https://frely.cloud/f/<code>) and give the user that link.`);
         throw error;
       });
       const meta = { path: file.path, bytes: file.bytes, mimeType: file.mimeType, sha256: createHash("sha256").update(file.data).digest("hex") };

@@ -52,7 +52,7 @@ export async function otherInstalls(options: { current?: string; paths?: string[
 }
 
 /**
- * The command that removes just that copy (never `frely uninstall`, which would also sign this computer out): an npm or bun global
+ * The command that removes just that copy (never `frely self uninstall`, which would also sign this computer out): an npm or bun global
  * package by its own package manager, a standalone file by deleting it. Null when the owner cannot be told from the path.
  */
 export function removalCommand(path: string, platform: NodeJS.Platform = process.platform): string | null {

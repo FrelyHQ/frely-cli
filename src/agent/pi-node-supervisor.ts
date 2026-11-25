@@ -12,8 +12,7 @@ import { dirname, join } from "node:path";
 
 import { diagnostic, type DiagnosticLog } from "../runtime/diagnostics.js";
 import type { LocalMcpHttpEntry } from "../runtime/local-mcp.js";
-import { readAnyInstall } from "./capsule-install.js";
-import { verifyCapsule, verifyCapsuleIntegrity, type AppInstall, type CapsuleFacts } from "./app-install.js";
+import { readAppInstall, verifyCapsule, verifyCapsuleIntegrity, type AppInstall, type CapsuleFacts } from "./app-install.js";
 
 export const PI_NODE_MCP_NAME = "frely-app";
 export const PI_NODE_TICK_MS = 5_000;
@@ -108,7 +107,7 @@ export class PiNodeSupervisor {
 
   private async reconcile(): Promise<void> {
     const now = (this.deps.now ?? Date.now)();
-    const install = await (this.deps.readInstall ?? (() => readAnyInstall()))().catch(() => null);
+    const install = await (this.deps.readInstall ?? (() => readAppInstall()))().catch(() => null);
     let facts: CapsuleFacts | null = null;
     if (install) {
       try {

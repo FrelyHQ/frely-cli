@@ -179,7 +179,7 @@ export async function resolveRun(target: string | undefined): Promise<RunRecord>
     if (latest === undefined) throw new Error("There are no agent runs on this computer.");
     return latest;
   }
-  if (!isRunId(target)) throw new Error("Use a run id from `frely runs`, or --last.");
+  if (!isRunId(target)) throw new Error("Use a run id from `frely result list`, or --last.");
   const record = await readRun(target);
   if (record === null) throw new Error("This run is not on this computer (runs are removed after 7 days).");
   return record;

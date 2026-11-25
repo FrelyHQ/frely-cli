@@ -224,10 +224,10 @@ test("a failing run_command returns its stderr and stdout, not only the exit sta
   }
 });
 
-test("only the exact command `frely update` counts as a self-update request", async () => {
+test("only the exact command `frely self update` counts as a self-update request", async () => {
   const { isSelfUpdateCommand } = await import("./mcp.js");
-  assert.equal(isSelfUpdateCommand("run_command", { command: "  frely   update " }), true);
-  assert.equal(isSelfUpdateCommand("process", { action: "run", command: "frely update" }), true);
-  for (const command of ["frely update --x", "frely update; rm -rf ~", "frely update && id", "./frely update", "sudo frely update", "frely updates"]) assert.equal(isSelfUpdateCommand("run_command", { command }), false, command);
-  assert.equal(isSelfUpdateCommand("start_process", { command: "frely update" }), false);
+  assert.equal(isSelfUpdateCommand("run_command", { command: "  frely   self   update " }), true);
+  assert.equal(isSelfUpdateCommand("process", { action: "run", command: "frely self update" }), true);
+  for (const command of ["frely self update --x", "frely self update; rm -rf ~", "frely self update && id", "./frely self update", "sudo frely self update", "frely self updates", "frely update"]) assert.equal(isSelfUpdateCommand("run_command", { command }), false, command);
+  assert.equal(isSelfUpdateCommand("start_process", { command: "frely self update" }), false);
 });

@@ -4,10 +4,10 @@ import { effectiveStatus, isRunId, listRuns, readRun, resolveRun } from "./agent
 import { taskRunRecordCommand, type TaskIo } from "./task/command.js";
 import { isTaskRunId, listTaskRuns, readTaskRun } from "./task/run-store.js";
 
-export const RUNS_USAGE = `Runs on this computer: item calls (frely item call) and task runs (frely task start, schedules, remote calls).
-  frely runs [<task name>] [--json]                                 Newest first, both kinds
+export const RUNS_USAGE = `Runs on this computer: item calls (frely item call) and task runs (frely task local start, schedules, remote calls).
+  frely result list [<task name>] [--json]                                 Newest first, both kinds
   frely result [<runId>|--last] [--wait [--wait-sec <n>]] [--resume] [--log [--lines <n>] [--follow]] [--json]
-  frely cancel [<runId>|--last] [--json]
+  frely result cancel [<runId>|--last] [--json]
 --resume continues an interrupted item call; --log shows what a task run printed.
 `;
 
@@ -36,10 +36,10 @@ async function kindOf(target: string | undefined): Promise<Kind> {
   }
   if (isRunId(target) && await readRun(target) !== null) return "item";
   if (isTaskRunId(target) && await readTaskRun(target) !== null) return "task";
-  throw new Error("This run is not on this computer. Use a run id from `frely runs`, or --last.");
+  throw new Error("This run is not on this computer. Use a run id from `frely result list`, or --last.");
 }
 
-/** `frely runs|result|cancel`: one set of commands for every run recorded on this computer. */
+/** `frely result list|result|cancel`: one set of commands for every run recorded on this computer. */
 export async function runRecordCommand(action: "runs" | "result" | "cancel", args: string[], io: TaskIo): Promise<number> {
   try {
     if (args.includes("--help") || args.includes("-h")) { io.out(RUNS_USAGE); return EXIT.ok; }

@@ -28,10 +28,10 @@ export function permissionHint(result: object, style: "api" | "install" = "api")
         if (typeof error.approvalCode !== "string" || !/^[A-HJ-NP-Z]{8}$/.test(error.approvalCode)) continue;
         const lead = `${typeof error.summary === "string" ? error.summary + "\n" : ""}Approve this in your browser:\n${url.toString()}\nCode: ${error.approvalCode.slice(0, 4)}-${error.approvalCode.slice(4)}`;
         if (style === "install") return `${lead}\nKeep the command running: it continues by itself once the owner approves. If it has already ended, run the same command again.`;
-        return `${lead}\nThen run the same call again with "approvalCode":"${error.approvalCode}" added to the input, or add --wait to let the CLI wait and run it once. To wait in the background: frely permission wait ${error.approvalCode}`;
+        return `${lead}\nThen run the same call again with "approvalCode":"${error.approvalCode}" added to the input, or add --wait to let the CLI wait and run it once. To wait in the background: frely device permission wait ${error.approvalCode}`;
       }
       const waiting = style === "install" ? "\nAfter the owner grants it, run the same command again."
-        : typeof error.shortCode === "string" && /^[A-Za-z]{8}$/.test(error.shortCode) ? `\nTo wait in the background: frely permission wait ${error.shortCode}, then run the call again (or use --wait).` : "";
+        : typeof error.shortCode === "string" && /^[A-Za-z]{8}$/.test(error.shortCode) ? `\nTo wait in the background: frely device permission wait ${error.shortCode}, then run the call again (or use --wait).` : "";
       return `This device needs ${need}${typeof error.group === "string" ? " to " + error.group : ""}. Grant it in your browser (passkey or authenticator code required):\n${url.toString()}${waiting}`;
     } catch { /* Not a permission failure. */ }
   }

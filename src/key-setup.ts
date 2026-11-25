@@ -1,4 +1,4 @@
-// `frely key setup <agent>`: create a Frely API key and write it straight into another AI application's own settings, so the AI that
+// `frely agent setup <agent>`: create a Frely API key and write it straight into another AI application's own settings, so the AI that
 // runs this command never sees the key. The key is made by the existing `keys.create` Cloud tool (which needs the owner's approval on the
 // web each time), held only in this process, and written to the agent's file with mode 0600. The command prints the key's id and prefix,
 // never the key. Frely's server has no special import logic: this is `frely api call keys.create` plus a local file edit.
@@ -16,7 +16,7 @@ type Call = (name: string, input: Record<string, unknown>) => Promise<Record<str
 /** `instance` is the one this computer is logged in to: its gateway is the default and the only kind of address `--gateway` may name. */
 export interface KeySetupIo { out: (text: string) => void; call: Call; instance: InstanceEndpoints; home?: string; hostName?: string }
 
-const USAGE = "Usage: frely key setup codex|claude-code [--name <text>] [--gateway <url>] [--json]";
+const USAGE = "Usage: frely agent setup codex|claude-code --gateway [<url>] [--name <text>] [--json]";
 
 /** Only the logged-in instance's own gateway (or a loopback one for tests) may receive this key: the agent will send it there on every request. */
 export function checkedGatewayUrl(value: string, instance: InstanceEndpoints): string {

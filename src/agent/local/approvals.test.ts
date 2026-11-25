@@ -24,7 +24,7 @@ test("a site that is already allowed needs no wait and the request names the dev
   const gained = await approveSites(record(), io(false), { open: async () => controller, deviceId: async () => "dev_1" });
   assert.deepEqual(gained, { "pypi.org": "2026-10-29T00:00:00Z", "api.example.com": "2026-10-30T00:00:00Z" });
   assert.equal(calls[0]!.name, "request_permission");
-  assert.deepEqual({ ...calls[0]!.args, reason: undefined }, { device: "dev_1", resource: "net:pypi.org", mode: "window", reason: undefined, command: "frely service start helper" });
+  assert.deepEqual({ ...calls[0]!.args, reason: undefined }, { device: "dev_1", resource: "net:pypi.org", mode: "window", reason: undefined, command: "frely agent start helper" });
   assert.match(String(calls[0]!.args.reason), /helper.*pypi\.org/u);
   assert.equal(siteResource("pypi.org"), "net:pypi.org");
 });

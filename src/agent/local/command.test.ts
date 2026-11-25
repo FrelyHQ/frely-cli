@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { EXIT } from "../../controller/client.js";
-import { runAgentLocal, type LocalIo } from "./command.js";
+import { listLocalAgents, runAgentLocal, type LocalIo } from "./command.js";
 import { logPath, readRecord, workspaceOf, writeRecord, type LocalAgentRecord } from "./store.js";
 
 function harness() {
@@ -22,23 +22,23 @@ const isolate = () => { process.env.FRELY_AGENTS_DIR = mkdtempSync(join(tmpdir()
 test("with no arguments the usage lists every local command", async () => {
   const h = harness();
   assert.equal(await runAgentLocal([], h.io), EXIT.ok);
-  for (const word of ["add", "start", "stop", "logs", "list", "remove", "key"]) assert.match(h.text(), new RegExp(`service ${word}`, "u"));
+  for (const word of ["start", "stop", "logs", "remove", "key"]) assert.match(h.text(), new RegExp(`agent ${word}`, "u"));
   assert.equal(await runAgentLocal(["nonsense"], harness().io), EXIT.cli);
 });
 
 test("list shows an empty state, then each Agent with its state", async () => {
   isolate();
   const empty = harness();
-  assert.equal(await runAgentLocal(["list"], empty.io), EXIT.ok);
+  assert.equal(await listLocalAgents([], empty.io), EXIT.ok);
   assert.match(empty.text(), /No local Agents/u);
   await writeRecord(make("stopped-one"));
   await writeRecord(make("half", { setupDone: false }));
   const listing = harness();
-  await runAgentLocal(["list"], listing.io);
+  await listLocalAgents([], listing.io);
   assert.match(listing.text(), /half\tnot set up/u);
   assert.match(listing.text(), /stopped-one\tstopped/u);
   const json = harness();
-  await runAgentLocal(["list", "--json"], json.io);
+  await listLocalAgents(["--json"], json.io);
   assert.deepEqual((JSON.parse(json.text()) as Array<{ name: string; running: boolean }>).map((item) => [item.name, item.running]), [["half", false], ["stopped-one", false]]);
 });
 
@@ -70,7 +70,7 @@ test("start and stop say what is wrong with an Agent that is missing, half set u
   await writeRecord(make("half", { setupDone: false }));
   const half = harness();
   assert.equal(await runAgentLocal(["start", "half"], half.io), EXIT.cli);
-  assert.match(half.errors(), /not set up yet.*add again/u);
+  assert.match(half.errors(), /not set up yet.*agent start/u);
   await writeRecord(make("idle"));
   const idle = harness();
   assert.equal(await runAgentLocal(["stop", "idle"], idle.io), EXIT.ok);
@@ -92,7 +92,7 @@ test("logs prints the tail of what the Agent wrote", async () => {
 test("add refuses an address that is not a Frely Agent or a public GitHub repository", async () => {
   isolate();
   const h = harness();
-  assert.equal(await runAgentLocal(["add", "http://example.com/x.git"], h.io), EXIT.cli);
+  assert.equal(await runAgentLocal(["start", "http://example.com/x.git"], h.io), EXIT.cli);
   assert.match(h.errors(), /Frely Agent name.*public GitHub address/u);
 });
 

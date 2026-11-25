@@ -30,7 +30,7 @@ export interface ManagerDeps {
 
 export const defaultManagerDeps: ManagerDeps = {
   spawnWorker: (runId) => {
-    const launch = cliLaunchArguments(process.argv[1] ?? "", ["task", "__worker", runId]);
+    const launch = cliLaunchArguments(process.argv[1] ?? "", ["task", "local", "__worker", runId]);
     spawn(launch[0]!, launch.slice(1), { detached: true, stdio: "ignore", windowsHide: true, env: process.env }).unref();
   },
 };
@@ -42,7 +42,7 @@ export const defaultManagerDeps: ManagerDeps = {
 export async function startTask(name: string, options: { trigger?: TaskTrigger; scheduledFor?: string; input?: string; workspace?: TaskWorkspace } = {}, deps: ManagerDeps = defaultManagerDeps): Promise<TaskRunRecord> {
   const trigger = options.trigger ?? "manual";
   const definition = await getDefinition(name);
-  if (!definition) throw new TaskError("unknown_task", `No task named ${name}. See frely task list.`);
+  if (!definition) throw new TaskError("unknown_task", `No task named ${name}. See frely task local list.`);
   if (!isSandboxDisabled()) {
     const reason = sandboxUnavailableReason();
     if (reason) throw new TaskError("sandbox_unavailable", `Tasks run on this computer only inside the Frely sandbox, and it cannot run here (${reason}). On Linux install bubblewrap, socat and ripgrep; Windows is not supported.`);

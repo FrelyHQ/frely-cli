@@ -26,13 +26,11 @@ export interface LocalIo {
 }
 
 export const LOCAL_USAGE = `Local Agents (a repository run on this computer):
-  frely service add <username/name | https://github.com/owner/repo> [--name <folder-name>]
-  frely service start <name> [--foreground]
-  frely service stop <name>
-  frely service logs <name> [--lines <n>] [--follow]
-  frely service list [--json]
-  frely service remove <name>
-  frely service key --api-key-stdin | --clear
+  frely agent start <name | username/name | https://github.com/owner/repo> [--name <folder-name>] [--foreground]
+  frely agent stop <name>
+  frely agent logs <name> [--lines <n>] [--follow]
+  frely agent remove <name>
+  frely agent key --api-key-stdin | --clear
 `;
 
 const fail = (message: string, code: number = EXIT.cli): never => { throw new ControllerError(message, code); };
@@ -46,16 +44,14 @@ function value(args: readonly string[], name: string): string | undefined {
 }
 const positional = (args: readonly string[]): string[] => args.filter((arg, index) => !arg.startsWith("--") && !(index > 0 && ["--name", "--lines"].includes(args[index - 1]!)));
 
-/** Runs `frely service ...`; returns the exit code. */
+/** Runs the local-Agent half of `frely agent ...`; returns the exit code. */
 export async function runAgentLocal(args: readonly string[], io: LocalIo, deps: ApprovalDeps = {}): Promise<number> {
   try {
     const [action, ...rest] = args;
     switch (action) {
-      case "add": return await add(rest, io, deps);
       case "start": return await start(rest, io, deps);
       case "stop": return await stop(rest, io);
       case "logs": return await logs(rest, io);
-      case "list": return await list(rest, io);
       case "remove": return await remove(rest, io);
       case "key": return await key(rest, io);
       case "supervise": return await superviseAgent(rest[0] ?? "");
@@ -74,6 +70,9 @@ function slugFor(source: AgentSource, requested: string | undefined, manifestNam
   if (!SLUG.test(slug)) return fail(`Could not make a folder name from ${JSON.stringify(manifestName ?? raw)}. Pass --name <letters-digits-dashes>.`);
   return slug;
 }
+
+/** A name with a slash (`username/name`) or a URL is a source to download; a plain name is an Agent already on this computer. */
+const isSourceTarget = (target: string): boolean => target.includes("/") || /^https?:/u.test(target);
 
 async function add(args: string[], io: LocalIo, deps: ApprovalDeps): Promise<number> {
   const [target] = positional(args);
@@ -95,7 +94,7 @@ async function add(args: string[], io: LocalIo, deps: ApprovalDeps): Promise<num
     const registered = source.kind === "frely" ? await resolveRegisteredRepo(source.user, source.name, relayUrl) : undefined;
     const repoUrl = registered?.repoUrl ?? githubUrl(source as { owner: string; repo: string });
     const slug = slugFor(source, requested, registered?.name);
-    if (await readRecord(slug)) return fail(`${slug} is already on this computer. Remove it first with frely service remove ${slug}, or pick another --name.`);
+    if (await readRecord(slug)) return fail(`${slug} is already on this computer. Remove it first with frely agent remove ${slug}, or pick another --name.`);
     const workspace = workspaceOf(slug);
     if (await stat(workspace).then(() => true, () => false)) return fail(`${workspace} already exists. Pick another --name or move that folder away.`);
     io.err(`Downloading ${repoUrl}${registered?.commit ? ` at ${registered.commit.slice(0, 8)}` : ""}…\n`);
@@ -115,12 +114,12 @@ async function add(args: string[], io: LocalIo, deps: ApprovalDeps): Promise<num
   if (record.setup && !record.setupDone) {
     io.err(`Running setup inside the sandbox: ${record.setup}\n`);
     const code = await runSetup(record, instance, io);
-    if (code !== 0) return fail(`Setup failed (exit ${code}). Fix it or remove the Agent with frely service remove ${record.slug}, then run add again.`, EXIT.tool);
+    if (code !== 0) return fail(`Setup failed (exit ${code}). Fix it or remove the Agent with frely agent remove ${record.slug}, then run frely agent start again.`, EXIT.tool);
   }
   await writeRecord({ ...record, setupDone: true });
   await ensureDataDir(record.workspace);
   io.out(`  data: ${dataDirOf(record.workspace)} (also FRELY_AGENT_DATA_DIR for the Agent; stays on this computer)\n`);
-  io.out(`Added. Start it with: frely service start ${record.slug}\n`);
+  io.out(`Added ${record.slug}.\n`);
   return EXIT.ok;
 }
 
@@ -150,11 +149,20 @@ async function runSetup(record: LocalAgentRecord, instance: InstanceEndpoints, i
 }
 
 async function start(args: string[], io: LocalIo, deps: ApprovalDeps): Promise<number> {
-  const [slug] = positional(args);
-  if (!slug) return fail("Usage: frely service start <name> [--foreground]");
+  const [target] = positional(args);
+  if (!target) return fail("Usage: frely agent start <name | username/name | https://github.com/owner/repo> [--name <folder-name>] [--foreground]");
+  let slug = target;
+  if (isSourceTarget(target)) {
+    // Not on this computer yet: download and set it up first (an interrupted setup resumes), then start it.
+    const added = await add(args, io, deps);
+    if (added !== EXIT.ok) return added;
+    const found = (await listRecords()).filter((item) => item.source === target && (value(args, "--name") === undefined || item.slug === value(args, "--name"))).at(-1);
+    if (!found) return fail(`${target} was not added.`);
+    slug = found.slug;
+  }
   assertSlug(slug);
-  let record = await readRecord(slug) ?? fail(`No local Agent named ${slug}. See frely service list.`);
-  if (!record.setupDone) return fail(`${slug} was not set up yet. Run frely service add again to finish.`);
+  let record = await readRecord(slug) ?? fail(`No local Agent named ${slug}. See frely agent list.`);
+  if (!record.setupDone) return fail(`${slug} was not set up yet. Run frely agent start ${record.source} again to finish.`);
   if (isRunning(record)) return fail(`${slug} is already running (process ${record.pid}). Stop it first to apply new approvals.`);
   record = await withApprovals(record, io, deps);
   await preflight(record);
@@ -164,7 +172,7 @@ async function start(args: string[], io: LocalIo, deps: ApprovalDeps): Promise<n
   let supervisor: number | undefined;
   const log = openSync(logPath(slug), "a", 0o600);
   try {
-    const launch = cliLaunchArguments(fileURLToPath(new URL("../../index.js", import.meta.url)), ["service", "supervise", slug]);
+    const launch = cliLaunchArguments(fileURLToPath(new URL("../../index.js", import.meta.url)), ["agent", "supervise", slug]);
     const child = spawn(launch[0]!, launch.slice(1), { detached: true, stdio: ["ignore", log, log], env: process.env, windowsHide: true });
     child.unref();
     supervisor = child.pid;
@@ -173,26 +181,26 @@ async function start(args: string[], io: LocalIo, deps: ApprovalDeps): Promise<n
   for (let waited = 0; waited < 15_000; waited += 250) {
     await new Promise((done) => setTimeout(done, 250));
     const current = await readRecord(slug);
-    if (current && isRunning(current)) { io.out(`${slug} is running. Logs: frely service logs ${slug}\n`); return EXIT.ok; }
+    if (current && isRunning(current)) { io.out(`${slug} is running. Logs: frely agent logs ${slug}\n`); return EXIT.ok; }
     if (supervisor === undefined || !isRunning({ pid: supervisor })) {
       const tail = (await readFile(logPath(slug), "utf8").catch(() => "")).trim().split("\n").slice(-6).join("\n");
       return fail(`${slug} did not start:\n${tail}`, EXIT.tool);
     }
   }
-  return fail(`${slug} did not report that it started. See frely service logs ${slug}.`, EXIT.tool);
+  return fail(`${slug} did not report that it started. See frely agent logs ${slug}.`, EXIT.tool);
 }
 
 /** The two things a start needs besides the download: a login and a key for the model calls. Said now, not in a log file. */
 async function preflight(record: LocalAgentRecord): Promise<void> {
   const login = await requireLogin().catch(() => fail("Frely login is required. Run `frely login`."));
   if (!await readApiKey(gatewayOrigin(login.config.instance))) {
-    fail(`${record.slug} needs a Frely API key for its model calls. Create one at ${login.config.relayUrl}/user/keys, then run: frely service key --api-key-stdin`);
+    fail(`${record.slug} needs a Frely API key for its model calls. Create one at ${login.config.relayUrl}/user/keys, then run: frely agent key --api-key-stdin`);
   }
 }
 
 async function stop(args: string[], io: LocalIo): Promise<number> {
   const [slug] = positional(args);
-  if (!slug) return fail("Usage: frely service stop <name>");
+  if (!slug) return fail("Usage: frely agent stop <name>");
   assertSlug(slug);
   const record = await readRecord(slug) ?? fail(`No local Agent named ${slug}.`);
   if (!isRunning(record)) { io.out(`${slug} is not running.\n`); return EXIT.ok; }
@@ -206,7 +214,7 @@ async function stop(args: string[], io: LocalIo): Promise<number> {
 
 async function logs(args: string[], io: LocalIo): Promise<number> {
   const [slug] = positional(args);
-  if (!slug) return fail("Usage: frely service logs <name> [--lines <n>] [--follow]");
+  if (!slug) return fail("Usage: frely agent logs <name> [--lines <n>] [--follow]");
   assertSlug(slug);
   if (!await readRecord(slug)) return fail(`No local Agent named ${slug}.`);
   const lines = Number(value(args, "--lines") ?? 100);
@@ -227,20 +235,21 @@ async function logs(args: string[], io: LocalIo): Promise<number> {
   }
 }
 
-async function list(args: string[], io: LocalIo): Promise<number> {
+/** `frely agent list` prints this after the installed agents. */
+export async function listLocalAgents(args: readonly string[], io: LocalIo): Promise<number> {
   const records = await listRecords();
   if (flag(args, "--json")) {
     io.out(JSON.stringify(records.map((r) => ({ name: r.slug, title: r.name, source: r.source, commit: r.commit, workspace: r.workspace, running: isRunning(r), setupDone: r.setupDone, sites: r.network, approved: approvedHosts(r) })), null, 2) + "\n");
     return EXIT.ok;
   }
-  if (records.length === 0) { io.out(`No local Agents. Add one with frely service add <username/name>. They live under ${agentsRoot()}.\n`); return EXIT.ok; }
+  if (records.length === 0) { io.out(`No local Agents. Add one with frely agent start <username/name>. They live under ${agentsRoot()}.\n`); return EXIT.ok; }
   io.out(records.map((r) => `${r.slug}\t${isRunning(r) ? "running" : r.setupDone ? "stopped" : "not set up"}\t${r.source}\t${r.commit.slice(0, 8)}`).join("\n") + "\n");
   return EXIT.ok;
 }
 
 async function remove(args: string[], io: LocalIo): Promise<number> {
   const [slug] = positional(args);
-  if (!slug) return fail("Usage: frely service remove <name>");
+  if (!slug) return fail("Usage: frely agent remove <name>");
   assertSlug(slug);
   const record = await readRecord(slug) ?? fail(`No local Agent named ${slug}.`);
   if (isRunning(record)) await stop([slug], io);
@@ -254,7 +263,7 @@ async function remove(args: string[], io: LocalIo): Promise<number> {
 async function key(args: string[], io: LocalIo): Promise<number> {
   const origin = gatewayOrigin((await requireLogin().catch(() => fail("Frely login is required. Run `frely login`."))).config.instance);
   if (flag(args, "--clear")) { await credentialStore.deletePassword(API_KEY_SERVICE, origin); io.out("The saved API key was removed.\n"); return EXIT.ok; }
-  if (!flag(args, "--api-key-stdin")) return fail("Usage: frely service key --api-key-stdin | --clear");
+  if (!flag(args, "--api-key-stdin")) return fail("Usage: frely agent key --api-key-stdin | --clear");
   const secret = await io.readSecret();
   if (Buffer.byteLength(secret, "utf8") < 8 || Buffer.byteLength(secret, "utf8") > 8192 || /[\x00-\x20\x7f]/u.test(secret)) return fail("The API key is invalid.");
   await credentialStore.setPassword(API_KEY_SERVICE, origin, secret);

@@ -93,7 +93,7 @@ export function restartWindowsService(installation: Installation): void {
 }
 
 /**
- * Start the service's own upgrade for a client that ran `frely update` through MCP. That call holds the maintenance gate until it returns, so the
+ * Start the service's own upgrade for a client that ran `frely self update` through MCP. That call holds the maintenance gate until it returns, so the
  * upgrade is retried while the gate is busy. Only a standalone installation qualifies (package managers are never driven remotely); otherwise it
  * returns false and the command runs as before.
  */

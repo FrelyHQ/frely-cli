@@ -42,7 +42,7 @@ test("run sends the command and ends with 2 when the remote command failed", asy
 test("a device that needs approval ends with 3 and the wait command", async () => {
   const result = await run(["permission", "request", "box", "--resource", "ssh", "--reason", "deploy", "--command", "ssh host true", "--no-wait"], () => text("Approval required", { structuredContent: { status: "pending", device: "box", approveUrl: "https://frely.test/device?g=QWERTY", shortCode: "QWERTY" } }));
   assert.equal(result.code, EXIT.approval);
-  assert.match(result.err, /frely permission wait QWERTY/u);
+  assert.match(result.err, /frely device permission wait QWERTY/u);
   assert.deepEqual(result.calls[0]!.input, { device: "box", resource: "ssh", reason: "deploy", command: "ssh host true" });
 });
 

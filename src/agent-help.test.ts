@@ -20,16 +20,16 @@ test("Agent help runs offline without authentication or credential-store access"
   assert.equal(mcp?.effect, "authorization-if-needed");
   assert.match(mcp!.purpose, /browser approval/);
   assert.ok(help.commands.some(command => command.id === "item.call"));
-  assert.ok(help.commands.some(command => command.id === "skill.install"));
+  assert.ok(help.commands.some(command => command.id === "agent.setup"));
   for (const removed of ["whoami", "key.budget", "agent.invoke", "mcp.renew", "mcp.revoke", "mcp.service", "provider.finalize"]) {
     assert.ok(!help.commands.some(command => command.id === removed), removed);
   }
-  assert.equal(help.commands.find(command => command.id === "doctor")?.usage, "frely doctor [-v] [--json]");
+  assert.equal(help.commands.find(command => command.id === "doctor")?.usage, "frely doctor [-v] [--json] | frely doctor computer | frely doctor agent [<id>] [--json]");
   assert.ok(!help.commands.some(command => ["status"].includes(command.id)));
   const ordinary = await execute(process.execPath, [fileURLToPath(new URL("./index.js", import.meta.url)), "--help"]);
   assert.ok(ordinary.stdout.includes("frely help --agent --json"));
   assert.ok(ordinary.stdout.includes("frely item status"));
-  for (const removed of ["frely agent ", "frely share "]) assert.ok(!ordinary.stdout.includes(removed), removed);
+  for (const removed of ["frely share "]) assert.ok(!ordinary.stdout.includes(removed), removed);
   for (const hidden of ["frely mcp serve", "frely mcp stdio", "frely network", "frely whoami", "frely key"]) assert.ok(!ordinary.stdout.includes(hidden), hidden);
 });
 
@@ -62,6 +62,9 @@ test("command groups without a direct action print their subcommands offline", a
     [["service"], /frely service share --type http/],
     [["provider"], /frely provider list/],
     [["api"], /frely api list/],
+    [["agent"], /frely agent run/],
+    [["task"], /frely task local add/],
+    [["self"], /frely self update/],
     [["app"], /frely app status/],
   ];
   for (const [args, expected] of cases) {
@@ -100,8 +103,8 @@ test("agent help by group or id returns full entries with examples", async () =>
   const services = JSON.parse((await run("service")).stdout) as { commands: Entry[] };
   assert.ok(services.commands.length > 5 && services.commands.every((command) => command.id.startsWith("service.")));
   assert.ok(services.commands.find((command) => command.id === "service.share.http"));
-  const runs = JSON.parse((await run("runs")).stdout) as { commands: Entry[] };
-  assert.deepEqual(runs.commands.map((command) => command.id).sort(), ["cancel", "result", "runs"]);
+  const runs = JSON.parse((await run("results")).stdout) as { commands: Entry[] };
+  assert.deepEqual(runs.commands.map((command) => command.id).sort(), ["result", "result.cancel", "result.list"]);
   const one = JSON.parse((await run("api")).stdout) as { commands: Entry[] };
   const items = JSON.parse((await run("items")).stdout) as { commands: Entry[] };
   assert.ok(items.commands.find((command) => command.id === "item.call")?.examples?.length, "the items group includes item.call with examples");
@@ -116,15 +119,15 @@ test("agent help by group or id returns full entries with examples", async () =>
 });
 
 test("every agent help command belongs to a group and examples point at real commands", () => {
-  for (const [name, id] of [["service", "service.add"], ["item", "item.status"], ["item", "item.call"], ["runs", "result"], ["link", "link.on"], ["devices", "run"]] as const) {
+  for (const [name, id] of [["service", "service.list"], ["item", "item.status"], ["item", "item.call"], ["results", "result"], ["link", "link.on"], ["device", "device.run"], ["agent", "agent.run"], ["task", "task.local.add"]] as const) {
     const result = agentHelpView({ name });
     assert.ok(result.ok);
     const commands = (result.value as { commands: { id: string; group: string; examples?: string[] }[] }).commands;
     assert.ok(commands.some((command) => command.id === id), `${name} lists ${id}`);
   }
   const internal = (agentHelpView({ name: "internal" }).value as { commands: { id: string }[] }).commands.map((command) => command.id).sort();
-  assert.deepEqual(internal, ["network"]);
-  for (const id of ["login", "api", "item.call", "item.install", "link.on", "permission", "service.share.http"]) {
+  assert.deepEqual(internal, ["item.run", "network"]);
+  for (const id of ["login", "api", "item.call", "item.install", "link.on", "device.permission", "service.share.http"]) {
     const entry = (agentHelpView({ name: id }).value as { commands: { id: string; examples?: string[] }[] }).commands.find((command) => command.id === id);
     assert.ok(entry?.examples?.length, `${id} has examples`);
     for (const example of entry!.examples!) assert.ok(/^(frely |printf .*\| frely )/u.test(example), `${id}: ${example}`);

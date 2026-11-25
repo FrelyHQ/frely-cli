@@ -164,7 +164,7 @@ test("computer use is built in: offered without registration, `off` is a local v
     const offered = await builtinLocalMcps("/cli/index.js");
     assert.equal(offered[0]?.name, "computer");
     assert.equal(offered[0]?.transport, "stdio");
-    assert.deepEqual(offered[0] && offered[0].transport === "stdio" ? offered[0].args.slice(-2) : [], ["computer", "mcp"]);
+    assert.deepEqual(offered[0] && offered[0].transport === "stdio" ? offered[0].args.slice(-3) : [], ["link", "computer", "mcp"]);
     assert.equal(await computerLocallyEnabled(), true);
     assert.match(await runComputerCommand(["status"]), /allowed here/);
     // The veto removes it from the device's offer and from the toolset at once.
@@ -173,7 +173,7 @@ test("computer use is built in: offered without registration, `off` is a local v
     assert.equal(await computerLocallyEnabled(), false);
     assert.equal(JSON.parse(await runComputerCommand(["status", "--json"])).enabled, false);
     assert.match(await runComputerCommand(["off"]), /already blocked/);
-    // Enable lifts the veto and drops an entry an older `frely computer on` registered by hand.
+    // Enable lifts the veto and drops an entry an older `frely link computer on` registered by hand.
     await addManualEntry({ name: "computer", transport: "stdio", command: "old", args: [] });
     assert.match(await runComputerCommand(["on"]), /stays off until you turn it on/);
     assert.equal((await builtinLocalMcps("/cli/index.js")).length, 1);
@@ -186,7 +186,7 @@ test("computer use is built in: offered without registration, `off` is a local v
 });
 
 test("the hub lists the built-in computer entry first, a manual entry of that name wins, and the veto hides it", async () => {
-  const builtin = async () => [{ name: "computer", source: "manual" as const, transport: "stdio" as const, command: "frely", args: ["computer", "mcp"] }];
+  const builtin = async () => [{ name: "computer", source: "manual" as const, transport: "stdio" as const, command: "frely", args: ["link", "computer", "mcp"] }];
   const manual = [{ name: "notes", source: "manual" as const, transport: "http" as const, url: "http://127.0.0.1:9/mcp" }];
   const scanned = async (loadBuiltin: () => Promise<never[] | Awaited<ReturnType<typeof builtin>>>, loadManual = async () => manual) => {
     const hub = new LocalMcpHub({ loadManual, loadBuiltin, discovery: { listPorts: async () => [], probe: async () => null } });
@@ -270,7 +270,7 @@ test("a missing-permission error is rewritten and starts doctor once per interva
   const first = await toolset.call("click", { app: "Safari", x: 1, y: 1 });
   await toolset.call("click", { app: "Safari", x: 1, y: 1 });
   assert.equal(first.isError, true);
-  assert.match(first.content[0]!.text!, /frely computer doctor/);
+  assert.match(first.content[0]!.text!, /frely doctor computer/);
   assert.doesNotMatch(first.content[0]!.text!, /open-computer-use doctor/);
   assert.equal(doctorRuns, 1);
 });

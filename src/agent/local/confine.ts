@@ -16,7 +16,7 @@ export function gatewayOrigin(instance: InstanceEndpoints, env: NodeJS.ProcessEn
   return url.origin;
 }
 
-/** The key for the Agent's model calls: FRELY_API_KEY when set, else the one saved with `frely service key`. */
+/** The key for the Agent's model calls: FRELY_API_KEY when set, else the one saved with `frely agent key`. */
 export async function readApiKey(origin: string, env: NodeJS.ProcessEnv = process.env, store: CredentialStore = secureCredentialStore): Promise<string | undefined> {
   const fromEnv = env.FRELY_API_KEY?.trim();
   if (fromEnv) return fromEnv;

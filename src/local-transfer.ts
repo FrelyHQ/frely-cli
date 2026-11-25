@@ -4,7 +4,7 @@ import { transferDownload, transferPrepare, transferUpload, type TransferTarget 
 import { Workspace } from "./runtime/workspace.js";
 
 /**
- * Upload and download of a file on this computer over presigned URLs, for `frely put` / `frely get`. It sits outside src/controller
+ * Upload and download of a file on this computer over presigned URLs, for `frely file put` / `frely file get`. It sits outside src/controller
  * (which may not import runtime code) and reuses the device-side helpers: https only, public addresses pinned, no redirects, SHA-256.
  * The file's own folder is the workspace, so the helpers' symlink and credential-folder protections apply to it as on a device.
  */
