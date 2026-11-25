@@ -201,3 +201,58 @@ test("a known write tool goes straight to the FrelyMCP connection without openin
   assert.equal((await callCloudToolAwaiting("items.claim_install", { name: "a/b" }, deps as never)).kind, "skill");
   assert.equal(readers, 0);
 });
+
+test("an approved permission followed by a confirmation waits for that one too, once, and repeats with its approvalCode", async () => {
+  const permission = refusal({ code: "permission_required", shortCode: "ABCDEFGH", url: "https://frely.cloud/r/ab", expiresAt: 60_000 });
+  const confirmation = refusal({ code: "confirmation_required", approvalCode: "CDEFGHJK", url: "https://frely.cloud/c/c_1", expiresAt: 60_000 });
+  const { refs, wait } = waiter("approved");
+  const inputs: Array<Record<string, unknown>> = [];
+  const chained: unknown[] = [];
+  const final = await rerunAfterApproval(permission, async input => { inputs.push(input); return input.approvalCode ? ok : confirmation; }, { a: 1 }, wait, () => 0, undefined, next => chained.push(next));
+  assert.deepEqual(refs.map(entry => entry.ref.code), ["ABCDEFGH", "CDEFGHJK"]);
+  assert.deepEqual(inputs, [{ a: 1 }, { a: 1, approvalCode: "CDEFGHJK" }]);
+  assert.deepEqual(chained, [confirmation]);
+  assert.equal(final, ok);
+});
+
+test("the chained confirmation is not repeated when it is not approved, and a third refusal is never waited for", async () => {
+  const permission = refusal({ code: "permission_required", shortCode: "ABCDEFGH", url: "https://frely.cloud/r/ab", expiresAt: 60_000 });
+  const confirmation = refusal({ code: "confirmation_required", approvalCode: "CDEFGHJK", url: "https://frely.cloud/c/c_1", expiresAt: 60_000 });
+  const statuses = ["approved", "denied"] as const;
+  const seen: string[] = [];
+  let calls = 0;
+  const final = await rerunAfterApproval(permission, async () => { calls++; return confirmation; }, {}, async ref => { seen.push(ref.code); return outcome(statuses[seen.length - 1]!); }, () => 0);
+  assert.equal(calls, 1);
+  assert.equal(final, confirmation);
+  const again = await rerunAfterApproval(permission, async () => confirmation, {}, async ref => { seen.push(ref.code); return outcome("approved"); }, () => 0);
+  assert.equal(again, confirmation);
+  assert.equal(seen.length, 4);
+});
+
+test("callCloudToolAwaiting prints each approval once, including the chained one, and its error says to run the same command again", async () => {
+  const { callCloudToolAwaiting } = await import("./cloud.js");
+  const { CloudToolError, ApprovalRequiredError } = await import("./skill/cloud-item.js");
+  const permission = failure({ code: "permission_required", shortCode: "ABCDEFGH", url: "https://frely.cloud/r/ab", expiresAt: new Date(Date.now() + 60_000).toISOString() });
+  const confirmation = failure({ code: "confirmation_required", approvalCode: "CDEFGHJK", url: "https://frely.cloud/c/c_1", expiresAt: new Date(Date.now() + 60_000).toISOString() });
+  const deps = {
+    openReader: async () => ({ tools: async () => [], call: async () => { throw new CloudToolError("tool_unavailable_or_forbidden"); }, close: async () => undefined }),
+    openControllerConnection: async () => ({
+      call: async (_name: string, args: Record<string, unknown>) => (args.arguments as Record<string, unknown>).approvalCode ? { content: [{ type: "text", text: "{}" }], structuredContent: { done: true } } : (calls++ === 0 ? permission : confirmation),
+      close: async () => undefined,
+    }),
+  };
+  let calls = 0;
+  const written: string[] = [];
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((text: string) => { written.push(String(text)); return true; }) as typeof process.stderr.write;
+  const announced: string[] = [];
+  try {
+    await callCloudToolAwaiting("items.claim_install", {}, deps as never, async () => ({ status: "approved" }) as ApprovalOutcome, (approval) => { announced.push(approval.code); });
+    calls = 0;
+    await assert.rejects(callCloudToolAwaiting("items.claim_install", {}, deps as never, async () => ({ status: "pending" }) as ApprovalOutcome), (error: unknown) => error instanceof ApprovalRequiredError && error.approval.then === "repeat");
+  } finally { process.stderr.write = original; }
+  assert.deepEqual(announced, ["ABCDEFGH", "CDEF" + "GHJK"]);
+  const output = written.join("");
+  assert.equal(output.match(/Code: ABCD-EFGH/g)?.length, 2);
+  assert.equal(output.match(/Code: CDEF-GHJK/g)?.length, 1);
+});
