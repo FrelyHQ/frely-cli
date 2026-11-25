@@ -17,8 +17,10 @@ export interface VaultCommandIo {
 const USAGE = "Usage: frely vault login [--server <url>] | frely vault status | frely vault lock";
 
 const attached = (args: string[], env: Record<string, string>): Promise<number | null> => new Promise((resolve) => {
+  // Prompts go to stderr and stay on the terminal; with --raw the only thing on stdout is the session key, which nothing here needs, so it is dropped unread.
+  const quiet = args.includes("--raw");
   try { mkdirSync(env.BITWARDENCLI_APPDATA_DIR ?? bitwardenDataDir(), { recursive: true, mode: 0o700 }); } catch { /* bw reports a folder it cannot use */ }
-  const child = spawn("bw", args, { stdio: "inherit", env });
+  const child = spawn("bw", args, { stdio: ["inherit", quiet ? "ignore" : "inherit", "inherit"], env });
   child.on("error", () => resolve(null));
   child.on("close", (code) => resolve(code));
 });
@@ -58,12 +60,13 @@ export async function runVaultCommand(args: readonly string[], io: VaultCommandI
     }
     io.out(`Signing in to the dedicated Bitwarden account. Data folder: ${bitwardenDataDir()}\n`);
     if (server && await interactive(["config", "server", server], env) !== 0) return failed(io, "bw could not set the server.");
-    const code = await interactive(["login"], env);
+    // --raw keeps bw from printing "You are logged in!" and the BW_SESSION export hints; the prompts (password, new-device code) still show.
+    const code = await interactive(["login", "--raw"], env);
     if (code === null) { io.out(`${INSTALL_HINT}\n`); return 1; }
-    // `bw login` prints a session key to the terminal; lock right away so the one that was shown no longer opens anything.
+    // bw login makes a session key; it is never printed here, and locking right away makes any copy of it useless anyway.
     await run(["lock", "--nointeraction"], bwEnv(), 30_000).catch(() => undefined);
     if (code !== 0) return failed(io, "bw login did not finish.");
-    io.out("Signed in. Now ask your AI to unlock the vault (secret_drop with target kind vault_unlock) and use site_login.\n");
+    io.out("Logged in. Next, ask your AI to unlock the vault, then use site_login.\n");
     return 0;
   }
   if (sub === "status") {
