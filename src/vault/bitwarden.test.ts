@@ -2,7 +2,7 @@ import test from "node:test";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { safeEnv } from "../runtime/workspace.js";
-import { defaultPasswordPipe, bitwardenDataDir, bwEnv, createVault, INSTALL_HINT, LOCKED_HINT, LOGIN_HINT, VAULT_TTL_MS, VaultLockedError, type BwResult } from "./bitwarden.js";
+import { defaultPasswordPipe, bitwardenDataDir, bwEnv, createVault, INSTALL_HINT, LOCKED_HINT, LOGIN_HINT, SYNC_MIN_INTERVAL_MS, VAULT_TTL_MS, VaultLockedError, type BwResult } from "./bitwarden.js";
 
 const MASTER = "master-password-for-tests";
 const SESSION = "session-key-for-tests";
@@ -195,4 +195,60 @@ esac
   const logged = readFileSync(`${seen}.args`, "utf8") + readFileSync(`${seen}.env`, "utf8");
   assert.equal(logged.includes(MASTER), false);
   assert.match(logged, /unlock --passwordfile .*\/pw --raw --nointeraction/u);
+});
+
+const syncs = (calls: Call[]) => calls.filter((call) => call.args[0] === "sync").length;
+
+test("unlock syncs once; a miss syncs again only after the throttle and then looks again", async () => {
+  const { vault, calls, advance } = fake(unlocked([]));
+  await vault.unlock(Buffer.from(MASTER));
+  assert.equal(syncs(calls), 1);
+  assert.equal((await vault.findLogin("https://example.com")).status, "no_login_found");
+  assert.equal(syncs(calls), 1);
+  advance(SYNC_MIN_INTERVAL_MS + 1);
+  assert.equal((await vault.findLogin("https://example.com")).status, "no_login_found");
+  assert.equal(syncs(calls), 2);
+  assert.equal(calls.filter((call) => call.args[0] === "list").length, 3);
+});
+
+test("a login added elsewhere is found after the miss syncs", async () => {
+  let synced = false;
+  const { vault, advance } = fake((args) => args[0] === "sync" ? ((synced = true), {}) : unlocked(synced ? [item("1", ["https://example.com/login"])] : [])(args));
+  await vault.unlock(Buffer.from(MASTER));
+  synced = false;
+  advance(SYNC_MIN_INTERVAL_MS + 1);
+  assert.equal((await vault.findLogin("https://example.com")).status, "found");
+});
+
+test("saveLogin sends base64 JSON on stdin only, then zeroes it; no argument or variable carries the values", async () => {
+  const stdins: Buffer[] = [];
+  const seen: string[] = [];
+  const calls: Call[] = [];
+  const vault = createVault({
+    pipe: async () => ({ path: "/tmp/p", feed: async () => undefined, close: async () => undefined }),
+    run: async (args, env, _t, stdin) => { calls.push({ args, env }); if (stdin) { stdins.push(stdin); seen.push(Buffer.from(stdin.toString("utf8"), "base64").toString("utf8")); }
+      return { code: 0, stderr: "", stdout: args[0] === "status" ? JSON.stringify({ status: "locked" }) : args[0] === "unlock" ? `${SESSION}\n` : args[0] === "list" ? "[]" : "" }; },
+    env: { PATH: "/usr/bin", HOME: "/home/test" }, schedule: () => () => undefined,
+  });
+  await assert.rejects(vault.saveLogin("https://example.com", { name: "Example", username: "u@example.com", password: "pw-SECRET" }), VaultLockedError);
+  await vault.unlock(Buffer.from(MASTER));
+  assert.deepEqual(await vault.saveLogin("https://example.com", { name: "Example", username: "u@example.com", password: "pw-SECRET", totp: "JBSWY3DP" }), { status: "saved", hasTotp: true });
+  const create = calls.find((call) => call.args[0] === "create")!;
+  assert.deepEqual(create.args, ["create", "item", "--nointeraction"]);
+  assert.equal(create.env.BW_SESSION, SESSION);
+  assert.equal(JSON.stringify(calls.map((call) => [call.args, { ...call.env, BW_SESSION: "" }])).includes("pw-SECRET"), false);
+  assert.deepEqual(JSON.parse(seen[0]!), { type: 1, name: "Example", notes: null, favorite: false, login: { username: "u@example.com", password: "pw-SECRET", totp: "JBSWY3DP", uris: [{ uri: "https://example.com", match: null }] } });
+  assert.equal(stdins[0]!.every((byte) => byte === 0), true);
+});
+
+test("saveLogin refuses an origin that already has a login, a non-https origin, and hides the values in a bw error", async () => {
+  const dup = fake(unlocked([item("1", ["https://example.com/login"])]));
+  await dup.vault.unlock(Buffer.from(MASTER));
+  assert.deepEqual(await dup.vault.saveLogin("https://example.com", { name: "E", username: "u", password: "p" }), { status: "exists" });
+  assert.equal(dup.calls.some((call) => call.args[0] === "create"), false);
+  await assert.rejects(dup.vault.saveLogin("http://example.com", { name: "E", username: "u", password: "p" }), /https/u);
+  // a subdomain item does not count as the same site
+  const sub = fake((args) => args[0] === "create" ? { code: 1, stderr: "bad pw-SECRET for wyatt" } : unlocked([item("2", ["https://app.example.com"])])(args));
+  await sub.vault.unlock(Buffer.from(MASTER));
+  await assert.rejects(sub.vault.saveLogin("https://example.com", { name: "E", username: "wyatt", password: "pw-SECRET" }), (error: Error) => !error.message.includes("pw-SECRET") && !error.message.includes("wyatt") && /\[hidden\]/u.test(error.message));
 });

@@ -8,7 +8,7 @@ import { verifyApproval, type SignedApproval } from "./trust/record.js";
 import { readTrustWithReason, type TrustRefresh } from "./trust/sync.js";
 import { refreshAccountTrust } from "./device/control.js";
 import { NO_TRUST_MESSAGE, TrustError } from "./trust/webauthn.js";
-import { unlockVault } from "./vault/bitwarden.js";
+import { LOCKED_HINT, saveLogin, unlockVault, vaultStatus, type NewLogin, type SaveLoginResult } from "./vault/bitwarden.js";
 
 /**
  * Secret drop: the owner pastes a secret on the approval site, bound to one destination, and this device writes it there with a fixed
@@ -36,7 +36,14 @@ export interface SecretDropField { name: string; label: string; type: (typeof SE
 export interface SecretDropFileTarget { kind: "file" | "ssh_file"; path: string; owner: string; group: string; mode: string; host?: string; fields?: SecretDropField[]; format?: (typeof SECRET_DROP_FORMATS)[number] }
 /** Unlocks the Bitwarden vault on this computer; the value is its master password and goes to `unlockVault`, never to a file. */
 export interface SecretDropVaultUnlockTarget { kind: "vault_unlock" }
-export type SecretDropTarget = SecretDropFileTarget | SecretDropVaultUnlockTarget;
+/** Saves a new website login in the Bitwarden vault on this computer. Its field list is fixed here and in the relay (the owner signs it), never chosen by the AI. */
+export interface SecretDropVaultItemTarget { kind: "vault_item"; origin: string; name: string; fields: SecretDropField[]; format: "json" }
+export type SecretDropTarget = SecretDropFileTarget | SecretDropVaultUnlockTarget | SecretDropVaultItemTarget;
+export const VAULT_ITEM_FIELDS: readonly SecretDropField[] = [
+  { name: "username", label: "Username or email", type: "text", required: true, max: 256 },
+  { name: "password", label: "Password", type: "password", required: true, max: 1024 },
+  { name: "totp", label: "TOTP secret", type: "password", required: false, max: 256 },
+];
 const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/u;
 
 /** Same rules as the relay's own check: the field list is part of what the owner signed, so it is rebuilt byte for byte or refused. */
@@ -65,7 +72,7 @@ function parseFields(t: Record<string, unknown>): { fields?: SecretDropField[]; 
 }
 
 /** Checks the decrypted JSON against the signed field list and turns it into the bytes to write: the value itself, NAME=value lines, or JSON. */
-export function renderSecretFields(target: SecretDropFileTarget, plain: Buffer): Buffer {
+export function renderSecretFields(target: Pick<SecretDropFileTarget, "fields" | "format">, plain: Buffer): Buffer {
   if (!target.fields) return plain;
   let values: unknown;
   try { values = JSON.parse(target.format === "raw" ? JSON.stringify({ [target.fields[0]!.name]: plain.toString("utf8") }) : plain.toString("utf8")); } catch { throw new TrustError("fields_invalid", "The values did not match the requested fields."); }
@@ -90,7 +97,16 @@ export function parseSecretDropTarget(value: unknown): SecretDropTarget {
   if (!value || typeof value !== "object" || Array.isArray(value)) return bad("it is not an object");
   const t = value as Record<string, unknown>;
   if (t.kind === "vault_unlock") return Object.keys(t).length === 1 ? { kind: "vault_unlock" } : bad("unknown property");
-  if (t.kind !== "file" && t.kind !== "ssh_file") return bad("kind must be file, ssh_file or vault_unlock");
+  if (t.kind === "vault_item") {
+    // Exactly the form the relay builds: any other field list, format or extra key is refused, so what the owner typed into is what is saved.
+    if (Object.keys(t).length !== 5 || typeof t.origin !== "string" || typeof t.name !== "string") return bad("not a valid vault_item");
+    let origin: string;
+    try { const url = new URL(t.origin); origin = url.protocol === "https:" && !url.username && !url.password ? url.origin : ""; } catch { origin = ""; }
+    if (origin !== t.origin || t.name !== t.name.trim() || t.name.length < 1 || t.name.length > 100 || /[\r\n]/u.test(t.name)) return bad("not a valid vault_item");
+    if (t.format !== "json" || jcs(t.fields) !== jcs(VAULT_ITEM_FIELDS)) return bad("not a valid vault_item");
+    return { kind: "vault_item", origin, name: t.name, fields: VAULT_ITEM_FIELDS.map((f) => ({ ...f })), format: "json" };
+  }
+  if (t.kind !== "file" && t.kind !== "ssh_file") return bad("kind must be file, ssh_file, vault_unlock or vault_item");
   if (typeof t.path !== "string" || !PATH.test(t.path) || !isAbsolute(t.path) || t.path.endsWith("/") || t.path.slice(1).split("/").some((part) => part === "." || part === ".." || part === "")) return bad("path must be an absolute file path without dot segments");
   if (typeof t.owner !== "string" || !ACCOUNT.test(t.owner) || typeof t.group !== "string" || !ACCOUNT.test(t.group)) return bad("owner and group must be plain account names");
   if (typeof t.mode !== "string" || !MODE.test(t.mode) || (Number.parseInt(t.mode, 8) & 0o022) !== 0) return bad("mode must be octal and not writable by group or others");
@@ -110,9 +126,11 @@ const pending = new Map<string, PendingKey>();
 const wipeExpired = (now: number): void => { for (const [id, key] of pending) if (key.exp <= now) pending.delete(id); };
 
 /** Makes the one-use key for one drop. The private half is memory-only: a restart of this process cancels the drop. */
-export function prepareSecretDrop(args: Record<string, unknown>, now = Date.now()): { dropId: string; epk: string; expiresAt: string } {
+export function prepareSecretDrop(args: Record<string, unknown>, now = Date.now(), status: () => { status: string } = vaultStatus): { dropId: string; epk: string; expiresAt: string } {
   const dropId = args.dropId;
   if (typeof dropId !== "string" || !DROP_ID.test(dropId)) throw new Error("dropId is invalid.");
+  // A vault item can only be saved into an unlocked vault; the owner's one-use key is spent at apply, so a locked vault must be found out before they type anything.
+  if (args.kind === "vault_item" && status().status !== "unlocked") throw new Error(LOCKED_HINT);
   wipeExpired(now);
   if (!pending.has(dropId) && pending.size >= MAX_PENDING_KEYS) throw new Error("Too many secret drops are waiting on this computer.");
   const pair = generateKeyPairSync("x25519");
@@ -174,7 +192,7 @@ export function writerCommand(target: SecretDropFileTarget, self = userInfo().us
   return plain ? { command: "sh", args: ["-c", WRITE_SCRIPT, "sh", ...params] } : { command: "sudo", args: ["-n", "sh", "-c", WRITE_SCRIPT, "sh", ...params] };
 }
 
-export interface SecretDropDeps { run?: SecretDropRunner; now?: () => number; refreshTrust?: TrustRefresh; unlockVault?: (secret: Buffer) => Promise<{ locksAt: string }> }
+export interface SecretDropDeps { run?: SecretDropRunner; now?: () => number; refreshTrust?: TrustRefresh; unlockVault?: (secret: Buffer) => Promise<{ locksAt: string }>; saveLogin?: (origin: string, login: NewLogin) => Promise<SaveLoginResult> }
 
 /** Never returns anything that could carry the value; stderr is scrubbed again against the plaintext as a last guard. */
 const scrub = (text: string, secret: Buffer): string => {
@@ -214,6 +232,22 @@ export async function applySecretDrop(args: Record<string, unknown>, deps: Secre
     } catch (error) {
       throw new Error(scrub(error instanceof Error ? error.message : "The vault could not be unlocked.", decrypted));
     } finally { decrypted.fill(0); }
+  }
+  if (target.kind === "vault_item") {
+    // Not a file either: the field values are checked against the signed list, then handed to `bw create item`. The receipt never carries them.
+    let rendered: Buffer | null = null;
+    let values: { username: string; password: string; totp: string } | null = null;
+    try {
+      rendered = renderSecretFields(target, decrypted);
+      values = JSON.parse(rendered.toString("utf8")) as { username: string; password: string; totp: string };
+      const login: NewLogin = { name: target.name, username: values.username, password: values.password, ...(values.totp ? { totp: values.totp } : {}) };
+      const saved = await (deps.saveLogin ?? saveLogin)(target.origin, login);
+      return saved.status === "saved" ? { status: "saved", site: target.origin, name: target.name, hasTotp: saved.hasTotp } : { status: "exists", site: target.origin };
+    } catch (error) {
+      // Each typed value is hidden on its own: an error that quotes only the password must not leak it because the whole JSON was not quoted.
+      const message = error instanceof Error ? error.message : "The login could not be saved.";
+      throw new Error(error instanceof TrustError ? message : [values?.password, values?.username, values?.totp].reduce<string>((text, value) => value ? text.split(value).join("[hidden]") : text, message).slice(0, 500));
+    } finally { decrypted.fill(0); rendered?.fill(0); }
   }
   let secret: Buffer;
   try { secret = renderSecretFields(target, decrypted); } catch (error) { decrypted.fill(0); throw error; }

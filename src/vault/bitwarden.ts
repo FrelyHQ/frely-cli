@@ -25,7 +25,7 @@ export class VaultLockedError extends Error {
 
 export interface BwResult { code: number | null; stdout: string; stderr: string; missing?: boolean; timedOut?: boolean }
 /** Runs `bw` with exactly this environment. Injected in tests; the real one never sees any other variable. */
-export type BwRunner = (args: string[], env: Record<string, string>, timeoutMs: number) => Promise<BwResult>;
+export type BwRunner = (args: string[], env: Record<string, string>, timeoutMs: number, stdin?: Buffer) => Promise<BwResult>;
 
 /** `~/.config/frely/bitwarden` (below the data directory when one is active), inside the folders the command sandbox hides from the AI. */
 export function bitwardenDataDir(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
@@ -39,9 +39,12 @@ export function bwEnv(extra: Record<string, string> = {}, env: NodeJS.ProcessEnv
   return { ...out, ...extra };
 }
 
-export const defaultBwRunner: BwRunner = (args, env, timeoutMs) => new Promise((resolve) => {
+export const defaultBwRunner: BwRunner = (args, env, timeoutMs, stdin) => new Promise((resolve) => {
   try { mkdirSync(env.BITWARDENCLI_APPDATA_DIR ?? bitwardenDataDir(), { recursive: true, mode: 0o700 }); } catch { /* bw reports a data directory it cannot use */ }
-  const child = spawn("bw", args, { stdio: ["ignore", "pipe", "pipe"], env });
+  // stdin is closed at once unless the caller hands bw something to read (`bw create item` reads its data from stdin, never from an argument).
+  const child = spawn("bw", args, { stdio: ["pipe", "pipe", "pipe"], env });
+  child.stdin.on("error", () => undefined);
+  child.stdin.end(stdin);
   let stdout = "", stderr = "", timedOut = false, done = false;
   const finish = (result: BwResult) => { if (done) return; done = true; clearTimeout(timer); resolve(result); };
   const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, timeoutMs);
@@ -53,6 +56,8 @@ export const defaultBwRunner: BwRunner = (args, env, timeoutMs) => new Promise((
 
 export interface VaultStatus { status: "locked" | "unlocked"; locksAt?: string }
 export interface FoundLogin { status: "found"; username: string; password: string; totp?: string }
+export interface NewLogin { name: string; username: string; password: string; totp?: string }
+export type SaveLoginResult = { status: "saved"; hasTotp: boolean } | { status: "exists" };
 export type FindLoginResult = FoundLogin | { status: "no_login_found" } | { status: "ambiguous" };
 
 /** Hands the master password to `bw unlock --passwordfile` through a FIFO: no environment variable, no command-line argument, no file on disk. */
@@ -82,6 +87,8 @@ export interface VaultDeps {
 }
 
 const defaultSchedule = (fn: () => void, ms: number): (() => void) => { const timer = setTimeout(fn, ms); timer.unref(); return () => clearTimeout(timer); };
+/** How often a miss may trigger a `bw sync` (changes made in the Bitwarden app or website reach this computer within this time). */
+export const SYNC_MIN_INTERVAL_MS = 5 * 60_000;
 const SESSION_GONE = /locked|not logged in|unauthenticated|invalid session|session key/iu;
 
 /** One vault in one process; `createVault` makes isolated ones for tests, the exported functions below use the real one. */
@@ -94,8 +101,9 @@ export function createVault(deps: VaultDeps = {}) {
   let session: string | null = null;
   let lockAt = 0;
   let cancelTimer: (() => void) | null = null;
+  let lastSync = 0;
 
-  const drop = (): void => { session = null; lockAt = 0; cancelTimer?.(); cancelTimer = null; };
+  const drop = (): void => { session = null; lockAt = 0; lastSync = 0; cancelTimer?.(); cancelTimer = null; };
   const locksAt = (): string => new Date(lockAt).toISOString();
 
   async function lock(): Promise<void> {
@@ -133,6 +141,7 @@ export function createVault(deps: VaultDeps = {}) {
     session = key;
     lockAt = now() + VAULT_TTL_MS;
     cancelTimer = schedule(() => { void lock(); }, VAULT_TTL_MS);
+    await sync();
     return { locksAt: locksAt() };
   }
 
@@ -141,24 +150,37 @@ export function createVault(deps: VaultDeps = {}) {
     return session ? { status: "unlocked", locksAt: locksAt() } : { status: "locked" };
   }
 
+  /** Pulls changes made elsewhere (phone app, website) into this computer's copy. Best effort: a failed sync only means the copy may be stale. */
+  async function sync(): Promise<void> {
+    if (!session) return;
+    lastSync = now();
+    await run(["sync", "--nointeraction"], bwEnv({ BW_SESSION: session }, env), BW_TIMEOUT_MS).catch(() => undefined);
+  }
+  const syncIfStale = async (): Promise<void> => { if (now() - lastSync >= SYNC_MIN_INTERVAL_MS) await sync(); };
+
   /**
-   * The one login saved for this exact https origin. `bw list items --url` matches loosely (any scheme, subdomains), so the match is
-   * redone here: the page origin must be https and equal to the origin of one of the item's URIs. None or several is never guessed.
+   * The logins saved for this exact https origin. `bw list items --url` matches loosely (any scheme, subdomains), so the match is
+   * redone here: the page origin must be https and equal to the origin of one of the item's URIs.
    */
-  async function findLogin(origin: string): Promise<FindLoginResult> {
+  async function loginsFor(origin: string): Promise<BwItem[]> {
     if (status().status !== "unlocked") throw new VaultLockedError();
     let page: URL;
-    try { page = new URL(origin); } catch { return { status: "no_login_found" }; }
-    if (page.protocol !== "https:") return { status: "no_login_found" };
-    const bwSession = { BW_SESSION: session! };
-    const listed = await run(["list", "items", "--url", page.origin, "--nointeraction"], bwEnv(bwSession, env), BW_TIMEOUT_MS);
+    try { page = new URL(origin); } catch { return []; }
+    if (page.protocol !== "https:") return [];
+    const listed = await run(["list", "items", "--url", page.origin, "--nointeraction"], bwEnv({ BW_SESSION: session! }, env), BW_TIMEOUT_MS);
     if (listed.code !== 0) {
       if (SESSION_GONE.test(listed.stderr)) { drop(); throw new VaultLockedError(); }
       throw new Error(listed.timedOut ? "Bitwarden did not answer in time." : "Bitwarden could not list the saved logins.");
     }
     let items: unknown;
     try { items = JSON.parse(listed.stdout); } catch { throw new Error("Bitwarden returned a list this computer could not read."); }
-    const matches = (Array.isArray(items) ? items : []).filter((item): item is BwItem => isLoginFor(item, page.origin));
+    return (Array.isArray(items) ? items : []).filter((item): item is BwItem => isLoginFor(item, page.origin));
+  }
+
+  /** The one login saved for this origin; none or several is never guessed. A miss syncs once (at most every few minutes) and looks again. */
+  async function findLogin(origin: string): Promise<FindLoginResult> {
+    let matches = await loginsFor(origin);
+    if (matches.length === 0 && now() - lastSync >= SYNC_MIN_INTERVAL_MS) { await sync(); matches = await loginsFor(origin); }
     if (matches.length === 0) return { status: "no_login_found" };
     if (matches.length > 1) return { status: "ambiguous" };
     const item = matches[0]!;
@@ -166,13 +188,38 @@ export function createVault(deps: VaultDeps = {}) {
     if (typeof username !== "string" || !username || typeof password !== "string" || !password) return { status: "no_login_found" };
     let code: string | undefined;
     if (typeof totp === "string" && totp) {
-      const got = await run(["get", "totp", item.id, "--nointeraction"], bwEnv(bwSession, env), BW_TIMEOUT_MS);
+      const got = await run(["get", "totp", item.id, "--nointeraction"], bwEnv({ BW_SESSION: session! }, env), BW_TIMEOUT_MS);
       if (got.code === 0 && /^[0-9]{4,10}$/u.test(got.stdout.trim())) code = got.stdout.trim();
     }
     return { status: "found", username, password, ...(code ? { totp: code } : {}) };
   }
 
-  return { unlock, lock, status, findLogin };
+  /**
+   * Adds a new login for this https origin. Refused when the origin already has one (two would make `site_login` ambiguous). The item is
+   * handed to `bw create item` on stdin as base64 JSON, so the values are in no argument, environment variable or file; stdin buffers are zeroed.
+   */
+  async function saveLogin(origin: string, login: NewLogin): Promise<SaveLoginResult> {
+    let page: URL;
+    try { page = new URL(origin); } catch { throw new Error("The site address is not valid."); }
+    if (page.protocol !== "https:" || page.origin !== origin) throw new Error("Only an https site origin can be saved.");
+    if (status().status !== "unlocked") throw new VaultLockedError();
+    await syncIfStale();
+    if ((await loginsFor(origin)).length > 0) return { status: "exists" };
+    const json = Buffer.from(JSON.stringify({ type: 1, name: login.name, notes: null, favorite: false, login: { username: login.username, password: login.password, totp: login.totp || null, uris: [{ uri: origin, match: null }] } }), "utf8");
+    const encoded = Buffer.from(json.toString("base64"), "utf8");
+    json.fill(0);
+    try {
+      const created = await run(["create", "item", "--nointeraction"], bwEnv({ BW_SESSION: session! }, env), BW_TIMEOUT_MS, encoded);
+      if (created.code !== 0) {
+        if (SESSION_GONE.test(created.stderr)) { drop(); throw new VaultLockedError(); }
+        const hide = (text: string) => [login.password, login.username, login.totp ?? ""].reduce((out, value) => value ? out.split(value).join("[hidden]") : out, text).slice(0, 200);
+        throw new Error(created.timedOut ? "Bitwarden did not answer in time. The login may not have been saved." : `Bitwarden could not save the login: ${hide(created.stderr.trim() || "no error text")}`);
+      }
+    } finally { encoded.fill(0); }
+    return { status: "saved", hasTotp: Boolean(login.totp) };
+  }
+
+  return { unlock, lock, status, findLogin, saveLogin };
 }
 
 interface BwItem { id: string; type: number; login: { username?: unknown; password?: unknown; totp?: unknown; uris?: unknown } }
@@ -193,3 +240,4 @@ export const unlockVault = (master: Buffer): Promise<{ locksAt: string }> => vau
 export const lockVault = (): Promise<void> => vault.lock();
 export const vaultStatus = (): VaultStatus => vault.status();
 export const findLogin = (origin: string): Promise<FindLoginResult> => vault.findLogin(origin);
+export const saveLogin = (origin: string, login: NewLogin): Promise<SaveLoginResult> => vault.saveLogin(origin, login);
