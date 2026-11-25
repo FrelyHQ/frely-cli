@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { execFile as execFileCallback } from "node:child_process";
+import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { Controller, ToolResult } from "./client.js";
-import { runControllerCommand, useControllerOpener, waitForPermission } from "./commands.js";
+import { controllerArguments, runControllerCommand, useControllerOpener, waitForPermission } from "./commands.js";
 import { EXIT } from "./client.js";
 
 const text = (value: unknown, extra: Partial<ToolResult> = {}): ToolResult => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }], ...extra });
@@ -138,6 +140,7 @@ import { prepareLocalUpload } from "../local-transfer.js";
 
 const PRESIGNED = "https://storage.example/obj?X-Amz-Signature=SECRET";
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
+const execFile = promisify(execFileCallback);
 const view = { id: "tr_1", name: "pic.png", bytes: 5, expiresAt: "2026-12-01T00:00:00Z", visibility: "self", url: "https://frely.cloud/f/abc123" };
 
 test("put uploads a local file, completes it and prints the short link without the presigned address", async () => {
@@ -158,6 +161,65 @@ test("put uploads a local file, completes it and prints the short link without t
     assert.deepEqual(JSON.parse(json.out), { url: view.url, id: "tr_1", name: "pic.png", bytes: 5, expiresAt: view.expiresAt, visibility: "self" });
     assert.ok(!json.out.includes("SECRET"));
   } finally { restore(); }
+});
+
+test("drop asks for a drop code, returns the script in --json and refuses unsafe file hints", async () => {
+  const claimUrl = "https://frely.test/api/drop/abc";
+  const reply = () => text({ code: "abc", expiresAt: "2026-12-01T00:00:00Z", claimUrl, completeUrl: `${claimUrl}/complete` });
+  assert.deepEqual(controllerArguments("file", ["drop", "report.csv"]), ["drop", "report.csv"]);
+  const shown = await run(["drop", "report.csv"], reply);
+  assert.deepEqual(shown.calls[0]!.input, { action: "drop_link" });
+  assert.match(shown.out, /f='report\.csv'/u);
+  assert.match(shown.out, /When it finishes, the file shows in: frely file list/u);
+  assert.equal(JSON.parse((await run(["drop", "--json"], reply)).out).script.includes(claimUrl), true);
+  const unsafe = await run(["drop", 'bad"name'], reply);
+  assert.equal(unsafe.code, EXIT.cli);
+  assert.equal(unsafe.calls.length, 0);
+});
+
+// The snippet is POSIX sh for the other machine; Windows runners have no sh on PATH.
+test("drop prints a runnable script and refuses unsafe file hints", { skip: process.platform === "win32" }, async () => {
+  const claimUrl = "https://frely.test/api/drop/abc";
+  const completeUrl = `${claimUrl}/complete`;
+  const reply = () => text({ code: "abc", expiresAt: "2026-12-01T00:00:00Z", claimUrl, completeUrl });
+  const dir = await mkdtemp(join(tmpdir(), "frely-drop-"));
+  const file = join(dir, "hello world.txt");
+  await writeFile(file, "hello");
+  const log = join(dir, "calls");
+  const curl = join(dir, "curl");
+  await writeFile(curl, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CURL_LOG\"\ncase \"$*\" in *'/complete'*) ;; *'format=url'*) printf '%s\\n' 'https://upload.test/object' ;; esac\n");
+  await chmod(curl, 0o755);
+  const result = await run(["drop", file], reply);
+  assert.deepEqual(result.calls[0]!.input, { action: "drop_link" });
+  const script = result.out.slice(result.out.indexOf("\n") + 1).split("\nWhen it finishes")[0]!.trim();
+  await execFile("sh", ["-c", script], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CURL_LOG: log } });
+  const calls = (await readFile(log, "utf8")).trim().split("\n");
+  assert.equal(calls.length, 3);
+  assert.match(calls[0]!, /POST.*format=url/u);
+  assert.match(calls[0]!, /hello world\.txt/u);
+  assert.match(calls[1]!, /-T.*hello world\.txt.*https:\/\/upload\.test\/object/u);
+  assert.match(calls[2]!, /POST.*\/complete/u);
+  assert.match(result.out, /When it finishes, the file shows in: frely file list/u);
+  const json = await run(["drop", "FILE", "--json"], reply);
+  assert.equal(JSON.parse(json.out).script.includes(claimUrl), true);
+  const unsafe = await run(["drop", 'bad"name'], reply);
+  assert.equal(unsafe.code, EXIT.cli);
+  assert.match(unsafe.err, /cannot contain/u);
+  assert.equal(unsafe.calls.length, 0);
+  const defaultScript = (await run(["drop"], reply)).out.split("\nWhen it finishes")[0]!.split("\n").slice(1).join("\n").trim();
+  const quotedFile = join(dir, 'a"b.txt');
+  await writeFile(quotedFile, "hello");
+  const quotedScript = defaultScript.replace(/^f='FILE'/u, `f='${quotedFile.replace(/'/gu, "'\\''")}'`);
+  const unsafeLog = join(dir, "unsafe-calls");
+  let quotedError: { stderr?: string } | undefined;
+  try { await execFile("sh", ["-c", quotedScript], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CURL_LOG: unsafeLog } }); }
+  catch (error) { quotedError = error as { stderr?: string }; }
+  assert.match(String(quotedError?.stderr), /Rename the file/u);
+  await assert.rejects(() => readFile(unsafeLog, "utf8"));
+  const missingScript = defaultScript.replace(/^f='FILE'/u, `f='${join(dir, "missing.txt")}'`);
+  const missingLog = join(dir, "missing-calls");
+  await assert.rejects(() => execFile("sh", ["-c", missingScript], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CURL_LOG: missingLog } }));
+  await assert.rejects(() => readFile(missingLog, "utf8"));
 });
 
 test("put of device:path asks the relay to pull the file, and a missing local file is a usage error", async () => {

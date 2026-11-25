@@ -6,10 +6,10 @@ import { downloadToLocalFile, prepareLocalUpload, type LocalUpload } from "../lo
 import { waitForApproval, type ApprovalRef, type ApprovalWaitOptions } from "./approval-wait.js";
 import { openController, outcomeOf, resultData, resultText, ControllerError, EXIT, type Controller, type Outcome, type ToolResult } from "./client.js";
 
-export const CONTROLLER_COMMANDS: ReadonlySet<string> = new Set(["devices", "run", "ps", "logs", "kill", "read", "ls", "grep", "edit", "put", "get", "files", "tools", "call", "permission"]);
+export const CONTROLLER_COMMANDS: ReadonlySet<string> = new Set(["devices", "run", "ps", "logs", "kill", "read", "ls", "grep", "edit", "put", "drop", "get", "files", "tools", "call", "permission"]);
 
 const DEVICE_VERBS = new Set(["run", "ps", "logs", "kill", "read", "ls", "grep", "edit", "permission"]);
-const FILE_VERBS = new Set(["put", "get", "rm", "share"]);
+const FILE_VERBS = new Set(["put", "drop", "get", "rm", "share"]);
 
 /** `frely device ...` and `frely file ...` as the arguments `runControllerCommand` takes; undefined when no verb (or an unknown one) was given. */
 export function controllerArguments(group: "device" | "file", args: readonly string[]): string[] | undefined {
@@ -21,7 +21,7 @@ export function controllerArguments(group: "device" | "file", args: readonly str
     if (DEVICE_VERBS.has(verb)) return [verb, ...rest];
   } else {
     if (verb === "list") return ["files", ...rest];
-    if (verb === "put" || verb === "get") return [verb, ...rest];
+    if (verb === "put" || verb === "drop" || verb === "get") return [verb, ...rest];
     if (verb === "rm" || verb === "share") return ["files", verb, ...rest];
   }
   throw new ControllerError(`Unknown ${group} command ${JSON.stringify(verb)}. Run frely ${group} --help.`, EXIT.cli);
@@ -45,6 +45,7 @@ export const CONTROLLER_USAGE = `Control your Frely devices from this computer.
   frely device permission confirm <code> [A|B|C]        Finish an approval by authenticator or emailed code
   frely device permission wait <short code> [--then '<command>'] [--timeout <s>]
   frely file put <local file | device:path> [--json]  Share a file or image as a link (https://frely.cloud/f/<code>); prints the link first
+  frely file drop [<file>]                           Get a one-time command for a machine without Frely to upload a file to you (valid 30 minutes)
   frely file get <id> [<local path> | <device>:<path>] [--overwrite]   Fetch a shared file to this computer or a device
   frely file list                                    List shared files (id, name, size, visibility, expiry, link)
   frely file rm <id>                            Delete a shared file
@@ -131,6 +132,7 @@ export async function runControllerCommand(args: readonly string[], io: Output):
       case "grep": return await grep(rest, io);
       case "edit": return await edit(rest, io);
       case "put": return await putCommand(rest, io);
+      case "drop": return await dropCommand(rest, io);
       case "get": return await getCommand(rest, io);
       case "files": return await filesCommand(rest, io);
       case "tools": return await toolsCommand(rest, io);
@@ -341,6 +343,31 @@ async function putCommand(args: string[], io: Output): Promise<number> {
       data = done.data;
     }
     return emit(showView(viewOf(data)), { exitCode: EXIT.ok }, parsed, io);
+  });
+}
+
+function shellQuote(value: string): string { return `'${value.replace(/'/gu, "'\\''")}'`; }
+
+function dropScript(file: string, claimUrl: string, completeUrl: string): string {
+  return `f=${shellQuote(file)}; [ -f "$f" ] || { echo "No such file: $f" >&2; exit 1; }; n=$(basename "$f"); case "$n" in *[\\\"\\\\]*) echo 'Rename the file: double quotes and backslashes are not allowed' >&2; exit 1;; esac; s=$(wc -c < "$f" | tr -d ' '); h=$( (sha256sum "$f" 2>/dev/null || shasum -a 256 "$f") | cut -d' ' -f1)
+  u=$(curl -fsS -X POST -H 'content-type: application/json' --data "{\\\"name\\\":\\\"$n\\\",\\\"bytes\\\":$s,\\\"sha256\\\":\\\"$h\\\"}" ${shellQuote(`${claimUrl}?format=url`)}) && curl -fsS -T "$f" "$u" && curl -fsS -X POST ${shellQuote(completeUrl)}`;
+}
+
+async function dropCommand(args: string[], io: Output): Promise<number> {
+  const parsed = parseArgs(args, { flags: COMMON_FLAGS, values: COMMON_VALUES });
+  if (parsed.positionals.length > 1) throw new ControllerError("Usage: frely file drop [<file>] [--json]", EXIT.cli);
+  const hint = parsed.positionals[0] ?? "FILE";
+  if (/["\\]/u.test(hint)) throw new ControllerError('The file hint cannot contain " or \\.', EXIT.cli);
+  return withController(io, async (controller) => {
+    const result = await controller.call("transfer", { action: "drop_link" });
+    const outcome = outcomeOf(result);
+    const data = resultData(result);
+    if (outcome.exitCode !== EXIT.ok || !data) return emit(shownOf(result), outcome, parsed, io);
+    const claimUrl = asText(data.claimUrl), completeUrl = asText(data.completeUrl);
+    if (!claimUrl || !completeUrl) throw new ControllerError("The transfer service gave no drop addresses.", EXIT.tool);
+    const script = dropScript(hint, claimUrl, completeUrl);
+    const expiresAt = asText(data.expiresAt) || "unknown";
+    return emit({ text: `Drop command (expires ${expiresAt}):\n${script}\nWhen it finishes, the file shows in: frely file list`, result: { ...data, script } as ToolResult }, outcome, parsed, io);
   });
 }
 
