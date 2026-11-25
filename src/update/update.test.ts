@@ -246,6 +246,17 @@ test("registry lookup follows an https redirect and takes the first registry tha
     : new Response(null, { status: 302, headers: { location: "http://evil.test/" } })), /https/u);
 });
 
+test("registry lookup takes the higher version when a mirror lags a release", async () => {
+  const install = { method: "standalone" as const, entry: "/frely", platform: "linux" as const };
+  const release = await latestRelease(install, async (url) => {
+    const u = String(url);
+    if (u.startsWith("https://api.github.com/")) return new Response("", { status: 403 });
+    return Response.json({ version: u.startsWith("https://registry.npmmirror.com/") ? "1.2.3" : "1.2.4" });
+  });
+  assert.equal(release.version, "1.2.4");
+  assert.match((release.sources![1] as { tarballUrl: string }).tarballUrl, /1\.2\.4\.tgz$/u);
+});
+
 test("standalone lookup falls back to npmmirror when GitHub is unreachable, and download falls back source by source", async (t) => {
   const install = { method: "standalone" as const, entry: "/frely", platform: "linux" as const };
   const asked: string[] = [];

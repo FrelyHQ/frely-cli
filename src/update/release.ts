@@ -9,6 +9,7 @@ export interface Release { version: string; sources?: ReleaseSource[] }
 
 const GITHUB_RELEASES = "https://github.com/FrelyHQ/frely-cli/releases/download";
 /** npmmirror is the China CDN of npmjs; both carry @frelyhq/cli-<target>. */
+const REGISTRY_GRACE_MS = 1500;
 export const NPM_REGISTRIES = ["https://registry.npmmirror.com", "https://registry.npmjs.org"];
 export function platformPackage(asset = standaloneAsset()): string {
   return `@frelyhq/cli-${asset.replace(/^frely-/u, "").replace(/\.exe$/u, "")}`;
@@ -114,11 +115,16 @@ export async function latestRelease(installation: Installation, request: typeof 
     if (error instanceof ReleaseRejected) throw error;
     failures.push(`GitHub: ${reason(error)}`);
   }
-  // Ask both registries at once and take the first answer: a slow or blocked one must not delay the other.
+  // Ask both registries at once. A slow or blocked one must not delay the other, but a mirror can lag a release by hours,
+  // so after the first answer give the other a short moment and take the higher version.
   const failed: string[] = [];
+  const answers = NPM_REGISTRIES.map((registry) => npmRegistryLatest(request, registry, asset)
+    .catch((error: unknown) => { failed.push(`${new URL(registry).hostname}: ${reason(error)}`); throw error; }));
   try {
-    const version = await Promise.any(NPM_REGISTRIES.map((registry) => npmRegistryLatest(request, registry, asset)
-      .catch((error: unknown) => { failed.push(`${new URL(registry).hostname}: ${reason(error)}`); throw error; })));
+    const first = await Promise.any(answers);
+    const grace = new Promise<string[]>((resolve) => setTimeout(() => resolve([]), REGISTRY_GRACE_MS));
+    const rest = await Promise.race([Promise.allSettled(answers).then((all) => all.flatMap((r) => r.status === "fulfilled" ? [r.value] : [])), grace]);
+    const version = [first, ...rest].reduce((best, v) => compareVersions(v, best) > 0 ? v : best);
     return { version, sources: releaseSources(version, asset) };
   } catch { failures.push(...failed); }
   throw new Error(`Release lookup failed on GitHub, npmmirror and npmjs. (${failures.join("; ")})`);
