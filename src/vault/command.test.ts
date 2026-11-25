@@ -12,7 +12,8 @@ test("vault login runs bw config server and bw login in the owner's terminal, th
     run: async (args) => { ran.push(args); return { code: 0, stdout: "", stderr: "" }; },
   });
   assert.equal(code, 0);
-  assert.deepEqual(attached, [["config", "server", "https://vault.example.com"], ["login"]]);
+  assert.deepEqual(attached, [["config", "server", "https://vault.example.com"], ["login", "--raw"]]);
+  assert.equal(out.join("").includes("BW_SESSION"), false);
   assert.deepEqual(ran, [["--version"], ["lock", "--nointeraction"]]);
 });
 
@@ -22,7 +23,7 @@ test("vault login installs bw first when it is missing, and stops when it cannot
   const missing = async (args: string[]) => ({ code: null, stdout: "", stderr: "", missing: args[0] === "--version" });
   assert.equal(await runVaultCommand(["login"], { out: () => undefined, run: missing, install: async () => { installs += 1; return 0; }, interactive: async (args) => { attached.push(args); return 0; } }), 0);
   assert.equal(installs, 1);
-  assert.deepEqual(attached, [["login"]]);
+  assert.deepEqual(attached, [["login", "--raw"]]);
   const out: string[] = [];
   assert.equal(await runVaultCommand(["login"], { out: (text) => out.push(text), run: missing, install: async () => null, interactive: async () => { throw new Error("login must not start"); } }), 1);
   assert.match(out.join(""), /brew install bitwarden-cli/u);
