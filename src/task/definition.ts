@@ -5,10 +5,10 @@ import { isAbsolute, join } from "node:path";
 import { isValidTimezone, nextCronTime, parseCron } from "./cron.js";
 
 /**
- * Runners: `script` runs a shell command in the sandbox. `pi` runs a prompt through the Pi agent (added with the Pi capsule).
- * Both get their model through the model proxy; neither holds a credential.
+ * Runners: `script` runs a shell command in the sandbox. `pi` runs a prompt through the Pi agent (added with the Pi capsule). `codex` runs a prompt through `codex exec`.
+ * Script and pi get their model through the model proxy; neither holds a credential.
  */
-export const RUNNERS = ["script", "pi"] as const;
+export const RUNNERS = ["script", "pi", "codex"] as const;
 export type RunnerId = (typeof RUNNERS)[number];
 
 export const TASK_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/u;
@@ -32,7 +32,7 @@ export interface TaskDefinition {
   readonly version: 1;
   readonly name: string;
   readonly runner: RunnerId;
-  /** `script`: the shell command. `pi`: the prompt. */
+  /** `script`: the shell command. `pi` and `codex`: the prompt. */
   readonly command: string;
   /** Absolute folder: the working directory, and the only place the task can write besides the temp folder. */
   readonly cwd: string;
@@ -86,7 +86,7 @@ export function buildDefinition(input: TaskDefinitionInput, previous?: TaskDefin
   const runner = input.runner ?? "script";
   if (!RUNNERS.includes(runner)) throw new Error(`Unknown runner ${JSON.stringify(runner)}. Use ${RUNNERS.join(" or ")}.`);
   const command = input.command.trim();
-  if (command === "" || Buffer.byteLength(command, "utf8") > MAX_COMMAND_BYTES) throw new Error(`A task needs a ${runner === "pi" ? "prompt" : "command"} of at most 16 KiB.`);
+  if (command === "" || Buffer.byteLength(command, "utf8") > MAX_COMMAND_BYTES) throw new Error(`A task needs a ${runner === "script" ? "command" : "prompt"} of at most 16 KiB.`);
   if (!isAbsolute(input.cwd)) throw new Error("The task folder must be an absolute path.");
   const network = [...new Set((input.network ?? []).map((host) => host.trim().toLowerCase()))];
   for (const host of network) if (!HOST.test(host) || host === "*") throw new Error(`Invalid site ${JSON.stringify(host)}. Use a host name such as registry.npmjs.org.`);

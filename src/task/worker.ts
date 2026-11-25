@@ -5,11 +5,12 @@ import { terminateProcessTree } from "../runtime/process-tree.js";
 import { restrictSandboxNetwork, sandboxCommandDetailed, sandboxViolationLines, shutdownSandbox } from "../runtime/sandbox.js";
 import { logTail, LOG_LIMIT_BYTES, readTaskRun, runsDir, taskLogPath, writeTaskRun, type TaskRunRecord } from "./run-store.js";
 import { openTaskModel, type ModelStats, type OpenedModel } from "./model-route.js";
+import { codexRunner } from "./codex-runner.js";
 import { createPiRunner } from "./pi-runner.js";
 import { scriptRunner, type Runner, type RunnerContext } from "./runner.js";
 
 /** Runners the worker can run. `registerRunner` replaces one (tests). */
-const runners = new Map<string, Runner>([["script", scriptRunner], ["pi", createPiRunner()]]);
+const runners = new Map<string, Runner>([["script", scriptRunner], ["pi", createPiRunner()], ["codex", codexRunner]]);
 export function registerRunner(runner: Runner): void { runners.set(runner.id, runner); }
 
 /** What a worker needs beyond the run record. Tests stand in for these. */

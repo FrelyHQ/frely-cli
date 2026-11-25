@@ -20,7 +20,7 @@ export interface RunnerPlan {
 }
 
 export interface Runner {
-  readonly id: "script" | "pi";
+  readonly id: "script" | "pi" | "codex";
   /** Runs before the sandboxed program starts: set up a worktree, say. */
   prepare(context: RunnerContext): Promise<RunnerPlan & { readonly patch?: Partial<TaskRunRecord> }>;
   /** Runs after it ended: collect the answer and the diff. */
