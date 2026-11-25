@@ -40,6 +40,17 @@ export interface SearchHit {
 
 const PROTECTED_MESSAGE = "This path holds credentials or shell start-up files and is protected from file tools. To read a credential store, call request_permission for it (the owner approves on the web), then read it with run_command, for example `cat ~/.ssh/config`.";
 
+const GIT_METADATA_MESSAGE = "File tools do not write inside .git: hooks and git config there make git run programs outside the command sandbox. Change git settings with run_command (for example `git config` or `git remote add`); hooks are left to the user.";
+
+/** Whether `path` (relative to the workspace root) names a `.git` file or directory, or anything inside one, at any depth. */
+export function isGitMetadataPath(path: string): boolean {
+  return path.split(/[\\/]+/u).some((segment) => {
+    // Case-insensitive file systems (macOS, Windows) open `.GIT` as `.git`; Windows also drops trailing dots and spaces and knows the short name.
+    const name = segment.toLowerCase().replace(/[. ]+$/u, "");
+    return name === ".git" || (process.platform === "win32" && name === "git~1");
+  });
+}
+
 export class Workspace {
   private readonly protection: PathProtection;
 
@@ -457,6 +468,7 @@ export class Workspace {
 
   private assertWritable(path: string): void {
     if (this.protection.writeBlocked(path)) throw new Error(PROTECTED_MESSAGE);
+    if (isGitMetadataPath(relative(this.root, path))) throw new Error(GIT_METADATA_MESSAGE);
   }
 }
 

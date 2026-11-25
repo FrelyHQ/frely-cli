@@ -93,6 +93,9 @@ export const PROTECTED_PATHS: readonly string[] = [
   "~/.zshrc", "~/.zshenv", "~/.zprofile", "~/.zlogin", "~/.bashrc", "~/.bash_profile", "~/.bash_login", "~/.profile", "~/.config/fish",
   "~/Library/LaunchAgents", "/Library/LaunchAgents", "/Library/LaunchDaemons", "~/.git-credentials", "~/.netrc", "~/.npmrc", "~/.pypirc",
   "~/.cargo/credentials.toml", "~/Library/Application Support/gcloud",
+  // Started by the system or by git outside the sandbox: user services and their environment (frely-mcp.service, FRELY_SANDBOX),
+  // desktop autostart, global git config (fsmonitor, hooksPath), and a directory that is usually early on PATH.
+  "~/.config/systemd", "~/.config/environment.d", "~/.config/autostart", "~/.gitconfig", "~/.config/git", "~/.local/bin",
 ];
 /** Frely's own device credentials: never writable by a grant, not even an exact one. */
 const neverWritablePaths = (): string[] => ["~/.config/frely", ...(process.env.FRELY_DATA_DIR ? [process.env.FRELY_DATA_DIR] : [])];

@@ -84,3 +84,24 @@ test("findDefinition matches declarations across languages and not plain calls",
   assert.deepEqual(hits.map((hit) => `${hit.path}:${hit.line}`).sort(), ["a.ts:1", "a.ts:4", "b.py:1", "c.go:1", "d.rs:1"]);
   await assert.rejects(() => workspace.findDefinition(".", "a.b", { maxResults: 5, contextLines: 0 }), /identifier/);
 });
+
+test("file tools never write inside .git, at any depth or through a link", async () => {
+  const root = await mkdtemp(join(tmpdir(), "frely-cli-workspace-"));
+  await mkdir(join(root, ".git", "hooks"), { recursive: true });
+  await writeFile(join(root, ".git", "config"), "[core]\n");
+  await mkdir(join(root, "sub", ".git"), { recursive: true });
+  const workspace = await Workspace.open(root);
+  for (const path of [".git/hooks/pre-commit", ".git/config", "sub/.git/config", ".GIT/hooks/post-checkout", "other/.git"]) {
+    await assert.rejects(() => workspace.writeFile(path, "#!/bin/sh\n", true), /inside \.git/u, path);
+  }
+  await assert.rejects(() => workspace.createDirectory(".git/hooks/x"), /inside \.git/u);
+  await assert.rejects(() => workspace.deletePath(".git/config", false), /inside \.git/u);
+  await writeFile(join(root, "hook.sh"), "#!/bin/sh\n");
+  await assert.rejects(() => workspace.movePath("hook.sh", ".git/hooks/pre-commit", false), /inside \.git/u);
+  // A link made by a command does not lead a write into .git.
+  await symlink(join(root, ".git"), join(root, "meta"));
+  await assert.rejects(() => workspace.writeFile("meta/hooks/pre-commit", "x", false));
+  // Names that only look alike stay writable.
+  await workspace.writeFile(".gitignore", "node_modules\n", false);
+  await workspace.writeFile(".github/workflows/ci.yml", "on: push\n", false);
+});
