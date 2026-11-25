@@ -163,7 +163,21 @@ test("put uploads a local file, completes it and prints the short link without t
   } finally { restore(); }
 });
 
-test("drop prints a runnable script and refuses unsafe file hints", async () => {
+test("drop asks for a drop code, returns the script in --json and refuses unsafe file hints", async () => {
+  const claimUrl = "https://frely.test/api/drop/abc";
+  const reply = () => text({ code: "abc", expiresAt: "2026-12-01T00:00:00Z", claimUrl, completeUrl: `${claimUrl}/complete` });
+  const shown = await run(["drop", "report.csv"], reply);
+  assert.deepEqual(shown.calls[0]!.input, { action: "drop_link" });
+  assert.match(shown.out, /f='report\.csv'/u);
+  assert.match(shown.out, /When it finishes, the file shows in: frely files/u);
+  assert.equal(JSON.parse((await run(["drop", "--json"], reply)).out).script.includes(claimUrl), true);
+  const unsafe = await run(["drop", 'bad"name'], reply);
+  assert.equal(unsafe.code, EXIT.cli);
+  assert.equal(unsafe.calls.length, 0);
+});
+
+// The snippet is POSIX sh for the other machine; Windows runners have no sh on PATH.
+test("drop prints a runnable script and refuses unsafe file hints", { skip: process.platform === "win32" }, async () => {
   const claimUrl = "https://frely.test/api/drop/abc";
   const completeUrl = `${claimUrl}/complete`;
   const reply = () => text({ code: "abc", expiresAt: "2026-12-01T00:00:00Z", claimUrl, completeUrl });
