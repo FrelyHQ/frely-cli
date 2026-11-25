@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { setObserveIdentity } from "./trust/observe.js";
 import { APPROVAL_DOMAIN, pinTrustChain, TRUST_DOMAIN, trustDirectory, trustRecordHash, type ApprovalPayload, type TrustRecord } from "./trust/record.js";
 import { challengeFor, type Signer, type WebAuthnSignature } from "./trust/webauthn.js";
-import { applySecretDrop, forgetSecretDropKeys, parseSecretDropTarget as parseAnyTarget, renderSecretFields, prepareSecretDrop, secretDropBinding, writerCommand, type SecretDropFileTarget as SecretDropTarget, type SecretDropTarget as AnySecretDropTarget } from "./secret-drop.js";
+import { VAULT_ITEM_FIELDS, applySecretDrop, forgetSecretDropKeys, parseSecretDropTarget as parseAnyTarget, renderSecretFields, prepareSecretDrop, secretDropBinding, writerCommand, type SecretDropFileTarget as SecretDropTarget, type SecretDropTarget as AnySecretDropTarget } from "./secret-drop.js";
 
 /** The tests below build file targets; the vault_unlock kind has its own tests. */
 const parseSecretDropTarget = (value: unknown) => parseAnyTarget(value) as SecretDropTarget;
@@ -264,6 +264,63 @@ test("vault_unlock: a failure never carries the value, and a signature for anoth
     const ct2 = await browserEncrypt(again.epk, DROP, SECRET);
     let called = 0;
     assert.equal(await refusal(applySecretDrop({ dropId: DROP, target: VAULT_TARGET, epk: again.epk, ciphertext: ct2, approval: approval({ epk: again.epk, ciphertext: ct2, target: target() }) }, { unlockVault: async () => { called += 1; return { locksAt: "x" }; } })), "bind_mismatch");
+    assert.equal(called, 0);
+  });
+});
+
+const ITEM_TARGET: AnySecretDropTarget = { kind: "vault_item", origin: "https://example.com", name: "Example", format: "json", fields: [...VAULT_ITEM_FIELDS] };
+const ITEM_SECRET = JSON.stringify({ username: "wyatt@example.com", password: "hunter2-ITEM-PASSWORD", totp: "JBSWY3DPEHPK3PXP" });
+
+test("vault_item target: only the exact signed form parses, and its binding is the value the relay pins", () => {
+  assert.deepEqual(parseAnyTarget(ITEM_TARGET), ITEM_TARGET);
+  for (const bad of [{ ...ITEM_TARGET, fields: VAULT_ITEM_FIELDS.slice(0, 2) }, { ...ITEM_TARGET, origin: "http://example.com" }, { ...ITEM_TARGET, origin: "https://example.com/login" }, { ...ITEM_TARGET, format: "env" }, { ...ITEM_TARGET, extra: 1 }, { ...ITEM_TARGET, name: "" }, { ...ITEM_TARGET, name: "a\nb" }]) {
+    assert.throws(() => parseAnyTarget(bad), /not allowed/u);
+  }
+  assert.equal(secretDropBinding({ dropId: DROP, target: ITEM_TARGET, epk: b64(Buffer.alloc(32, 7)), ciphertext: "AAAA" }), "5bq1q605vr5fdHspedKuhu1A_uwWVrcDon5IllNUCrQ");
+});
+
+test("vault_item: prepare refuses a locked vault only for this kind", () => {
+  const locked = () => ({ status: "locked" });
+  assert.throws(() => prepareSecretDrop({ dropId: DROP, kind: "vault_item" }, Date.now(), locked), /vault is locked/u);
+  assert.ok(prepareSecretDrop({ dropId: DROP, kind: "vault_item" }, Date.now(), () => ({ status: "unlocked" })).epk);
+  assert.ok(prepareSecretDrop({ dropId: DROP, kind: "file" }, Date.now(), locked).epk);
+  assert.ok(prepareSecretDrop({ dropId: DROP }, Date.now(), locked).epk);
+});
+
+test("vault_item: the typed values go to saveLogin once, the receipt carries none of them, and a duplicate is reported", async () => {
+  await withDevice(async () => {
+    const { epk } = prepareSecretDrop({ dropId: DROP });
+    const ciphertext = await browserEncrypt(epk, DROP, ITEM_SECRET);
+    let writes = 0;
+    const saved: unknown[] = [];
+    const receipt = await applySecretDrop({ dropId: DROP, target: ITEM_TARGET, epk, ciphertext, approval: approval({ epk, ciphertext, target: ITEM_TARGET }) }, {
+      run: async () => { writes += 1; return { code: 0, stdout: "", stderr: "" }; },
+      saveLogin: async (origin, login) => { saved.push({ origin, login }); return { status: "saved", hasTotp: true }; },
+    });
+    assert.deepEqual(saved, [{ origin: "https://example.com", login: { name: "Example", username: "wyatt@example.com", password: "hunter2-ITEM-PASSWORD", totp: "JBSWY3DPEHPK3PXP" } }]);
+    assert.deepEqual(receipt, { status: "saved", site: "https://example.com", name: "Example", hasTotp: true });
+    assert.equal(JSON.stringify(receipt).includes("hunter2"), false);
+    assert.equal(writes, 0);
+
+    const again = prepareSecretDrop({ dropId: DROP });
+    const ct2 = await browserEncrypt(again.epk, DROP, JSON.stringify({ username: "u", password: "p", totp: "" }));
+    const seen: unknown[] = [];
+    const exists = await applySecretDrop({ dropId: DROP, target: ITEM_TARGET, epk: again.epk, ciphertext: ct2, approval: approval({ epk: again.epk, ciphertext: ct2, target: ITEM_TARGET }) }, { saveLogin: async (_o, login) => { seen.push(login); return { status: "exists" }; } });
+    assert.deepEqual(exists, { status: "exists", site: "https://example.com" });
+    assert.deepEqual(seen, [{ name: "Example", username: "u", password: "p" }]);
+  });
+});
+
+test("vault_item: a failure never carries the values, and values outside the signed field list are refused", async () => {
+  await withDevice(async () => {
+    const { epk } = prepareSecretDrop({ dropId: DROP });
+    const ciphertext = await browserEncrypt(epk, DROP, ITEM_SECRET);
+    const message = await refusal(applySecretDrop({ dropId: DROP, target: ITEM_TARGET, epk, ciphertext, approval: approval({ epk, ciphertext, target: ITEM_TARGET }) }, { saveLogin: async () => { throw new Error("bw said hunter2-ITEM-PASSWORD and wyatt@example.com"); } }));
+    assert.equal(message.includes("hunter2"), false);
+    const again = prepareSecretDrop({ dropId: DROP });
+    const extra = await browserEncrypt(again.epk, DROP, JSON.stringify({ username: "u", password: "p", totp: "", notes: "x" }));
+    let called = 0;
+    assert.match(await refusal(applySecretDrop({ dropId: DROP, target: ITEM_TARGET, epk: again.epk, ciphertext: extra, approval: approval({ epk: again.epk, ciphertext: extra, target: ITEM_TARGET }) }, { saveLogin: async () => { called += 1; return { status: "saved", hasTotp: false }; } })), /did not match the requested fields/u);
     assert.equal(called, 0);
   });
 });
