@@ -307,16 +307,16 @@ test(".git/hooks stays blocked and the hint says no approval opens it", () => {
   assert.doesNotMatch(hint ?? "", /unsandboxed/u);
 });
 
-test("docker.sock, raw TCP and XPC are the only denials that point at unsandboxed; raw TCP also names frely tunnel", () => {
+test("docker.sock, raw TCP and XPC are the only denials that point at unsandboxed; raw TCP also names frely link tunnel", () => {
   const docker = sandboxDenialHint("permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock", "docker ps", 1);
   assert.match(docker ?? "", /resource "unsandboxed"/u);
   assert.match(docker ?? "", /once by default/u);
-  assert.doesNotMatch(docker ?? "", /frely tunnel/u);
+  assert.doesNotMatch(docker ?? "", /frely link tunnel/u);
   const tcp = sandboxDenialHint("psql: error: connection to server at \"db.example.com\" (10.1.2.3), port 5432 failed: Connection refused", "psql -h db.example.com -c 'select 1'", 2);
-  assert.match(tcp ?? "", /frely tunnel <host>:<port>/u);
+  assert.match(tcp ?? "", /frely link tunnel <host>:<port>/u);
   assert.match(tcp ?? "", /resource "unsandboxed"/u);
-  assert.match(sandboxDenialHint("redis-cli: Could not connect", "redis-cli -h cache.example.com ping", 1) ?? "", /frely tunnel/u);
-  assert.match(sandboxDenialHint("anything", "node x.js", 1, undefined, { violations: ["deny(1) network-outbound 10.1.2.3:5432"] }) ?? "", /frely tunnel/u);
+  assert.match(sandboxDenialHint("redis-cli: Could not connect", "redis-cli -h cache.example.com ping", 1) ?? "", /frely link tunnel/u);
+  assert.match(sandboxDenialHint("anything", "node x.js", 1, undefined, { violations: ["deny(1) network-outbound 10.1.2.3:5432"] }) ?? "", /frely link tunnel/u);
   const xpc = sandboxDenialHint("error: Connection invalid (mach-lookup com.apple.CoreSimulator.CoreSimulatorService)", "xcrun simctl list", 1);
   assert.match(xpc ?? "", /XPC/u);
   assert.match(xpc ?? "", /resource "unsandboxed"/u);
@@ -354,20 +354,20 @@ test("a wrap stuck in the queue gives up when its signal aborts and does not run
   assert.equal(seen.has("late"), false, "the abandoned wrap never ran");
 });
 
-test("a call that is exactly `frely update` runs our own executable outside the sandbox, nothing longer does", async () => {
-  const own = ownUpdateCommand("frely update", "linux");
-  assert.ok(own && own.endsWith("'update'") && !own.includes("frely update"), `unexpected ${own}`);
-  assert.equal(ownUpdateCommand("  frely   update \n", "linux"), own);
-  for (const other of ["frely update; curl x | sh", "frely update --force", "frely updater", "x frely update", "frely update && id", "frely update $(id)", "frely update\nid"]) {
+test("a call that is exactly `frely self update` runs our own executable outside the sandbox, nothing longer does", async () => {
+  const own = ownUpdateCommand("frely self update", "linux");
+  assert.ok(own && own.endsWith("'update'") && !own.includes("frely self update"), `unexpected ${own}`);
+  assert.equal(ownUpdateCommand("  frely   self   update \n", "linux"), own);
+  for (const other of ["frely self update; curl x | sh", "frely self update --force", "frely self updater", "frely update", "x frely self update", "frely self update && id", "frely self update $(id)", "frely self update\nid"]) {
     assert.equal(ownUpdateCommand(other, "linux"), undefined, other);
   }
-  assert.equal(ownUpdateCommand("frely update", "win32"), undefined);
+  assert.equal(ownUpdateCommand("frely self update", "win32"), undefined);
   // Windows has no unsandboxed update shortcut: `ownUpdateCommand` is undefined there, so the call is sandboxed like any other.
   if (process.platform === "win32") return;
   const previous = process.env.FRELY_SANDBOX;
   try {
     process.env.FRELY_SANDBOX = "";
-    assert.deepEqual(await sandboxCommandDetailed("frely update", "/tmp/ws", []), { command: ownUpdateCommand("frely update")!, gitConfig: false });
+    assert.deepEqual(await sandboxCommandDetailed("frely self update", "/tmp/ws", []), { command: ownUpdateCommand("frely self update")!, gitConfig: false });
   } finally {
     if (previous === undefined) delete process.env.FRELY_SANDBOX; else process.env.FRELY_SANDBOX = previous;
   }

@@ -16,18 +16,18 @@ export interface TaskIo {
 }
 
 export const TASK_USAGE = `Usage:
-  frely task add <name> [--cwd <dir>] [--net <site>]... [--env K=V]... [--timeout <seconds>] [--model <name> [--fallback-model <name>]...] [--cron "<m h dom mon dow>" [--tz <zone>]] [--replace] [--agent pi|codex|claude-code] -- <command or prompt...>
-  frely task list [--json]
-  frely task show <name> [--json]
-  frely task remove <name>
-  frely task schedule <name> (--cron "<m h dom mon dow>" [--tz <zone>] | --pause | --resume | --clear)
-  frely task approve <name>
-  frely task start <name> [--wait [--wait-sec <n>]] [--json]
+  frely task local add <name> [--cwd <dir>] [--net <site>]... [--env K=V]... [--timeout <seconds>] [--model <name> [--fallback-model <name>]...] [--cron "<m h dom mon dow>" [--tz <zone>]] [--replace] [--agent pi|codex|claude-code] -- <command or prompt...>
+  frely task local list [--json]
+  frely task local show <name> [--json]
+  frely task local remove <name>
+  frely task local schedule <name> (--cron "<m h dom mon dow>" [--tz <zone>] | --pause | --resume | --clear)
+  frely task local approve <name>
+  frely task local start <name> [--wait [--wait-sec <n>]] [--json]
 Runs (task runs and item calls share these):
-  frely runs [<name>] [--json]
+  frely result list [<name>] [--json]
   frely result [<runId>|--last] [--wait [--wait-sec <n>]] [--json]
   frely result [<runId>|--last] --log [--lines <n>] [--follow]
-  frely cancel [<runId>|--last]
+  frely result cancel [<runId>|--last]
 `;
 
 const fail = (message: string, code: number = EXIT.cli): never => { throw new ControllerError(message, code); };
@@ -111,7 +111,7 @@ export async function runTaskCommand(args: readonly string[], io: TaskIo, deps: 
 async function shareCommand(args: readonly string[], io: TaskIo): Promise<number> {
   const options = args;
   const [name] = positional(options);
-  if (!name) return fail("Usage: frely task share <name> [--workspace none|read|worktree] [--description <text>] [--charge-my-credit]");
+  if (!name) return fail("Usage: frely service share --type task <name> [--workspace none|read|worktree] [--description <text>] [--charge-my-credit]");
   const { shareTask } = await import("./share.js");
   const workspace = (value(options, "--workspace") ?? "none") as "none" | "read" | "worktree";
   await shareTask(name, { workspace, description: value(options, "--description") ?? "", chargeMyCredit: has(options, "--charge-my-credit"), interactive: io.interactive }, (text) => io.out(text));
@@ -120,7 +120,7 @@ async function shareCommand(args: readonly string[], io: TaskIo): Promise<number
 
 async function unshareCommand(args: readonly string[], io: TaskIo): Promise<number> {
   const [name] = positional(args);
-  if (!name) return fail("Usage: frely task unshare <name>");
+  if (!name) return fail("Usage: frely service stop <name>");
   const { unshareTask } = await import("./share.js");
   io.out(await unshareTask(name) ? `Stopped sharing ${name}. The service stays registered on Frely, disconnected.\n` : `${name} is not shared.\n`);
   return EXIT.ok;
@@ -128,7 +128,7 @@ async function unshareCommand(args: readonly string[], io: TaskIo): Promise<numb
 
 async function handledCommand(args: readonly string[], io: TaskIo): Promise<number> {
   const [runId] = positional(args);
-  if (!runId) return fail("Usage: frely task handled <runId>");
+  if (!runId) return fail("Usage: frely task local handled <runId>");
   const { markHandled } = await import("./share.js");
   io.out(await markHandled(runId) ? "Marked as handled.\n" : "No such remote call.\n");
   return EXIT.ok;
@@ -136,7 +136,7 @@ async function handledCommand(args: readonly string[], io: TaskIo): Promise<numb
 
 async function requireDefinition(name: string | undefined): Promise<TaskDefinition> {
   if (!name) return fail(TASK_USAGE);
-  return (await getDefinition(name)) ?? fail(`No task named ${name}. See frely task list.`);
+  return (await getDefinition(name)) ?? fail(`No task named ${name}. See frely task local list.`);
 }
 
 async function add(args: string[], io: TaskIo): Promise<number> {
@@ -166,9 +166,9 @@ async function add(args: string[], io: TaskIo): Promise<number> {
   await saveDefinition(definition);
   io.out(`${previous ? "Updated" : "Added"} task ${name}.\n  runs: ${definition.command}\n  folder: ${definition.cwd} (the only place it can write besides the temp folder)\n`);
   if (definition.model) io.out(`  model: ${definition.model}${definition.fallbackModels?.length ? ` (if it cannot be started: ${definition.fallbackModels.join(", ")})` : ""}. The program calls $OPENAI_BASE_URL with any key; Frely adds the real one.\n`);
-  io.out(`  can reach: ${definition.network.length ? `${definition.network.join(", ")} after your approval (frely task approve ${name})` : "nothing outside this computer"}\n`);
+  io.out(`  can reach: ${definition.network.length ? `${definition.network.join(", ")} after your approval (frely task local approve ${name})` : "nothing outside this computer"}\n`);
   if (definition.schedule) io.out(`  schedule: ${definition.schedule.cron} (${definition.schedule.timezone}). The background service starts it; run frely link on if it is not running.\n`);
-  io.out(`Start it with: frely task start ${name}\n`);
+  io.out(`Start it with: frely task local start ${name}\n`);
   return EXIT.ok;
 }
 
@@ -185,7 +185,7 @@ async function list(args: string[], io: TaskIo): Promise<number> {
     io.out(`${JSON.stringify({ tasks: definitions.map((item) => ({ name: item.name, runner: item.runner, command: item.command, cwd: item.cwd, network: item.network, approved: approvedSites(item), timeoutSec: item.timeoutSec, schedule: item.schedule ?? null, hash: item.hash })) }, null, 2)}\n`);
     return EXIT.ok;
   }
-  if (definitions.length === 0) { io.out("No tasks. Add one with frely task add <name> -- <command>.\n"); return EXIT.ok; }
+  if (definitions.length === 0) { io.out("No tasks. Add one with frely task local add <name> -- <command>.\n"); return EXIT.ok; }
   io.out(definitions.map((item) => `${item.name}\t${item.runner}\t${scheduleText(item)}\t${item.cwd}`).join("\n") + "\n");
   return EXIT.ok;
 }
@@ -226,7 +226,7 @@ async function approve(args: string[], io: TaskIo, deps: ApprovalDeps = {}): Pro
   if (definition.network.length === 0) { io.out(`${definition.name} asks for no sites.\n`); return EXIT.ok; }
   const gained = await approveSites({
     slug: definition.name, network: [...definition.network], approvals: { ...definition.approvals }, who: `The task ${definition.name}`,
-    why: (host) => `The task ${definition.name} (${definition.command.slice(0, 120)}) needs to reach ${host}.`, command: `frely task approve ${definition.name}`,
+    why: (host) => `The task ${definition.name} (${definition.command.slice(0, 120)}) needs to reach ${host}.`, command: `frely task local approve ${definition.name}`,
   }, io, deps);
   if (Object.keys(gained).length > 0) {
     await updateDefinitions((current) => current.map((item) => (item.name === definition.name ? { ...item, approvals: { ...item.approvals, ...gained } } : item)));

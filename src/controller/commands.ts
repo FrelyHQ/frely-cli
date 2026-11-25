@@ -32,30 +32,30 @@ export const isAccountToolName = (name: string): boolean => /^[a-z][a-z0-9_]*\.[
 export interface Output { out(text: string): void; err(text: string): void }
 
 export const CONTROLLER_USAGE = `Control your Frely devices from this computer.
-  frely devices [--add]                          List devices, whether they are online, and their workspaces
-  frely run <device> [--cwd <dir>] [--timeout <s>] [--background] -- <command>
-  frely ps <device>                              Background commands on the device
-  frely logs <device> <id> [--follow]            Output of a background command
-  frely kill <device> <id>                       Stop a background command
-  frely read <device>:<path> [--lines a:b]       Print a file
-  frely ls [<device>:<path>]                     List a folder (no argument: the workspace roots)
-  frely grep <device>:<path> <text> [--regex] [--case] [--max <n>]
-  frely edit <device>:<path> (--from <local file> | --patch <json file>) [--overwrite]
-  frely permission request <device> --resource <name> --reason <text> --command <text> [--cwd <dir>] [--mode once|window|authorization]
-  frely permission confirm <code> [A|B|C]        Finish an approval by authenticator or emailed code
-  frely permission wait <short code> [--then '<command>'] [--timeout <s>]
-  frely put <local file | device:path> [--json]  Share a file or image as a link (https://frely.cloud/f/<code>); prints the link first
-  frely get <id> [<local path> | <device>:<path>] [--overwrite]   Fetch a shared file to this computer or a device
-  frely files                                    List shared files (id, name, size, visibility, expiry, link)
-  frely files rm <id>                            Delete a shared file
-  frely files share <id> --scope self|team|link  Who can open the link
-  frely tools [--json]                           What the server offers, with its own instructions
-  frely call <tool> [--json '<object>' | --input <file>]   Any tool by name
+  frely device list [--add]                          List devices, whether they are online, and their workspaces
+  frely device run <device> [--cwd <dir>] [--timeout <s>] [--background] -- <command>
+  frely device ps <device>                              Background commands on the device
+  frely device logs <device> <id> [--follow]            Output of a background command
+  frely device kill <device> <id>                       Stop a background command
+  frely device read <device>:<path> [--lines a:b]       Print a file
+  frely device ls [<device>:<path>]                     List a folder (no argument: the workspace roots)
+  frely device grep <device>:<path> <text> [--regex] [--case] [--max <n>]
+  frely device edit <device>:<path> (--from <local file> | --patch <json file>) [--overwrite]
+  frely device permission request <device> --resource <name> --reason <text> --command <text> [--cwd <dir>] [--mode once|window|authorization]
+  frely device permission confirm <code> [A|B|C]        Finish an approval by authenticator or emailed code
+  frely device permission wait <short code> [--then '<command>'] [--timeout <s>]
+  frely file put <local file | device:path> [--json]  Share a file or image as a link (https://frely.cloud/f/<code>); prints the link first
+  frely file get <id> [<local path> | <device>:<path>] [--overwrite]   Fetch a shared file to this computer or a device
+  frely file list                                    List shared files (id, name, size, visibility, expiry, link)
+  frely file rm <id>                            Delete a shared file
+  frely file share <id> --scope self|team|link  Who can open the link
+  frely api list [--json]                           What the server offers, with its own instructions
+  frely api call <tool> [--json '<object>' | --input <file>]   Any tool by name
 
 Every command takes --json (the full result) and --out <file> (write the output there).
-A device is its name or id from "frely devices". A path on this computer is not accepted where <device>:<path> is expected.
+A device is its name or id from "frely device list". A path on this computer is not accepted where <device>:<path> is expected.
 Exit codes: 0 done, 1 this CLI (usage, local file), 2 the tool or the remote command failed, 3 approval needed (the output has the link
-and the "frely permission wait" command), 4 not signed in (run \`frely login\`), 5 device offline, 6 limit reached.
+and the "frely device permission wait" command), 4 not signed in (run \`frely login\`), 5 device offline, 6 limit reached.
 `;
 
 const MAX_LOCAL_FILE = 1024 * 1024;
@@ -169,7 +169,7 @@ async function toolCall(io: Output, parsed: ParsedArgs, name: string, input: Rec
 async function run(args: string[], io: Output): Promise<number> {
   const parsed = parseArgs(args, { flags: [...COMMON_FLAGS, "--background"], values: [...COMMON_VALUES, "--cwd", "--timeout"] });
   const [device] = parsed.positionals;
-  if (!device || parsed.positionals.length !== 1 || parsed.rest.length === 0) throw new ControllerError("Usage: frely run <device> [--cwd <dir>] [--timeout <s>] [--background] -- <command>", EXIT.cli);
+  if (!device || parsed.positionals.length !== 1 || parsed.rest.length === 0) throw new ControllerError("Usage: frely device run <device> [--cwd <dir>] [--timeout <s>] [--background] -- <command>", EXIT.cli);
   const timeout = intOption(parsed, "--timeout", 1, 120);
   const background = parsed.flags.has("--background");
   return toolCall(io, parsed, "process", {
@@ -180,19 +180,19 @@ async function run(args: string[], io: Output): Promise<number> {
 
 async function ps(args: string[], io: Output): Promise<number> {
   const parsed = parseArgs(args, { flags: COMMON_FLAGS, values: COMMON_VALUES });
-  if (parsed.positionals.length !== 1) throw new ControllerError("Usage: frely ps <device>", EXIT.cli);
+  if (parsed.positionals.length !== 1) throw new ControllerError("Usage: frely device ps <device>", EXIT.cli);
   return toolCall(io, parsed, "process", { device: parsed.positionals[0], action: "list" });
 }
 
 async function kill(args: string[], io: Output): Promise<number> {
   const parsed = parseArgs(args, { flags: COMMON_FLAGS, values: COMMON_VALUES });
-  if (parsed.positionals.length !== 2) throw new ControllerError("Usage: frely kill <device> <id>", EXIT.cli);
+  if (parsed.positionals.length !== 2) throw new ControllerError("Usage: frely device kill <device> <id>", EXIT.cli);
   return toolCall(io, parsed, "process", { device: parsed.positionals[0], action: "stop", processId: parsed.positionals[1] });
 }
 
 async function logs(args: string[], io: Output): Promise<number> {
   const parsed = parseArgs(args, { flags: [...COMMON_FLAGS, "--follow"], values: COMMON_VALUES });
-  if (parsed.positionals.length !== 2) throw new ControllerError("Usage: frely logs <device> <id> [--follow]", EXIT.cli);
+  if (parsed.positionals.length !== 2) throw new ControllerError("Usage: frely device logs <device> <id> [--follow]", EXIT.cli);
   const [device, processId] = parsed.positionals as [string, string];
   const follow = parsed.flags.has("--follow");
   return withController(io, async (controller) => {
@@ -215,7 +215,7 @@ async function logs(args: string[], io: Output): Promise<number> {
 
 async function readCommand(args: string[], io: Output): Promise<number> {
   const parsed = parseArgs(args, { flags: COMMON_FLAGS, values: [...COMMON_VALUES, "--lines"] });
-  if (parsed.positionals.length !== 1) throw new ControllerError("Usage: frely read <device>:<path> [--lines a:b]", EXIT.cli);
+  if (parsed.positionals.length !== 1) throw new ControllerError("Usage: frely device read <device>:<path> [--lines a:b]", EXIT.cli);
   const { device, path } = requireRemote(parsed.positionals[0]);
   let range: Record<string, number> = {};
   const lines = parsed.values.get("--lines");
@@ -229,7 +229,7 @@ async function readCommand(args: string[], io: Output): Promise<number> {
 
 async function ls(args: string[], io: Output): Promise<number> {
   const parsed = parseArgs(args, { flags: COMMON_FLAGS, values: COMMON_VALUES });
-  if (parsed.positionals.length > 1) throw new ControllerError("Usage: frely ls [<device>:<path>]", EXIT.cli);
+  if (parsed.positionals.length > 1) throw new ControllerError("Usage: frely device ls [<device>:<path>]", EXIT.cli);
   const [target] = parsed.positionals;
   if (target !== undefined && !target.includes(":")) return toolCall(io, parsed, "read", { device: target, action: "roots" });
   const { device, path } = requireRemote(target);
@@ -238,7 +238,7 @@ async function ls(args: string[], io: Output): Promise<number> {
 
 async function grep(args: string[], io: Output): Promise<number> {
   const parsed = parseArgs(args, { flags: [...COMMON_FLAGS, "--regex", "--case"], values: [...COMMON_VALUES, "--max", "--context"] });
-  if (parsed.positionals.length !== 2) throw new ControllerError("Usage: frely grep <device>:<path> <text> [--regex] [--case] [--max <n>] [--context <n>]", EXIT.cli);
+  if (parsed.positionals.length !== 2) throw new ControllerError("Usage: frely device grep <device>:<path> <text> [--regex] [--case] [--max <n>] [--context <n>]", EXIT.cli);
   const { device, path } = requireRemote(parsed.positionals[0]);
   const max = intOption(parsed, "--max", 1, 1000), context = intOption(parsed, "--context", 0, 10);
   return toolCall(io, parsed, "read", {
@@ -249,7 +249,7 @@ async function grep(args: string[], io: Output): Promise<number> {
 
 async function edit(args: string[], io: Output): Promise<number> {
   const parsed = parseArgs(args, { flags: [...COMMON_FLAGS, "--overwrite"], values: [...COMMON_VALUES, "--from", "--patch"] });
-  if (parsed.positionals.length !== 1) throw new ControllerError("Usage: frely edit <device>:<path> (--from <local file> | --patch <json file>) [--overwrite]", EXIT.cli);
+  if (parsed.positionals.length !== 1) throw new ControllerError("Usage: frely device edit <device>:<path> (--from <local file> | --patch <json file>) [--overwrite]", EXIT.cli);
   const { device, path } = requireRemote(parsed.positionals[0]);
   const from = parsed.values.get("--from"), patch = parsed.values.get("--patch");
   if ((from === undefined) === (patch === undefined)) throw new ControllerError("Give exactly one of --from <local file> or --patch <json file>.", EXIT.cli);
@@ -316,7 +316,7 @@ function transferFailure(error: unknown, exitCode: number): ControllerError {
 
 async function putCommand(args: string[], io: Output): Promise<number> {
   const parsed = parseArgs(args, { flags: COMMON_FLAGS, values: COMMON_VALUES });
-  if (parsed.positionals.length !== 1) throw new ControllerError("Usage: frely put <local file | device:path> [--json]", EXIT.cli);
+  if (parsed.positionals.length !== 1) throw new ControllerError("Usage: frely file put <local file | device:path> [--json]", EXIT.cli);
   const target = parseTarget(parsed.positionals[0]!);
   return withController(io, async (controller) => {
     let data: Record<string, unknown>;
@@ -346,7 +346,7 @@ async function putCommand(args: string[], io: Output): Promise<number> {
 
 async function getCommand(args: string[], io: Output): Promise<number> {
   const parsed = parseArgs(args, { flags: [...COMMON_FLAGS, "--overwrite"], values: COMMON_VALUES });
-  if (parsed.positionals.length < 1 || parsed.positionals.length > 2) throw new ControllerError("Usage: frely get <id> [<local path> | <device>:<path>] [--overwrite]", EXIT.cli);
+  if (parsed.positionals.length < 1 || parsed.positionals.length > 2) throw new ControllerError("Usage: frely file get <id> [<local path> | <device>:<path>] [--overwrite]", EXIT.cli);
   const [id, destination] = parsed.positionals as [string, string | undefined];
   const overwrite = parsed.flags.has("--overwrite");
   const target = destination === undefined ? null : parseTarget(destination);
@@ -387,16 +387,16 @@ async function filesCommand(args: string[], io: Output): Promise<number> {
   const [action, ...rest] = args;
   if (action === "rm" || action === "share") {
     const parsed = parseArgs(rest, { flags: COMMON_FLAGS, values: action === "share" ? [...COMMON_VALUES, "--scope"] : COMMON_VALUES });
-    if (parsed.positionals.length !== 1) throw new ControllerError(action === "rm" ? "Usage: frely files rm <id>" : "Usage: frely files share <id> --scope self|team|link", EXIT.cli);
+    if (parsed.positionals.length !== 1) throw new ControllerError(action === "rm" ? "Usage: frely file rm <id>" : "Usage: frely file share <id> --scope self|team|link", EXIT.cli);
     const id = parsed.positionals[0]!;
     if (action === "rm") return toolCall(io, parsed, "transfer", { action: "delete", id });
     const scope = parsed.values.get("--scope");
     if (!scope || !(SHARE_SCOPES as readonly string[]).includes(scope)) throw new ControllerError("--scope must be self, team or link.", EXIT.cli);
     return toolCall(io, parsed, "transfer", { action: "share", id, scope });
   }
-  if (action !== undefined && !action.startsWith("--")) throw new ControllerError("Usage: frely files [rm <id> | share <id> --scope self|team|link]", EXIT.cli);
+  if (action !== undefined && !action.startsWith("--")) throw new ControllerError("Usage: frely file list [rm <id> | share <id> --scope self|team|link]", EXIT.cli);
   const parsed = parseArgs(args, { flags: COMMON_FLAGS, values: COMMON_VALUES });
-  if (parsed.positionals.length !== 0) throw new ControllerError("Usage: frely files [rm <id> | share <id> --scope self|team|link]", EXIT.cli);
+  if (parsed.positionals.length !== 0) throw new ControllerError("Usage: frely file list [rm <id> | share <id> --scope self|team|link]", EXIT.cli);
   return withController(io, async (controller) => {
     const result = await controller.call("transfer", { action: "list" });
     const outcome = outcomeOf(result);
@@ -441,7 +441,7 @@ function parseObject(text: string): Record<string, unknown> {
 async function callCommand(args: string[], io: Output): Promise<number> {
   const { parsed, input } = callArgs(args);
   const [name] = parsed.positionals;
-  if (!name || parsed.positionals.length !== 1 || !/^[a-zA-Z0-9_.:-]{1,128}$/u.test(name)) throw new ControllerError("Usage: frely call <tool> [--json '<object>' | --input <file>]", EXIT.cli);
+  if (!name || parsed.positionals.length !== 1 || !/^[a-zA-Z0-9_.:-]{1,128}$/u.test(name)) throw new ControllerError("Usage: frely api call <tool> [--json '<object>' | --input <file>]", EXIT.cli);
   // A Frely account tool is named group.action (share_links.redeem): it is not a tool of a device, which would otherwise be asked for.
   if (/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/u.test(name)) throw new ControllerError(`${name} is a Frely account tool, not a device tool. Run: frely api call ${name} --json '<object>'`, EXIT.cli);
   const file = parsed.values.get("--input");
@@ -455,7 +455,7 @@ async function permissionCommand(args: string[], io: Output): Promise<number> {
     const parsed = parseArgs(rest, { flags: [...COMMON_FLAGS, "--no-wait"], values: [...COMMON_VALUES, "--resource", "--reason", "--command", "--cwd", "--mode"] });
     const [device] = parsed.positionals;
     const resource = parsed.values.get("--resource"), reason = parsed.values.get("--reason"), command = parsed.values.get("--command");
-    if (!device || parsed.positionals.length !== 1 || !resource || !reason || !command) throw new ControllerError("Usage: frely permission request <device> --resource <name> --reason <text> --command <text> [--cwd <dir>] [--mode once|window|authorization]", EXIT.cli);
+    if (!device || parsed.positionals.length !== 1 || !resource || !reason || !command) throw new ControllerError("Usage: frely device permission request <device> --resource <name> --reason <text> --command <text> [--cwd <dir>] [--mode once|window|authorization]", EXIT.cli);
     const mode = parsed.values.get("--mode");
     if (mode !== undefined && !["once", "window", "authorization"].includes(mode)) throw new ControllerError("--mode must be once, window or authorization.", EXIT.cli);
     return withController(io, async (controller) => {
@@ -472,13 +472,13 @@ async function permissionCommand(args: string[], io: Output): Promise<number> {
   if (action === "confirm") {
     const parsed = parseArgs(rest, { flags: COMMON_FLAGS, values: COMMON_VALUES });
     const [code, choice] = parsed.positionals;
-    if (!code || parsed.positionals.length > 2 || (choice !== undefined && !/^[ABC]$/u.test(choice))) throw new ControllerError("Usage: frely permission confirm <code> [A|B|C]", EXIT.cli);
+    if (!code || parsed.positionals.length > 2 || (choice !== undefined && !/^[ABC]$/u.test(choice))) throw new ControllerError("Usage: frely device permission confirm <code> [A|B|C]", EXIT.cli);
     return toolCall(io, parsed, "confirm_permission", { code, ...(choice ? { choice } : {}) });
   }
   if (action === "wait") {
     const parsed = parseArgs(rest, { values: ["--then", "--timeout"] });
     const [reference] = parsed.positionals;
-    if (!reference || parsed.positionals.length !== 1 || !/^[A-Za-z]{4}-?[A-Za-z]{4}$/u.test(reference)) throw new ControllerError("Usage: frely permission wait <approval code (ABCD-EFGH)> [--then '<command>'] [--timeout <s>]", EXIT.cli);
+    if (!reference || parsed.positionals.length !== 1 || !/^[A-Za-z]{4}-?[A-Za-z]{4}$/u.test(reference)) throw new ControllerError("Usage: frely device permission wait <approval code (ABCD-EFGH)> [--then '<command>'] [--timeout <s>]", EXIT.cli);
     const ref: ApprovalRef = { code: reference.replace("-", "").toUpperCase() };
     const timeout = intOption(parsed, "--timeout", 1, 3600) ?? 600;
     const status = await withController(io, (controller) => waitForPermission(controller, ref, timeout * 1000, io));
@@ -491,7 +491,7 @@ async function permissionCommand(args: string[], io: Output): Promise<number> {
       child.once("exit", (exit) => done(exit ?? EXIT.tool));
     });
   }
-  throw new ControllerError("Usage: frely permission request|confirm|wait. See frely permission --help.", EXIT.cli);
+  throw new ControllerError("Usage: frely device permission request|confirm|wait. See frely device permission --help.", EXIT.cli);
 }
 
 /** Waits until the owner decides: approved is 0, denied 2, and a request that ran out (or was revoked) or the time limit is 3, because approval is still needed. */
@@ -507,7 +507,7 @@ export async function waitForPermission(controller: Pick<Controller, "call">, re
     case "denied": io.err("The owner denied this request.\n"); return EXIT.tool;
     case "used": io.err("This approval was already used for a call. Check that call's result before repeating it.\n"); return EXIT.tool;
     case "expired": case "revoked": io.err(`The request is ${outcome.status}. Ask for it again.\n`); return EXIT.approval;
-    case "pending": io.err("Still waiting for the owner. Run frely permission wait again to keep waiting.\n"); return EXIT.approval;
+    case "pending": io.err("Still waiting for the owner. Run frely device permission wait again to keep waiting.\n"); return EXIT.approval;
     default: io.err(outcome.message + "\n"); return EXIT.tool;
   }
 }

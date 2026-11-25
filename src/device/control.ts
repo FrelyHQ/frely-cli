@@ -64,7 +64,7 @@ export function sameComputerNotes(record: Record<string, unknown>): string[] {
   const names = (value: unknown) => Array.isArray(value) ? value.flatMap((item) => item && typeof item === "object" && typeof (item as { name?: unknown }).name === "string" ? [String((item as { name: string }).name).slice(0, 128)] : []) : [];
   const notes: string[] = [];
   for (const name of names(record.replaced)) notes.push(`This computer was registered before as "${name}" (offline); that entry was replaced by this one.`);
-  for (const name of names(record.sameComputerOnline)) notes.push(`Warning: another Frely on this computer is connected as "${name}" with a different device key (another user account or home directory). Keep one: run \`frely uninstall\` in the one you do not need.`);
+  for (const name of names(record.sameComputerOnline)) notes.push(`Warning: another Frely on this computer is connected as "${name}" with a different device key (another user account or home directory). Keep one: run \`frely self uninstall\` in the one you do not need.`);
   return notes;
 }
 

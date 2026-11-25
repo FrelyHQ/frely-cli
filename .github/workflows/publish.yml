@@ -173,7 +173,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "$FRELY_RELEASE_SIGNING_KEY_PEM" ]]; then
-            echo "Environment release-signing has no secret FRELY_RELEASE_SIGNING_KEY; remote frely update refuses unsigned releases." >&2
+            echo "Environment release-signing has no secret FRELY_RELEASE_SIGNING_KEY; remote frely self update refuses unsigned releases." >&2
             exit 1
           fi
           key_file="$(mktemp)"

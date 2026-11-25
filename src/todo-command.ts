@@ -1,4 +1,4 @@
-// `frely todo`: read and write the signed-in account's cloud todos (a goal and a plan of steps) through the Frely todo.* tools.
+// `frely task`: read and write the signed-in account's cloud todos (a goal and a plan of steps) through the Frely todo.* tools.
 // The cloud is the only copy: the CLI needs a connection (it is online-by-default), and archived is the only delete.
 
 type Call = (name: string, input: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -11,7 +11,7 @@ export interface TodoCommandIo {
 export const TODO_STATUSES = ["open", "in_progress", "done", "cancelled", "archived"] as const;
 export const TODO_STEP_STATUSES = ["pending", "succeeded", "failed", "skipped", "cancelled"] as const;
 
-const USAGE = "Usage: frely todo list|show|add|update|archive|plan|step. Run frely help --agent --json todo for flags.";
+const USAGE = "Usage: frely task list|show|add|update|archive|plan|step. Run frely help --agent --json todo for flags.";
 
 interface Parsed { positional: string[]; flags: Map<string, string[]>; json: boolean }
 
@@ -55,7 +55,7 @@ function stepLine(step: Step): string {
   return `  ${step.seq}. [${step.status}] ${step.instruction}${step.deviceId ? `  (device ${step.deviceId})` : ""}  ${step.id}\n${step.resultSummary ? `     ${step.resultSummary.split("\n")[0]}\n` : ""}`;
 }
 
-/** Runs one `frely todo` command; returns the exit code. */
+/** Runs one `frely task` command; returns the exit code. */
 export async function runTodoCommand(args: readonly string[], io: TodoCommandIo): Promise<number> {
   const action = args[0];
   const rest = args.slice(1);
@@ -78,7 +78,7 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
   if (action === "show") {
     const parsed = parseTodoArgs(rest, []);
     const todoId = parsed.positional[0];
-    if (!todoId) throw new Error("Usage: frely todo show <todoId> [--json]");
+    if (!todoId) throw new Error("Usage: frely task show <todoId> [--json]");
     const result = await io.call("todo.show", { todoId }) as { todo?: Todo; steps?: Step[] };
     emit(result, parsed.json, () => `${line(result.todo ?? {})}${result.todo?.description ? `${result.todo.description}\n` : ""}${(result.steps ?? []).map(stepLine).join("") || "  (no steps)\n"}`);
     return 0;
@@ -86,7 +86,7 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
   if (action === "add") {
     const parsed = parseTodoArgs(rest, ["--description", "--step", "--device"]);
     const title = parsed.positional.join(" ").trim();
-    if (!title) throw new Error("Usage: frely todo add <title> [--description <text>] [--step <instruction> [--device <id>]]... [--json]");
+    if (!title) throw new Error("Usage: frely task add <title> [--description <text>] [--step <instruction> [--device <id>]]... [--json]");
     const result = await io.call("todo.add", { title, ...(one(parsed, "--description") ? { description: one(parsed, "--description") } : {}), ...(parsed.flags.has("--step") ? { steps: steps(parsed) } : {}) }) as { todo?: Todo };
     emit(result, parsed.json, () => `Created ${result.todo?.id}\n`);
     return 0;
@@ -94,7 +94,7 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
   if (action === "update" || action === "archive") {
     const parsed = parseTodoArgs(rest, ["--title", "--description", "--status"]);
     const todoId = parsed.positional[0];
-    if (!todoId) throw new Error(action === "archive" ? "Usage: frely todo archive <todoId>" : "Usage: frely todo update <todoId> [--title <t>] [--description <t>] [--status open|in_progress|done|cancelled|archived]");
+    if (!todoId) throw new Error(action === "archive" ? "Usage: frely task archive <todoId>" : "Usage: frely task update <todoId> [--title <t>] [--description <t>] [--status open|in_progress|done|cancelled|archived]");
     const input: Record<string, unknown> = { todoId };
     if (action === "archive") input.status = "archived";
     else {
@@ -110,7 +110,7 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
   if (action === "plan") {
     const parsed = parseTodoArgs(rest, ["--step", "--device"]);
     const todoId = parsed.positional[0];
-    if (!todoId) throw new Error("Usage: frely todo plan <todoId> [--step <instruction> [--device <id>]]... [--json] (replaces the steps that have not started; no --step clears them)");
+    if (!todoId) throw new Error("Usage: frely task plan <todoId> [--step <instruction> [--device <id>]]... [--json] (replaces the steps that have not started; no --step clears them)");
     const result = await io.call("todo.plan", { todoId, steps: steps(parsed) }) as { steps?: Step[] };
     emit(result, parsed.json, () => (result.steps ?? []).map(stepLine).join("") || "  (no steps)\n");
     return 0;
@@ -121,7 +121,7 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
       const parsed = parseTodoArgs(rest.slice(1), ["--device"]);
       const [todoId, ...words] = parsed.positional;
       const instruction = words.join(" ").trim();
-      if (!todoId || !instruction) throw new Error("Usage: frely todo step add <todoId> <instruction> [--device <id>] [--json]");
+      if (!todoId || !instruction) throw new Error("Usage: frely task step add <todoId> <instruction> [--device <id>] [--json]");
       const result = await io.call("todo.step_add", { todoId, instruction, ...(one(parsed, "--device") ? { deviceId: one(parsed, "--device") } : {}) }) as { steps?: Step[] };
       emit(result, parsed.json, () => (result.steps ?? []).map(stepLine).join(""));
       return 0;
@@ -129,7 +129,7 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
     if (sub === "update") {
       const parsed = parseTodoArgs(rest.slice(1), ["--instruction", "--device", "--status", "--result"]);
       const [todoId, stepId] = parsed.positional;
-      if (!todoId || !stepId) throw new Error("Usage: frely todo step update <todoId> <stepId> [--instruction <t>] [--device <id>] [--status pending|succeeded|failed|skipped|cancelled] [--result <text>] [--json]");
+      if (!todoId || !stepId) throw new Error("Usage: frely task step update <todoId> <stepId> [--instruction <t>] [--device <id>] [--status pending|succeeded|failed|skipped|cancelled] [--result <text>] [--json]");
       const input: Record<string, unknown> = { todoId, stepId };
       if (one(parsed, "--instruction") !== undefined) input.instruction = one(parsed, "--instruction");
       if (one(parsed, "--device") !== undefined) input.deviceId = one(parsed, "--device");
@@ -140,7 +140,7 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
       emit(result, parsed.json, () => stepLine(result.step ?? {}));
       return 0;
     }
-    throw new Error("Usage: frely todo step add|update");
+    throw new Error("Usage: frely task step add|update");
   }
   io.out(`${USAGE}\n`);
   return action === undefined ? 0 : 1;

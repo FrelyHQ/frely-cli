@@ -13,13 +13,13 @@ Anything running as your user can read that folder, including a model's shell, s
       "Bash(cat ~/.config/frely/*)",
       "Bash(cat ~/.local/state/frely/*)"
     ],
-    "allow": ["Bash(frely devices:*)", "Bash(frely read:*)", "Bash(frely ls:*)", "Bash(frely grep:*)", "Bash(frely tools:*)"]
+    "allow": ["Bash(frely device list:*)", "Bash(frely device read:*)", "Bash(frely device ls:*)", "Bash(frely device grep:*)", "Bash(frely api list:*)"]
   },
   "env": { "BASH_DEFAULT_TIMEOUT_MS": "120000" }
 }
 ```
 
-The `allow` lines are only the read-only commands. `frely run`, `edit`, `kill` and `call` stay behind Claude Code's own prompt.
+The `allow` lines are only the read-only commands. `frely device run`, `edit`, `kill` and `call` stay behind Claude Code's own prompt.
 A leaked token works until it is disconnected, so the deny rules matter; this machine's connection can be revoked any time on the web
 (My Devices) or by `frely logout`.
 

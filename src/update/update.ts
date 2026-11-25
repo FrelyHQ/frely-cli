@@ -36,7 +36,7 @@ export async function inspectUpdate(): Promise<UpdateInspection> {
     const release = await latestRelease(installation);
     const available = compareVersions(release.version, VERSION) > 0;
     return { currentVersion: VERSION, latestVersion: release.version, installation, state: available ? "available" as const : "current" as const,
-      message: available ? `${VERSION} → ${release.version}. Run frely update.` : `${VERSION} is up to date.` };
+      message: available ? `${VERSION} → ${release.version}. Run frely self update.` : `${VERSION} is up to date.` };
   } catch {
     return { currentVersion: VERSION, installation, state: "unavailable" as const, message: "Version lookup unavailable. Check connectivity and run frely doctor again." };
   }
@@ -192,7 +192,7 @@ async function assertLoginUsable(): Promise<void> {
   try { await requireLogin(); }
   catch (error) {
     if (!isLoginFailure(error)) return;
-    throw new Error("This computer's Frely login is no longer valid, so restarting the service into the new version would take it offline. Nothing was changed. Run frely login, then frely update.");
+    throw new Error("This computer's Frely login is no longer valid, so restarting the service into the new version would take it offline. Nothing was changed. Run frely login, then frely self update.");
   }
 }
 
@@ -207,7 +207,7 @@ export async function update(write: (message: string) => void, dependencies: Upd
   const release = await d.latestRelease(installation);
   if (compareVersions(release.version, VERSION) <= 0) return { state: "current", message: `Frely ${VERSION} is up to date.` };
   const service = await d.serviceStatus();
-  if (installation.platform === "win32") return { state: "manual", message: `Update ${VERSION} → ${release.version}. Finish any running Frely tasks, then run this command in a local PowerShell terminal:\n\n${manualUpdateCommand(installation, release.version, service.active, (await currentInstance()).setupUrl)}\n\nAfter installation, run frely doctor. No files or services were changed by frely update.` };
+  if (installation.platform === "win32") return { state: "manual", message: `Update ${VERSION} → ${release.version}. Finish any running Frely tasks, then run this command in a local PowerShell terminal:\n\n${manualUpdateCommand(installation, release.version, service.active, (await currentInstance()).setupUrl)}\n\nAfter installation, run frely doctor. No files or services were changed by frely self update.` };
   if (!["darwin", "linux"].includes(installation.platform)) throw new Error("This platform requires a manual update.");
   if (service.active) {
     const command = await d.serviceCommand();

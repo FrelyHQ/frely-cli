@@ -65,7 +65,7 @@ async function approveSite(controller: Controller, device: string, record: Appro
   const result = await controller.call("request_permission", {
     device, resource: siteResource(host), mode: "window",
     reason: (record.why ? record.why(host) : `The local Agent ${record.slug} lists ${host} in its frely.yaml.`).slice(0, 300),
-    command: record.command ?? `frely service start ${record.slug}`,
+    command: record.command ?? `frely agent start ${record.slug}`,
   });
   const data = resultData(result);
   if (result.isError === true || !data) throw new ControllerError(`Could not ask for approval of ${host}: ${resultText(result) || "no answer"}`, EXIT.tool);

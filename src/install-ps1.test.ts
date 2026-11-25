@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-// install.ps1 cannot run on CI Linux; pin the contract between the installer's PATH forwarder and `frely uninstall`.
+// install.ps1 cannot run on CI Linux; pin the contract between the installer's PATH forwarder and `frely self uninstall`.
 const installer = readFileSync("install.ps1", "utf8");
 const uninstall = readFileSync("src/uninstall.ts", "utf8");
 

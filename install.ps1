@@ -192,7 +192,7 @@ try {
   }
   # A long-running local agent (or IDE) keeps the PATH it started with, so the registry update above never reaches
   # the shells it spawns. When the install directory is missing from this process' PATH, also drop a tiny
-  # frely.cmd forwarder into a user-writable directory that is already on it; it is removed by `frely uninstall`.
+  # frely.cmd forwarder into a user-writable directory that is already on it; it is removed by `frely self uninstall`.
   $inheritedPath = $env:PATH
   $shim = $null
   if ($env:FRELY_INSTALL_NO_PROFILE -ne '1' -and (($inheritedPath -split ';' | ForEach-Object { $_.TrimEnd('\') }) -notcontains $directory.TrimEnd('\'))) {
@@ -203,7 +203,7 @@ try {
       $file = Join-Path $candidate 'frely.cmd'
       try {
         if ((Test-Path -LiteralPath $file) -and -not ((Get-Content -LiteralPath $file -Raw) -match 'frely-shim')) { continue }
-        [IO.File]::WriteAllText($file, "@echo off`r`nREM frely-shim: forwards to the Frely install directory; removed by frely uninstall`r`n`"$target`" %*`r`n")
+        [IO.File]::WriteAllText($file, "@echo off`r`nREM frely-shim: forwards to the Frely install directory; removed by frely self uninstall`r`n`"$target`" %*`r`n")
         $shim = $file; break
       } catch { continue }
     }

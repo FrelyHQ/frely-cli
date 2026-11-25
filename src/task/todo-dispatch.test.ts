@@ -62,7 +62,7 @@ test("start verifies the signed scope, runs one step as a remote pi task, and a 
     // Pin with a proper first-version signature.
     await pinTrustChain([{ record, sig: trustSig(record) }], "usr_1", trustDirectory({ relayUrl: "https://r.test", userId: "usr_1" }), trustAnchor(HOSTED_INSTANCE));
     const spawned: string[] = [];
-    const deps = { spawnWorker: (runId: string) => { spawned.push(runId); } };
+    const deps = { spawnWorker: (runId: string) => { spawned.push(runId); }, defaultAgent: async () => "pi" as const };
     const args = { action: "start", runKey: "run_abcdef01", todoId: "td_1", instruction: "Say hello", cwd: work, sites: ["github.com"] };
     const meta = { [TODO_SCOPE_META_KEY]: approval(work) };
     const first = await runTodoDispatch(args, meta, deps);

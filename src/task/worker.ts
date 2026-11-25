@@ -84,7 +84,7 @@ export async function executeTaskRun(runId: string, signal: AbortSignal = new Ab
     clearTimeout(timer);
     signal.removeEventListener("abort", stop);
     const blocked = [...new Set(sandboxViolationLines(wrapped.commandId))].slice(0, 10);
-    if (blocked.length > 0) note(`The sandbox blocked:\n${blocked.join("\n")}\nIf a site is missing, add it with frely task add --net <site> and approve it with frely task approve.`);
+    if (blocked.length > 0) note(`The sandbox blocked:\n${blocked.join("\n")}\nIf a site is missing, add it with frely task local add --net <site> and approve it with frely task local approve.`);
     await new Promise<void>((done) => logStream.end(done));
     const output = await logTail(runId);
     const extra = runner.finish ? await runner.finish(context, { code, output }).catch((error: unknown) => ({ error: { code: "finish_failed", message: error instanceof Error ? error.message : String(error) } })) : {};

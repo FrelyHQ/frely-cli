@@ -61,7 +61,7 @@ Then sign in and install the Skill for your agent host:
 
 ```sh
 frely login --email <you@example.com>   # Then run: frely login --code <6-digit code> [--host <host>] [--link on] (installs Skill; --link on also turns on remote control)
-frely skill install --host <claude-code|codex|pi|workbuddy|codebuddy|generic>
+frely agent setup --host <claude-code|codex|pi|workbuddy|codebuddy|generic>
 ```
 
 ### Add FreelyMCP to web agents
@@ -82,17 +82,17 @@ Tutorial [https://freely.cloud/docs/claude](https://freely.cloud/docs/claude/)
 
 | Command | What it does |
 | --- | --- |
-| `frely skill install --host <host>` | Install the `frely` Skill for an agent host (`claude-code`, `codex`, `pi` or `generic`). |
+| `frely agent setup --host <host>` | Install the `frely` Skill for an agent host (`claude-code`, `codex`, `pi` or `generic`). |
 | `frely link on` | Turn remote control on: sign in if needed, approve this computer in the browser, start the background service and print the MCP URL. Safe to re-run: it renews expired access and starts a stopped service. |
 | `frely link off` | Turn remote control off: revoke access for every client and lock it on this computer, so only `frely link on` here turns it on again. The background service is uninstalled, or kept running for local Providers. |
 | `frely link status` | Show whether remote control is on, off or not enabled yet, with the MCP URL, workspace, expiry and service state. |
 | `frely link workspace add <path>` | Share another folder. `frely link workspace list` shows them all. `frely link workspace add <path> --primary` (or `-p`) makes a folder the primary one without a new authorization; `remove` only stops sharing, it never deletes files. |
 | `frely doctor` | Check sign-in, installation, service and connection. `-v` for details. |
-| `frely update` | Update to the latest version in place. |
+| `frely self update` | Update to the latest version in place. |
 | `frely login` / `frely logout` | Sign in or out of Freely account. |
-| `frely sandbox proxy <url>` | Forward the command sandbox's network traffic to your own HTTP(S) proxy. Without it the CLI uses `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` and, on macOS, the system proxy. `--clear` removes it. A running background service restarts to apply the change. |
-| `frely tunnel <host>:<port>` | Inside a sandboxed command: listen on `127.0.0.1` and forward TCP connections to `host:port` through the sandbox, for database and redis clients. `--local-port N` picks the local port. |
-| `frely uninstall` | Remove Freely from this computer (lists everything first). |
+| `frely link proxy <url>` | Forward the command sandbox's network traffic to your own HTTP(S) proxy. Without it the CLI uses `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` and, on macOS, the system proxy. `--clear` removes it. A running background service restarts to apply the change. |
+| `frely link tunnel <host>:<port>` | Inside a sandboxed command: listen on `127.0.0.1` and forward TCP connections to `host:port` through the sandbox, for database and redis clients. `--local-port N` picks the local port. |
+| `frely self uninstall` | Remove Freely from this computer (lists everything first). |
 
 All commands and options: [command reference](https://cli.frely.cloud/docs/help/commands/). `frely help --agent --json` prints the full machine-readable contract.
 

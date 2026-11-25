@@ -29,7 +29,7 @@ export interface ManagedSkillRecord {
   readonly pendingSha256?: string;
   /** Links (or copies) of this Skill folder in other agents' Skill folders. */
   readonly links?: readonly LinkRecord[];
-  /** Link paths the person deleted; automatic link sync does not put them back (an install, update or `frely skill sync --host` does). */
+  /** Link paths the person deleted; automatic link sync does not put them back (an install, update or `frely agent setup --host` does). */
   readonly dismissedLinks?: readonly string[];
 }
 

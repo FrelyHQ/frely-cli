@@ -5,7 +5,7 @@ import { COMPUTER_MCP_NAME, computerLocallyVetoed, setComputerLocalVeto } from "
 import { OCU_VERSION, ocuBinaryPath, runOcuDoctor } from "./ocu.js";
 import { installOcuRuntime } from "./runtime.js";
 
-/** An entry named `computer` that an earlier `frely computer on` registered by hand; the built-in entry replaces it. */
+/** An entry named `computer` that an earlier `frely link computer on` registered by hand; the built-in entry replaces it. */
 async function removeLegacyEntry(): Promise<boolean> {
   if (!(await loadManualEntries().catch(() => [])).some((entry) => entry.name === COMPUTER_MCP_NAME)) return false;
   await removeManualEntry(COMPUTER_MCP_NAME);
@@ -13,7 +13,7 @@ async function removeLegacyEntry(): Promise<boolean> {
 }
 
 /**
- * `frely computer on|off|status`. Computer use is a built-in local MCP named `computer`: every device offers it, and the
+ * `frely link computer on|off|status`. Computer use is a built-in local MCP named `computer`: every device offers it, and the
  * switch on the Frely connections page (which asks for a passkey or authenticator code) is what turns it on for remote clients.
  * The runtime is installed on first use. `off` is a local veto the web cannot override; `on` lifts it.
  */
@@ -28,14 +28,14 @@ export async function runComputerCommand(args: string[]): Promise<string> {
     await setComputerLocalVeto(false);
     await removeLegacyEntry();
     // macOS and Windows gate screen access behind OS permissions; doctor shows the prompts now instead of on the first remote call.
-    const guide = process.platform === "darwin" || process.platform === "win32" ? await runOcuDoctor().catch((error: unknown) => `Permission check could not run: ${error instanceof Error ? error.message : "failed"}. Run \`frely computer doctor\` later.`) : "";
+    const guide = process.platform === "darwin" || process.platform === "win32" ? await runOcuDoctor().catch((error: unknown) => `Permission check could not run: ${error instanceof Error ? error.message : "failed"}. Run \`frely doctor computer\` later.`) : "";
     return [
       "Computer use is allowed on this device. It stays off until you turn it on for this device on the Frely connections page.",
       "While it is on, a connected client can see this screen and operate apps as you, except terminals, password managers, OS security prompts, system settings and Frely itself.",
       downloaded ? `Installed the computer-use runtime (open-computer-use ${OCU_VERSION}, checksum verified).` : "",
       guide ? `Permission check:\n${guide}` : "",
       process.platform === "darwin" ? "macOS: grant Accessibility and Screen Recording to \"Open Computer Use\" in System Settings if asked." : "",
-      "Block it on this device at any time with `frely computer off`; the web page cannot override that.",
+      "Block it on this device at any time with `frely link computer off`; the web page cannot override that.",
     ].filter(Boolean).join("\n") + "\n";
   }
   if (action === "doctor") {
@@ -46,7 +46,7 @@ export async function runComputerCommand(args: string[]): Promise<string> {
     const vetoed = await computerLocallyVetoed();
     await setComputerLocalVeto(true);
     await removeLegacyEntry();
-    return vetoed ? "Computer use was already blocked on this device.\n" : "Computer use is blocked on this device. The Frely connections page cannot turn it on until you run `frely computer on`.\n";
+    return vetoed ? "Computer use was already blocked on this device.\n" : "Computer use is blocked on this device. The Frely connections page cannot turn it on until you run `frely link computer on`.\n";
   }
   if (action === "status") {
     const enabled = !(await computerLocallyVetoed());
@@ -54,7 +54,7 @@ export async function runComputerCommand(args: string[]): Promise<string> {
     const installed = await access(binary).then(() => true, () => false);
     const value = { enabled, runtimeVersion: OCU_VERSION, runtimeInstalled: installed };
     if (args.includes("--json")) return `${JSON.stringify(value)}\n`;
-    return `Computer use: ${enabled ? "allowed here (turn it on for this device on the Frely connections page)" : "blocked on this device (run `frely computer on` to allow it)"}\nRuntime: open-computer-use ${OCU_VERSION}, ${installed ? "installed" : `not installed yet (${binary}); it installs on first use`}\n`;
+    return `Computer use: ${enabled ? "allowed here (turn it on for this device on the Frely connections page)" : "blocked on this device (run `frely link computer on` to allow it)"}\nRuntime: open-computer-use ${OCU_VERSION}, ${installed ? "installed" : `not installed yet (${binary}); it installs on first use`}\n`;
   }
   throw new Error(`Unknown computer command.\n${subcommandUsage("computer")}`);
 }

@@ -1,4 +1,4 @@
-// `frely key setup <agent>`: create a Frely API key and write it straight into another AI application's own settings, so the AI that
+// `frely agent setup <agent>`: create a Frely API key and write it straight into another AI application's own settings, so the AI that
 // runs this command never sees the key. The key is made by the existing `keys.create` Cloud tool (which needs the owner's approval on the
 // web each time), held only in this process, and written to the agent's file with mode 0600. The command prints the key's id and prefix,
 // never the key. Frely's server has no special import logic: this is `frely api call keys.create` plus a local file edit.

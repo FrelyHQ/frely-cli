@@ -2,7 +2,7 @@
 // Real-systemd lifecycle check for the background service, against a fake relay. No mocks of the service or the supervisor.
 //   node scripts/systemd-upgrade-smoke.mjs <old-binary> <new-binary>
 // 1. old release runs as a systemd user service and connects.
-// 2. the installation is replaced by the new build (what `frely update` does): within 60 s the old pid is gone and the
+// 2. the installation is replaced by the new build (what `frely self update` does): within 60 s the old pid is gone and the
 //    new version is connected from a new pid.
 // 3. the relay closes the connection with 4412 (hourly hard lifetime): the same process reconnects within 60 s.
 // 4. the relay goes down and comes back: the same process reconnects within 60 s.
@@ -116,7 +116,7 @@ try {
   const first = await waitFor(`old release ${oldVersion} connected`, () => seen.find((s) => s.version === oldVersion));
   console.log(`1. old release ${oldVersion} connected (pid ${first.pid})`);
 
-  // Replace the installation like `frely update` does: a complete file renamed over the old one.
+  // Replace the installation like `frely self update` does: a complete file renamed over the old one.
   const staged = join(bin, ".frely.new");
   copyFileSync(newBinary, staged); chmodSync(staged, 0o755); renameSync(staged, installed);
   const started = Date.now();

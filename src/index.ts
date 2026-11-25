@@ -303,7 +303,7 @@ async function main(): Promise<void> {
   if (command === "item") {
     const action = args[1];
     // `item call <name>` without a tool sends a request to the item (an Agent, or the cloud part of a Skill) and waits for the answer;
-    // with a tool it calls that MCP tool (below). Its runs are read with `frely runs|result|cancel`, shared with task runs.
+    // with a tool it calls that MCP tool (below). Its runs are read with `frely result list|result|cancel`, shared with task runs.
     if (action === "call" && (args[3] === undefined || args[3].startsWith("-"))) {
       const target = args[2];
       if (!target || target.startsWith("-")) throw new Error(RUN_USAGE);
@@ -833,7 +833,7 @@ async function main(): Promise<void> {
     const name = option(args, "--name");
     const maxConcurrent = option(args, "--max-concurrent");
     const binding = await registerLocalOnlyProvider({ driver, ...(url ? { url } : {}), ...(models ? { models } : {}), ...(name ? { name } : {}), ...(key ? { key } : {}), ...(maxConcurrent ? { maxConcurrent: Number(maxConcurrent) } : {}) }, providerIo());
-    stdout.write(`Registered ${binding.providerId} (${binding.name}) at ${binding.baseUrl}\nModels: ${binding.models.join(", ")}\nIt is used by tasks on this computer only (frely task add --model <name>); it is not shared and takes no Provider slot.\n`);
+    stdout.write(`Registered ${binding.providerId} (${binding.name}) at ${binding.baseUrl}\nModels: ${binding.models.join(", ")}\nIt is used by tasks on this computer only (frely task local add --model <name>); it is not shared and takes no Provider slot.\n`);
     return;
   }
 
@@ -942,7 +942,7 @@ async function main(): Promise<void> {
     void watchLinkClaim({ signal: controller.signal, log: nodeLog, onClaimed: stop, onLocked: stop });
     // Services saved with `frely service share --background` stay connected for as long as the daemon runs.
     const services = superviseServices({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Services stopped: ${error instanceof Error ? error.message : String(error)}`));
-    // Scheduled tasks (`frely task add --cron`): the clock lives here; each run is a detached worker that does not depend on this connection.
+    // Scheduled tasks (`frely task local add --cron`): the clock lives here; each run is a detached worker that does not depend on this connection.
     const taskShares = providerOnly ? Promise.resolve() : superviseTaskShares({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Shared tasks stopped: ${error instanceof Error ? error.message : String(error)}`));
     const tasks = providerOnly ? Promise.resolve() : superviseTasks({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Tasks stopped: ${error instanceof Error ? error.message : String(error)}`));
     try {
@@ -1002,7 +1002,7 @@ async function main(): Promise<void> {
         if (!deviceId) throw new Error("MCP is not enabled. Run frely link on.");
         try { await callCloudToolAwaiting("devices.confirm_workspace_change", { deviceId, action, path }, undefined, undefined, announce); }
         catch (error) {
-          if (error instanceof CloudToolError && error.code === "tool_unavailable_or_forbidden") throw new Error("Frely cannot confirm workspace changes yet. Update Frely CLI with frely update, or sign in again, and try again.");
+          if (error instanceof CloudToolError && error.code === "tool_unavailable_or_forbidden") throw new Error("Frely cannot confirm workspace changes yet. Update Frely CLI with frely self update, or sign in again, and try again.");
           throw error;
         }
       } });

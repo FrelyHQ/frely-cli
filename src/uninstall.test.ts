@@ -221,7 +221,7 @@ test("registered services are removed from the account best effort and local-ser
 
 test("unknown arguments are rejected before anything is read", async () => {
   const f = await fixture();
-  await assert.rejects(() => runUninstall(["--purge"], io().value, f.deps), /Usage: frely uninstall/);
+  await assert.rejects(() => runUninstall(["--purge"], io().value, f.deps), /Usage: frely self uninstall/);
   await rm(f.home, { recursive: true, force: true });
 });
 

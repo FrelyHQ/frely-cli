@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { defaultAgentId, isAgentId } from "../agents/registry.js";
+import type { AgentId } from "../agents/types.js";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { observeIdentity } from "../trust/observe.js";
@@ -26,7 +27,7 @@ const ANSWER_LIMIT = 4000;
 
 interface RunMap { [runKey: string]: { runId: string; task: string } }
 
-export interface TodoDispatchDeps extends ManagerDeps { now?: () => number; refreshTrust?: TrustRefresh }
+export interface TodoDispatchDeps extends ManagerDeps { now?: () => number; refreshTrust?: TrustRefresh; defaultAgent?: () => Promise<AgentId> }
 
 const text = (args: Record<string, unknown>, name: string, max = 4096): string => {
   const value = args[name];
@@ -87,7 +88,7 @@ export async function runTodoDispatch(args: Record<string, unknown>, meta: unkno
     });
     const name = `todo-${createHash("sha256").update(runKey).digest("hex").slice(0, 24)}`;
     const remaining = Math.floor((Date.parse(authorization.expiresAt) - now) / 1000);
-    const runner = isAgentId(args.executor) ? args.executor : await defaultAgentId();
+    const runner = isAgentId(args.executor) ? args.executor : await (deps.defaultAgent ?? defaultAgentId)();
     const definition = buildDefinition({
       name, runner, command: text(args, "instruction", MAX_INSTRUCTION_BYTES), cwd: args.cwd as string, network: sites,
       timeoutSec: Math.max(1, Math.min(MAX_STEP_SECONDS, remaining)), ...(typeof args.model === "string" && args.model ? { model: args.model } : {}),

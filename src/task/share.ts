@@ -55,7 +55,7 @@ export async function shareRefusal(definition: TaskDefinition, options: Pick<Sha
  */
 export async function shareTask(name: string, options: ShareOptions, write: (text: string) => void, deps: ShareDeps = {}): Promise<TaskShare> {
   const definition = await getDefinition(name);
-  if (!definition) throw new Error(`No task named ${name}. See frely task list.`);
+  if (!definition) throw new Error(`No task named ${name}. See frely task local list.`);
   if (!WORKSPACES.includes(options.workspace)) throw new Error(`The workspace must be ${WORKSPACES.join(", ")}.`);
   if (definition.runner === "script" && options.workspace !== "none") throw new Error("A script task runs in its own folder; leave --workspace out for it.");
   const refusal = await shareRefusal(definition, options, deps.providers);
