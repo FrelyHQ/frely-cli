@@ -6,7 +6,7 @@ import { downloadToLocalFile, prepareLocalUpload, type LocalUpload } from "../lo
 import { waitForApproval, type ApprovalRef, type ApprovalWaitOptions } from "./approval-wait.js";
 import { openController, outcomeOf, resultData, resultText, ControllerError, EXIT, type Controller, type Outcome, type ToolResult } from "./client.js";
 
-export const CONTROLLER_COMMANDS: ReadonlySet<string> = new Set(["devices", "run", "ps", "logs", "kill", "read", "ls", "grep", "edit", "put", "get", "files", "tools", "call", "permission"]);
+export const CONTROLLER_COMMANDS: ReadonlySet<string> = new Set(["devices", "run", "ps", "logs", "kill", "read", "ls", "grep", "edit", "put", "drop", "get", "files", "tools", "call", "permission"]);
 export interface Output { out(text: string): void; err(text: string): void }
 
 export const CONTROLLER_USAGE = `Control your Frely devices from this computer.
@@ -23,6 +23,7 @@ export const CONTROLLER_USAGE = `Control your Frely devices from this computer.
   frely permission confirm <code> [A|B|C]        Finish an approval by authenticator or emailed code
   frely permission wait <short code> [--then '<command>'] [--timeout <s>]
   frely put <local file | device:path> [--json]  Share a file or image as a link (https://frely.cloud/f/<code>); prints the link first
+  frely drop [<file>]                            Get a one-time command for a machine without Frely to upload a file to you (valid 30 minutes)
   frely get <id> [<local path> | <device>:<path>] [--overwrite]   Fetch a shared file to this computer or a device
   frely files                                    List shared files (id, name, size, visibility, expiry, link)
   frely files rm <id>                            Delete a shared file
@@ -109,6 +110,7 @@ export async function runControllerCommand(args: readonly string[], io: Output):
       case "grep": return await grep(rest, io);
       case "edit": return await edit(rest, io);
       case "put": return await putCommand(rest, io);
+      case "drop": return await dropCommand(rest, io);
       case "get": return await getCommand(rest, io);
       case "files": return await filesCommand(rest, io);
       case "tools": return await toolsCommand(rest, io);
@@ -319,6 +321,31 @@ async function putCommand(args: string[], io: Output): Promise<number> {
       data = done.data;
     }
     return emit(showView(viewOf(data)), { exitCode: EXIT.ok }, parsed, io);
+  });
+}
+
+function shellQuote(value: string): string { return `'${value.replace(/'/gu, "'\\''")}'`; }
+
+function dropScript(file: string, claimUrl: string, completeUrl: string): string {
+  return `f=${shellQuote(file)}; [ -f "$f" ] || { echo "No such file: $f" >&2; exit 1; }; n=$(basename "$f"); case "$n" in *[\\\"\\\\]*) echo 'Rename the file: double quotes and backslashes are not allowed' >&2; exit 1;; esac; s=$(wc -c < "$f" | tr -d ' '); h=$( (sha256sum "$f" 2>/dev/null || shasum -a 256 "$f") | cut -d' ' -f1)
+  u=$(curl -fsS -X POST -H 'content-type: application/json' --data "{\\\"name\\\":\\\"$n\\\",\\\"bytes\\\":$s,\\\"sha256\\\":\\\"$h\\\"}" ${shellQuote(`${claimUrl}?format=url`)}) && curl -fsS -T "$f" "$u" && curl -fsS -X POST ${shellQuote(completeUrl)}`;
+}
+
+async function dropCommand(args: string[], io: Output): Promise<number> {
+  const parsed = parseArgs(args, { flags: COMMON_FLAGS, values: COMMON_VALUES });
+  if (parsed.positionals.length > 1) throw new ControllerError("Usage: frely drop [<file>] [--json]", EXIT.cli);
+  const hint = parsed.positionals[0] ?? "FILE";
+  if (/["\\]/u.test(hint)) throw new ControllerError('The file hint cannot contain " or \\.', EXIT.cli);
+  return withController(io, async (controller) => {
+    const result = await controller.call("transfer", { action: "drop_link" });
+    const outcome = outcomeOf(result);
+    const data = resultData(result);
+    if (outcome.exitCode !== EXIT.ok || !data) return emit(shownOf(result), outcome, parsed, io);
+    const claimUrl = asText(data.claimUrl), completeUrl = asText(data.completeUrl);
+    if (!claimUrl || !completeUrl) throw new ControllerError("The transfer service gave no drop addresses.", EXIT.tool);
+    const script = dropScript(hint, claimUrl, completeUrl);
+    const expiresAt = asText(data.expiresAt) || "unknown";
+    return emit({ text: `Drop command (expires ${expiresAt}):\n${script}\nWhen it finishes, the file shows in: frely files`, result: { ...data, script } as ToolResult }, outcome, parsed, io);
   });
 }
 
