@@ -127,7 +127,7 @@ export async function doctor(options: DoctorOptions = {}, dependencies: DoctorDe
       : "Command sandbox active (workspace + temp writes only).");
   if (dependencies.pendingSkillLinks) {
     const pending = await dependencies.pendingSkillLinks().catch(() => null);
-    if (pending && pending.added.length > 0) add("skill_links", "info", `${pending.added.length} Skill link${pending.added.length === 1 ? "" : "s"} missing in ${[...new Set(pending.added.map((change) => change.agent))].join(", ")}. Run frely skill sync.`);
+    if (pending && pending.added.length > 0) add("skill_links", "info", `${pending.added.length} Skill link${pending.added.length === 1 ? "" : "s"} missing in ${[...new Set(pending.added.map((change) => change.agent))].join(", ")}. Run frely agent setup.`);
   }
   const refreshGuidance = connection?.autoRefresh && connection.pid === service?.pid
     ? "The service will switch after active work finishes and the installation passes its startup check."

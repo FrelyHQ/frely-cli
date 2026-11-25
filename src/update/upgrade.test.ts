@@ -83,7 +83,7 @@ test("on Windows a blocked swap keeps the verified executable for the next start
   gate.enter()();
 });
 
-test("a remote `frely update` starts the service's own upgrade once the calling request has finished, and only for a standalone installation", async () => {
+test("a remote `frely self update` starts the service's own upgrade once the calling request has finished, and only for a standalone installation", async () => {
   const gate = new MaintenanceGate(), calls: string[] = [];
   const finish = gate.track(); // the MCP call that asked for the update
   const up = upgrader(gate, deps({}, calls));

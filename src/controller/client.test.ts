@@ -42,7 +42,7 @@ test("tool results map to the exit codes", () => {
   assert.equal(outcomeOf(text("fine")).exitCode, EXIT.ok);
   const pending = outcomeOf({ ...text("Approval required"), structuredContent: { status: "pending", device: "box", approveUrl: "https://frely.test/device?g=ABCDEF", shortCode: "ABCDEF" } });
   assert.equal(pending.exitCode, EXIT.approval);
-  assert.match(pending.note!, /frely permission wait ABCDEF/u);
+  assert.match(pending.note!, /frely device permission wait ABCDEF/u);
   assert.match(pending.note!, /g=ABCDEF/u);
   assert.equal(outcomeOf({ ...text({ error: { code: "permission_required", url: "https://frely.test/p" } }), isError: true }).exitCode, EXIT.approval);
   assert.equal(outcomeOf({ ...text("Frely device is offline. On that computer, run `frely link on`, then try again."), isError: true }).exitCode, EXIT.offline);

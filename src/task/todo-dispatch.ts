@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { defaultAgentId, isAgentId } from "../agents/registry.js";
+import type { AgentId } from "../agents/types.js";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { observeIdentity } from "../trust/observe.js";
@@ -25,20 +27,13 @@ const ANSWER_LIMIT = 4000;
 
 interface RunMap { [runKey: string]: { runId: string; task: string } }
 
-export interface TodoDispatchDeps extends ManagerDeps { now?: () => number; refreshTrust?: TrustRefresh }
+export interface TodoDispatchDeps extends ManagerDeps { now?: () => number; refreshTrust?: TrustRefresh; defaultAgent?: () => Promise<AgentId> }
 
 const text = (args: Record<string, unknown>, name: string, max = 4096): string => {
   const value = args[name];
   if (typeof value !== "string" || value.length < 1 || Buffer.byteLength(value, "utf8") > max) throw new Error(`${name} is required.`);
   return value;
 };
-
-/** The local agent for a step: `pi` unless the cloud named `codex`. Anything else is refused (a newer cloud must not run a step with the wrong agent). */
-function stepExecutor(value: unknown): "pi" | "codex" {
-  if (value === undefined || value === null || value === "pi") return "pi";
-  if (value === "codex") return "codex";
-  throw new Error("executor must be pi or codex.");
-}
 
 let queue: Promise<unknown> = Promise.resolve();
 const serial = <T>(work: () => Promise<T>): Promise<T> => { const run = queue.then(work); queue = run.catch(() => undefined); return run; };
@@ -86,16 +81,18 @@ export async function runTodoDispatch(args: Record<string, unknown>, meta: unkno
     if (!trust) throw new TrustError("no_trust_record", NO_TRUST_MESSAGE);
     const approval = (meta && typeof meta === "object" ? (meta as Record<string, unknown>)[TODO_SCOPE_META_KEY] : undefined) as SignedApproval | undefined;
     if (!approval || typeof approval !== "object") throw new TrustError("approval_missing");
-    const executor = stepExecutor(args.executor);
     const sites = Array.isArray(args.sites) ? args.sites.filter((site): site is string => typeof site === "string") : [];
     const now = deps.now?.() ?? Date.now();
+    // The agent that runs the step is part of what the owner signed for: a device default or a named agent must be in the scope.
+    if (args.executor !== undefined && args.executor !== null && !isAgentId(args.executor)) throw new Error("executor must be an installed-agent id such as pi, codex or claude-code.");
+    const runner = isAgentId(args.executor) ? args.executor : await (deps.defaultAgent ?? defaultAgentId)();
     const authorization = await authorizeTodoStep(approval, { record: trust.record, device: identity.device, deviceKey: identity.deviceKey, counterDirectory: directory, now }, {
-      todoId: text(args, "todoId", 128), stepKey: runKey, cwd: text(args, "cwd", 1024), sites, executor,
+      todoId: text(args, "todoId", 128), stepKey: runKey, cwd: text(args, "cwd", 1024), sites, executor: runner,
     });
     const name = `todo-${createHash("sha256").update(runKey).digest("hex").slice(0, 24)}`;
     const remaining = Math.floor((Date.parse(authorization.expiresAt) - now) / 1000);
     const definition = buildDefinition({
-      name, runner: executor, command: text(args, "instruction", MAX_INSTRUCTION_BYTES), cwd: args.cwd as string, network: sites,
+      name, runner, command: text(args, "instruction", MAX_INSTRUCTION_BYTES), cwd: args.cwd as string, network: sites,
       timeoutSec: Math.max(1, Math.min(MAX_STEP_SECONDS, remaining)), ...(typeof args.model === "string" && args.model ? { model: args.model } : {}),
     }, undefined, new Date(now));
     // The signed scope is the approval for its sites, until the approval ends.

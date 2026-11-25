@@ -11,7 +11,7 @@ const MAX_RESULT_BYTES = 6 * 1024 * 1024;
 
 export interface ComputerToolsetOptions {
   backend: OcuBackend;
-  /** Local key of the two-key rule (false once `frely computer off` vetoed computer use); checked on every list and call so the veto takes effect at once. */
+  /** Local key of the two-key rule (false once `frely link computer off` vetoed computer use); checked on every list and call so the veto takes effect at once. */
   isLocallyEnabled: () => Promise<boolean>;
   audit?: (entry: ComputerAuditEntry) => Promise<void>;
   /** Starts the OS permission walkthrough (`open-computer-use doctor`); called at most once per `doctorIntervalMs` when a call fails for lack of permission. */
@@ -19,7 +19,7 @@ export interface ComputerToolsetOptions {
   doctorIntervalMs?: number;
 }
 
-const PERMISSION_HINT = "Computer use needs OS permission on this device. A permission guide was opened there; ask the user to grant Accessibility and Screen Recording, or run `frely computer doctor` on the device, then retry.";
+const PERMISSION_HINT = "Computer use needs OS permission on this device. A permission guide was opened there; ask the user to grant Accessibility and Screen Recording, or run `frely doctor computer` on the device, then retry.";
 
 export class ComputerToolset {
   private readonly backend: OcuBackend;
@@ -63,7 +63,7 @@ export class ComputerToolset {
     };
     const fail = (message: string, reason: string) => finish({ isError: true, content: [{ type: "text", text: message }] }, reason);
     if (!ALLOWED_TOOLS.has(tool)) return fail(`Unknown tool: ${name}`, "unknown_tool");
-    if (!(await this.available())) return fail("Computer use is turned off on this device (`frely computer off`). Run `frely computer on` on it to allow it again.", "locally_disabled");
+    if (!(await this.available())) return fail("Computer use is turned off on this device (`frely link computer off`). Run `frely link computer on` on it to allow it again.", "locally_disabled");
     try {
       if (tool !== "list_apps") {
         try { assertAppAllowed(args.app); } catch (error) {

@@ -18,15 +18,15 @@ export async function setComputerLocalVeto(vetoed: boolean): Promise<void> {
   const path = computerOptOutPath();
   if (!vetoed) { await rm(path, { force: true }); return; }
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await writeFile(path, "computer use is turned off on this device (frely computer off)\n", { mode: 0o600 });
+  await writeFile(path, "computer use is turned off on this device (frely link computer off)\n", { mode: 0o600 });
 }
 
 /**
  * Computer use is built in: every device offers the local MCP `computer` without local registration, and the web switch is the
- * only key to turn it on. `frely computer off` is the one thing the web cannot override, so the entry disappears while vetoed.
+ * only key to turn it on. `frely link computer off` is the one thing the web cannot override, so the entry disappears while vetoed.
  */
 export async function builtinLocalMcps(entryPoint: string = process.argv[1] ?? ""): Promise<LocalMcpEntry[]> {
   if (await computerLocallyVetoed()) return [];
-  const [command, ...args] = cliLaunchArguments(entryPoint, ["computer", "mcp"]);
+  const [command, ...args] = cliLaunchArguments(entryPoint, ["link", "computer", "mcp"]);
   return [{ name: COMPUTER_MCP_NAME, source: "manual", transport: "stdio", command: command!, args, path: process.env.PATH ?? "" }];
 }

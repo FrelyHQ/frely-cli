@@ -244,7 +244,7 @@ function gitWriteDenials(workspaceRoot: string, allowGitConfig: boolean): string
 }
 
 /**
- * A narrower network than the open default, for a process that only ever runs one confined program (`frely service start`).
+ * A narrower network than the open default, for a process that only ever runs one confined program (`frely agent start`).
  * `mitmProxy` sends plain-HTTP requests for its domains to a Unix socket the CLI itself serves, so the program never holds the credential behind it.
  */
 export interface SandboxNetworkPolicy {
@@ -414,15 +414,15 @@ export function untilAborted<T>(work: Promise<T>, signal?: AbortSignal): Promise
 }
 
 /**
- * `frely update` replaces the installed executable and restarts the service, so it cannot run inside the command sandbox (it must write the
+ * `frely self update` replaces the installed executable and restarts the service, so it cannot run inside the command sandbox (it must write the
  * install directory) and the install directory must never be sandbox-writable (a command could swap the binary). The command is exactly our own
- * code, so a call whose whole text is `frely update` runs this very executable by absolute path without the sandbox. Anything longer
- * (`frely update; ...`, other arguments) stays sandboxed, and the PATH is not consulted, so a `frely` in the workspace is never run unsandboxed.
+ * code, so a call whose whole text is `frely self update` runs this very executable by absolute path without the sandbox. Anything longer
+ * (`frely self update; ...`, other arguments) stays sandboxed, and the PATH is not consulted, so a `frely` in the workspace is never run unsandboxed.
  */
 export function ownUpdateCommand(command: string, platform: NodeJS.Platform = process.platform): string | undefined {
-  if (platform === "win32" || !/^\s*frely\s+update\s*$/u.test(command)) return undefined;
+  if (platform === "win32" || !/^\s*frely\s+self\s+update\s*$/u.test(command)) return undefined;
   const quote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
-  return cliLaunchArguments(process.argv[1] ?? "", ["update"]).map(quote).join(" ");
+  return cliLaunchArguments(process.argv[1] ?? "", ["self", "update"]).map(quote).join(" ");
 }
 
 export interface SandboxedCommand {
@@ -622,7 +622,7 @@ export function sandboxDenialHint(stderr: string, command?: string, exitCode?: n
   }
   if (rawTcp) {
     hints.push("The Frely command sandbox only routes HTTP(S) and SOCKS traffic, so a direct TCP connection (database and redis clients, nc) is blocked. "
-      + "Stay in the sandbox: start `frely tunnel <host>:<port>` in the same command and point the client at 127.0.0.1:<port>, for example `frely tunnel db.example.com:5432 & sleep 1; psql -h 127.0.0.1 -p 5432 ...`. "
+      + "Stay in the sandbox: start `frely link tunnel <host>:<port>` in the same command and point the client at 127.0.0.1:<port>, for example `frely link tunnel db.example.com:5432 & sleep 1; psql -h 127.0.0.1 -p 5432 ...`. "
       + `If a tunnel cannot work for this client, ${UNSANDBOXED_ASK.replace(/^Call/u, "call")}`);
   } else if (XPC_DENIAL.test(text)) {
     hints.push(`The command needs a macOS system service (XPC) that the Frely command sandbox does not open, and only ${UNSANDBOXED_GROUP} reaches it. ${UNSANDBOXED_ASK}`);
@@ -657,7 +657,7 @@ export function sshConfigReadable(): boolean {
   }
 }
 
-/** Stops srt's proxies and bridges. A process that confined its own work (`frely service start`) calls this when done, or it never exits. */
+/** Stops srt's proxies and bridges. A process that confined its own work (`frely agent start`) calls this when done, or it never exits. */
 export async function shutdownSandbox(): Promise<void> {
   if (!initialized) return;
   initialized = undefined;

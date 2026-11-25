@@ -2,14 +2,16 @@ import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { AGENT_IDS } from "../agents/registry.js";
+import type { AgentId } from "../agents/types.js";
 import { isValidTimezone, nextCronTime, parseCron } from "./cron.js";
 
 /**
- * Runners: `script` runs a shell command in the sandbox. `pi` runs a prompt through the Pi agent (added with the Pi capsule). `codex` runs a prompt through `codex exec`.
- * Script and pi get their model through the model proxy; neither holds a credential.
+ * Runners: `script` runs a shell command in the sandbox and gets its model through the model proxy. Any other runner is an agent installed
+ * on this computer (src/agents/registry.ts) that runs the task text as its prompt, with its own model settings.
  */
-export const RUNNERS = ["script", "pi", "codex"] as const;
-export type RunnerId = (typeof RUNNERS)[number];
+export const RUNNERS = ["script", ...AGENT_IDS] as const;
+export type RunnerId = "script" | AgentId;
 
 export const TASK_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/u;
 export const MAX_COMMAND_BYTES = 16 * 1024;
@@ -32,7 +34,7 @@ export interface TaskDefinition {
   readonly version: 1;
   readonly name: string;
   readonly runner: RunnerId;
-  /** `script`: the shell command. `pi` and `codex`: the prompt. */
+  /** `script`: the shell command. An agent: the prompt. */
   readonly command: string;
   /** Absolute folder: the working directory, and the only place the task can write besides the temp folder. */
   readonly cwd: string;
@@ -44,7 +46,7 @@ export interface TaskDefinition {
   readonly model?: string;
   /** Models tried in order when the first cannot be started (unreachable, unknown model, authentication error). */
   readonly fallbackModels?: readonly string[];
-  /** Run in a fresh git worktree of `cwd` (pi). */
+  /** Run in a fresh git worktree of `cwd` (agents). */
   readonly worktree?: boolean;
   readonly schedule?: TaskSchedule;
   /** Approved site -> end of the approval (ISO). */

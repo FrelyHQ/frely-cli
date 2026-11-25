@@ -2,7 +2,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { sshProxyConnect } from "./ssh-proxy.js";
 
 /**
- * `frely tunnel <host>:<port> [--local-port N]`: a TCP port on 127.0.0.1 that forwards every connection to `host:port` through the
+ * `frely link tunnel <host>:<port> [--local-port N]`: a TCP port on 127.0.0.1 that forwards every connection to `host:port` through the
  * command sandbox's proxy (the HTTP_PROXY it exports; HTTP CONNECT with the proxy's credentials, the same relay `frely ssh-proxy`
  * uses). The sandbox only lets HTTP(S) and SOCKS traffic out, so a database or redis client cannot connect to its server directly;
  * started in the same command, the tunnel lets it connect to 127.0.0.1 instead. Everything stays inside the sandbox's network rules:
@@ -16,12 +16,12 @@ const validPort = (port: number): boolean => Number.isInteger(port) && port >= 1
 export function parseTunnelTarget(value: string): TunnelTarget {
   const match = /^\[([^\]]+)\]:(\d+)$/u.exec(value) ?? /^([^:\s\[\]]+):(\d+)$/u.exec(value);
   const port = Number(match?.[2]);
-  if (!match || !match[1] || !validPort(port) || /[\s\0/\\@]/u.test(match[1])) throw new Error("Usage: frely tunnel <host>:<port> [--local-port N]");
+  if (!match || !match[1] || !validPort(port) || /[\s\0/\\@]/u.test(match[1])) throw new Error("Usage: frely link tunnel <host>:<port> [--local-port N]");
   return { host: match[1], port };
 }
 
 export function tunnelUsage(): string {
-  return "Usage: frely tunnel <host>:<port> [--local-port N]  (run inside the command sandbox; HTTP_PROXY must name the sandbox proxy)";
+  return "Usage: frely link tunnel <host>:<port> [--local-port N]  (run inside the command sandbox; HTTP_PROXY must name the sandbox proxy)";
 }
 
 /** Parse `[<host>:<port>, --local-port N]` (after the `tunnel` word). */

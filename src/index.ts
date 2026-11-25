@@ -39,24 +39,24 @@ import { listLocalServices } from "./share/service-state.js";
 import { listLocalProviders } from "./provider/state.js";
 import { API_USAGE, logoutCloud, runApi } from "./cloud.js";
 import { SERVICE_STUCK_EXIT_CODE } from "./device/stuck-watchdog.js";
-import { CONTROLLER_COMMANDS, runControllerCommand } from "./controller/commands.js";
+import { controllerArguments, isAccountToolName, runControllerCommand } from "./controller/commands.js";
 import { ControllerError } from "./controller/client.js";
-import { LOCAL_USAGE, runAgentLocal } from "./agent/local/command.js";
-import { SLUG as LOCAL_AGENT_SLUG, readRecord as readLocalAgent } from "./agent/local/store.js";
-import { runTaskCommand } from "./task/command.js";
+import { runAgentCommand } from "./agents/command.js";
+import { agentDoctor, formatAgentDoctor } from "./agents/doctor.js";
+import { runTaskCommand, shareTaskCommand } from "./task/command.js";
 import { runRecordCommand } from "./runs-command.js";
 import { installAt, installsOfItem, removeInstalls } from "./skill/item-remove.js";
 import { findManagedSkillByInstallName } from "./skill/managed.js";
 import type { InstallRecord } from "./skill/registry.js";
 import { taskWorkerMain } from "./task/worker.js";
 import { superviseTasks } from "./task/scheduler.js";
-import { superviseTaskShares } from "./task/share.js";
+import { listTaskShares } from "./task/share-store.js";
+import { superviseTaskShares, unshareTask } from "./task/share.js";
 import { runOutcome, startRun, workerMain } from "./agent/run.js";
 import { isRunId } from "./agent/run-store.js";
 import { DEFAULT_READ_LIMITS, defaultReadRoot } from "./agent/workspace-read.js";
 import { PiNodeSupervisor } from "./agent/pi-node-supervisor.js";
 import { readAppInstall } from "./agent/app-install.js";
-import { installCapsule, readAnyInstall } from "./agent/capsule-install.js";
 import { appInstallStatus, installApp, openApp, uninstallApp, updateApp } from "./app-manager.js";
 import { detectSandboxBackend } from "./runtime/sandbox.js";
 import { LocalMcpHub, loadManualEntries } from "./runtime/local-mcp.js";
@@ -87,7 +87,6 @@ import { callCloudTool, callCloudToolAwaiting } from "./cloud.js";
 import { runTodoCommand } from "./todo-command.js";
 import { runRemindersCommand } from "./reminders/command.js";
 import { superviseReminders } from "./reminders/sync.js";
-import { runKeyCommand } from "./key-setup.js";
 import { claimInstall, ItemNotFoundError, resolveItem, type ResolvedItem } from "./skill/resolve.js";
 import { ApprovalRequiredError, type Approval } from "./skill/cloud-item.js";
 import { createInterface } from "node:readline/promises";
@@ -96,7 +95,7 @@ import { runUninstall } from "./uninstall.js";
 
 
 const ITEM_PUBLISH_USAGE = "Usage: frely item publish <folder> [--slug <slug>] [--premium <path>]... [--json]";
-const ITEM_INSTALL_USAGE = "Usage: frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|workbuddy|codebuddy|generic] [--scope global|project] [--dir <path>] [--gift <code>] [--email <address>] [--no-wait] [--no-browser] [--replace] [--api-key-stdin] [--json]";
+const ITEM_INSTALL_USAGE = "Usage: frely item install <username/name[@version]> [--host chatgpt|pi|codex|claude-code|workbuddy|codebuddy|generic] [--scope global|project] [--dir <path>] [--gift <code>] [--email <address>] [--no-wait] [--no-browser] [--replace] [--api-key-stdin] [--json]";
 
 /**
  * Where to ask for the current entry Skill text. A relay that cannot be read from the local config, or a configured address that is not
@@ -143,16 +142,16 @@ function providerIo(): RegisterIo {
 /** Commands that run often or inside other tools, where even a quick check of the agent folders is not worth it. */
 function skipsLinkSync(args: readonly string[]): boolean {
   const [command, sub] = args;
-  if (command === undefined || ["ssh-proxy", "tunnel", "--version", "-v", "version", "help", "--help", "-h", "uninstall"].includes(command)) return true;
+  if (command === undefined || ["ssh-proxy", "--version", "-v", "help", "--help", "-h"].includes(command)) return true;
   if (command === "mcp" && (sub === "stdio" || sub === "serve")) return true;
-  if (command === "sandbox" || (command === "item" && sub === "run")) return true;
-  return command === "skill" && sub === "sync";
+  if ((command === "self" && sub === "uninstall") || (command === "link" && (sub === "proxy" || sub === "tunnel")) || (command === "item" && sub === "run")) return true;
+  return command === "agent" && sub === "setup";
 }
 
 /** Links Skills into agents installed since the last pass. Installs and updates always rescan; other commands only when an agent folder appeared or went. Never fails the command. */
 async function autoSyncAgentLinks(args: readonly string[]): Promise<void> {
   if (skipsLinkSync(args)) return;
-  const full = (args[0] === "item" && (args[1] === "install" || args[1] === "update")) || (args[0] === "skill" && args[1] === "install");
+  const full = (args[0] === "item" && (args[1] === "install" || args[1] === "update")) || (args[0] === "agent" && args[1] === "setup");
   const result = await syncAgentLinks({ mode: full ? "full" : "check" }).catch(() => null);
   if (result === null || result.added.length === 0 || args.includes("--json")) return;
   process.stderr.write(linkSyncNotice(result));
@@ -165,10 +164,24 @@ async function main(): Promise<void> {
   const args = normalizeLinkArgs(applyDataDir(process.argv.slice(2)));
   const command = args[0];
   await autoSyncAgentLinks(args);
-  if (command === "update") {
-    if (args.length !== 1) throw new Error("Usage: frely update. Version checks are available in frely doctor.");
-    const result = await update((message) => process.stderr.write(message));
-    stdout.write(result.message + "\n");
+  if (command === "self") {
+    if (args[1] === "update") {
+      if (args.length !== 2) throw new Error("Usage: frely self update. Version checks are available in frely doctor.");
+      const result = await update((message) => process.stderr.write(message));
+      stdout.write(result.message + "\n");
+      return;
+    }
+    if (args[1] === "uninstall") {
+      const interactive = Boolean(stdin.isTTY && stdout.isTTY);
+      const prompt = interactive ? async (question: string) => {
+        const rl = createInterface({ input: stdin, output: stdout });
+        try { return await rl.question(question); } finally { rl.close(); }
+      } : undefined;
+      process.exitCode = await runUninstall(args.slice(2), { write: (text) => { stdout.write(text); }, interactive, ...(prompt ? { prompt } : {}) });
+      return;
+    }
+    stdout.write(subcommandUsage("self"));
+    process.exitCode = args[1] === undefined || args[1] === "help" || args[1] === "--help" ? 0 : 2;
     return;
   }
   if (command === "link" && args[1] === "help") { stdout.write(linkUsage()); return; }
@@ -181,20 +194,20 @@ async function main(): Promise<void> {
     process.exit(0);
   }
   // Run inside the command sandbox: a loopback port that forwards to host:port through the sandbox proxy, for clients that need a raw TCP connection.
-  if (command === "tunnel") {
-    if (args.length < 2 || args[1] === "help" || args[1] === "--help") { stdout.write(`${tunnelUsage()}\n`); return; }
+  if (command === "link" && args[1] === "tunnel") {
+    if (args.length < 3 || args[2] === "help" || args[2] === "--help") { stdout.write(`${tunnelUsage()}\n`); return; }
     const proxyUrl = process.env.HTTP_PROXY ?? process.env.http_proxy;
-    if (!proxyUrl) throw new Error("frely tunnel must run inside the Frely command sandbox: HTTP_PROXY does not name the sandbox proxy here.");
-    const { host, port, localPort } = parseTunnelArguments(args.slice(1));
+    if (!proxyUrl) throw new Error("frely link tunnel must run inside the Frely command sandbox: HTTP_PROXY does not name the sandbox proxy here.");
+    const { host, port, localPort } = parseTunnelArguments(args.slice(2));
     // One failed connection must never take the tunnel down: log a line and keep serving.
-    const survive = (error: unknown) => { process.stderr.write(`frely tunnel: ${error instanceof Error ? error.message : String(error)}\n`); };
+    const survive = (error: unknown) => { process.stderr.write(`frely link tunnel: ${error instanceof Error ? error.message : String(error)}\n`); };
     process.on("uncaughtException", survive);
     process.on("unhandledRejection", survive);
-    const { address } = await startTunnel({ proxyUrl, host, port, localPort, onError: (error) => process.stderr.write(`frely tunnel: ${error.message}\n`) });
+    const { address } = await startTunnel({ proxyUrl, host, port, localPort, onError: (error) => process.stderr.write(`frely link tunnel: ${error.message}\n`) });
     stdout.write(`Tunnel listening on ${address} -> ${host}:${port}. Connect your client to ${address}; stop with Ctrl+C or by killing this process.\n`);
     await new Promise<never>(() => undefined);
   }
-  if (command === "sandbox" && args[1] === "proxy") {
+  if (command === "link" && args[1] === "proxy") {
     // The sandbox reads the proxy once, when the background service starts: restart a running one so the change applies now.
     if (await runSandboxProxyCommand(args.slice(2), (text) => { stdout.write(text); })) {
       if ((await serviceStatus()).active) { await installDeviceRelayService(); stdout.write("Background service restarted to use it.\n"); }
@@ -202,7 +215,7 @@ async function main(): Promise<void> {
     }
     return;
   }
-  if (command === "--version" || command === "-v" || command === "version") {
+  if (command === "--version" || command === "-v") {
     stdout.write(`${VERSION}\n`);
     return;
   }
@@ -215,28 +228,30 @@ async function main(): Promise<void> {
   }
   if (!command || command === "help" || command === "--help" || command === "-h") return usage();
 
-  if (command !== undefined && CONTROLLER_COMMANDS.has(command)) {
-    process.exitCode = await runControllerCommand(args, { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); } });
+  if (command === "device" || command === "file") {
+    const controllerArgs = controllerArguments(command, args.slice(1));
+    if (controllerArgs === undefined) { stdout.write(subcommandUsage(command)); return; }
+    process.exitCode = await runControllerCommand(controllerArgs, { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); } });
     return;
   }
 
   if (command === "api") {
     if (args[1] === undefined) { stdout.write(API_USAGE); return; }
+    // An account operation is named group.action; any other name is a tool of FrelyMCP itself (browser, web_fetch, store, ...).
+    if (args[1] === "call" && args[2] !== undefined && !isAccountToolName(args[2])) {
+      process.exitCode = await runControllerCommand(["call", ...args.slice(2)], { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); } });
+      return;
+    }
     const result = await runApi(args);
-    stdout.write(result.text ?? JSON.stringify(result.value, null, 2) + "\n");
+    if (args[1] === "list" && !args.includes("--group")) {
+      const json = args.includes("--json");
+      const parts: string[] = [];
+      const code = await runControllerCommand(["tools", ...(json ? ["--json"] : [])], { out: (text) => { parts.push(text); }, err: (text) => { process.stderr.write(text); } });
+      const tools = code === 0 ? parts.join("") : "";
+      if (json) stdout.write(JSON.stringify({ account: result.value, tools: tools ? JSON.parse(tools) as unknown : null }, null, 2) + "\n");
+      else stdout.write(`FrelyMCP tools (frely api call <tool> --json '<object>'):\n${tools || "  Not available: this computer is not connected to FrelyMCP.\n"}\nAccount operations (frely api call <group.action>):\n${result.text ?? ""}`);
+    } else stdout.write(result.text ?? JSON.stringify(result.value, null, 2) + "\n");
     if (result.failed) process.exitCode = 2;
-    return;
-  }
-
-  if (command === "key") {
-    if (args[1] === undefined) { stdout.write(subcommandUsage("key")); return; }
-    process.exitCode = await runKeyCommand(args.slice(1), { out: (text) => { stdout.write(text); }, call: (name, input) => callCloudToolAwaiting(name, input), instance: await currentInstance() });
-    return;
-  }
-
-  if (command === "todo") {
-    if (args[1] === undefined) { stdout.write(subcommandUsage("todo")); return; }
-    process.exitCode = await runTodoCommand(args.slice(1), { out: (text) => { stdout.write(text); }, call: callCloudTool });
     return;
   }
 
@@ -253,67 +268,45 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === "pi") {
-    if (args[1] === "install") {
-      const result = await installCapsule();
-      stdout.write(args.includes("--json") ? `${JSON.stringify(result)}\n` : `Pi Node ${result.tag} ${result.changed ? "installed" : "is up to date"} at ${result.capsulePath}.\nThe background service starts it (run frely link on if it is not running).\n`);
-      return;
-    }
-    if (args[1] === "status") {
-      const install = await readAnyInstall().catch(() => null);
-      const endpoint = install ? await readFile(join(install.agentDir, "frely", "headless.json"), "utf8").then(() => true, () => false) : false;
-      stdout.write(args.includes("--json") ? `${JSON.stringify({ installed: install !== null, running: endpoint, ...(install ? { version: install.appVersion, path: install.capsulePath } : {}) })}\n` : !install ? "The Pi Node is not installed. Run `frely pi install`.\n" : `Pi Node ${install.appVersion} at ${install.capsulePath}\nState: ${endpoint ? "running" : "not running"}\n`);
-      return;
-    }
-    stdout.write(subcommandUsage("pi"));
+  if (command === "agent") {
+    process.exitCode = await runAgentCommand(args.slice(1), {
+      out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY), readSecret: () => readStdinSecret(8192),
+    }, { key: async () => ({ out: (text: string) => { stdout.write(text); }, call: (name, input) => callCloudToolAwaiting(name, input), instance: await currentInstance() }) });
     return;
   }
 
   if (command === "task") {
-    if (args[1] === "__worker") {
-      const runId = args[2];
-      if (!runId) throw new Error("Usage: frely task __worker <runId>");
-      await taskWorkerMain(runId);
+    const taskIo = { out: (text: string) => { stdout.write(text); }, err: (text: string) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY) };
+    // Device task definitions and their runs live under `task local`; every other `task` command is the cloud plan.
+    if (args[1] === "local") {
+      if (args[2] === "__worker") {
+        const runId = args[3];
+        if (!runId) throw new Error("Internal command.");
+        await taskWorkerMain(runId);
+        return;
+      }
+      if (args[2] === undefined) { stdout.write(subcommandUsage("task.local")); return; }
+      process.exitCode = await runTaskCommand(args.slice(2), taskIo);
       return;
     }
     if (args[1] === "reminders") { process.exitCode = await runRemindersCommand(args.slice(2), { out: (text) => { stdout.write(text); }, call: callCloudTool }); return; }
     if (args[1] === undefined) { stdout.write(subcommandUsage("task")); return; }
-    process.exitCode = await runTaskCommand(args.slice(1), { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY) });
+    process.exitCode = await runTodoCommand(args.slice(1), { out: (text) => { stdout.write(text); }, call: callCloudTool });
     return;
   }
 
-  if (command === "skill" && args[1] === "sync" && !args.includes("--help") && !args.includes("-h")) {
-    const host = option(args, "--host");
-    if (host !== undefined && !isLinkAgent(host)) throw new Error(`--host must be one of: ${Object.keys(LINK_AGENTS).join(", ")}`);
-    const value = await syncAgentLinks({ mode: "full", ...(host ? { force: host } : {}), dryRun: args.includes("--dry-run") });
-    if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
-    const verb = args.includes("--dry-run") ? "Would link" : "Linked";
-    stdout.write(value.added.map((change) => `${verb}: ${change.path} (${change.agent})\n`).join("")
-      + value.skipped.map((change) => `Skipped link: ${change.path} (${change.reason})\n`).join("")
-      + value.dismissed.map((change) => `Not linking ${change.path}: you removed it. To link it again: frely skill sync --host ${change.agent}\n`).join("")
-      + (value.added.length === 0 && value.skipped.length === 0 && value.dismissed.length === 0 ? (value.scanned ? "All Skill links are in place.\n" : "Another link sync is running; try again in a minute.\n") : value.added.length > 0 && !args.includes("--dry-run") ? "Restart or reload those agents so they rescan Skills.\n" : ""));
-    return;
-  }
-  if (command === "skill") {
-    if (args[1] !== "install" || args.includes("--help") || args.includes("-h")) { stdout.write(subcommandUsage("skill")); return; }
-    const host = skillHost(option(args, "--host") ?? "generic");
-    const scope = skillScope(option(args, "--scope") ?? "global");
-    const dir = option(args, "--dir");
-    const value = await installEntrySkill({ host, scope, ...(dir ? { dir } : {}) });
-    if (args.includes("--json")) { stdout.write(`${JSON.stringify(value)}\n`); return; }
-    stdout.write(`Skill: frely\nPath: ${value.path}\n${linkLines(value.links)}Restart or reload the agent session so it rescans Skills.\n`);
-    return;
-  }
-
-  if (command === "runs" || command === "result" || command === "cancel") {
-    process.exitCode = await runRecordCommand(command, args.slice(1), { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); }, interactive: false });
+  if (command === "result") {
+    const io = { out: (text: string) => { stdout.write(text); }, err: (text: string) => { process.stderr.write(text); }, interactive: false };
+    if (args[1] === "list") process.exitCode = await runRecordCommand("runs", args.slice(2), io);
+    else if (args[1] === "cancel") process.exitCode = await runRecordCommand("cancel", args.slice(2), io);
+    else process.exitCode = await runRecordCommand("result", args.slice(1), io);
     return;
   }
 
   if (command === "item") {
     const action = args[1];
     // `item call <name>` without a tool sends a request to the item (an Agent, or the cloud part of a Skill) and waits for the answer;
-    // with a tool it calls that MCP tool (below). Its runs are read with `frely runs|result|cancel`, shared with task runs.
+    // with a tool it calls that MCP tool (below). Its runs are read with `frely result list|result|cancel`, shared with task runs.
     if (action === "call" && (args[3] === undefined || args[3].startsWith("-"))) {
       const target = args[2];
       if (!target || target.startsWith("-")) throw new Error(RUN_USAGE);
@@ -779,19 +772,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === "uninstall") {
-    const interactive = Boolean(stdin.isTTY && stdout.isTTY);
-    const prompt = interactive ? async (question: string) => {
-      const rl = createInterface({ input: stdin, output: stdout });
-      try { return await rl.question(question); } finally { rl.close(); }
-    } : undefined;
-    process.exitCode = await runUninstall(args.slice(1), { write: (text) => { stdout.write(text); }, interactive, ...(prompt ? { prompt } : {}) });
-    return;
-  }
-
   if (command === "service") {
-    // One group for everything this computer serves: shared services (mcp, a2a, model), a temporary web link (--type http) and local Agents.
-    const localIo = { out: (text: string) => { stdout.write(text); }, err: (text: string) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY), readSecret: () => readStdinSecret(8192) };
+    // Everything this computer shares: services (mcp, a2a, model), a temporary web link (--type http) and a shared task (--type task).
     const action = args[1];
     if (action === "share" && option(args, "--type") === "http") {
       const port = option(args, "--port");
@@ -800,35 +782,19 @@ async function main(): Promise<void> {
       process.exitCode = await runShareCommand([port, ...rest], { write: (text) => { stdout.write(text); }, interactive: Boolean(stdin.isTTY && stdout.isTTY) });
       return;
     }
-    if (action === "add" || action === "start" || action === "logs" || action === "key" || action === "supervise") {
-      process.exitCode = await runAgentLocal(args.slice(1), localIo);
+    if (action === "share" && option(args, "--type") === "task") {
+      const rest = args.slice(2).filter((arg, index, all) => !(arg === "--type" || all[index - 1] === "--type"));
+      process.exitCode = await shareTaskCommand(rest, { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY) });
       return;
     }
     if ((action === "stop" || action === "remove") && args[2] !== undefined && !args[2].startsWith("-")) {
-      const name = args[2];
-      const agent = LOCAL_AGENT_SLUG.test(name) ? await readLocalAgent(name).catch(() => null) : null;
-      const shared = (await listLocalServices()).some((service) => service.label === name || service.serviceShareId === name);
-      if (agent && shared) throw new Error(`Both a local Agent and a shared service are called "${name}". Use the shared service's id (frely service list).`);
-      if (agent) { process.exitCode = await runAgentLocal(args.slice(1), localIo); return; }
-    }
-    if (action === "list") {
-      const json = args.includes("--json");
-      if (json) {
-        const parts: string[] = [];
-        process.exitCode = await runServiceCommand(["list", "--json"], { write: (text) => { parts.push(text); } }, serviceDeps());
-        const agents: string[] = [];
-        await runAgentLocal(["list", "--json"], { ...localIo, out: (text) => { agents.push(text); } });
-        stdout.write(`${JSON.stringify({ ...(JSON.parse(parts.join("")) as object), agents: JSON.parse(agents.join("")) as unknown }, null, 2)}\n`);
-        return;
-      }
-      stdout.write("Shared services:\n");
-      process.exitCode = await runServiceCommand(["list"], { write: (text) => { stdout.write(text); } }, serviceDeps());
-      stdout.write("\nLocal Agents:\n");
-      await runAgentLocal(["list"], localIo);
-      return;
+      // A shared task is a service too: stopping its service stops the sharing.
+      const shared = (await listLocalServices()).find((service) => service.label === args[2] || service.serviceShareId === args[2]);
+      const share = shared ? (await listTaskShares()).find((item) => item.serviceShareId === shared.serviceShareId) : undefined;
+      if (share) await unshareTask(share.name);
     }
     if (action === undefined || action === "help" || action === "--help") {
-      stdout.write(`Usage:\n  ${serviceUsage().split("\n").join("\n  ")}\n  frely service share --type http --port <n> [--ttl <hours>] [--rewrite-host] [--json]\n\n${LOCAL_USAGE}`);
+      stdout.write(`Usage:\n  ${serviceUsage().split("\n").join("\n  ")}\n  frely service share --type http --port <n> [--ttl <hours>] [--rewrite-host] [--json]\n  frely service share --type task <name> [--workspace none|read|worktree] [--description <text>] [--charge-my-credit]\n`);
       return;
     }
     const controller = new AbortController();
@@ -842,8 +808,18 @@ async function main(): Promise<void> {
   }
 
   if (command === "doctor") {
+    const area = args[1] !== undefined && !args[1].startsWith("-") ? args[1] : undefined;
+    const json = args.includes("--json");
+    if (area === "computer") { stdout.write(await runComputerCommand(["doctor"])); return; }
+    if (area === "agent") {
+      const value = await agentDoctor(args[2] !== undefined && !args[2].startsWith("-") ? args[2] : undefined);
+      stdout.write(json ? `${JSON.stringify(value, null, 2)}\n` : formatAgentDoctor(value));
+      if (!value.ok) process.exitCode = 1;
+      return;
+    }
+    if (area !== undefined) throw new Error(`Unknown doctor area ${JSON.stringify(area)}. Use frely doctor, frely doctor computer or frely doctor agent [<id>].`);
     const value = await doctor({ verbose: args.includes("-v") || args.includes("--verbose") });
-    if (args.includes("--json")) stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+    if (json) stdout.write(`${JSON.stringify(value, null, 2)}\n`);
     else stdout.write(formatDoctor(value));
     if (!value.ok) process.exitCode = 1;
     return;
@@ -860,7 +836,7 @@ async function main(): Promise<void> {
     const name = option(args, "--name");
     const maxConcurrent = option(args, "--max-concurrent");
     const binding = await registerLocalOnlyProvider({ driver, ...(url ? { url } : {}), ...(models ? { models } : {}), ...(name ? { name } : {}), ...(key ? { key } : {}), ...(maxConcurrent ? { maxConcurrent: Number(maxConcurrent) } : {}) }, providerIo());
-    stdout.write(`Registered ${binding.providerId} (${binding.name}) at ${binding.baseUrl}\nModels: ${binding.models.join(", ")}\nIt is used by tasks on this computer only (frely task add --model <name>); it is not shared and takes no Provider slot.\n`);
+    stdout.write(`Registered ${binding.providerId} (${binding.name}) at ${binding.baseUrl}\nModels: ${binding.models.join(", ")}\nIt is used by tasks on this computer only (frely task local add --model <name>); it is not shared and takes no Provider slot.\n`);
     return;
   }
 
@@ -888,9 +864,9 @@ async function main(): Promise<void> {
   }
 
   if (command === "app" && args[1] === undefined) { stdout.write(subcommandUsage("app")); return; }
-  if (command === "computer") {
-    if (args[1] === "mcp") { await runComputerMcpServer(); return; }
-    stdout.write(await runComputerCommand(args.slice(1)));
+  if (command === "link" && args[1] === "computer") {
+    if (args[2] === "mcp") { await runComputerMcpServer(); return; }
+    stdout.write(await runComputerCommand(args.slice(2)));
     return;
   }
 
@@ -969,7 +945,7 @@ async function main(): Promise<void> {
     void watchLinkClaim({ signal: controller.signal, log: nodeLog, onClaimed: stop, onLocked: stop });
     // Services saved with `frely service share --background` stay connected for as long as the daemon runs.
     const services = superviseServices({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Services stopped: ${error instanceof Error ? error.message : String(error)}`));
-    // Scheduled tasks (`frely task add --cron`): the clock lives here; each run is a detached worker that does not depend on this connection.
+    // Scheduled tasks (`frely task local add --cron`): the clock lives here; each run is a detached worker that does not depend on this connection.
     const taskShares = providerOnly ? Promise.resolve() : superviseTaskShares({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Shared tasks stopped: ${error instanceof Error ? error.message : String(error)}`));
     const tasks = providerOnly ? Promise.resolve() : superviseTasks({ signal: controller.signal, log: nodeLog }).catch((error) => nodeLog(`Tasks stopped: ${error instanceof Error ? error.message : String(error)}`));
     const reminders = providerOnly ? Promise.resolve() : superviseReminders({ signal: controller.signal, log: nodeLog, call: callCloudTool }).catch((error) => nodeLog(`Reminders stopped: ${error instanceof Error ? error.message : String(error)}`));
@@ -1031,7 +1007,7 @@ async function main(): Promise<void> {
         if (!deviceId) throw new Error("MCP is not enabled. Run frely link on.");
         try { await callCloudToolAwaiting("devices.confirm_workspace_change", { deviceId, action, path }, undefined, undefined, announce); }
         catch (error) {
-          if (error instanceof CloudToolError && error.code === "tool_unavailable_or_forbidden") throw new Error("Frely cannot confirm workspace changes yet. Update Frely CLI with frely update, or sign in again, and try again.");
+          if (error instanceof CloudToolError && error.code === "tool_unavailable_or_forbidden") throw new Error("Frely cannot confirm workspace changes yet. Update Frely CLI with frely self update, or sign in again, and try again.");
           throw error;
         }
       } });
@@ -1142,7 +1118,7 @@ function option(args: string[], name: string): string | undefined {
 
 function skillHost(value: string): SkillHost {
   if ((SKILL_HOSTS as readonly string[]).includes(value)) return value as SkillHost;
-  throw new Error("--host must be chatgpt, codex, claude-code, pi, workbuddy, codebuddy, or generic.");
+  throw new Error(`--host must be ${SKILL_HOSTS.join(", ")}.`);
 }
 
 function skillScope(value: string): SkillScope {

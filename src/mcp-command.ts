@@ -8,7 +8,7 @@ import { installMcpService, serviceStatus, startMcpService } from "./service.js"
 import { connectionStatusPath } from "./device/connection-status.js";
 
 /**
- * The controlled-side group is `frely link`: whether this computer accepts remote control, whatever the channel (an MCP client, `frely run`
+ * The controlled-side group is `frely link`: whether this computer accepts remote control, whatever the channel (an MCP client, `frely device run`
  * from another computer, a hosted Agent). It has one switch, `link on` / `link off`, plus `link status`; a bare `frely link` prints the usage.
  * `link on` is the idempotent enable/start/print-URL action. The internal `frely mcp …` commands are not in help: `mcp serve` and `mcp stdio`
  * are what installed services and local MCP clients launch, `mcp service stop|start` is what update scripts run around an update, and
@@ -22,6 +22,8 @@ export function normalizeLinkArgs(input: readonly string[]): string[] {
     return checkOptions(args, args[1]);
   }
   if (args[0] !== "link") return args;
+  // Not about remote control itself: their own commands parse their arguments.
+  if (args[1] === "computer" || args[1] === "proxy" || args[1] === "tunnel") return args;
   if (args.slice(1).some((arg) => arg === "--help" || arg === "-h") || args[1] === "help") return ["link", "help"];
   if (!args[1]) return ["link", "help"];
   if (!["workspace", "local", "on", "off", "status"].includes(args[1])) throw new Error("Unknown link command. Run frely link --help.");

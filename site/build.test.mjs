@@ -162,7 +162,7 @@ test('the landing page leads with the Skill install and keeps frely link on in t
     for (const route of ['en/', 'zh/']) {
       const html = await readFile(resolve(temp, '_site', route, 'index.html'), 'utf8');
       const card = html.slice(html.indexOf('id="install"'), html.indexOf('id="skill"'));
-      assert.ok(card.includes('frely skill install --host'), route + ': install card shows the Skill command');
+      assert.ok(card.includes('frely agent setup'), route + ': install card shows the Skill command');
       assert.equal(card.includes('frely.cloud/start.'), false, route + ': install card does not run the start script that enables Device MCP');
       assert.ok(html.indexOf('frely.cloud/start.sh') > html.indexOf('id="get-started"'), route + ': the start script sits in the FrelyMCP section');
       assert.ok(html.indexOf('id="skill"') < html.indexOf('id="get-started"'), route + ': Skill section comes before FrelyMCP');

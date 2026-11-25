@@ -215,7 +215,7 @@ test("Windows package instructions preserve manager and prefix, escape paths, an
 test("update accepts no switches and directs version checks to doctor", async () => {
   const entry = fileURLToPath(new URL("../index.js", import.meta.url));
   for (const flag of ["--check", "--version", "--json"]) {
-    await assert.rejects(execFile(process.execPath, [entry, "update", flag]), (error: unknown) => {
+    await assert.rejects(execFile(process.execPath, [entry, "self", "update", flag]), (error: unknown) => {
       const result = error as { stderr: string; code: number };
       return result.code === 1 && /frely doctor/.test(result.stderr);
     });
@@ -331,7 +331,7 @@ test("gunzipLimited stops at the output limit", async (t) => {
 
 test("a dead login refuses the update before anything changes, so the restart cannot take the computer offline", async () => {
   const { d, calls } = fixture(true);
-  d.assertLoginUsable = async () => { throw new Error("This computer's Frely login is no longer valid. Nothing was changed. Run frely login, then frely update."); };
+  d.assertLoginUsable = async () => { throw new Error("This computer's Frely login is no longer valid. Nothing was changed. Run frely login, then frely self update."); };
   await assert.rejects(() => update(() => {}, d), /Run frely login/);
   assert.deepEqual(calls, []);
 });

@@ -40,7 +40,7 @@
   "install.eyebrow": "安装 FRELY SKILL",
   "install.standalone": "下载独立可执行文件",
   "install.runtime": "独立安装器自带运行时，不需要 Node.js。",
-  "install.node": "需要 Node.js 22+。然后运行 frely login 和 frely skill install。",
+  "install.node": "需要 Node.js 22+。然后运行 frely login 和 frely agent setup。",
   "install.platformLabel": "选择你的系统",
   "install.step1": "把这段话粘贴给 Agent",
   "copy.install": "复制 npm 安装命令",

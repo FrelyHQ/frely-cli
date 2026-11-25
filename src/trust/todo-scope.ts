@@ -1,5 +1,6 @@
 import { chmod, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { isAbsolute, join, sep } from "node:path";
+import { isAgentId } from "../agents/registry.js";
 import { verifyApproval, type ApprovalPayload, type SignedApproval, type TrustRecord } from "./record.js";
 import { TrustError } from "./webauthn.js";
 
@@ -23,7 +24,7 @@ function shapedScope(payload: ApprovalPayload): NonNullable<ApprovalPayload["sco
   const scope = payload.scope;
   if (!scope || typeof scope.todo !== "string" || typeof scope.workspace !== "string" || !isAbsolute(scope.workspace) || scope.workspace.includes("\0")) throw new TrustError("scope_invalid");
   if (!Array.isArray(scope.sites) || scope.sites.length > MAX_SITES || !scope.sites.every((site) => typeof site === "string" && SITE.test(site))) throw new TrustError("scope_invalid");
-  if (scope.executors !== undefined && (!Array.isArray(scope.executors) || scope.executors.length < 1 || !scope.executors.every((item) => item === "pi" || item === "codex"))) throw new TrustError("scope_invalid");
+  if (scope.executors !== undefined && (!Array.isArray(scope.executors) || scope.executors.length < 1 || !scope.executors.every((item) => isAgentId(item)))) throw new TrustError("scope_invalid");
   if (!Number.isSafeInteger(scope.maxSteps) || scope.maxSteps < 1 || scope.maxSteps > MAX_STEPS) throw new TrustError("scope_invalid");
   return scope;
 }

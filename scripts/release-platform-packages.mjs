@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSyn
 import { join, resolve } from 'node:path';
 
 // One npm package per release target: @frelyhq/cli-<target> holds package/frely[.exe] and its .sha256.
-// install.sh / install.ps1 and `frely update` download these tarballs from npmmirror or npmjs when GitHub is unreachable.
+// install.sh / install.ps1 and `frely self update` download these tarballs from npmmirror or npmjs when GitHub is unreachable.
 export const TARGETS = {
   'darwin-arm64': { os: 'darwin', cpu: 'arm64' },
   'darwin-x64': { os: 'darwin', cpu: 'x64' },

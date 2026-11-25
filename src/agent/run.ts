@@ -114,7 +114,7 @@ export function runFailure(record: RunRecord): SkillAccessError {
   return new SkillAccessError(code, record.error?.message ?? "The remote Frely Agent call failed.");
 }
 
-/** The state `frely result` and `frely runs` print for a run (no task text; the result text only when finished). */
+/** The state `frely result` and `frely result list` print for a run (no task text; the result text only when finished). */
 export function runSummary(record: RunRecord): Record<string, unknown> {
   const status = effectiveStatus(record);
   return {
