@@ -85,7 +85,7 @@ import { redeemGift } from "./skill/gift.js";
 import { callRemoteTool, connectRemoteMcp, installRemoteMcpSkill, isNotASkill, listRemoteTools, mcpClientConfig, parseMcpName, RemoteMcpError } from "./skill/remote-mcp.js";
 import { callCloudTool, callCloudToolAwaiting } from "./cloud.js";
 import { runTodoCommand } from "./todo-command.js";
-import { runRemindersDoctor } from "./reminders/command.js";
+import { runRemindersCommand } from "./reminders/command.js";
 import { superviseReminders } from "./reminders/sync.js";
 import { runKeyCommand } from "./key-setup.js";
 import { claimInstall, ItemNotFoundError, resolveItem, type ResolvedItem } from "./skill/resolve.js";
@@ -276,6 +276,7 @@ async function main(): Promise<void> {
       await taskWorkerMain(runId);
       return;
     }
+    if (args[1] === "reminders") { process.exitCode = await runRemindersCommand(args.slice(2), { out: (text) => { stdout.write(text); }, call: callCloudTool }); return; }
     if (args[1] === undefined) { stdout.write(subcommandUsage("task")); return; }
     process.exitCode = await runTaskCommand(args.slice(1), { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY) });
     return;
@@ -837,11 +838,6 @@ async function main(): Promise<void> {
     try {
       process.exitCode = await runServiceCommand(args.slice(1), { write: (text) => { stdout.write(text); } }, serviceDeps(controller.signal));
     } finally { process.off("SIGINT", onSignal); process.off("SIGTERM", onSignal); }
-    return;
-  }
-
-  if (command === "doctor" && args[1] === "reminders") {
-    process.exitCode = await runRemindersDoctor(args.slice(2), { out: (text) => { stdout.write(text); }, call: callCloudTool });
     return;
   }
 
