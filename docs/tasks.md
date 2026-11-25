@@ -36,14 +36,14 @@ Five cron fields in an IANA time zone (default: this computer's). When both day-
 - **Limits.** Each endpoint serves a limited number of calls at once, shared with callers that use a shared Provider: 1 for a model served on this computer, 6 for a network address or the gateway (`frely provider add --max-concurrent <n>` changes it). A task waits for a free slot; a remote buyer is told the endpoint is busy, so your own tasks go first.
 - **Records.** A run records how many model calls it made and how many failed, on this computer only. Nothing is reported or billed for them.
 
-## Pi tasks (`--pi`)
+## Agent tasks (`--agent`)
 
-`frely task local add <name> --pi [--model <name>] [--cwd <git-folder>] -- <prompt>` defines a task whose prompt is run by the Pi Node, an agent that edits files. The task folder must be a clean git repository: the Pi Node works in its own git worktree of it, so nothing is committed to your main branch or pushed. The result holds the agent's last answer and a short summary of the changes (`frely result`).
+`frely task local add <name> --agent pi|codex|claude-code [--model <name>] [--cwd <git-folder>] -- <prompt>` defines a task whose prompt is run by a coding agent installed on this computer (`pi -p`, `codex exec`, `claude -p`). frely-cli does not install or embed an agent; `frely agent list` shows which are installed and `frely agent status <id>` prints the vendor's install command. `frely agent run <id> "<task>"` is the one-off form of the same thing.
 
-- `frely pi install` downloads the Pi Node (the Capsule the Frely App publishes as a release asset), checks its SHA-256 and every file in it, and keeps it under `~/.config/frely/pi-node`. The Frely App is not needed; if the App is installed, its Pi Node is used instead. Run it again to update.
-- The background service (`frely link on`) keeps the Pi Node running. `frely pi status` shows its state.
-- With `--model`, the agent's model calls go through the same model route as other tasks (a local Provider first, else the Frely gateway). The Pi Node is not inside the command sandbox, so this route listens on `127.0.0.1` for the length of the run.
-- A cancelled or timed-out run stops waiting; its Pi thread may keep running inside the Pi Node.
+- The prompt is sent on stdin and the agent runs inside the Frely command sandbox, which is the boundary of the run (the agent's own approval prompts and sandbox are off). It uses its own login and model settings; Frely holds none of them. `--model` is passed to the agent as given.
+- The sandbox lets a run reach only the sites you approved: the agent's own service (`api.openai.com`, `api.anthropic.com`, ...) is asked for through an approval link the first time (`frely task local approve <name>`; `frely agent run` asks by itself).
+- With `--agent` the task folder should be a git repository: the agent works in its own git worktree of it, so nothing is committed to your main branch or pushed. The result holds the agent's last answer and a short summary of the changes (`frely result`).
+- `frely doctor agent` checks which agents are installed. `frely agent setup <id>` gives an agent the Frely Skill.
 
 ## Sharing a task as an A2A service
 
@@ -51,8 +51,8 @@ Five cron fields in an IANA time zone (default: this computer's). When both day-
 
 - A caller sends only a text request (`message/send`). The runner, instructions, command, folder and workspace mode come from the approved definition; the Agent Card is generated from it.
 - You approve the exact definition at a terminal on this computer. Any change to the task (or removing it) delists the share until you share it again.
-- Pi tasks, `--workspace`: `none` (default) works in a one-time empty folder; `read` answers about the task folder without changing it; `worktree` uses a git worktree per call (nothing is committed to your main branch or pushed) and returns the answer plus a diff summary. After 10 calls whose changes you have not dealt with (`frely task local handled <runId>`), new worktree calls are answered busy.
+- Agent tasks, `--workspace`: `none` (default) works in a one-time empty folder; `read` answers about the task folder without changing it; `worktree` uses a git worktree per call (nothing is committed to your main branch or pushed) and returns the answer plus a diff summary. After 10 calls whose changes you have not dealt with (`frely task local handled <runId>`), new worktree calls are answered busy.
 - Only a model registered on this computer (`frely provider add`) is allowed. A task that uses a gateway model needs `--charge-my-credit`: each call then deducts model fees from your Credit.
 - One call runs at a time and three wait; further calls get a busy answer and nothing is charged. A call that takes longer than 50 seconds returns a task id; poll it with `tasks/get`. Local tasks start first when the computer is full.
 - A script task gets the request as `$FRELY_TASK_INPUT`.
-- `frely service stop <name>` stops sharing.
+- `frely service stop <id|label>` stops sharing (`frely service list` shows the id).

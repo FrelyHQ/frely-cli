@@ -61,7 +61,7 @@ Then sign in and install the Skill for your agent host:
 
 ```sh
 frely login --email <you@example.com>   # Then run: frely login --code <6-digit code> [--host <host>] [--link on] (installs Skill; --link on also turns on remote control)
-frely agent setup --host <claude-code|codex|pi|workbuddy|codebuddy|generic>
+frely agent setup
 ```
 
 ### Add FreelyMCP to web agents
@@ -82,12 +82,13 @@ Tutorial [https://freely.cloud/docs/claude](https://freely.cloud/docs/claude/)
 
 | Command | What it does |
 | --- | --- |
-| `frely agent setup --host <host>` | Install the `frely` Skill for an agent host (`claude-code`, `codex`, `pi` or `generic`). |
+| `frely agent setup [<id>]` | Install the `frely` Skill for the agents on this computer (`pi`, `codex`, `claude-code`) and link it where they read Skills. |
+| `frely agent list` / `frely agent run <id> "<task>"` | See which coding agents (`pi`, `codex`, `claude-code`) are installed here, and run one task in one of them inside the Frely sandbox. Frely does not install or embed an agent. |
 | `frely link on` | Turn remote control on: sign in if needed, approve this computer in the browser, start the background service and print the MCP URL. Safe to re-run: it renews expired access and starts a stopped service. |
 | `frely link off` | Turn remote control off: revoke access for every client and lock it on this computer, so only `frely link on` here turns it on again. The background service is uninstalled, or kept running for local Providers. |
 | `frely link status` | Show whether remote control is on, off or not enabled yet, with the MCP URL, workspace, expiry and service state. |
 | `frely link workspace add <path>` | Share another folder. `frely link workspace list` shows them all. `frely link workspace add <path> --primary` (or `-p`) makes a folder the primary one without a new authorization; `remove` only stops sharing, it never deletes files. |
-| `frely doctor` | Check sign-in, installation, service and connection. `-v` for details. |
+| `frely doctor` | Check sign-in, installation, service and connection (read-only). `-v` for details; `frely doctor computer` and `frely doctor agent` check computer use and the installed agents. |
 | `frely self update` | Update to the latest version in place. |
 | `frely login` / `frely logout` | Sign in or out of Freely account. |
 | `frely link proxy <url>` | Forward the command sandbox's network traffic to your own HTTP(S) proxy. Without it the CLI uses `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` and, on macOS, the system proxy. `--clear` removes it. A running background service restarts to apply the change. |

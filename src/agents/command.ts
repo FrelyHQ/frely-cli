@@ -6,7 +6,7 @@ import { ControllerError, EXIT } from "../controller/client.js";
 import { runKeyCommand, KEY_SETUP_AGENTS, type KeySetupIo } from "../key-setup.js";
 import { installEntrySkill } from "../skill/entry.js";
 import { syncAgentLinks } from "../skill/link-sync.js";
-import { linkLines } from "../skill/agent-links.js";
+import { isLinkAgent, linkLines } from "../skill/agent-links.js";
 import type { SkillScope } from "../skill/managed.js";
 import { buildDefinition, getDefinition, saveDefinition } from "../task/definition.js";
 import type { ManagerDeps } from "../task/manager.js";
@@ -34,6 +34,8 @@ export interface AgentCommandDeps {
   readonly manager?: ManagerDeps;
   readonly approval?: ApprovalDeps;
   readonly key?: () => Promise<KeySetupIo>;
+  /** The home folder the Skill goes under (tests). */
+  readonly home?: string;
 }
 
 const fail = (message: string, code: number = EXIT.cli): never => { throw new ControllerError(message, code); };
@@ -134,36 +136,24 @@ async function setup(args: readonly string[], io: AgentCommandIo, deps: AgentCom
   const dir = value(args, "--dir");
   const gatewayAt = args.indexOf("--gateway");
   const gateway = gatewayAt >= 0 ? (args[gatewayAt + 1] !== undefined && !args[gatewayAt + 1]!.startsWith("--") ? args[gatewayAt + 1]! : "") : undefined;
-  let targets: AgentAdapter[];
-  if (id !== undefined) {
-    const agent = requireAgent(id);
-    if (!agent.capabilities.skillHost) return fail(`${agent.title} cannot be set up from frely-cli.`);
-    targets = [agent];
-  } else {
-    if (gateway !== undefined) return fail(`--gateway needs one agent: ${KEY_SETUP_AGENTS.join(" or ")}.`);
-    const detect = deps.detect ?? detectBinary;
-    targets = [];
-    for (const agent of runnableAgents()) if (agent.capabilities.skillHost && (await detect(agent.binary)).installed) targets.push(agent);
-  }
-  const done: Array<Record<string, unknown>> = [];
-  for (const agent of targets) {
-    const skill = await installEntrySkill({ host: agent.skillHost, scope, ...(dir ? { dir } : {}) });
-    done.push({ agent: agent.id, skill: skill.path });
-    if (!json) io.out(`${agent.title}: Frely Skill at ${skill.path}\n${linkLines(skill.links)}`);
-  }
-  // Agents that read another folder than .agents/skills (and hosts such as WorkBuddy) get a link to the one copy.
-  const links = await syncAgentLinks({ mode: "full" });
-  if (!json) {
+  const agent = id === undefined ? undefined : requireAgent(id);
+  if (agent && !agent.capabilities.skillHost) return fail(`${agent.title} cannot be set up from frely-cli.`);
+  if (gateway !== undefined && (!agent || !(KEY_SETUP_AGENTS as readonly string[]).includes(agent.id))) return fail(`--gateway needs one agent: ${KEY_SETUP_AGENTS.join(" or ")}.`);
+  // The Skill has one copy in .agents/skills; agents that read another folder get a link to it.
+  const skill = await installEntrySkill({ host: agent?.skillHost ?? "generic", scope, ...(dir ? { dir } : {}), ...(deps.home ? { home: deps.home } : {}) });
+  const links = await syncAgentLinks({ mode: "full", ...(deps.home ? { home: deps.home } : {}), ...(agent && isLinkAgent(agent.skillHost) ? { force: agent.skillHost } : {}) });
+  const detect = deps.detect ?? detectBinary;
+  const installed: string[] = [];
+  if (agent === undefined) for (const item of runnableAgents()) if ((await detect(item.binary)).installed) installed.push(item.id);
+  if (json) io.out(`${JSON.stringify({ skill: skill.path, links: links.added, agents: agent ? [agent.id] : installed })}\n`);
+  else {
+    io.out(`Skill: frely\nPath: ${skill.path}\n${linkLines(skill.links)}`);
     for (const change of links.added) io.out(`Linked: ${change.path} (${change.agent})\n`);
-    if (targets.length === 0 && links.added.length === 0) io.out("No supported agent was found on this computer. Install one, or name it: frely agent setup <id>.\n");
+    io.out(agent ? `Restart or reload ${agent.title} so it rescans Skills.\n` : installed.length > 0 ? `Agents here that can use it: ${installed.join(", ")}. Restart or reload them so they rescan Skills.\n` : "No supported agent was found on this computer; the Skill is in place for when one is installed (frely agent list).\n");
   }
-  if (gateway !== undefined) {
-    if (!id || !(KEY_SETUP_AGENTS as readonly string[]).includes(id)) return fail(`--gateway works for ${KEY_SETUP_AGENTS.join(" or ")}.`);
+  if (gateway !== undefined && agent) {
     const keyIo = await (deps.key ?? (() => { throw new Error("The Frely login is not available here."); }))();
-    const code = await runKeyCommand(["setup", id, ...(gateway === "" ? [] : ["--gateway", gateway]), ...(has(args, "--json") ? ["--json"] : [])], keyIo);
-    if (code !== 0) return code;
+    return runKeyCommand(["setup", agent.id, ...(gateway === "" ? [] : ["--gateway", gateway]), ...(value(args, "--name") ? ["--name", value(args, "--name")!] : []), ...(json ? ["--json"] : [])], keyIo);
   }
-  if (json && gateway === undefined) io.out(`${JSON.stringify({ agents: done, links: links.added })}\n`);
-  else if (!json && done.length > 0) io.out("Restart or reload the agent session so it rescans Skills.\n");
   return EXIT.ok;
 }

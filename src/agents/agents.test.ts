@@ -4,7 +4,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, before, test } from "node:test";
+import { after, before, beforeEach, test } from "node:test";
 import { EXIT } from "../controller/client.js";
 import { buildDefinition, RUNNERS, saveDefinition } from "../task/definition.js";
 import { startTask, waitForTaskRun, type ManagerDeps } from "../task/manager.js";
@@ -22,6 +22,7 @@ import { createAgentRunner, promptOf, summarizeDiff } from "./runner.js";
 let root: string;
 let previousSandbox: string | undefined;
 before(async () => { root = await mkdtemp(join(tmpdir(), "frely-agents-test-")); previousSandbox = process.env.FRELY_SANDBOX; process.env.FRELY_SANDBOX = "off"; });
+beforeEach(async () => { process.env.XDG_CONFIG_HOME = await mkdtemp(join(root, "config-")); });
 after(async () => { if (previousSandbox === undefined) delete process.env.FRELY_SANDBOX; else process.env.FRELY_SANDBOX = previousSandbox; await rm(root, { recursive: true, force: true }); });
 
 const none = async () => ({ installed: false });
@@ -205,4 +206,38 @@ test("frely agent run saves one task per agent, starts it and can wait for the a
   assert.equal(code, 0, h.err());
   const printed = JSON.parse(h.out()) as { status: string; answer: string; runner: string };
   assert.deepEqual([printed.status, printed.answer, printed.runner], ["completed", "ran", "pi"]);
+});
+
+test("frely agent setup puts the Frely Skill in .agents/skills once, for one agent or for whoever is installed", async () => {
+  const home = await mkdtemp(join(root, "home-"));
+  {
+    const h = io();
+    assert.equal(await runAgentCommand(["setup", "codex", "--json"], h.io, { detect: present("codex"), home }), 0, h.err());
+    const done = JSON.parse(h.out()) as { skill: string; agents: string[] };
+    assert.equal(done.skill, join(home, ".agents", "skills", "frely"));
+    assert.deepEqual(done.agents, ["codex"]);
+    assert.ok(existsSync(join(done.skill, "SKILL.md")));
+    const all = io();
+    assert.equal(await runAgentCommand(["setup", "--json"], all.io, { detect: present("pi", "claude-code"), home }), 0, all.err());
+    assert.deepEqual((JSON.parse(all.out()) as { agents: string[] }).agents, ["pi", "claude-code"]);
+    const refused = io();
+    assert.notEqual(await runAgentCommand(["setup", "pi", "--gateway"], refused.io, { detect: present("pi"), home }), 0);
+    assert.match(refused.err(), /--gateway needs one agent: codex or claude-code/u);
+    const noId = io();
+    assert.notEqual(await runAgentCommand(["setup", "--gateway"], noId.io, { detect: none, home }), 0);
+  }
+});
+
+test("task local add --agent defines an agent task with the agent's own sites and a plain-text prompt", async () => {
+  const folder = await mkdtemp(join(root, "work-"));
+  const { runTaskCommand } = await import("../task/command.js");
+  const { getDefinition } = await import("../task/definition.js");
+  const h = io();
+  assert.equal(await runTaskCommand(["add", "fix-it", "--agent", "codex", "--net", "github.com", "--cwd", folder, "--", "Fix", "the", "bug", "in", "'main'"], h.io), 0, h.err());
+  const definition = await getDefinition("fix-it");
+  assert.deepEqual([definition?.runner, definition?.command, definition?.worktree], ["codex", "Fix the bug in 'main'", true]);
+  assert.deepEqual([...(definition?.network ?? [])].sort(), ["api.openai.com", "chatgpt.com", "github.com"]);
+  const bad = io();
+  assert.notEqual(await runTaskCommand(["add", "x", "--agent", "gemini", "--cwd", folder, "--", "hi"], bad.io), 0);
+  assert.match(bad.err(), /Unknown agent/u);
 });

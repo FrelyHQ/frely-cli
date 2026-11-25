@@ -15,7 +15,7 @@ export const codexAdapter: AgentAdapter = {
   hosts: ["api.openai.com", "chatgpt.com"],
   usesOutputFile: true,
   runArguments: ({ model, resume, outputFile }) => [
-    "exec", ...(resume === undefined ? [] : ["resume", resume]), "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox",
+    "exec", ...(resume === undefined ? [] : ["resume", resume]), "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox",
     "-o", outputFile, ...(model === undefined ? [] : ["-m", model]), "-",
   ],
   parseOutput: (output, fileText) => {

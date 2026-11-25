@@ -1,12 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
+import { AGENTS, OTHER_SKILL_HOSTS } from "../agents/registry.js";
+import type { AgentId } from "../agents/types.js";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, readdir, rename, rmdir, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { linkSkill, unlinkSkill, type LinkOutcome, type LinkRecord } from "./agent-links.js";
 
-export const SKILL_HOSTS = ["chatgpt", "codex", "claude-code", "pi", "workbuddy", "codebuddy", "generic"] as const;
-export type SkillHost = (typeof SKILL_HOSTS)[number];
+/** Agents installed on the computer (the registry) and hosts that only read an installed Skill. */
+export type SkillHost = AgentId | (typeof OTHER_SKILL_HOSTS)[number];
+export const SKILL_HOSTS: readonly SkillHost[] = [...AGENTS.map((agent) => agent.skillHost), ...OTHER_SKILL_HOSTS];
 export type SkillScope = "global" | "project";
 
 export interface ManagedSkillRecord {
@@ -29,7 +32,7 @@ export interface ManagedSkillRecord {
   readonly pendingSha256?: string;
   /** Links (or copies) of this Skill folder in other agents' Skill folders. */
   readonly links?: readonly LinkRecord[];
-  /** Link paths the person deleted; automatic link sync does not put them back (an install, update or `frely agent setup --host` does). */
+  /** Link paths the person deleted; automatic link sync does not put them back (an install, update or `frely agent setup <id>` does). */
   readonly dismissedLinks?: readonly string[];
 }
 

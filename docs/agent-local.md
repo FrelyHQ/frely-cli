@@ -1,14 +1,14 @@
 # Agents on this computer
 
-`frely service` runs an open-source Agent's repository on your computer, inside the Frely command sandbox.
+`frely agent start` runs an open-source Agent's repository on your computer, inside the Frely command sandbox.
 
 ```
 frely agent start <username/name | https://github.com/owner/repo> [--name <folder-name>]
 frely agent start <name> [--foreground]
-frely service stop <name>
+frely agent stop <name>
 frely agent logs <name> [--lines <n>] [--follow]
-frely service list [--json]
-frely service remove <name>
+frely agent list [--json]
+frely agent remove <name>
 frely agent key --api-key-stdin | --clear
 ```
 

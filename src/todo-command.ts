@@ -11,7 +11,7 @@ export interface TodoCommandIo {
 export const TODO_STATUSES = ["open", "in_progress", "done", "cancelled", "archived"] as const;
 export const TODO_STEP_STATUSES = ["pending", "succeeded", "failed", "skipped", "cancelled"] as const;
 
-const USAGE = "Usage: frely task list|show|add|update|archive|plan|step. Run frely help --agent --json todo for flags.";
+const USAGE = "Usage: frely task list|show|add|update|archive|plan|step. Run frely help --agent --json task for flags.";
 
 interface Parsed { positional: string[]; flags: Map<string, string[]>; json: boolean }
 

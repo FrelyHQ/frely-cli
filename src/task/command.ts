@@ -96,8 +96,6 @@ export async function runTaskCommand(args: readonly string[], io: TaskIo, deps: 
       case "schedule": return await schedule(rest, io);
       case "approve": return await approve(rest, io, deps.approval);
       case "start": return await start(rest, io, deps);
-      case "share": return await shareCommand(rest, io);
-      case "unshare": return await unshareCommand(rest, io);
       case "handled": return await handledCommand(rest, io);
       default: io.out(TASK_USAGE); return action === undefined || action === "help" || action === "--help" ? EXIT.ok : EXIT.cli;
     }
@@ -108,21 +106,14 @@ export async function runTaskCommand(args: readonly string[], io: TaskIo, deps: 
   }
 }
 
-async function shareCommand(args: readonly string[], io: TaskIo): Promise<number> {
+/** `frely service share --type task <name>`: shares a task definition as an A2A service. */
+export async function shareTaskCommand(args: readonly string[], io: TaskIo): Promise<number> {
   const options = args;
   const [name] = positional(options);
   if (!name) return fail("Usage: frely service share --type task <name> [--workspace none|read|worktree] [--description <text>] [--charge-my-credit]");
   const { shareTask } = await import("./share.js");
   const workspace = (value(options, "--workspace") ?? "none") as "none" | "read" | "worktree";
   await shareTask(name, { workspace, description: value(options, "--description") ?? "", chargeMyCredit: has(options, "--charge-my-credit"), interactive: io.interactive }, (text) => io.out(text));
-  return EXIT.ok;
-}
-
-async function unshareCommand(args: readonly string[], io: TaskIo): Promise<number> {
-  const [name] = positional(args);
-  if (!name) return fail("Usage: frely service stop <name>");
-  const { unshareTask } = await import("./share.js");
-  io.out(await unshareTask(name) ? `Stopped sharing ${name}. The service stays registered on Frely, disconnected.\n` : `${name} is not shared.\n`);
   return EXIT.ok;
 }
 
@@ -150,14 +141,16 @@ async function add(args: string[], io: TaskIo): Promise<number> {
   const previous = await getDefinition(name);
   if (previous && !has(options, "--replace")) return fail(`A task named ${name} exists. Use --replace to change it (a changed task needs its sites approved again).`);
   const timeout = value(options, "--timeout");
-  const command = commandWords.length === 1 ? commandWords[0]! : commandWords.map(shellQuote).join(" ");
+  
   const model = value(options, "--model");
   const fallbacks = values(options, "--fallback-model");
   const agentName = value(options, "--agent");
-  const agent = agentName === undefined ? undefined : getAgent(agentName).id;
+  const agent = agentName === undefined ? undefined : getAgent(agentName);
+  // An agent's prompt is plain words; a script's command is quoted word by word.
+  const command = agent !== undefined ? commandWords.join(" ") : commandWords.length === 1 ? commandWords[0]! : commandWords.map(shellQuote).join(" ");
   if (fallbacks.length > 0 && model === undefined) return fail("--fallback-model needs --model.");
   let definition = buildDefinition({
-    name, command, cwd, network: values(options, "--net"), ...(agent === undefined ? {} : { runner: agent, worktree: true }), env: parseEnv(values(options, "--env")),
+    name, command, cwd, network: [...new Set([...values(options, "--net"), ...(agent?.hosts ?? [])])], ...(agent === undefined ? {} : { runner: agent.id, worktree: true }), env: parseEnv(values(options, "--env")),
     ...(timeout === undefined ? {} : { timeoutSec: Number(timeout) }),
     ...(model === undefined ? {} : { model }), ...(fallbacks.length > 0 ? { fallbackModels: fallbacks } : {}),
   }, previous);

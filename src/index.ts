@@ -43,7 +43,7 @@ import { controllerArguments, isAccountToolName, runControllerCommand } from "./
 import { ControllerError } from "./controller/client.js";
 import { runAgentCommand } from "./agents/command.js";
 import { agentDoctor, formatAgentDoctor } from "./agents/doctor.js";
-import { runTaskCommand } from "./task/command.js";
+import { runTaskCommand, shareTaskCommand } from "./task/command.js";
 import { runRecordCommand } from "./runs-command.js";
 import { installAt, installsOfItem, removeInstalls } from "./skill/item-remove.js";
 import { findManagedSkillByInstallName } from "./skill/managed.js";
@@ -93,7 +93,7 @@ import { runUninstall } from "./uninstall.js";
 
 
 const ITEM_PUBLISH_USAGE = "Usage: frely item publish <folder> [--slug <slug>] [--premium <path>]... [--json]";
-const ITEM_INSTALL_USAGE = "Usage: frely item install <username/name[@version]> [--host chatgpt|codex|claude-code|pi|workbuddy|codebuddy|generic] [--scope global|project] [--dir <path>] [--gift <code>] [--email <address>] [--no-wait] [--no-browser] [--replace] [--api-key-stdin] [--json]";
+const ITEM_INSTALL_USAGE = "Usage: frely item install <username/name[@version]> [--host chatgpt|pi|codex|claude-code|workbuddy|codebuddy|generic] [--scope global|project] [--dir <path>] [--gift <code>] [--email <address>] [--no-wait] [--no-browser] [--replace] [--api-key-stdin] [--json]";
 
 /**
  * Where to ask for the current entry Skill text. A relay that cannot be read from the local config, or a configured address that is not
@@ -781,7 +781,7 @@ async function main(): Promise<void> {
     }
     if (action === "share" && option(args, "--type") === "task") {
       const rest = args.slice(2).filter((arg, index, all) => !(arg === "--type" || all[index - 1] === "--type"));
-      process.exitCode = await runTaskCommand(["share", ...rest], { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY) });
+      process.exitCode = await shareTaskCommand(rest, { out: (text) => { stdout.write(text); }, err: (text) => { process.stderr.write(text); }, interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY) });
       return;
     }
     if ((action === "stop" || action === "remove") && args[2] !== undefined && !args[2].startsWith("-")) {
@@ -1113,7 +1113,7 @@ function option(args: string[], name: string): string | undefined {
 
 function skillHost(value: string): SkillHost {
   if ((SKILL_HOSTS as readonly string[]).includes(value)) return value as SkillHost;
-  throw new Error("--host must be chatgpt, codex, claude-code, pi, workbuddy, codebuddy, or generic.");
+  throw new Error(`--host must be ${SKILL_HOSTS.join(", ")}.`);
 }
 
 function skillScope(value: string): SkillScope {
