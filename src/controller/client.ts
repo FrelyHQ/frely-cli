@@ -2,7 +2,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { VERSION } from "../version.js";
-import { frelyMcpUrl, refreshLoginCredential, requireLogin } from "../auth.js";
+import { frelyMcpUrl, openVerificationUrl, readConfig, refreshLoginCredential, requireLogin } from "../auth.js";
 
 export type ToolResult = { isError?: boolean; content?: unknown; structuredContent?: unknown; [key: string]: unknown };
 
@@ -24,20 +24,64 @@ export interface LoginMcpSession {
   mcpToken: string;
 }
 
+/** What asking the owner to turn this computer's controller on needs; replaced in tests. */
+export interface ControllerRequestDeps {
+  /** This computer's id and the Frely web address, as the login recorded them. */
+  config(): Promise<{ deviceId: string | undefined; relayUrl: string }>;
+  /** Refreshes the login once; the new credential carries the FrelyMCP token as soon as the owner enabled the controller. */
+  refresh(): Promise<{ mcpUrl: string; mcpToken: string | undefined }>;
+  open(url: string): void;
+  write(text: string): void;
+  sleep(ms: number): Promise<void>;
+  now(): number;
+}
+
+const CONTROLLER_WAIT_MS = 10 * 60_000;
+const CONTROLLER_POLL_MS = 5_000;
+
+const defaultRequestDeps: ControllerRequestDeps = {
+  config: async () => { const config = await readConfig(); return { deviceId: config.deviceId, relayUrl: config.relayUrl }; },
+  refresh: async () => { const { config, credential } = await refreshLoginCredential(); return { mcpUrl: frelyMcpUrl(config.instance), mcpToken: credential.mcpToken }; },
+  open: openVerificationUrl,
+  write: (text) => { process.stderr.write(text); },
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  now: Date.now,
+};
+
 /**
- * The login's FreyMCP side of the OAuth credential. The machine's connection needs the token minted beside the login access token;
- * a login stored before the two channels merged has none and is asked to sign in again.
+ * A computer's CLI signs in as a controlled end only. A command that needs to act as a controller asks the owner once: it prints (and opens) the page
+ * where the owner turns this computer's controller on, then waits for the FrelyMCP token to appear on a login refresh. Not approved in time: exit code 3.
+ */
+export async function requestControllerAccess(deps: ControllerRequestDeps = defaultRequestDeps): Promise<LoginMcpSession> {
+  const { deviceId, relayUrl } = await deps.config();
+  if (!deviceId) throw new ControllerError("This computer needs a fresh sign-in to control your Frely devices. Run `frely login` again.", EXIT.auth);
+  const url = new URL("/user/device", relayUrl);
+  url.searchParams.set("enableController", deviceId);
+  deps.write(`This computer is not a controller yet. Turn it on in your browser (it needs your confirmation):\n  ${url.toString()}\nWaiting for you to approve; this command continues by itself.\n`);
+  deps.open(url.toString());
+  const deadline = deps.now() + CONTROLLER_WAIT_MS;
+  while (deps.now() < deadline) {
+    await deps.sleep(CONTROLLER_POLL_MS);
+    const next = await deps.refresh();
+    if (next.mcpToken) return { mcpUrl: next.mcpUrl, mcpToken: next.mcpToken };
+  }
+  throw new ControllerError(`The controller was not turned on in time. Open ${url.toString()}, approve it, then run the command again.`, EXIT.approval);
+}
+
+/**
+ * The login's FreyMCP side of the OAuth credential. The machine's connection needs the token minted beside the login access token. A computer whose
+ * controller the owner has not turned on has none: the command asks the owner to turn it on and waits (see `requestControllerAccess`).
  */
 export async function loginMcpSession(): Promise<LoginMcpSession> {
   const { config, credential } = await requireLogin();
-  if (!credential.mcpToken) throw new ControllerError("This computer needs a fresh sign-in to control your Frely devices. Run `frely login` again.", EXIT.auth);
+  if (!credential.mcpToken) return requestControllerAccess();
   return { mcpUrl: frelyMcpUrl(config.instance), mcpToken: credential.mcpToken };
 }
 
-/** A refused FreyMCP token is replaced by refreshing the login, which mints a fresh side token for this machine. */
+/** A refused FreyMCP token is replaced by refreshing the login, which mints a fresh side token for this machine; none means the owner turned the controller off. */
 async function refreshLoginMcpSession(): Promise<LoginMcpSession> {
   const { config, credential } = await refreshLoginCredential();
-  if (!credential.mcpToken) throw new ControllerError("This computer needs a fresh sign-in to control your Frely devices. Run `frely login` again.", EXIT.auth);
+  if (!credential.mcpToken) return requestControllerAccess();
   return { mcpUrl: frelyMcpUrl(config.instance), mcpToken: credential.mcpToken };
 }
 

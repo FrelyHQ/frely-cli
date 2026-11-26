@@ -71,3 +71,36 @@ test("the transport's own abort signal still cancels a request, so closing the c
   closing.abort();
   assert.equal(sent?.aborted, true);
 });
+
+test("a computer that is not a controller asks the owner, waits for the token on a refresh, and continues by itself", async () => {
+  const { requestControllerAccess } = await import("./client.js");
+  let clock = 0;
+  let polls = 0;
+  const written: string[] = [];
+  const opened: string[] = [];
+  const result = await requestControllerAccess({
+    config: async () => ({ deviceId: `frd_local_${"a".repeat(32)}`, relayUrl: "https://frely.test" }),
+    refresh: async () => { polls++; return { mcpUrl: "https://mcp.test/mcp", mcpToken: polls === 3 ? "fmcp_at_new" : undefined }; },
+    open: (url) => { opened.push(url); }, write: (text) => { written.push(text); }, sleep: async (ms) => { clock += ms; }, now: () => clock,
+  });
+  assert.deepEqual(result, { mcpUrl: "https://mcp.test/mcp", mcpToken: "fmcp_at_new" });
+  assert.equal(polls, 3);
+  assert.deepEqual(opened, [`https://frely.test/user/device?enableController=frd_local_${"a".repeat(32)}`]);
+  assert.match(written.join(""), /not a controller yet/u);
+});
+
+test("a controller nobody turned on in ten minutes ends with exit code 3 and the link", async () => {
+  const { requestControllerAccess } = await import("./client.js");
+  let clock = 0;
+  await assert.rejects(requestControllerAccess({
+    config: async () => ({ deviceId: `drd_${"b".repeat(32)}`, relayUrl: "https://frely.test" }),
+    refresh: async () => ({ mcpUrl: "https://mcp.test/mcp", mcpToken: undefined }),
+    open: () => undefined, write: () => undefined, sleep: async (ms) => { clock += ms; }, now: () => clock,
+  }), (error: unknown) => error instanceof ControllerError && error.exitCode === EXIT.approval && error.message.includes("/user/device?enableController="));
+});
+
+test("a computer without a recorded id is asked to sign in again", async () => {
+  const { requestControllerAccess } = await import("./client.js");
+  await assert.rejects(requestControllerAccess({ config: async () => ({ deviceId: undefined, relayUrl: "https://frely.test" }), refresh: async () => ({ mcpUrl: "", mcpToken: undefined }), open: () => undefined, write: () => undefined, sleep: async () => undefined, now: () => 0 }),
+    (error: unknown) => error instanceof ControllerError && error.exitCode === EXIT.auth);
+});

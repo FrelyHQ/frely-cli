@@ -703,6 +703,7 @@ export async function pollDeviceToken(
     if (response.ok && isString(record.access_token) && (!record.token_type || String(record.token_type).toLowerCase() === "bearer")) {
       const expiresInSeconds = numberPayload(record.expires_in, 1, 86_400);
       // Not an error: the computer works as a controlled device. It connects as a controller on a later sign-in once a slot is free.
+      // A computer signs in as a controlled end only; a command that needs a controller asks the owner to turn it on (see controller/client.ts).
       if (record[FRELY_CONTROLLER_STATUS_FIELD] === "slots_full") process.stderr.write("This computer is signed in, but your account has no free slot for it to act as a controller. Disconnect a device or controller in the Frely web console, or upgrade your plan, then run `frely login` again.\n");
       return { accessToken: record.access_token, ...(isString(record.refresh_token) ? { refreshToken: record.refresh_token } : {}), expiresAt: Date.now() + expiresInSeconds * 1000, ...(isString(record[SESSION_BINDING_ID_FIELD]) ? { sessionBindingId: record[SESSION_BINDING_ID_FIELD] as string } : {}), ...(isString(record[FRELY_MCP_TOKEN_FIELD]) ? { mcpToken: record[FRELY_MCP_TOKEN_FIELD] as string } : {}) };
     }
