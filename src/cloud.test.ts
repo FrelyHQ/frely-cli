@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatApiList, isInteractiveTerminal, permissionHint, rerunAfterApproval } from "./cloud.js";
+import { formatApiList, isInteractiveTerminal, permissionHint, rerunAfterApproval, retryDetail } from "./cloud.js";
+import { CloudToolError } from "./skill/cloud-item.js";
 import type { ApprovalOutcome, ApprovalRef } from "./controller/approval-wait.js";
 
 const failure = (error: object) => ({ isError: true, content: [{ type: "text", text: JSON.stringify({ error }) }] });
@@ -255,4 +256,12 @@ test("callCloudToolAwaiting prints each approval once, including the chained one
   const output = written.join("");
   assert.equal(output.match(/Code: ABCD-EFGH/g)?.length, 2);
   assert.equal(output.match(/Code: CDEF-GHJK/g)?.length, 1);
+});
+
+test("a confirmation_limited refusal tells when asking again can work", () => {
+  assert.match(retryDetail("2026-11-26T10:03:00.000Z", Date.parse("2026-11-26T10:00:30.000Z"))!, /in about 3 min/);
+  assert.equal(retryDetail(undefined), undefined);
+  assert.equal(retryDetail("not a time"), undefined);
+  assert.equal(new CloudToolError("confirmation_limited", "Try later.").message, "Frely Cloud call failed: confirmation_limited. Try later.");
+  assert.equal(new CloudToolError("operation_failed").message, "Frely Cloud call failed: operation_failed");
 });

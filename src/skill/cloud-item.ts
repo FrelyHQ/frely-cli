@@ -38,8 +38,9 @@ const MAX_TOTAL_BYTES = 8 * 1024 * 1024;
 export type CloudToolCaller = (name: string, input: Record<string, unknown>) => Promise<Record<string, unknown>>;
 
 export class CloudToolError extends Error {
-  constructor(readonly code: string) {
-    super(`Frely Cloud call failed: ${code}`);
+  /** `detail` is the server's own explanation when it gave one (a refusal that says when to ask again). */
+  constructor(readonly code: string, readonly detail?: string) {
+    super(`Frely Cloud call failed: ${code}${detail ? `. ${detail}` : ""}`);
     this.name = "CloudToolError";
   }
 }
