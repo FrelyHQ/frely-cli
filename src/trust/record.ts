@@ -107,6 +107,9 @@ export async function pinTrustChain(chain: readonly SignedTrustRecord[], userId:
   return pin;
 }
 
+/** A `script` step the owner signed: the sha256 of the command text and of each file it names (paths relative to the step folder). */
+export interface TodoStepScript { command: string; files: { path: string; sha256: string }[] }
+
 export interface ApprovalPayload {
   typ: "frely.approval.v1";
   id: string;
@@ -120,7 +123,7 @@ export interface ApprovalPayload {
   grant: { kind: string; resource?: string; mode: "once" | "window" | "authorization" };
   bind?: { tool?: string; cmdHash?: string };
   /** `todo_scope` approvals: what the owner read and signed (see todo-scope.ts). */
-  scope?: { todo: string; deviceName: string; workspace: string; sites: string[]; executors?: string[]; scriptHashes?: string[]; maxSteps: number };
+  scope?: { todo: string; deviceName: string; workspace: string; sites: string[]; executors?: string[]; scriptHashes?: string[]; stepScripts?: TodoStepScript[]; credentials?: string[]; maxSteps: number };
   iat: string; nbf: string; exp: string;
 }
 export interface SignedApproval { payload: ApprovalPayload; sig: WebAuthnSignature }

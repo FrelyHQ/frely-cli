@@ -50,7 +50,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { customWritePath, isKnownGrantName, SSH_PROXY_PREFIX, UNSANDBOXED_GROUP, writablePaths } from "./sandbox.js";
+import { autostartCommand, customWritePath, isKnownGrantName, SSH_PROXY_PREFIX, UNSANDBOXED_GROUP, writablePaths } from "./sandbox.js";
 
 test("cache groups and custom paths open only the directories they name", () => {
   assert.ok(buildSandboxConfig("/work", ["pub-cache"]).filesystem?.allowWrite?.includes("~/.pub-cache"));
@@ -65,6 +65,8 @@ test("custom writable paths: any absolute directory, protected paths only when n
     "path:/", "path:", "path:~", "path:relative/dir", "path:/opt/../etc", "path:~/a/../.ssh", "path:/tmp\0/x", `path:/${"a".repeat(150)}`,
     // Frely's own credentials can never be granted; sub-paths of a protected path need the protected path itself.
     "path:~/.config/frely", "path:~/.config/frely/devices", "path:~/.ssh/keys", `path:${join(home, ".aws", "config")}`, "path:~/Library/LaunchAgents/x",
+    // Autostart locations are never writable, even when named exactly.
+    "path:~/Library/LaunchAgents", "path:/Library/LaunchAgents", "path:/Library/LaunchDaemons", "path:~/.config/systemd", "path:~/.config/autostart", "path:~/.config/environment.d",
     // Places run outside the sandbox later: user services and their environment, autostart, global git config, ~/.local/bin.
     "path:~/.config/systemd/user", "path:~/.config/environment.d/frely", "path:~/.config/autostart/x", "path:~/.config/git/hooks", "path:~/.local/bin/tools",
   ];
@@ -104,6 +106,9 @@ test("protected paths stay write-denied inside a granted parent until named exac
   const denied = (groups: string[]) => buildSandboxConfig("/work", groups).filesystem?.denyWrite ?? [];
   // Always denied by default, and Frely's credentials in every case.
   for (const path of ["~/.ssh", "~/.aws", "~/.zshrc", "~/Library/LaunchAgents", "~/.config/frely"]) assert.ok(denied([]).includes(path), path);
+  // An exact grant lifts a protected path but never an autostart location.
+  assert.ok(buildSandboxConfig("/work", ["path:~/Library/LaunchAgents"]).filesystem?.denyWrite?.includes("~/Library/LaunchAgents"));
+  assert.equal(isKnownGrantName("path:~/Library/LaunchAgents"), false);
   // The home directory granted as a whole does not open the protected paths inside it.
   const withHome = buildSandboxConfig("/work", ["path:~/"]).filesystem;
   assert.ok(withHome?.allowWrite?.includes(homedir()));
@@ -378,4 +383,9 @@ test("a call that is exactly `frely self update` runs our own executable outside
   } finally {
     if (previous === undefined) delete process.env.FRELY_SANDBOX; else process.env.FRELY_SANDBOX = previous;
   }
+});
+
+test("scheduler and service commands are refused by name, not by substring", () => {
+  for (const command of ["launchctl bootstrap gui/501 x.plist", "ls && crontab -l", "sudo launchctl load x", "echo hi; at now", "systemctl --user enable x", "echo a | crontab -", "/bin/launchctl list"]) assert.equal(autostartCommand(command), true, command);
+  for (const command of ["cat launchctl.txt", "git status", "grep at file", "systemctl status x", "echo crontab"]) assert.equal(autostartCommand(command), false, command);
 });

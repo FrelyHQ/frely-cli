@@ -91,14 +91,24 @@ const CUSTOM_PATH_PREFIX = "path:";
 export const PROTECTED_PATHS: readonly string[] = [
   "~/.ssh", "~/.gnupg", "~/.aws", "~/.kube", "~/.docker", "~/.config/gcloud", "~/.config/gh",
   "~/.zshrc", "~/.zshenv", "~/.zprofile", "~/.zlogin", "~/.bashrc", "~/.bash_profile", "~/.bash_login", "~/.profile", "~/.config/fish",
-  "~/Library/LaunchAgents", "/Library/LaunchAgents", "/Library/LaunchDaemons", "~/.git-credentials", "~/.netrc", "~/.npmrc", "~/.pypirc",
+  "~/.git-credentials", "~/.netrc", "~/.npmrc", "~/.pypirc",
   "~/.cargo/credentials.toml", "~/Library/Application Support/gcloud",
-  // Started by the system or by git outside the sandbox: user services and their environment (frely-mcp.service, FRELY_SANDBOX),
-  // desktop autostart, global git config (fsmonitor, hooksPath), and a directory that is usually early on PATH.
-  "~/.config/systemd", "~/.config/environment.d", "~/.config/autostart", "~/.gitconfig", "~/.config/git", "~/.local/bin",
+  // Started by git outside the sandbox: global git config (fsmonitor, hooksPath), and a directory that is usually early on PATH.
+  // (Autostart locations are in AUTOSTART_PATHS: never writable, not even by an exact grant.)
+  "~/.gitconfig", "~/.config/git", "~/.local/bin",
 ];
-/** Frely's own device credentials: never writable by a grant, not even an exact one. */
-const neverWritablePaths = (): string[] => ["~/.config/frely", ...(process.env.FRELY_DATA_DIR ? [process.env.FRELY_DATA_DIR] : [])];
+/**
+ * Autostart locations (launch agents/daemons, systemd user units and their environment, desktop autostart): anything written here
+ * outlives the call and runs outside the sandbox. Never writable by any grant, not even an exact one; use a Frely scheduled task instead.
+ * Keep in sync with the relay's AUTOSTART_PATHS (device-relay path-grants.ts), which refuses these grants before an approval card exists.
+ */
+export const AUTOSTART_PATHS: readonly string[] = [
+  "~/Library/LaunchAgents", "/Library/LaunchAgents", "/Library/LaunchDaemons", "~/.config/systemd", "~/.config/autostart", "~/.config/environment.d",
+];
+/** Message for a command that tries to install something that starts on its own. */
+export const AUTOSTART_REFUSAL = "Autostart locations and scheduler commands (launchctl, crontab, systemctl --user, at) are not available through Frely. Use a Frely scheduled task instead: frely_call todo.create with a cron condition.";
+/** Frely's own device credentials and autostart locations: never writable by a grant, not even an exact one. */
+const neverWritablePaths = (): string[] => ["~/.config/frely", ...AUTOSTART_PATHS, ...(process.env.FRELY_DATA_DIR ? [process.env.FRELY_DATA_DIR] : [])];
 /** Longest path after `path:`. Keep equal to the relay's `PATH_GRANT_CUSTOM_PATH_MAX` (device-relay path-grants.ts) so both ends accept the same paths. */
 const CUSTOM_PATH_MAX = 150;
 
@@ -428,6 +438,14 @@ export function ownUpdateCommand(command: string, platform: NodeJS.Platform = pr
   return cliLaunchArguments(process.argv[1] ?? "", ["self", "update"]).map(quote).join(" ");
 }
 
+/** Scheduler and service managers whose job is to start something later or at login, outside the sandbox. A command word, not a substring of a path or argument. */
+const AUTOSTART_COMMAND = /(?:^|[;&|(`\n]|&&|\|\||\$\()\s*(?:(?:sudo|env|command|exec|nohup|time)\s+(?:-\S+\s+)*)*(?:\S*\/)?(?:launchctl|crontab|at|batch|atq|systemd-run|(?:systemctl\s+(?:-\S+\s+)*)--user\b|systemctl\s+(?:-\S+\s+)*(?:enable|start|link|edit)\b)(?=\s|$|;|&|\|)/u;
+
+/** Whether the command text runs launchctl, crontab, at or a systemctl enable/start. Checked before the sandbox is prepared; best effort on the text, the paths are the hard limit. */
+export function autostartCommand(command: string): boolean {
+  return AUTOSTART_COMMAND.test(command);
+}
+
 export interface SandboxedCommand {
   /** The command to spawn with `shell: true`. */
   command: string;
@@ -458,6 +476,7 @@ export async function sandboxCommandDetailed(command: string, workspaceRoot: str
   if (allowedGroups.includes(UNSANDBOXED_GROUP)) return { command, gitConfig: false };
   const update = ownUpdateCommand(command);
   if (update) return { command: update, gitConfig: false };
+  if (autostartCommand(command)) throw new Error(AUTOSTART_REFUSAL);
   const denied = deniedReadReference(command, allowedGroups);
   if (denied) throw new Error(deniedReadMessage(denied));
   const startedAt = Date.now();

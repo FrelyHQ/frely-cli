@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { APPROVAL_DOMAIN, TRUST_DOMAIN, trustRecordHash, type ApprovalPayload, type TrustRecord } from "./record.js";
@@ -141,5 +141,31 @@ test("a script check needs its sha256 inside the signed scope and is not counted
     assert.equal((await authorizeTodoStep(a, ctx, { todoId: "td_1", stepKey: "s1", cwd: work, sites: [] })).stepsUsed, 1);
     assert.equal(await code(authorizeTodoCheck(approval(work), ctx, { todoId: "td_1", cwd: work, scriptHash: hash })), "script_mismatch");
     assert.equal(await code(authorizeTodoCheck(a, ctx, { todoId: "td_2", cwd: work, scriptHash: hash })), "todo_mismatch");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a script step runs only the signed command, only while its files keep the signed content, and only with signed credential groups", async () => {
+  const { root, work, sub, ctx } = await setup();
+  try {
+    await writeFile(join(sub, "update.sh"), "echo hi\n");
+    const fileHash = createHash("sha256").update("echo hi\n").digest("hex");
+    const command = "./update.sh";
+    const signed = { command: createHash("sha256").update(command).digest("hex"), files: [{ path: "update.sh", sha256: fileHash }] };
+    const a = approval(work, {}, { executors: ["script"], stepScripts: [signed], credentials: ["gcloud"], maxSteps: 10 });
+    const step = (key: string, over: Partial<Parameters<typeof authorizeTodoStep>[2]> = {}) => code(authorizeTodoStep(a, ctx, { todoId: "td_1", stepKey: key, cwd: sub, sites: [], executor: "script", script: { command }, credentials: ["gcloud"], ...over }));
+    assert.equal(await step("s1"), "ok");
+    assert.equal(await step("s2", { script: { command: "./other.sh" } }), "script_mismatch");
+    assert.equal(await step("s3", { credentials: ["aws"] }), "credentials_not_allowed");
+    assert.equal(await step("s4", { credentials: [] }), "ok");
+    // A scope without `script` among its executors does not allow one, and agent steps never get credential groups.
+    assert.equal(await code(authorizeTodoStep(approval(work, {}, { stepScripts: [signed] }), ctx, { todoId: "td_1", stepKey: "s5", cwd: sub, sites: [], executor: "script", script: { command } })), "executor_not_allowed");
+    assert.equal(await code(authorizeTodoStep(approval(work, {}, { executors: ["pi"] }), ctx, { todoId: "td_1", stepKey: "s6", cwd: sub, sites: [], executor: "pi", credentials: ["gcloud"] })), "credentials_not_allowed");
+    // One changed byte in a referenced file: refused until the owner signs again.
+    await writeFile(join(sub, "update.sh"), "echo hi!\n");
+    assert.equal(await step("s7"), "script_changed");
+    await rm(join(sub, "update.sh"));
+    assert.equal(await step("s8"), "script_changed");
+    // A scope that names a credential group this CLI does not know is invalid.
+    assert.equal(await code(authorizeTodoStep(approval(work, {}, { executors: ["script"], stepScripts: [signed], credentials: ["nope"] }), ctx, { todoId: "td_1", stepKey: "s9", cwd: sub, sites: [], executor: "script", script: { command } })), "scope_invalid");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
