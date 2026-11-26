@@ -2,6 +2,7 @@ import { lstat } from "node:fs/promises";
 import { runTodoDispatch, TODO_DISPATCH_TOOL } from "../task/todo-dispatch.js";
 import { applySecretDrop, prepareSecretDrop, SECRET_DROP_APPLY_TOOL, SECRET_DROP_PREPARE_TOOL } from "../secret-drop.js";
 import { siteLogin, siteLoginAvailable, SITE_LOGIN_TOOL } from "../vault/site-login.js";
+import { hideSecrets, vaultEnvFor, type VaultEnv } from "../vault/note-env.js";
 import { homedir } from "node:os";
 import { dirname, sep } from "node:path";
 import { createHash } from "node:crypto";
@@ -83,7 +84,7 @@ export const LOCAL_MCP_TOOLS = [
 export const LOCAL_MODELS_TOOL = tool("local_models", "Use a model server running on this device (Ollama, LM Studio, vLLM, llama.cpp, mltf) through Frely. action=list probes loopback OpenAI-compatible servers (the given url, else the usual ports 11434, 1234, 8000, 8080) and lists their models plus the local models already shared. action=share publishes the server's models (all of them, or `models`) as a Frely Provider, which uses one Provider slot of the account (without a free slot it counts against the Creator Plan Provider limit). Shared models then appear in models_list marked local: true; they run on this device at no Credit cost and suit low-priority, slow-ok tasks. The device must stay online.", { action: { type: "string", enum: ["list", "share"] }, url: stringSchema("Loopback OpenAI-compatible base URL such as http://127.0.0.1:1234/v1. Required for share; for list it limits the probe to that server."), models: { type: "array", maxItems: 256, items: { type: "string", maxLength: 256 }, description: "Model ids to share; omit to share every model the server reports." }, name: stringSchema("Provider name shown in Frely (at most 128 characters)") }, { readOnly: false, destructive: false, openWorld: true, idempotent: false });
 
 /** Logs in to a site with the user's Bitwarden vault; listed only where ego lite can run (macOS with ego-browser installed). */
-export const SITE_LOGIN = tool(SITE_LOGIN_TOOL, "Log in to a website in ego lite with the login the user saved in their Frely Bitwarden vault. You never see the password; you get only whether it was submitted. If the vault is locked, call secret_drop with target {\"kind\":\"vault_unlock\"} on this device and give the user the link.", { url: stringSchema("The https URL of the login page") }, { readOnly: false, destructive: false, openWorld: true, idempotent: false });
+export const SITE_LOGIN = tool(SITE_LOGIN_TOOL, "Log in to a website in ego lite with the login the user saved in their Frely Bitwarden vault. You never see the password; you get only whether it was submitted. If the vault is locked, call secret_drop with target {\"kind\":\"vault_unlock\"} on this device and give the user the link. If there is no saved login for the site, save one with secret_drop target {\"kind\":\"vault_item\",\"url\":\"<https login page>\"}; the user enters the username and password on the approval page.", { url: stringSchema("The https URL of the login page") }, { readOnly: false, destructive: false, openWorld: true, idempotent: false });
 
 export async function createMcpServer(workspaceInput: string, options: McpRuntimeOptions = {}): Promise<Server> {
   const p2p = new P2pTransfers();
@@ -149,7 +150,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
     tool("read", "Read the workspace. action=list lists a directory, or returns type/size/mtime for a file; read returns a UTF-8 file (max 1 MiB), or lines startLine..endLine; encoding=base64 returns any file as base64 with its sha256, encoding=image returns a png/jpeg/gif/webp the model can see (both max 1 MiB); search finds `query` in file contents; find matches file names (*, **, ?); roots lists workspace roots. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { action: { type: "string", enum: ["list", "read", "search", "find", "roots"] }, path: stringSchema("Relative path", "."), encoding: { type: "string", enum: ["utf8", "base64", "image"], default: "utf8" }, startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, query: { type: "string" }, regex: boolSchema(false), caseSensitive: boolSchema(false), maxResults: intSchema(100, 1, 1000), contextLines: intSchema(0, 0, 10) }, { readOnly: true, destructive: false, openWorld: false }),
     tool("edit_file", "Change a UTF-8 workspace file: `content` atomically writes the whole file, creating parent directories (overwrite=true to replace one); `contentBase64` does the same for binary data (max 1 MiB decoded); `edits` replaces line ranges. Delete, move and mkdir with process. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { path: stringSchema("Relative path"), content: { type: "string" }, contentBase64: { type: "string" }, overwrite: boolSchema(false), edits: { type: "array", minItems: 1, maxItems: 100, items: { type: "object", additionalProperties: false, required: ["startLine", "endLine", "replacement"], properties: { startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, replacement: { type: "string" } } } } }, { readOnly: false, destructive: true, openWorld: false, idempotent: false }),
     tool("web_fetch", "Read a public http(s) URL (GET or HEAD, ports 80, 443) from this device's network; private addresses are refused. Read-only: it cannot send a request body. Returns status, content type and body text up to maxBytes. Docs: https://github.com/FrelyHQ/frely-cli#local-execution-boundaries", { url: { type: "string" }, method: { type: "string", enum: ["GET", "HEAD"], default: "GET" }, headers: { type: "object", additionalProperties: { type: "string" } }, maxBytes: intSchema(262144, 1, 1048576), timeoutMs: intSchema(30000, 100, 120000) }, { readOnly: true, destructive: false, openWorld: true }),
-    tool("process", "Run shell commands as the current OS user, inside the OS sandbox, and refused when this device cannot sandbox them unless the owner turned the sandbox off: credential folders blocked (ask with request_permission), writes limited to workspace and temp, network to HTTP(S) and ssh (the connection needs no approval, but reading ~/.ssh config and keys does: request_permission resource=ssh). action=run waits up to timeoutMs and returns output; start returns an id for longer tasks; read returns output after stdoutCursor/stderrCursor; write sends `input` to stdin; list; stop. concurrency=exclusive for commands that change shared repo, dependency or build state.", { action: { type: "string", enum: ["run", "start", "read", "write", "list", "stop"] }, command: { type: "string" }, cwd: stringSchema("Relative path", "."), timeoutMs: intSchema(30000, 100, 120000), concurrency: { type: "string", enum: ["parallel", "exclusive"], default: "parallel" }, processId: { type: "string" }, stdoutCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), stderrCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), input: { type: "string" } }, { readOnly: false, destructive: true, openWorld: true, idempotent: false }),
+    tool("process", "Run shell commands as the current OS user, inside the OS sandbox, and refused when this device cannot sandbox them unless the owner turned the sandbox off: credential folders blocked (ask with request_permission), writes limited to workspace and temp, network to HTTP(S) and ssh (the connection needs no approval, but reading ~/.ssh config and keys does: request_permission resource=ssh). action=run waits up to timeoutMs and returns output; start returns an id for longer tasks; read returns output after stdoutCursor/stderrCursor; write sends `input` to stdin; list; stop. concurrency=exclusive for commands that change shared repo, dependency or build state.", { action: { type: "string", enum: ["run", "start", "read", "write", "list", "stop"] }, command: { type: "string" }, cwd: stringSchema("Relative path", "."), timeoutMs: intSchema(30000, 100, 120000), concurrency: { type: "string", enum: ["parallel", "exclusive"], default: "parallel" }, processId: { type: "string" }, stdoutCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), stderrCursor: intSchema(0, 0, Number.MAX_SAFE_INTEGER), input: { type: "string" }, vaultItem: stringSchema("run/start only: name of a Bitwarden secure note on this device; its fields become environment variables of the command (values never shown; replaced with *** in output). Save one with secret_drop target vault_item name+fields.") }, { readOnly: false, destructive: true, openWorld: true, idempotent: false }),
   ] }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
@@ -159,6 +160,7 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
     const finish = options.maintenance?.track();
     const name = request.params.name;
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
+    let vault: VaultEnv | undefined;
     try {
       if (name === "local_mcp_list" || name === "local_mcp_call") {
         const enabled = enabledLocalMcps(options);
@@ -207,14 +209,17 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
       if (options.requestUpgrade && isSelfUpdateCommand(name, args) && await options.requestUpgrade()) {
         return { content: [{ type: "text" as const, text: "The service is upgrading itself to the latest signed Frely release. No approval is needed. It installs once running work is finished, then restarts and reconnects on its own; this connection may drop briefly. Check with frely doctor." }] };
       }
-      const result = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]), pathGrantsFromMeta(request.params._meta), networkAllowFromMeta(request.params._meta), transferAllowedFromMeta(request.params._meta), p2p);
+      vault = await vaultEnvFor(name, args, request.params._meta);
+      const dispatched = await dispatch(name, args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, AbortSignal.any([lifecycle.signal, extra.signal]), pathGrantsFromMeta(request.params._meta), networkAllowFromMeta(request.params._meta), transferAllowedFromMeta(request.params._meta), p2p, vault);
+      const result = vault ? hideSecrets(dispatched, vault.secrets) : dispatched;
       if (result instanceof ImageResult) {
         return { content: [{ type: "image" as const, data: result.data, mimeType: result.mimeType }, { type: "text" as const, text: JSON.stringify(result.meta) }] };
       }
       return { content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result) }] };
     } catch (error) {
       try { options.onToolError?.(extra.requestId, name, error); } catch { /* Diagnostics cannot change tool results. */ }
-      return { isError: true, content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Local tool failed." }] };
+      const message = error instanceof Error ? error.message : "Local tool failed.";
+      return { isError: true, content: [{ type: "text" as const, text: vault ? hideSecrets(message, vault.secrets) : message }] };
     } finally {
       finish?.();
       complete?.();
@@ -280,6 +285,7 @@ async function dispatch(
   networkAllow: readonly string[] = [],
   transferAllowed = false,
   p2p: P2pTransfers = new P2pTransfers(),
+  vault?: VaultEnv,
 ): Promise<unknown> {
   const guarded = <T>(work: () => Promise<T>) => async () => { signal.throwIfAborted(); return work(); };
   // Directories the owner approved on the web (`path:` grants) act as workspaces for this call only; nothing is stored here.
@@ -316,11 +322,11 @@ async function dispatch(
     const mapped = Object.hasOwn(merged, action) ? merged[action] : undefined;
     if (!mapped) throw new Error(`action must be one of ${Object.keys(merged).join(", ")}.`);
     const routed = mapped === "find_files" ? { ...args, pattern: args.query } : args;
-    return dispatch(mapped, routed, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow, transferAllowed, p2p);
+    return dispatch(mapped, routed, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow, transferAllowed, p2p, vault);
   }
   if (name === "edit_file") {
     if ([args.content, args.contentBase64, args.edits].filter((value) => value !== undefined).length !== 1) throw new Error("Pass exactly one of content, contentBase64 or edits.");
-    return dispatch(args.edits === undefined ? "write_file" : "apply_patch", args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow, transferAllowed, p2p);
+    return dispatch(args.edits === undefined ? "write_file" : "apply_patch", args, workspaces, primaryRoot, processes, workspaceScheduler, commandScheduler, processScheduler, signal, pathGrants, networkAllow, transferAllowed, p2p, vault);
   }
 
   // Process-management tools address a process id, not a path: no workspace routing.
@@ -428,7 +434,7 @@ async function dispatch(
     const command = textArg(args, "command");
     const timeoutMs = intArg(args, "timeoutMs", 30000, 100, 120000);
     let started = false;
-    const work = () => { started = true; return workspace.runCommand(command, relativeInput, timeoutMs, signal, pathGrants); };
+    const work = () => { started = true; return workspace.runCommand(command, relativeInput, timeoutMs, signal, pathGrants, vault?.env); };
     // Waiting for a free slot counts against the same timeout: otherwise queue time plus run time outlasts the relay's wait,
     // the call is cancelled with no answer, and the client retries into a longer queue.
     const queueLimit = AbortSignal.timeout(timeoutMs);
@@ -444,7 +450,7 @@ async function dispatch(
     return processRead(async () => {
       const cwdPath = await workspace.processCwd(relativeInput);
       signal.throwIfAborted();
-      return processes.start(command, cwdPath, safeEnv(), workspace.root, pathGrants);
+      return processes.start(command, cwdPath, { ...safeEnv(), ...vault?.env }, workspace.root, pathGrants, vault?.secrets);
     });
   }
   throw new Error(`Unknown tool: ${name}`);

@@ -59,6 +59,11 @@ export interface FoundLogin { status: "found"; username: string; password: strin
 export interface NewLogin { name: string; username: string; password: string; totp?: string }
 export type SaveLoginResult = { status: "saved"; hasTotp: boolean } | { status: "exists" };
 export type FindLoginResult = FoundLogin | { status: "no_login_found" } | { status: "ambiguous" };
+/** One custom field of a secure note: its name (an environment variable name) and whether Bitwarden hides it. */
+export interface NoteField { name: string; value: string; hidden: boolean }
+export type UpsertNoteResult = { status: "created" | "updated" };
+/** Same rule as the secret-drop field names: a plain environment variable name. */
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/u;
 
 /** Hands the master password to `bw unlock --passwordfile` through a FIFO: no environment variable, no command-line argument, no file on disk. */
 export interface PasswordPipe { path: string; feed(master: Buffer, signal: AbortSignal): Promise<void>; close(): Promise<void> }
@@ -195,6 +200,78 @@ export function createVault(deps: VaultDeps = {}) {
   }
 
   /**
+   * Hands one item to `bw create item` or `bw edit item <id>` on stdin as base64 JSON, so the values are in no argument, environment
+   * variable or file; the stdin buffers are zeroed. A bw error is returned with every value in `hide` replaced.
+   */
+  async function writeItem(args: string[], item: unknown, hide: readonly string[], what: string): Promise<void> {
+    const json = Buffer.from(JSON.stringify(item), "utf8");
+    const encoded = Buffer.from(json.toString("base64"), "utf8");
+    json.fill(0);
+    try {
+      const written = await run([...args, "--nointeraction"], bwEnv({ BW_SESSION: session! }, env), BW_TIMEOUT_MS, encoded);
+      if (written.code !== 0) {
+        if (SESSION_GONE.test(written.stderr)) { drop(); throw new VaultLockedError(); }
+        const hidden = hide.reduce((out, value) => value ? out.split(value).join("[hidden]") : out, written.stderr.trim() || "no error text").slice(0, 200);
+        throw new Error(written.timedOut ? `Bitwarden did not answer in time. The ${what} may not have been saved.` : `Bitwarden could not save the ${what}: ${hidden}`);
+      }
+    } finally { encoded.fill(0); }
+  }
+
+  /** The secure notes named exactly `name` (bw's --search also matches parts of names and other fields, so the match is redone here). */
+  async function notesNamed(name: string): Promise<BwNote[]> {
+    if (status().status !== "unlocked") throw new VaultLockedError();
+    const listed = await run(["list", "items", "--search", name, "--nointeraction"], bwEnv({ BW_SESSION: session! }, env), BW_TIMEOUT_MS);
+    if (listed.code !== 0) {
+      if (SESSION_GONE.test(listed.stderr)) { drop(); throw new VaultLockedError(); }
+      throw new Error(listed.timedOut ? "Bitwarden did not answer in time." : "Bitwarden could not list the saved items.");
+    }
+    let items: unknown;
+    try { items = JSON.parse(listed.stdout); } catch { throw new Error("Bitwarden returned a list this computer could not read."); }
+    return (Array.isArray(items) ? items : []).filter((item): item is BwNote => !!item && typeof item === "object" && (item as BwNote).type === 2 && (item as BwNote).name === name && typeof (item as BwNote).id === "string");
+  }
+  const ambiguousNote = (name: string) => new Error(`Several secure notes are named "${name}" in the vault. Ask the user to rename or remove the extra ones in Bitwarden.`);
+
+  /**
+   * Saves fields into the secure note named `name`: a new note when there is none, otherwise only these fields are replaced and the
+   * note's other fields are kept. Hidden fields are Bitwarden hidden custom fields.
+   */
+  async function upsertNote(name: string, fields: readonly NoteField[]): Promise<UpsertNoteResult> {
+    if (status().status !== "unlocked") throw new VaultLockedError();
+    if (fields.length === 0 || fields.some((field) => !ENV_NAME.test(field.name))) throw new Error("Each note field needs a plain environment variable name.");
+    await syncIfStale();
+    const matches = await notesNamed(name);
+    if (matches.length > 1) throw ambiguousNote(name);
+    const values = fields.map((field) => field.value);
+    const given = fields.map((field) => ({ name: field.name, value: field.value, type: field.hidden ? 1 : 0, linkedId: null }));
+    if (matches.length === 0) {
+      await writeItem(["create", "item"], { type: 2, name, notes: null, favorite: false, secureNote: { type: 0 }, fields: given }, values, "note");
+      return { status: "created" };
+    }
+    const note = matches[0]!;
+    const replaced = new Set(fields.map((field) => field.name));
+    const kept = (Array.isArray(note.fields) ? note.fields : []).filter((field) => !(field && typeof field === "object" && replaced.has((field as { name?: unknown }).name as string)));
+    await writeItem(["edit", "item", note.id], { ...note, fields: [...kept, ...given] }, values, "note");
+    return { status: "updated" };
+  }
+
+  /**
+   * The text and hidden fields of the secure note named `name`, by field name, for a command's environment. A miss syncs once (at most every
+   * few minutes) and looks again; no note or several is an error. Fields whose names are not environment variable names are left out.
+   */
+  async function noteFields(name: string): Promise<Record<string, string>> {
+    let matches = await notesNamed(name);
+    if (matches.length === 0 && now() - lastSync >= SYNC_MIN_INTERVAL_MS) { await sync(); matches = await notesNamed(name); }
+    if (matches.length === 0) throw new Error(`There is no secure note named "${name}" in the vault. Save one with secret_drop target {"kind":"vault_item","name":"${name}","fields":[...]}.`);
+    if (matches.length > 1) throw ambiguousNote(name);
+    const out: Record<string, string> = {};
+    for (const field of Array.isArray(matches[0]!.fields) ? matches[0]!.fields : []) {
+      const f = field as { name?: unknown; value?: unknown; type?: unknown };
+      if (typeof f.name === "string" && ENV_NAME.test(f.name) && typeof f.value === "string" && (f.type === 0 || f.type === 1)) out[f.name] = f.value;
+    }
+    return out;
+  }
+
+  /**
    * Adds a new login for this https origin. Refused when the origin already has one (two would make `site_login` ambiguous). The item is
    * handed to `bw create item` on stdin as base64 JSON, so the values are in no argument, environment variable or file; stdin buffers are zeroed.
    */
@@ -205,23 +282,14 @@ export function createVault(deps: VaultDeps = {}) {
     if (status().status !== "unlocked") throw new VaultLockedError();
     await syncIfStale();
     if ((await loginsFor(origin)).length > 0) return { status: "exists" };
-    const json = Buffer.from(JSON.stringify({ type: 1, name: login.name, notes: null, favorite: false, login: { username: login.username, password: login.password, totp: login.totp || null, uris: [{ uri: origin, match: null }] } }), "utf8");
-    const encoded = Buffer.from(json.toString("base64"), "utf8");
-    json.fill(0);
-    try {
-      const created = await run(["create", "item", "--nointeraction"], bwEnv({ BW_SESSION: session! }, env), BW_TIMEOUT_MS, encoded);
-      if (created.code !== 0) {
-        if (SESSION_GONE.test(created.stderr)) { drop(); throw new VaultLockedError(); }
-        const hide = (text: string) => [login.password, login.username, login.totp ?? ""].reduce((out, value) => value ? out.split(value).join("[hidden]") : out, text).slice(0, 200);
-        throw new Error(created.timedOut ? "Bitwarden did not answer in time. The login may not have been saved." : `Bitwarden could not save the login: ${hide(created.stderr.trim() || "no error text")}`);
-      }
-    } finally { encoded.fill(0); }
+    await writeItem(["create", "item"], { type: 1, name: login.name, notes: null, favorite: false, login: { username: login.username, password: login.password, totp: login.totp || null, uris: [{ uri: origin, match: null }] } }, [login.password, login.username, login.totp ?? ""], "login");
     return { status: "saved", hasTotp: Boolean(login.totp) };
   }
 
-  return { unlock, lock, status, findLogin, saveLogin };
+  return { unlock, lock, status, findLogin, saveLogin, upsertNote, noteFields };
 }
 
+interface BwNote { id: string; type: 2; name: string; fields?: unknown[] }
 interface BwItem { id: string; type: number; login: { username?: unknown; password?: unknown; totp?: unknown; uris?: unknown } }
 
 function isLoginFor(item: unknown, origin: string): item is BwItem {
@@ -241,3 +309,5 @@ export const lockVault = (): Promise<void> => vault.lock();
 export const vaultStatus = (): VaultStatus => vault.status();
 export const findLogin = (origin: string): Promise<FindLoginResult> => vault.findLogin(origin);
 export const saveLogin = (origin: string, login: NewLogin): Promise<SaveLoginResult> => vault.saveLogin(origin, login);
+export const upsertNote = (name: string, fields: readonly NoteField[]): Promise<UpsertNoteResult> => vault.upsertNote(name, fields);
+export const noteFields = (name: string): Promise<Record<string, string>> => vault.noteFields(name);

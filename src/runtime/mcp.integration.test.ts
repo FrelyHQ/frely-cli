@@ -231,3 +231,26 @@ test("only the exact command `frely self update` counts as a self-update request
   for (const command of ["frely self update --x", "frely self update; rm -rf ~", "frely self update && id", "./frely self update", "sudo frely self update", "frely self updates", "frely update"]) assert.equal(isSelfUpdateCommand("run_command", { command }), false, command);
   assert.equal(isSelfUpdateCommand("start_process", { command: "frely self update" }), false);
 });
+
+test("process vaultItem needs an unlocked vault and run or start; nothing runs otherwise", async () => {
+  const root = await mkdtemp(join(tmpdir(), "frely-cli-mcp-vault-"));
+  const server = await createMcpServer(root);
+  const client = new Client({ name: "frely-cli-vault-test", version: "1.0.0" }, { capabilities: {} });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  try {
+    const textOf = (result: Awaited<ReturnType<typeof client.callTool>>) => (result.content as Array<{ text: string }>)[0]!.text;
+    const locked = await client.callTool({ name: "process", arguments: { action: "run", command: "touch ran.txt", vaultItem: "zen-quant webhook" } });
+    assert.equal(locked.isError, true);
+    assert.match(textOf(locked), /vault is locked/u);
+    const listed = await client.callTool({ name: "process", arguments: { action: "list", vaultItem: "zen-quant webhook" } });
+    assert.match(textOf(listed), /only with process action run or start/u);
+    assert.equal((await client.callTool({ name: "read", arguments: { action: "list", path: "." } })).content!.toString().includes("ran.txt"), false);
+    const tools = await client.listTools();
+    assert.equal(typeof (tools.tools.find((tool) => tool.name === "process")!.inputSchema.properties as Record<string, unknown>).vaultItem, "object");
+  } finally {
+    await client.close();
+    await server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

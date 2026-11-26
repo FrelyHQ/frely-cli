@@ -33,7 +33,7 @@ export interface Output { out(text: string): void; err(text: string): void }
 
 export const CONTROLLER_USAGE = `Control your Frely devices from this computer.
   frely device list [--add]                          List devices, whether they are online, and their workspaces
-  frely device run <device> [--cwd <dir>] [--timeout <s>] [--background] -- <command>
+  frely device run <device> [--cwd <dir>] [--timeout <s>] [--background] [--vault-item <note>] -- <command>
   frely device ps <device>                              Background commands on the device
   frely device logs <device> <id> [--follow]            Output of a background command
   frely device kill <device> <id>                       Stop a background command
@@ -169,14 +169,16 @@ async function toolCall(io: Output, parsed: ParsedArgs, name: string, input: Rec
 }
 
 async function run(args: string[], io: Output): Promise<number> {
-  const parsed = parseArgs(args, { flags: [...COMMON_FLAGS, "--background"], values: [...COMMON_VALUES, "--cwd", "--timeout"] });
+  const parsed = parseArgs(args, { flags: [...COMMON_FLAGS, "--background"], values: [...COMMON_VALUES, "--cwd", "--timeout", "--vault-item"] });
   const [device] = parsed.positionals;
-  if (!device || parsed.positionals.length !== 1 || parsed.rest.length === 0) throw new ControllerError("Usage: frely device run <device> [--cwd <dir>] [--timeout <s>] [--background] -- <command>", EXIT.cli);
+  if (!device || parsed.positionals.length !== 1 || parsed.rest.length === 0) throw new ControllerError("Usage: frely device run <device> [--cwd <dir>] [--timeout <s>] [--background] [--vault-item <note>] -- <command>", EXIT.cli);
   const timeout = intOption(parsed, "--timeout", 1, 120);
   const background = parsed.flags.has("--background");
   return toolCall(io, parsed, "process", {
     device, action: background ? "start" : "run", command: parsed.rest.join(" "), ...(parsed.values.has("--cwd") ? { cwd: parsed.values.get("--cwd") } : {}),
     ...(timeout !== undefined && !background ? { timeoutMs: timeout * 1000 } : {}),
+    // The note's fields become the command's environment on the device; their values are never sent back (*** in output).
+    ...(parsed.values.has("--vault-item") ? { vaultItem: parsed.values.get("--vault-item") } : {}),
   });
 }
 

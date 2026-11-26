@@ -8,7 +8,7 @@ import { verifyApproval, type SignedApproval } from "./trust/record.js";
 import { readTrustWithReason, type TrustRefresh } from "./trust/sync.js";
 import { refreshAccountTrust } from "./device/control.js";
 import { NO_TRUST_MESSAGE, TrustError } from "./trust/webauthn.js";
-import { LOCKED_HINT, saveLogin, unlockVault, vaultStatus, type NewLogin, type SaveLoginResult } from "./vault/bitwarden.js";
+import { LOCKED_HINT, saveLogin, unlockVault, upsertNote, vaultStatus, type NewLogin, type NoteField, type SaveLoginResult, type UpsertNoteResult } from "./vault/bitwarden.js";
 
 /**
  * Secret drop: the owner pastes a secret on the approval site, bound to one destination, and this device writes it there with a fixed
@@ -36,8 +36,11 @@ export interface SecretDropField { name: string; label: string; type: (typeof SE
 export interface SecretDropFileTarget { kind: "file" | "ssh_file"; path: string; owner: string; group: string; mode: string; host?: string; fields?: SecretDropField[]; format?: (typeof SECRET_DROP_FORMATS)[number] }
 /** Unlocks the Bitwarden vault on this computer; the value is its master password and goes to `unlockVault`, never to a file. */
 export interface SecretDropVaultUnlockTarget { kind: "vault_unlock" }
-/** Saves a new website login in the Bitwarden vault on this computer. Its field list is fixed here and in the relay (the owner signs it), never chosen by the AI. */
-export interface SecretDropVaultItemTarget { kind: "vault_item"; origin: string; name: string; fields: SecretDropField[]; format: "json" }
+/**
+ * Saves into the Bitwarden vault on this computer. With `origin`: a new website login, its field list fixed here and in the relay. Without:
+ * a secure note named `name` whose fields (environment variable names, password = hidden) the AI chose and the owner signed.
+ */
+export interface SecretDropVaultItemTarget { kind: "vault_item"; origin?: string; name: string; fields: SecretDropField[]; format: "json" }
 export type SecretDropTarget = SecretDropFileTarget | SecretDropVaultUnlockTarget | SecretDropVaultItemTarget;
 export const VAULT_ITEM_FIELDS: readonly SecretDropField[] = [
   { name: "username", label: "Username or email", type: "text", required: true, max: 256 },
@@ -97,6 +100,13 @@ export function parseSecretDropTarget(value: unknown): SecretDropTarget {
   if (!value || typeof value !== "object" || Array.isArray(value)) return bad("it is not an object");
   const t = value as Record<string, unknown>;
   if (t.kind === "vault_unlock") return Object.keys(t).length === 1 ? { kind: "vault_unlock" } : bad("unknown property");
+  if (t.kind === "vault_item" && t.origin === undefined) {
+    // A secure note, exactly as the relay builds it: name, the field list (same rules as a file's fields) and format json, nothing more.
+    if (Object.keys(t).length !== 4 || t.format !== "json" || typeof t.name !== "string" || t.name !== t.name.trim() || t.name.length < 1 || t.name.length > 100 || /[\r\n]/u.test(t.name)) return bad("not a valid vault_item");
+    const { fields } = parseFields({ fields: t.fields });
+    if (jcs(fields) !== jcs(t.fields)) return bad("not a valid vault_item");
+    return { kind: "vault_item", name: t.name, fields: fields!, format: "json" };
+  }
   if (t.kind === "vault_item") {
     // Exactly the form the relay builds: any other field list, format or extra key is refused, so what the owner typed into is what is saved.
     if (Object.keys(t).length !== 5 || typeof t.origin !== "string" || typeof t.name !== "string") return bad("not a valid vault_item");
@@ -192,7 +202,7 @@ export function writerCommand(target: SecretDropFileTarget, self = userInfo().us
   return plain ? { command: "sh", args: ["-c", WRITE_SCRIPT, "sh", ...params] } : { command: "sudo", args: ["-n", "sh", "-c", WRITE_SCRIPT, "sh", ...params] };
 }
 
-export interface SecretDropDeps { run?: SecretDropRunner; now?: () => number; refreshTrust?: TrustRefresh; unlockVault?: (secret: Buffer) => Promise<{ locksAt: string }>; saveLogin?: (origin: string, login: NewLogin) => Promise<SaveLoginResult> }
+export interface SecretDropDeps { run?: SecretDropRunner; now?: () => number; refreshTrust?: TrustRefresh; unlockVault?: (secret: Buffer) => Promise<{ locksAt: string }>; saveLogin?: (origin: string, login: NewLogin) => Promise<SaveLoginResult>; upsertNote?: (name: string, fields: readonly NoteField[]) => Promise<UpsertNoteResult> }
 
 /** Never returns anything that could carry the value; stderr is scrubbed again against the plaintext as a last guard. */
 const scrub = (text: string, secret: Buffer): string => {
@@ -233,6 +243,21 @@ export async function applySecretDrop(args: Record<string, unknown>, deps: Secre
       throw new Error(scrub(error instanceof Error ? error.message : "The vault could not be unlocked.", decrypted));
     } finally { decrypted.fill(0); }
   }
+  if (target.kind === "vault_item" && target.origin === undefined) {
+    // A secure note: the checked values become its custom fields (password fields hidden). The receipt names the fields, never their values.
+    let rendered: Buffer | null = null;
+    let values: Record<string, string> = {};
+    try {
+      rendered = renderSecretFields(target, decrypted);
+      values = JSON.parse(rendered.toString("utf8")) as Record<string, string>;
+      const fields = target.fields.map((f) => ({ name: f.name, value: values[f.name] ?? "", hidden: f.type === "password" }));
+      const saved = await (deps.upsertNote ?? upsertNote)(target.name, fields);
+      return { status: saved.status, name: target.name, fields: target.fields.map((f) => f.name) };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The note could not be saved.";
+      throw new Error(error instanceof TrustError ? message : Object.values(values).reduce<string>((text, value) => value ? text.split(value).join("[hidden]") : text, message).slice(0, 500));
+    } finally { decrypted.fill(0); rendered?.fill(0); }
+  }
   if (target.kind === "vault_item") {
     // Not a file either: the field values are checked against the signed list, then handed to `bw create item`. The receipt never carries them.
     let rendered: Buffer | null = null;
@@ -241,7 +266,7 @@ export async function applySecretDrop(args: Record<string, unknown>, deps: Secre
       rendered = renderSecretFields(target, decrypted);
       values = JSON.parse(rendered.toString("utf8")) as { username: string; password: string; totp: string };
       const login: NewLogin = { name: target.name, username: values.username, password: values.password, ...(values.totp ? { totp: values.totp } : {}) };
-      const saved = await (deps.saveLogin ?? saveLogin)(target.origin, login);
+      const saved = await (deps.saveLogin ?? saveLogin)(target.origin!, login);
       return saved.status === "saved" ? { status: "saved", site: target.origin, name: target.name, hasTotp: saved.hasTotp } : { status: "exists", site: target.origin };
     } catch (error) {
       // Each typed value is hidden on its own: an error that quotes only the password must not leak it because the whole JSON was not quoted.

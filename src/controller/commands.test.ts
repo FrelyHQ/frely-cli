@@ -38,6 +38,7 @@ test("run sends the command and ends with 2 when the remote command failed", asy
   assert.equal(failed.out, "boom\n");
   assert.equal(failed.code, EXIT.tool);
   assert.equal((await run(["run", "box", "--background", "--", "sleep", "9"], () => text({}))).calls[0]!.input.action, "start");
+  assert.deepEqual((await run(["run", "box", "--vault-item", "zen-quant webhook", "--", "./notify.sh"], () => text("", { structuredContent: { stdout: "", stderr: "", exitCode: 0 } }))).calls[0], { name: "process", input: { device: "box", action: "run", command: "./notify.sh", vaultItem: "zen-quant webhook" } });
   assert.equal((await run(["run", "box"], () => text({}))).code, EXIT.cli);
 });
 
