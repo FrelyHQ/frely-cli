@@ -8,7 +8,7 @@ import type { IncomingMessage } from "node:http";
 export const TRANSFER_MAX_BYTES = 100 * 1024 * 1024;
 /** Request `_meta` key the relay sets on the hidden transfer_* calls; the relay removes it from whatever a client sent. */
 export const TRANSFER_META_KEY = "frely/transfer";
-export const TRANSFER_TOOLS = new Set(["transfer_prepare", "transfer_upload", "transfer_download", "transfer_p2p_info", "transfer_p2p_listen", "transfer_p2p_send", "transfer_p2p_status", "transfer_p2p_cancel"]);
+export const TRANSFER_TOOLS = new Set(["transfer_check", "transfer_prepare", "transfer_upload", "transfer_download", "transfer_p2p_info", "transfer_p2p_listen", "transfer_p2p_send", "transfer_p2p_status", "transfer_p2p_cancel"]);
 
 /** The object stores Frely signs links for (the same two the web app's CSP allows). Plan gap G4 is closed by this list: a link to any other host is refused. */
 export const TRANSFER_STORE_HOST_SUFFIXES = [".r2.cloudflarestorage.com", ".s3.bitiful.net"] as const;
@@ -79,6 +79,12 @@ async function connect(target: TransferTarget, method: "PUT" | "GET", headers: R
     if (!body) { request.end(); return; }
     (async () => { for await (const chunk of body) if (!request.write(chunk)) await new Promise<void>((done) => request.once("drain", done)); request.end(); })().catch((error) => request.destroy(error as Error));
   });
+}
+
+/** Whether a file could be written at `path` now; the relay asks before it hands anyone an upload link bound to that path. */
+export async function transferCheck(workspace: Workspace, path: string, overwrite: boolean) {
+  await workspace.checkWrite(path, overwrite);
+  return { writable: true, path };
 }
 
 export async function transferPrepare(workspace: Workspace, path: string) {

@@ -271,6 +271,16 @@ export class Workspace {
     return { path: portableRelative(this.root, path), bytes };
   }
 
+  /** Throws what `writeStream` would throw for this path before it writes anything (boundary, protected path, link, directory, existing file); writes nothing. */
+  async checkWrite(input: string, overwrite: boolean): Promise<void> {
+    const path = await this.createPath(input);
+    const existing = await lstat(path).catch(() => null);
+    if (existing?.isSymbolicLink()) throw new Error("Refusing to replace a symbolic link.");
+    if (existing?.isDirectory()) throw new Error("Refusing to replace a directory.");
+    if (existing && existing.nlink > 1) throw new Error("Refusing to replace a file with multiple hard links.");
+    if (existing && !overwrite) throw new Error("File exists; set overwrite=true.");
+  }
+
   async readFileLines(input: string, startLine: number, endLine?: number) {
     const content = await this.readFile(input);
     const lines = content.split(/\r?\n/u);
