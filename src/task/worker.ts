@@ -71,7 +71,7 @@ export async function executeTaskRun(runId: string, signal: AbortSignal = new Ab
     restrictSandboxNetwork({ allowedDomains: domains, ...(mitm ? { mitmProxy: mitm } : {}) });
     await mkdir(`${plan.cwd}/.cache`, { recursive: true }).catch(() => undefined);
     note(`${record.snapshot.name} started (${record.snapshot.runner}, task folder ${plan.cwd}${domains.length ? `, sites: ${domains.join(", ")}` : ""}).`);
-    const wrapped = await sandboxCommandDetailed(plan.command, plan.cwd);
+    const wrapped = await sandboxCommandDetailed(plan.command, plan.cwd, record.snapshot.credentials ?? []);
     const child = spawn(wrapped.command, { cwd: plan.cwd, env: plan.env as NodeJS.ProcessEnv, shell: true, stdio: [plan.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"], detached: process.platform !== "win32", windowsHide: true });
     if (plan.stdin !== undefined) { child.stdin?.on("error", () => undefined); child.stdin?.end(plan.stdin); }
     child.stdout?.on("data", (data: Buffer) => write(data.toString("utf8")));

@@ -7,7 +7,8 @@ import { observeIdentity } from "../trust/observe.js";
 import { trustDirectory, type SignedApproval } from "../trust/record.js";
 import { readTrustOrRefresh, type TrustRefresh } from "../trust/sync.js";
 import { refreshAccountTrust } from "../device/control.js";
-import { authorizeTodoCheck, authorizeTodoStep } from "../trust/todo-scope.js";
+import { insideWorkspace } from "../trust/todo-scope.js";
+import { authorizeTodoCheck, authorizeTodoStep, hashStepFiles, MAX_SCRIPT_FILES, SCRIPT_EXECUTOR } from "../trust/todo-scope.js";
 import { NO_TRUST_MESSAGE, TrustError } from "../trust/webauthn.js";
 import { buildDefinition, removeDefinition, saveDefinition } from "./definition.js";
 import { cancelTaskRun, defaultManagerDeps, describeRun, startTask, waitForTaskRun, type ManagerDeps } from "./manager.js";
@@ -60,9 +61,10 @@ async function runView(runKey: string, runId: string): Promise<Record<string, un
   return { runKey, status: view.status, ...(view.startedAt ? { startedAt: view.startedAt } : {}), ...(view.endedAt ? { endedAt: view.endedAt } : {}), ...(view.exitCode !== undefined ? { exitCode: view.exitCode } : {}), ...(view.error ? { error: view.error } : {}), ...(answer !== undefined ? { answer } : {}) };
 }
 
-export async function runTodoDispatch(args: Record<string, unknown>, meta: unknown, deps: TodoDispatchDeps = defaultManagerDeps): Promise<Record<string, unknown>> {
+export async function runTodoDispatch(args: Record<string, unknown>, meta: unknown, deps: TodoDispatchDeps = defaultManagerDeps, workspaces: readonly string[] = []): Promise<Record<string, unknown>> {
   const action = args.action;
-  if (action !== "start" && action !== "status" && action !== "cancel" && action !== "check") throw new Error("action must be one of start, status, cancel, check.");
+  if (action !== "start" && action !== "status" && action !== "cancel" && action !== "check" && action !== "hash") throw new Error("action must be one of start, status, cancel, check, hash.");
+  if (action === "hash") return hashScriptFiles(args, workspaces);
   const runKey = text(args, "runKey", 128);
   if (!RUN_KEY.test(runKey)) throw new Error("runKey is invalid.");
   const identity = observeIdentity();
@@ -88,21 +90,26 @@ export async function runTodoDispatch(args: Record<string, unknown>, meta: unkno
     const sites = Array.isArray(args.sites) ? args.sites.filter((site): site is string => typeof site === "string") : [];
     const now = deps.now?.() ?? Date.now();
     // The agent that runs the step is part of what the owner signed for: a device default or a named agent must be in the scope.
-    if (args.executor !== undefined && args.executor !== null && !isAgentId(args.executor)) throw new Error("executor must be an installed-agent id such as pi, codex or claude-code.");
-    const runner = isAgentId(args.executor) ? args.executor : await (deps.defaultAgent ?? defaultAgentId)();
+    const script = args.executor === SCRIPT_EXECUTOR;
+    if (args.executor !== undefined && args.executor !== null && !script && !isAgentId(args.executor)) throw new Error("executor must be script or an installed-agent id such as pi, codex or claude-code.");
+    const runner = script ? SCRIPT_EXECUTOR : isAgentId(args.executor) ? args.executor : await (deps.defaultAgent ?? defaultAgentId)();
+    const credentials = script && Array.isArray(args.credentials) ? args.credentials.filter((name): name is string => typeof name === "string") : [];
+    const instruction = text(args, "instruction", MAX_INSTRUCTION_BYTES);
     const authorization = await authorizeTodoStep(approval, { record: trust.record, device: identity.device, deviceKey: identity.deviceKey, counterDirectory: directory, now }, {
       todoId: text(args, "todoId", 128), stepKey: runKey, cwd: text(args, "cwd", 1024), sites, executor: runner,
+      ...(script ? { script: { command: instruction }, credentials } : {}),
     });
     const name = `todo-${createHash("sha256").update(runKey).digest("hex").slice(0, 24)}`;
     const remaining = Math.floor((Date.parse(authorization.expiresAt) - now) / 1000);
     const definition = buildDefinition({
-      name, runner, command: text(args, "instruction", MAX_INSTRUCTION_BYTES), cwd: args.cwd as string, network: sites,
+      name, runner, command: instruction, cwd: args.cwd as string, network: sites,
       timeoutSec: Math.max(1, Math.min(MAX_STEP_SECONDS, remaining)), ...(typeof args.model === "string" && args.model ? { model: args.model } : {}),
     }, undefined, new Date(now));
     // The signed scope is the approval for its sites, until the approval ends.
     await saveDefinition({ ...definition, approvals: Object.fromEntries(sites.map((site) => [site, authorization.expiresAt])) });
     try {
-      const run = await startTask(name, { trigger: "remote" }, deps);
+      // Credential groups open for this run only (read access); nothing is written to the global grants.
+      const run = await startTask(name, { trigger: "remote", ...(credentials.length > 0 ? { credentials } : {}) }, deps);
       await writeRuns(directory, mapPath, { ...(await readRuns(mapPath)), [runKey]: { runId: run.runId, task: name } });
       return runView(runKey, run.runId);
     } finally { await removeDefinition(name).catch(() => undefined); }
@@ -135,4 +142,18 @@ async function runTodoCheck(args: Record<string, unknown>, meta: unknown, identi
     if (done.status === "running" || done.status === "queued") { await cancelTaskRun(run.runId).catch(() => undefined); return { status: "checked", met: false, exitCode: null }; }
     return { status: "checked", met: done.status === "completed" && done.exitCode === 0, exitCode: done.exitCode ?? null };
   } finally { await removeDefinition(name).catch(() => undefined); }
+}
+
+/**
+ * `hash`: the sha256 of the files a script step names, read from the step folder, so the owner's signing page can show them before signing.
+ * Read-only, only inside a workspace of this computer, and the content never leaves: only names and hashes go back.
+ */
+async function hashScriptFiles(args: Record<string, unknown>, workspaces: readonly string[]): Promise<Record<string, unknown>> {
+  const cwd = text(args, "cwd", 1024);
+  const files = Array.isArray(args.files) ? args.files : [];
+  if (files.length > MAX_SCRIPT_FILES || !files.every((file): file is string => typeof file === "string" && file.length > 0)) throw new Error(`files must be at most ${MAX_SCRIPT_FILES} relative paths.`);
+  let workspace: string | undefined;
+  for (const root of workspaces) if (await insideWorkspace(root, cwd)) { workspace = root; break; }
+  if (!workspace) throw new TrustError("outside_workspace");
+  return { status: "hashed", files: await hashStepFiles(workspace, cwd, files) };
 }

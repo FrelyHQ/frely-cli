@@ -30,6 +30,8 @@ export interface TaskRunSnapshot {
   readonly input?: string;
   /** Shared pi tasks: `none` (a one-time empty folder), `read` (answer only, the project is not changed) or `worktree` (a worktree per call). */
   readonly workspace?: TaskWorkspace;
+  /** Credential groups (SENSITIVE_PATH_GROUPS names) this run may read, signed by the owner for a todo script step. */
+  readonly credentials?: readonly string[];
 }
 export type TaskWorkspace = "none" | "read" | "worktree";
 
@@ -72,9 +74,9 @@ export const runsDir = (): string => join(tasksDir(), "runs");
 const recordPath = (runId: string): string => { if (!isTaskRunId(runId)) throw new Error("Invalid run id."); return join(runsDir(), `${runId}.json`); };
 export const taskLogPath = (runId: string): string => { if (!isTaskRunId(runId)) throw new Error("Invalid run id."); return join(runsDir(), `${runId}.log`); };
 
-export function snapshotOf(definition: TaskDefinition, sites: readonly string[], extra: { input?: string; workspace?: TaskWorkspace } = {}): TaskRunSnapshot {
+export function snapshotOf(definition: TaskDefinition, sites: readonly string[], extra: { input?: string; workspace?: TaskWorkspace; credentials?: readonly string[] } = {}): TaskRunSnapshot {
   return {
-    ...(extra.input === undefined ? {} : { input: extra.input }), ...(extra.workspace === undefined ? {} : { workspace: extra.workspace }),
+    ...(extra.input === undefined ? {} : { input: extra.input }), ...(extra.workspace === undefined ? {} : { workspace: extra.workspace }), ...(extra.credentials === undefined ? {} : { credentials: [...extra.credentials] }),
     name: definition.name, runner: definition.runner, command: definition.command, cwd: definition.cwd, env: definition.env,
     timeoutSec: definition.timeoutSec, hash: definition.hash, sites: [...sites],
     ...(definition.model === undefined ? {} : { model: definition.model }),
