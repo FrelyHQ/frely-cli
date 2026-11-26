@@ -252,3 +252,70 @@ test("saveLogin refuses an origin that already has a login, a non-https origin, 
   await sub.vault.unlock(Buffer.from(MASTER));
   await assert.rejects(sub.vault.saveLogin("https://example.com", { name: "E", username: "wyatt", password: "pw-SECRET" }), (error: Error) => !error.message.includes("pw-SECRET") && !error.message.includes("wyatt") && /\[hidden\]/u.test(error.message));
 });
+
+const note = (id: string, name: string, fields: Array<{ name: string; value: string; type: number }>) => ({ id, type: 2, name, notes: null, secureNote: { type: 0 }, fields: fields.map((f) => ({ ...f, linkedId: null })) });
+function noteVault(list: () => unknown[], over: (args: string[]) => Partial<BwResult> | undefined = () => undefined) {
+  const writes: Array<{ args: string[]; item: Record<string, unknown>; stdin: Buffer }> = [];
+  const calls: Call[] = [];
+  let clock = 1_000_000;
+  const vault = createVault({
+    pipe: async () => ({ path: "/tmp/p", feed: async () => undefined, close: async () => undefined }),
+    run: async (args, env, _t, stdin) => {
+      calls.push({ args, env });
+      if (stdin) writes.push({ args, item: JSON.parse(Buffer.from(stdin.toString("utf8"), "base64").toString("utf8")) as Record<string, unknown>, stdin });
+      const special = over(args);
+      if (special) return { code: 0, stdout: "", stderr: "", ...special };
+      return { code: 0, stderr: "", stdout: args[0] === "status" ? JSON.stringify({ status: "locked" }) : args[0] === "unlock" ? `${SESSION}\n` : args[0] === "list" ? JSON.stringify(list()) : "" };
+    },
+    now: () => clock,
+    env: { PATH: "/usr/bin", HOME: "/home/test" }, schedule: () => () => undefined,
+  });
+  return { vault, writes, calls, advance: (ms: number) => { clock += ms; } };
+}
+
+test("upsertNote creates a secure note with hidden fields on stdin only, and zeroes the stdin", async () => {
+  const { vault, writes, calls } = noteVault(() => [note("x", "zen-quant webhook (old)", [])]);
+  await assert.rejects(vault.upsertNote("zen-quant webhook", [{ name: "A", value: "v", hidden: false }]), VaultLockedError);
+  await vault.unlock(Buffer.from(MASTER));
+  assert.deepEqual(await vault.upsertNote("zen-quant webhook", [{ name: "CF_ID", value: "id-VALUE", hidden: false }, { name: "CF_SECRET", value: "secret-VALUE", hidden: true }]), { status: "created" });
+  assert.deepEqual(calls.find((call) => call.args[0] === "list")!.args, ["list", "items", "--search", "zen-quant webhook", "--nointeraction"]);
+  assert.deepEqual(writes[0]!.args, ["create", "item", "--nointeraction"]);
+  assert.deepEqual(writes[0]!.item, { type: 2, name: "zen-quant webhook", notes: null, favorite: false, secureNote: { type: 0 }, fields: [{ name: "CF_ID", value: "id-VALUE", type: 0, linkedId: null }, { name: "CF_SECRET", value: "secret-VALUE", type: 1, linkedId: null }] });
+  assert.equal(writes[0]!.stdin.every((byte) => byte === 0), true);
+  assert.equal(JSON.stringify(calls.map((call) => [call.args, { ...call.env, BW_SESSION: "" }])).includes("secret-VALUE"), false);
+  await assert.rejects(vault.upsertNote("n", [{ name: "1BAD", value: "v", hidden: false }]), /environment variable name/u);
+});
+
+test("upsertNote on an existing note replaces only the given fields and keeps the rest; two notes with the name are refused", async () => {
+  const existing = note("n1", "svc", [{ name: "KEEP", value: "kept", type: 1 }, { name: "CF_SECRET", value: "old", type: 1 }]);
+  const one = noteVault(() => [existing, { id: "l1", type: 1, name: "svc", login: {} }]);
+  await one.vault.unlock(Buffer.from(MASTER));
+  assert.deepEqual(await one.vault.upsertNote("svc", [{ name: "CF_SECRET", value: "new-SECRET", hidden: true }]), { status: "updated" });
+  assert.deepEqual(one.writes[0]!.args, ["edit", "item", "n1", "--nointeraction"]);
+  assert.deepEqual(one.writes[0]!.item.fields, [{ name: "KEEP", value: "kept", type: 1, linkedId: null }, { name: "CF_SECRET", value: "new-SECRET", type: 1, linkedId: null }]);
+  assert.equal(one.writes[0]!.item.id, "n1");
+
+  const two = noteVault(() => [existing, { ...existing, id: "n2" }]);
+  await two.vault.unlock(Buffer.from(MASTER));
+  await assert.rejects(two.vault.upsertNote("svc", [{ name: "A", value: "v", hidden: true }]), /Several secure notes/u);
+  assert.equal(two.writes.length, 0);
+
+  const failing = noteVault(() => [], (args) => args[0] === "create" ? { code: 1, stderr: "bad value new-SECRET" } : undefined);
+  await failing.vault.unlock(Buffer.from(MASTER));
+  await assert.rejects(failing.vault.upsertNote("svc", [{ name: "A", value: "new-SECRET", hidden: true }]), (error: Error) => !error.message.includes("new-SECRET") && /\[hidden\]/u.test(error.message));
+});
+
+test("noteFields returns the text and hidden fields by name; a miss syncs once, none or several is an error", async () => {
+  let synced = false;
+  const fields = [{ name: "CF_ID", value: "id", type: 0 }, { name: "CF_SECRET", value: "sec", type: 1 }, { name: "FLAG", value: "true", type: 2 }, { name: "has space", value: "x", type: 0 }];
+  const { vault, advance } = noteVault(() => synced ? [note("n1", "svc", fields)] : [], (args) => args[0] === "sync" ? ((synced = true), {}) : undefined);
+  await assert.rejects(vault.noteFields("svc"), VaultLockedError);
+  await vault.unlock(Buffer.from(MASTER));
+  synced = false;
+  advance(SYNC_MIN_INTERVAL_MS + 1);
+  assert.deepEqual(await vault.noteFields("svc"), { CF_ID: "id", CF_SECRET: "sec" });
+  await assert.rejects(vault.noteFields("other"), /no secure note named "other"/u);
+  const two = noteVault(() => [note("a", "svc", []), note("b", "svc", [])]);
+  await two.vault.unlock(Buffer.from(MASTER));
+  await assert.rejects(two.vault.noteFields("svc"), /Several secure notes/u);
+});

@@ -374,7 +374,8 @@ export class Workspace {
     return { from: portableRelative(this.root, from), to: portableRelative(this.root, to) };
   }
 
-  async runCommand(command: string, cwdInput: string, timeoutMs: number, signal?: AbortSignal, pathGrants: readonly string[] = []) {
+  /** `extraEnv` adds variables on top of the safe environment (the fields of a vault note, see `process` vaultItem). */
+  async runCommand(command: string, cwdInput: string, timeoutMs: number, signal?: AbortSignal, pathGrants: readonly string[] = [], extraEnv: Record<string, string> = {}) {
     if (!command.trim()) throw new Error("command is required.");
     const cwd = await this.existingPath(cwdInput || ".", "directory");
     // A process that escaped the previous command's cleanup may have written .git/config since: check before anything new runs.
@@ -385,7 +386,7 @@ export class Workspace {
     let leftovers = false;
     let outcome: { ok: true; value: { stdout: string; stderr: string } } | { ok: false; error: unknown };
     try {
-      outcome = { ok: true, value: await runShellCommand(prepared.command, cwd, safeEnv(), timeoutMs, MAX_OUTPUT_BYTES, signal, guard ? { killLeftovers: true, onLeftoversKilled: () => { leftovers = true; } } : {}) };
+      outcome = { ok: true, value: await runShellCommand(prepared.command, cwd, { ...safeEnv(), ...extraEnv }, timeoutMs, MAX_OUTPUT_BYTES, signal, guard ? { killLeftovers: true, onLeftoversKilled: () => { leftovers = true; } } : {}) };
     } catch (error) {
       outcome = { ok: false, error };
     }

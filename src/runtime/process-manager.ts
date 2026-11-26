@@ -3,6 +3,7 @@ import { checkRememberedGitConfigs } from "./git-config-guard.js";
 import { sandboxCommand } from "./sandbox.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { hideSecrets } from "../vault/note-env.js";
 
 const MAX_STREAM_CHARS = 1024 * 1024;
 const MAX_PROCESSES = 64;
@@ -13,6 +14,8 @@ interface ManagedProcess {
   readonly cwd: string;
   readonly child: ChildProcessWithoutNullStreams;
   readonly startedAt: string;
+  /** Values of the vault note it was started with; replaced with *** whenever its output is read. */
+  readonly secrets: readonly string[];
   stdout: string;
   stderr: string;
   stdoutBase: number;
@@ -47,7 +50,7 @@ export class ProcessManager {
   private readonly processes = new Map<string, ManagedProcess>();
   private readonly operations = new Map<string, Promise<unknown>>();
 
-  async start(command: string, cwd: string, env: NodeJS.ProcessEnv, workspaceRoot: string, pathGrants: readonly string[] = []): Promise<ProcessSnapshot> {
+  async start(command: string, cwd: string, env: NodeJS.ProcessEnv, workspaceRoot: string, pathGrants: readonly string[] = [], secrets: readonly string[] = []): Promise<ProcessSnapshot> {
     if (this.closed) throw new Error("MCP process manager is closed.");
     if (!command.trim()) throw new Error("command is required.");
     this.pruneExited();
@@ -65,6 +68,7 @@ export class ProcessManager {
       cwd,
       child,
       startedAt: new Date().toISOString(),
+      secrets,
       stdout: "",
       stderr: "",
       stdoutBase: 0,
@@ -93,10 +97,11 @@ export class ProcessManager {
     const managed = this.require(id);
     const stdoutStart = Math.max(stdoutCursor, managed.stdoutBase);
     const stderrStart = Math.max(stderrCursor, managed.stderrBase);
+    // Cursors count the raw output; only the returned text has the vault values replaced.
     return {
       ...snapshot(managed),
-      stdout: managed.stdout.slice(stdoutStart - managed.stdoutBase),
-      stderr: managed.stderr.slice(stderrStart - managed.stderrBase),
+      stdout: hideSecrets(managed.stdout.slice(stdoutStart - managed.stdoutBase), managed.secrets),
+      stderr: hideSecrets(managed.stderr.slice(stderrStart - managed.stderrBase), managed.secrets),
       stdoutCursor: managed.stdoutBase + managed.stdout.length,
       stderrCursor: managed.stderrBase + managed.stderr.length,
       stdoutTruncated: stdoutCursor < managed.stdoutBase,

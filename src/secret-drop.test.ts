@@ -324,3 +324,41 @@ test("vault_item: a failure never carries the values, and values outside the sig
     assert.equal(called, 0);
   });
 });
+
+const NOTE_TARGET: AnySecretDropTarget = { kind: "vault_item", name: "zen-quant webhook", format: "json", fields: [
+  { name: "CF_ACCESS_CLIENT_ID", label: "Client ID", type: "text", required: true },
+  { name: "CF_ACCESS_CLIENT_SECRET", label: "Client Secret", type: "password", required: true },
+] };
+const NOTE_SECRET = JSON.stringify({ CF_ACCESS_CLIENT_ID: "client-id-NOTE.access", CF_ACCESS_CLIENT_SECRET: "client-secret-NOTE-VALUE" });
+
+test("vault_item note: only the exact signed form parses, and its binding is the value the relay pins", () => {
+  assert.deepEqual(parseAnyTarget(NOTE_TARGET), NOTE_TARGET);
+  const fields = (NOTE_TARGET as unknown as { fields: Array<Record<string, unknown>> }).fields;
+  for (const bad of [{ ...NOTE_TARGET, format: "env" }, { ...NOTE_TARGET, extra: 1 }, { ...NOTE_TARGET, name: " x" }, { ...NOTE_TARGET, name: "a\nb" }, { ...NOTE_TARGET, fields: [{ ...fields[0], label: " Client ID " }] },
+    { ...NOTE_TARGET, fields: [{ ...fields[0], required: undefined }] }, { ...NOTE_TARGET, fields: [{ ...fields[0], name: "1BAD" }] }, { ...NOTE_TARGET, fields: [] }]) {
+    assert.throws(() => parseAnyTarget(JSON.parse(JSON.stringify(bad))), /not allowed/u);
+  }
+  assert.equal(secretDropBinding({ dropId: DROP, target: NOTE_TARGET, epk: b64(Buffer.alloc(32, 7)), ciphertext: "AAAA" }), "raKeMr2l7r42uhyMwOnFJTC_7LorXCn91Ee109dIBa0");
+});
+
+test("vault_item note: the values go to upsertNote once with password fields hidden; the receipt names only the fields", async () => {
+  await withDevice(async () => {
+    const { epk } = prepareSecretDrop({ dropId: DROP });
+    const ciphertext = await browserEncrypt(epk, DROP, NOTE_SECRET);
+    const saved: unknown[] = [];
+    let logins = 0;
+    const receipt = await applySecretDrop({ dropId: DROP, target: NOTE_TARGET, epk, ciphertext, approval: approval({ epk, ciphertext, target: NOTE_TARGET }) }, {
+      saveLogin: async () => { logins += 1; return { status: "exists" }; },
+      upsertNote: async (name, fields) => { saved.push({ name, fields }); return { status: "updated" }; },
+    });
+    assert.deepEqual(saved, [{ name: "zen-quant webhook", fields: [{ name: "CF_ACCESS_CLIENT_ID", value: "client-id-NOTE.access", hidden: false }, { name: "CF_ACCESS_CLIENT_SECRET", value: "client-secret-NOTE-VALUE", hidden: true }] }]);
+    assert.deepEqual(receipt, { status: "updated", name: "zen-quant webhook", fields: ["CF_ACCESS_CLIENT_ID", "CF_ACCESS_CLIENT_SECRET"] });
+    assert.equal(logins, 0);
+
+    const again = prepareSecretDrop({ dropId: DROP });
+    const ct2 = await browserEncrypt(again.epk, DROP, NOTE_SECRET);
+    const message = await refusal(applySecretDrop({ dropId: DROP, target: NOTE_TARGET, epk: again.epk, ciphertext: ct2, approval: approval({ epk: again.epk, ciphertext: ct2, target: NOTE_TARGET }) }, { upsertNote: async () => { throw new Error("bw said client-secret-NOTE-VALUE / client-id-NOTE.access"); } }));
+    assert.equal(message.includes("NOTE-VALUE") || message.includes("NOTE.access"), false);
+    assert.match(message, /\[hidden\]/u);
+  });
+});
