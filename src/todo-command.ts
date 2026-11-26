@@ -1,6 +1,7 @@
 // `frely task`: read and write the signed-in account's cloud todos (a goal and a plan of steps) through the Frely todo.* tools.
 // The cloud is the only copy: the CLI needs a connection (it is online-by-default), and archived is the only delete.
 
+import { readFile } from "node:fs/promises";
 import { AGENT_IDS } from "./agents/registry.js";
 
 type Call = (name: string, input: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -13,7 +14,7 @@ export interface TodoCommandIo {
 export const TODO_STATUSES = ["open", "in_progress", "done", "cancelled", "archived"] as const;
 export const TODO_STEP_STATUSES = ["pending", "succeeded", "failed", "skipped", "cancelled"] as const;
 
-const USAGE = "Usage: frely task list|show|add|update|archive|plan|step. Run frely help --agent --json task for flags.";
+const USAGE = "Usage: frely task list|show|add|update|archive|plan|step|condition. Run frely help --agent --json task for flags.";
 
 interface Parsed { positional: string[]; flags: Map<string, string[]>; json: boolean }
 
@@ -144,6 +145,16 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
       return 0;
     }
     throw new Error("Usage: frely task step add|update");
+  }
+  if (action === "condition") {
+    if (rest[0] !== "add") throw new Error("Usage: frely task condition add <todoId> --script <file> --device <id> --every <minutes> [--json]");
+    const parsed = parseTodoArgs(rest.slice(1), ["--script", "--device", "--every"]);
+    const todoId = parsed.positional[0];
+    const file = one(parsed, "--script"), deviceId = one(parsed, "--device"), every = Number(one(parsed, "--every"));
+    if (!todoId || !file || !deviceId || !Number.isInteger(every)) throw new Error("Usage: frely task condition add <todoId> --script <file> --device <id> --every <minutes> [--json] (the script runs on that device in the sandbox, with no network and no credentials; exit code 0 means met)");
+    const result = await io.call("todo.condition_add", { todoId, deviceId, script: await readFile(file, "utf8"), intervalMinutes: every }) as { condition?: { id?: string; nextCheckAt?: string | null } };
+    emit(result, parsed.json, () => `Added script condition ${result.condition?.id}. Approve device access for this task on the web so the script's hash is signed; an edited script needs that approval again.\n`);
+    return 0;
   }
   io.out(`${USAGE}\n`);
   return action === undefined ? 0 : 1;
