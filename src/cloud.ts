@@ -347,6 +347,16 @@ export async function callCloudToolWith(name: string, input: Record<string, unkn
   } finally { await reader.close().catch(() => undefined); }
 }
 
+/** When asking again can work, in the owner's local time and as minutes from now; undefined when the server gave no usable time. */
+export function retryDetail(retryAt: unknown, now: number = Date.now()): string | undefined {
+  if (typeof retryAt !== "string") return undefined;
+  const at = Date.parse(retryAt);
+  if (!Number.isFinite(at)) return undefined;
+  const minutes = Math.max(1, Math.ceil((at - now) / 60_000));
+  const time = new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `The owner denied this a moment ago or too many requests are waiting. You can ask again after ${time} (in about ${minutes} min).`;
+}
+
 /** One tool result as the calling command needs it: the JSON object on success, CloudToolError(code) on failure. Permission hints go to stderr either way. */
 function cloudToolResult(result: DirectResult, hintShown = false): Record<string, unknown> {
   const hint = permissionHint(result, "install");
@@ -358,9 +368,13 @@ function cloudToolResult(result: DirectResult, hintShown = false): Record<string
       const approval = approvalOf(refusal);
       if (approval) throw new ApprovalRequiredError(refusal.code, approval);
     }
-    let code = "operation_failed";
-    try { const parsed = (JSON.parse(String(text)) as { error?: { code?: unknown } }).error?.code; if (typeof parsed === "string") code = parsed; } catch { /* Keep the generic code. */ }
-    throw new CloudToolError(code);
+    let code = "operation_failed", detail: string | undefined;
+    try {
+      const error = (JSON.parse(String(text)) as { error?: { code?: unknown; retryAt?: unknown } }).error;
+      if (typeof error?.code === "string") code = error.code;
+      if (code === "confirmation_limited") detail = retryDetail(error?.retryAt);
+    } catch { /* Keep the generic code. */ }
+    throw new CloudToolError(code, detail);
   }
   const value: unknown = result.structuredContent ?? (typeof text === "string" ? JSON.parse(text) : null);
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new CloudToolError("invalid_operation_output");
