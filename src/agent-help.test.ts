@@ -133,3 +133,11 @@ test("every agent help command belongs to a group and examples point at real com
     for (const example of entry!.examples!) assert.ok(/^(frely |printf .*\| frely )/u.test(example), `${id}: ${example}`);
   }
 });
+
+test("the vault help and the site_login tool both say how to save a new login, and that no CLI command writes the vault", async () => {
+  const { SITE_LOGIN } = await import("./runtime/mcp.js");
+  const vault = agentHelp().commands.find((command: { id: string }) => command.id === "vault");
+  assert.match(vault!.purpose, /vault_item/);
+  assert.match(vault!.purpose, /no CLI command that writes the vault/);
+  assert.match(JSON.stringify(SITE_LOGIN), /vault_item/);
+});
