@@ -26,7 +26,7 @@ import type { LocalModelsHub } from "../provider/local-models.js";
 import { customWritePath, pathGrantsFromMeta } from "./sandbox.js";
 import { networkAllowFromMeta, webFetch } from "./web-fetch.js";
 import { P2pTransfers, type P2pAddress } from "./p2p.js";
-import { TRANSFER_TOOLS, transferAllowedFromMeta, transferDownload, transferPrepare, transferUpload, type TransferTarget } from "./transfer.js";
+import { TRANSFER_TOOLS, transferAllowedFromMeta, transferCheck, transferDownload, transferPrepare, transferUpload, type TransferTarget } from "./transfer.js";
 
 interface ToolFlags {
   readOnly: boolean;
@@ -353,6 +353,7 @@ async function dispatch(
       if (!to || typeof to.id !== "string" || !Array.isArray(to.directAddresses)) throw new Error("to must be the other device's address.");
       return read(() => p2p.send(transferWorkspace, { path: resolvedPath.relativeInput, bytes: p2pBytes, sha256: p2pSha, to: { id: to.id!, relayUrl: typeof to.relayUrl === "string" ? to.relayUrl : null, directAddresses: to.directAddresses!.filter((entry): entry is string => typeof entry === "string").slice(0, 16) }, relayUrl: args.relayUrl }));
     }
+    if (name === "transfer_check") return read(() => transferCheck(transferWorkspace, resolvedPath.relativeInput, boolArg(args, "overwrite", false)));
     if (name === "transfer_prepare") return read(() => transferPrepare(transferWorkspace, resolvedPath.relativeInput));
     // The link is chosen by the Relay, so connect() in transfer.ts accepts only Frely's object-store hosts; that allowlist closes plan gap G4.
     const headers = args.headers ?? {};

@@ -113,3 +113,18 @@ test("the pinned address is IPv4 when the host has one", () => {
   assert.equal(preferredAddress(["2606:4700:113::1", "104.18.2.3"]), "104.18.2.3");
   assert.equal(preferredAddress(["2606:4700:113::1"]), "2606:4700:113::1");
 });
+
+test("transfer_check answers whether a path can be written, and writes nothing", () => withClient(async (client, root) => {
+  await writeFile(join(root, "taken.bin"), "x");
+  const check = (path: string, overwrite?: boolean) => client.callTool({ name: "transfer_check", arguments: { path, ...(overwrite === undefined ? {} : { overwrite }) }, _meta: gate });
+  assert.deepEqual(JSON.parse(text(await check("new/dir/a.bin"))), { writable: true, path: "new/dir/a.bin" });
+  await assert.rejects(readFile(join(root, "new")), /ENOENT/u);
+  const exists = await check("taken.bin");
+  assert.equal(exists.isError, true);
+  assert.match(text(exists), /overwrite=true/u);
+  assert.equal((await check("taken.bin", true)).isError, undefined);
+  const outside = await check("../outside.bin");
+  assert.equal(outside.isError, true);
+  const denied = await client.callTool({ name: "transfer_check", arguments: { path: "a.bin" } });
+  assert.equal(denied.isError, true);
+}));
