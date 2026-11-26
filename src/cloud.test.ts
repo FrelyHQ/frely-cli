@@ -199,7 +199,7 @@ test("a known write tool goes straight to the FrelyMCP connection without openin
     openReader: async () => { readers++; throw new Error("the reader must not be opened"); },
     openControllerConnection: async () => ({ call: async () => ({ content: [{ type: "text", text: JSON.stringify({ kind: "skill", id: "s", name: "a/b" }) }], structuredContent: { kind: "skill", id: "s", name: "a/b" } }), close: async () => undefined }),
   };
-  assert.equal((await callCloudToolAwaiting("items.claim_install", { name: "a/b" }, deps as never)).kind, "skill");
+  assert.equal((await callCloudToolAwaiting("mcps.connect", { name: "a/b" }, deps as never)).kind, "skill");
   assert.equal(readers, 0);
 });
 
@@ -264,4 +264,48 @@ test("a confirmation_limited refusal tells when asking again can work", () => {
   assert.equal(retryDetail("not a time"), undefined);
   assert.equal(new CloudToolError("confirmation_limited", "Try later.").message, "Frely Cloud call failed: confirmation_limited. Try later.");
   assert.equal(new CloudToolError("operation_failed").message, "Frely Cloud call failed: operation_failed");
+});
+
+test("a gift claim runs on the login alone: it prints the approval once, repeats the same call until the owner confirmed it, and never opens the controller", async () => {
+  const { callCloudToolAwaiting } = await import("./cloud.js");
+  const refusal = failure({ code: "confirmation_required", approvalCode: "ABCDEFGH", url: "https://frely.cloud/device?g=ABCDEFGH", expiresAt: new Date(Date.now() + 60_000).toISOString(), summary: "Claim gift" });
+  const done = { content: [{ type: "text", text: JSON.stringify({ kind: "agent", id: "a", name: "u/n" }) }], structuredContent: { kind: "agent", id: "a", name: "u/n" } };
+  const answers = [refusal, refusal, done];
+  const seen: Array<Record<string, unknown>> = [];
+  const slept: number[] = [];
+  const deps = {
+    openReader: async () => ({ tools: async () => [], call: async (_name: string, args: Record<string, unknown>) => { seen.push(args); return answers.shift()!; }, close: async () => undefined }),
+    openControllerConnection: async () => { throw new Error("the controller must not be opened"); },
+    sleep: async (ms: number) => { slept.push(ms); },
+  };
+  const written: string[] = [];
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((text: string) => { written.push(String(text)); return true; }) as typeof process.stderr.write;
+  const announced: string[] = [];
+  try { assert.equal((await callCloudToolAwaiting("items.claim_install", { name: "u/n", gift: "fsl_x" }, deps as never, undefined, (approval) => { announced.push(approval.code); })).kind, "agent"); }
+  finally { process.stderr.write = original; }
+  assert.equal(seen.length, 3);
+  assert.deepEqual(seen[0], seen[2]);
+  assert.deepEqual(announced, ["ABCDEFGH"]);
+  assert.equal(slept.length, 2);
+  assert.equal(written.join("").match(/Code: ABCD-EFGH/g)?.length, 1);
+});
+
+test("a gift claim that is not approved in time ends with the approval to run again, and a denial shows when asking works again", async () => {
+  const { callCloudToolAwaiting } = await import("./cloud.js");
+  const { ApprovalRequiredError, CloudToolError } = await import("./skill/cloud-item.js");
+  const refusal = failure({ code: "confirmation_required", approvalCode: "ABCDEFGH", url: "https://frely.cloud/device?g=ABCDEFGH", expiresAt: new Date(Date.now() + 60_000).toISOString() });
+  let clock = 0;
+  const waiting = {
+    openReader: async () => ({ tools: async () => [], call: async () => refusal, close: async () => undefined }),
+    openControllerConnection: async () => { throw new Error("the controller must not be opened"); },
+    sleep: async (ms: number) => { clock += ms * 1000; }, now: () => clock,
+  };
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (() => true) as typeof process.stderr.write;
+  try {
+    await assert.rejects(callCloudToolAwaiting("items.claim_install", {}, waiting as never), (error: unknown) => error instanceof ApprovalRequiredError && error.approval.then === "repeat");
+    const denied = { ...waiting, openReader: async () => ({ tools: async () => [], call: async () => failure({ code: "confirmation_limited", retryAt: new Date(Date.now() + 120_000).toISOString() }), close: async () => undefined }) };
+    await assert.rejects(callCloudToolAwaiting("items.claim_install", {}, denied as never), (error: unknown) => error instanceof CloudToolError && error.code === "confirmation_limited" && /ask again after/.test(error.message));
+  } finally { process.stderr.write = original; }
 });

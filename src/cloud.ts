@@ -291,12 +291,51 @@ export async function callCloudTool(name: string, input: Record<string, unknown>
  * ApprovalRequiredError, so the caller can exit with 3 and say what to run again.
  */
 /** Tools the read-only reader can never see, so a command that calls one goes straight to the FrelyMCP connection and saves a handshake. */
-const KNOWN_WRITE_TOOLS = new Set(["items.claim_install", "share_links.redeem", "mcps.connect", "devices.confirm_workspace_change"]);
+const KNOWN_WRITE_TOOLS = new Set(["mcps.connect", "devices.confirm_workspace_change"]);
+/**
+ * A claim (a gift or share link) only adds to the caller's own account and spends nothing, so it needs no controller: the login alone asks for it.
+ * The owner approves once on the web. The wait is the call itself, repeated: the server hands back the open approval, and runs the call once the owner confirmed it.
+ */
+const CLAIM_TOOLS = new Set(["items.claim_install", "share_links.redeem"]);
+const CLAIM_POLL_MS = 3_000;
+
+async function callClaimWithLogin(name: string, input: Record<string, unknown>, deps: CloudCallDeps, onApproval?: (approval: Approval) => void): Promise<Record<string, unknown> | null> {
+  const reader = await deps.openReader();
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const now = deps.now ?? Date.now;
+  const deadline = now() + WAIT_MAX_MS;
+  let announced = false;
+  try {
+    for (;;) {
+      const result = await reader.call(name, input);
+      const error = toolError(result);
+      if (result.isError === true && error?.code === "tool_unavailable_or_forbidden") return null;
+      if (result.isError !== true || error?.code !== "confirmation_required") return cloudToolResult(result, true);
+      const approval = approvalOf(error);
+      if (!approval) return cloudToolResult(result, true);
+      if (!announced) {
+        announced = true;
+        onApproval?.(approval);
+        process.stderr.write(`${approval.summary ? approval.summary + "\n" : ""}Approve this in your browser:\n${approval.url}\nCode: ${approval.code.slice(0, 4)}-${approval.code.slice(4)}\n`
+          + `Keep this command running (up to ${WAIT_MAX_MS / 60_000} minutes): it continues by itself once the owner approves. If it has already ended, run the same command again.\n`);
+      }
+      if (now() >= deadline) throw new ApprovalRequiredError("confirmation_required", { ...approval, then: "repeat" });
+      await sleep(CLAIM_POLL_MS);
+    }
+  } finally { await reader.close().catch(() => undefined); }
+}
 
 export async function callCloudToolAwaiting(name: string, input: Record<string, unknown>, deps: CloudCallDeps = { openReader: openCloudReader, openControllerConnection },
   wait: (controller: { call(name: string, args: Record<string, unknown>): Promise<DirectResult> }, ref: ApprovalRef, timeoutMs: number) => Promise<ApprovalOutcome> = (controller, ref, timeoutMs) => waitForApproval(controller as never, ref, timeoutMs),
   /** Called with the approval as soon as the server asks for it, before this command starts to wait: a host that only reads the first lines of output can show it. */
   onApproval?: (approval: Approval) => void): Promise<Record<string, unknown>> {
+  if (CLAIM_TOOLS.has(name)) {
+    const claimed = await callClaimWithLogin(name, input, deps, onApproval).catch((error: unknown) => {
+      if (error instanceof CloudToolError && error.code === "tool_unavailable_or_forbidden") return null;
+      throw error;
+    });
+    if (claimed) return claimed;
+  }
   if (!KNOWN_WRITE_TOOLS.has(name)) {
     const reader = await deps.openReader();
     try {
@@ -333,6 +372,9 @@ export async function callCloudToolAwaiting(name: string, input: Record<string, 
 /** The two connections a Cloud call needs; production opens the login's reader directly and FreyMCP only on fallback. */
 export interface CloudCallDeps {
   openReader(): Promise<CloudReader>;
+  /** Test seams for the claim wait. */
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
   openControllerConnection(): Promise<{ call(name: string, args: Record<string, unknown>): Promise<DirectResult>; close(): Promise<void> }>;
 }
 
