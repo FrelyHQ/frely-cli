@@ -154,7 +154,9 @@ try {
   if (Test-Path -LiteralPath $target) {
     if (((Get-Item -LiteralPath $target -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Existing executable must not be a reparse point.' }
     try { & $target mcp service stop *> $null; $serviceStopped = ($LASTEXITCODE -eq 0) } catch { $serviceStopped = $false }
-    $install = { [IO.File]::Replace($download, $target, $null) }
+    # The backup name must be a real null: PowerShell turns a plain $null into an empty string for a .NET string parameter,
+    # and File.Replace then fails with "The path is not of a legal form." (every upgrade over an existing frely.exe).
+    $install = { [IO.File]::Replace($download, $target, [NullString]::Value) }
   } else { $install = { [IO.File]::Move($download, $target) } }
   # A just-written executable can stay locked for a moment (antivirus scan after the archive was decompressed): retry briefly.
   $installError = $null
