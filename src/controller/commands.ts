@@ -45,7 +45,7 @@ export const CONTROLLER_USAGE = `Control your Frely devices from this computer.
   frely device permission confirm <code> [A|B|C]        Finish an approval by authenticator or emailed code
   frely device permission wait <short code> [--then '<command>'] [--timeout <s>]
   frely file put <local file | device:path> [--json]  Share a file or image as a link (https://frely.cloud/f/<code>); prints the link first
-  frely file drop [<file>]                           Get a one-time command for a machine without Frely to upload a file to you (valid 30 minutes)
+  frely file drop [<file>] [--shell sh|powershell]   Get a one-time command for a machine without Frely to upload a file to you (valid 30 minutes)
   frely file get <id> [<local path> | <device>:<path>] [--overwrite]   Fetch a shared file to this computer or a device
   frely file list                                    List shared files (id, name, size, visibility, expiry, link)
   frely file rm <id>                            Delete a shared file
@@ -355,11 +355,28 @@ function dropScript(file: string, claimUrl: string, completeUrl: string): string
   u=$(curl -fsS -X POST -H 'content-type: application/json' --data "{\\\"name\\\":\\\"$n\\\",\\\"bytes\\\":$s,\\\"sha256\\\":\\\"$h\\\"}" ${shellQuote(`${claimUrl}?format=url`)}) && curl -fsS -T "$f" "$u" && curl -fsS -X POST ${shellQuote(completeUrl)}`;
 }
 
+/**
+ * The same flow for Windows PowerShell 5.1 and later: hash and size with built-ins, the JSON body from ConvertTo-Json (so any file name is safe),
+ * and curl.exe (shipped with Windows 10 1803+) for the upload, which streams the file and sends the real Content-Length the signed link needs.
+ * `curl` alone is PowerShell's Invoke-WebRequest alias, hence `curl.exe`.
+ */
+function dropScriptPowerShell(file: string, claimUrl: string, completeUrl: string): string {
+  const q = (value: string) => `'${value.replace(/'/gu, "''")}'`;
+  return `[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $f=${q(file)}; if(-not (Test-Path -LiteralPath $f -PathType Leaf)){ throw "No such file: $f" }; $i=Get-Item -LiteralPath $f; $h=(Get-FileHash -LiteralPath $i.FullName -Algorithm SHA256).Hash.ToLower(); $b=[Text.Encoding]::UTF8.GetBytes((@{name=$i.Name;bytes=[int64]$i.Length;sha256=$h}|ConvertTo-Json -Compress))
+$u=([string](Invoke-RestMethod -Method Post -ContentType 'application/json' -Body $b ${q(`${claimUrl}?format=url`)})).Trim(); curl.exe -fsS -T $i.FullName $u; if($LASTEXITCODE -eq 0){ Invoke-RestMethod -Method Post ${q(completeUrl)} | Out-Null; 'Uploaded.' }`;
+}
+
+const DROP_SHELLS = ["sh", "powershell"] as const;
+
 async function dropCommand(args: string[], io: Output): Promise<number> {
-  const parsed = parseArgs(args, { flags: COMMON_FLAGS, values: COMMON_VALUES });
-  if (parsed.positionals.length > 1) throw new ControllerError("Usage: frely file drop [<file>] [--json]", EXIT.cli);
+  const parsed = parseArgs(args, { flags: COMMON_FLAGS, values: [...COMMON_VALUES, "--shell"] });
+  if (parsed.positionals.length > 1) throw new ControllerError("Usage: frely file drop [<file>] [--shell sh|powershell] [--json]", EXIT.cli);
+  const shell = parsed.values.get("--shell") ?? "sh";
+  if (!(DROP_SHELLS as readonly string[]).includes(shell)) throw new ControllerError("--shell must be sh or powershell.", EXIT.cli);
   const hint = parsed.positionals[0] ?? "FILE";
-  if (/["\\]/u.test(hint)) throw new ControllerError('The file hint cannot contain " or \\.', EXIT.cli);
+  // A Windows path has backslashes; the PowerShell script reads the name from the file itself, so only the sh script is picky.
+  if (shell === "sh" && /["\\]/u.test(hint)) throw new ControllerError('The file hint cannot contain " or \\.', EXIT.cli);
+  if (/[\u0000-\u001f]/u.test(hint)) throw new ControllerError("The file hint cannot contain control characters.", EXIT.cli);
   return withController(io, async (controller) => {
     const result = await controller.call("transfer", { action: "drop_link" });
     const outcome = outcomeOf(result);
@@ -367,7 +384,7 @@ async function dropCommand(args: string[], io: Output): Promise<number> {
     if (outcome.exitCode !== EXIT.ok || !data) return emit(shownOf(result), outcome, parsed, io);
     const claimUrl = asText(data.claimUrl), completeUrl = asText(data.completeUrl);
     if (!claimUrl || !completeUrl) throw new ControllerError("The transfer service gave no drop addresses.", EXIT.tool);
-    const script = dropScript(hint, claimUrl, completeUrl);
+    const script = (shell === "powershell" ? dropScriptPowerShell : dropScript)(hint, claimUrl, completeUrl);
     const expiresAt = asText(data.expiresAt) || "unknown";
     return emit({ text: `Drop command (expires ${expiresAt}):\n${script}\nWhen it finishes, the file shows in: frely file list`, result: { ...data, script } as ToolResult }, outcome, parsed, io);
   });

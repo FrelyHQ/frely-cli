@@ -178,6 +178,28 @@ test("drop asks for a drop code, returns the script in --json and refuses unsafe
   assert.equal(unsafe.calls.length, 0);
 });
 
+test("drop --shell powershell prints a PowerShell script, accepts Windows paths and refuses other shells", async () => {
+  const claimUrl = "https://frely.test/api/drop/abc";
+  const reply = () => text({ code: "abc", expiresAt: "2026-12-01T00:00:00Z", claimUrl, completeUrl: `${claimUrl}/complete` });
+  const shown = await run(["drop", "C:\\Users\\o'brien\\report.csv", "--shell", "powershell"], reply);
+  assert.match(shown.out, /\$f='C:\\Users\\o''brien\\report\.csv'/u);
+  assert.match(shown.out, /Get-FileHash/u);
+  assert.match(shown.out, /curl\.exe -fsS -T/u);
+  assert.ok(shown.out.includes(`'${claimUrl}?format=url'`));
+  assert.ok(shown.out.includes(`'${claimUrl}/complete'`));
+  assert.ok(!shown.out.includes("sha256sum"));
+  const json = JSON.parse((await run(["drop", "--shell", "powershell", "--json"], reply)).out);
+  assert.match(json.script, /\$f='FILE'/u);
+  const sh = await run(["drop", "C:\\x.csv"], reply);
+  assert.equal(sh.code, EXIT.cli);
+  const bad = await run(["drop", "--shell", "cmd"], reply);
+  assert.equal(bad.code, EXIT.cli);
+  assert.match(bad.err, /--shell must be sh or powershell/u);
+  assert.equal(bad.calls.length, 0);
+  const control = await run(["drop", "a\nb", "--shell", "powershell"], reply);
+  assert.equal(control.code, EXIT.cli);
+});
+
 // The snippet is POSIX sh for the other machine; Windows runners have no sh on PATH.
 test("drop prints a runnable script and refuses unsafe file hints", { skip: process.platform === "win32" }, async () => {
   const claimUrl = "https://frely.test/api/drop/abc";
