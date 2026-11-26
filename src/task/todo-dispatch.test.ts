@@ -9,6 +9,7 @@ import { setObserveIdentity } from "../trust/observe.js";
 import { APPROVAL_DOMAIN, pinTrustChain, TRUST_DOMAIN, trustDirectory, trustRecordHash, type ApprovalPayload, type TrustRecord } from "../trust/record.js";
 import { challengeFor, type Signer, type WebAuthnSignature } from "../trust/webauthn.js";
 import { TODO_SCOPE_GRANT } from "../trust/todo-scope.js";
+import { executeTaskRun } from "./worker.js";
 import { runTodoDispatch, TODO_SCOPE_META_KEY } from "./todo-dispatch.js";
 import { listDefinitions } from "./definition.js";
 import { listTaskRuns } from "./run-store.js";
@@ -47,11 +48,11 @@ const trustSig = (r: TrustRecord): WebAuthnSignature => {
   return { kind: "webauthn", credId: signer.credId, authData: b64(authData), clientData: b64(clientData), signature: b64(sign("sha256", Buffer.concat([authData, sha(clientData)]), pair.privateKey)) };
 };
 
-function approval(workspace: string, maxSteps = 2, executors?: string[]) {
+function approval(workspace: string, maxSteps = 2, executors?: string[], scriptHashes?: string[]) {
   const now = Date.now();
   const payload: ApprovalPayload = {
     typ: APPROVAL_DOMAIN, id: "tdsc_1", user: "usr_1", trust: trustRecordHash(record), trustSeq: 1, device: DEVICE, deviceKey: "thumb", authz: null,
-    grant: { kind: TODO_SCOPE_GRANT, resource: "td_1", mode: "authorization" }, scope: { todo: "td_1", deviceName: "mbp", workspace, sites: ["github.com"], ...(executors ? { executors } : {}), maxSteps },
+    grant: { kind: TODO_SCOPE_GRANT, resource: "td_1", mode: "authorization" }, scope: { todo: "td_1", deviceName: "mbp", workspace, sites: ["github.com"], ...(executors ? { executors } : {}), ...(scriptHashes ? { scriptHashes } : {}), maxSteps },
     iat: new Date(now).toISOString(), nbf: new Date(now).toISOString(), exp: new Date(now + 3600_000).toISOString(),
   };
   return { payload, sig: assertion(payload) };
@@ -107,5 +108,41 @@ test("a codex step runs as a codex task only under a scope signed for codex; an 
     const started = await runTodoDispatch({ ...args, runKey: "run_codex003" }, { [TODO_SCOPE_META_KEY]: approval(work, 2, ["codex", "pi"]) }, deps);
     assert.equal(started.status, "running");
     assert.equal((await listTaskRuns())[0]!.snapshot.runner, "codex");
+  });
+});
+
+const hashOf = (script: string) => createHash("sha256").update(script, "utf8").digest("hex");
+
+test("a condition script runs in the signed folder: exit 0 is met, any other exit is not, and only met and the code go back", async () => {
+  await withDevice(async (work) => {
+    await pinTrustChain([{ record, sig: trustSig(record) }], "usr_1", trustDirectory({ relayUrl: "https://r.test", userId: "usr_1" }), trustAnchor(HOSTED_INSTANCE));
+    const deps = { spawnWorker: (runId: string) => { void executeTaskRun(runId); } };
+    const check = (script: string, key: string, hashes = [hashOf(script)]) => runTodoDispatch({ action: "check", runKey: key, todoId: "td_1", script, cwd: work }, { [TODO_SCOPE_META_KEY]: approval(work, 2, undefined, hashes) }, deps);
+    assert.deepEqual(await check("echo secret-output; exit 0", "chk_met00001"), { status: "checked", met: true, exitCode: 0 });
+    assert.deepEqual(await check("exit 3", "chk_not00001"), { status: "checked", met: false, exitCode: 3 });
+    assert.deepEqual(await listDefinitions(), [], "the one-off definition is removed");
+  });
+});
+
+test("a condition script that was edited after the owner signed is refused and never runs", async () => {
+  await withDevice(async (work) => {
+    await pinTrustChain([{ record, sig: trustSig(record) }], "usr_1", trustDirectory({ relayUrl: "https://r.test", userId: "usr_1" }), trustAnchor(HOSTED_INSTANCE));
+    const spawned: string[] = [];
+    const deps = { spawnWorker: (runId: string) => { spawned.push(runId); } };
+    const args = { action: "check", runKey: "chk_edited001", todoId: "td_1", script: "touch pwned", cwd: work };
+    await assert.rejects(runTodoDispatch(args, { [TODO_SCOPE_META_KEY]: approval(work, 2, undefined, [hashOf("true")]) }, deps), /script_mismatch/u);
+    await assert.rejects(runTodoDispatch({ ...args, runKey: "chk_nohash001" }, { [TODO_SCOPE_META_KEY]: approval(work) }, deps), /script_mismatch/u);
+    await assert.rejects(runTodoDispatch({ ...args, runKey: "chk_outside01", cwd: tmpdir() }, { [TODO_SCOPE_META_KEY]: approval(work, 2, undefined, [hashOf("touch pwned")]) }, deps), /outside_workspace/u);
+    assert.equal(spawned.length, 0);
+  });
+});
+
+test("a condition script that does not end in time counts as not met", async () => {
+  await withDevice(async (work) => {
+    await pinTrustChain([{ record, sig: trustSig(record) }], "usr_1", trustDirectory({ relayUrl: "https://r.test", userId: "usr_1" }), trustAnchor(HOSTED_INSTANCE));
+    const script = "sleep 5";
+    // The worker never starts, so the run stays queued past the (shortened) wait and is cancelled.
+    const result = await runTodoDispatch({ action: "check", runKey: "chk_slow00001", todoId: "td_1", script, cwd: work }, { [TODO_SCOPE_META_KEY]: approval(work, 2, undefined, [hashOf(script)]) }, { spawnWorker: () => undefined, checkWaitMs: 200 });
+    assert.deepEqual(result, { status: "checked", met: false, exitCode: null });
   });
 });

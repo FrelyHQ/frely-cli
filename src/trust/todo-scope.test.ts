@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { APPROVAL_DOMAIN, TRUST_DOMAIN, trustRecordHash, type ApprovalPayload, type TrustRecord } from "./record.js";
-import { authorizeTodoStep, TODO_SCOPE_GRANT } from "./todo-scope.js";
+import { authorizeTodoCheck, authorizeTodoStep, TODO_SCOPE_GRANT } from "./todo-scope.js";
 import { challengeFor, TrustError, type Signer, type WebAuthnSignature } from "./webauthn.js";
 
 const ORIGIN = "https://approve.frely.cloud";
@@ -80,7 +80,7 @@ test("folder and site rules: outside, dot-dot, symlink escape, other sites and a
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("only a passkey todo_scope approval counts: other grants, bad signatures, expiry, TTL over 12 hours, other devices and rewritten scopes are refused", async () => {
+test("only a passkey todo_scope approval counts: other grants, bad signatures, expiry, TTL over 30 days, other devices and rewritten scopes are refused", async () => {
   const { root, work, ctx } = await setup();
   try {
     const req = { todoId: "td_1", stepKey: "s1", cwd: work, sites: [] };
@@ -93,7 +93,7 @@ test("only a passkey todo_scope approval counts: other grants, bad signatures, e
     assert.equal(await run(wrongOrigin), "origin_not_allowed");
     const old = Date.now() - 3 * 3600_000;
     assert.equal(await run(approval(work, { iat: new Date(old).toISOString(), nbf: new Date(old).toISOString(), exp: new Date(old + 3600_000).toISOString() })), "expired");
-    assert.equal(await run(approval(work, { exp: new Date(Date.now() + 13 * 3600_000).toISOString() })), "ttl_too_long");
+    assert.equal(await run(approval(work, { exp: new Date(Date.now() + 31 * 24 * 3600_000).toISOString() })), "ttl_too_long");
     assert.equal(await run(approval(work), { ...ctx, device: "drd_" + "b".repeat(32) }), "device_mismatch");
     assert.equal(await run(approval(work, { ctl: { kind: "key", id: "k" } })), "approval_invalid");
     assert.equal(await run(approval(work, {}, { maxSteps: 1000 })), "scope_invalid");
@@ -114,5 +114,32 @@ test("codex steps need a scope the owner signed for codex; a scope without execu
     const signed = approval(work, {}, { maxSteps: 50, executors: ["codex", "pi"] });
     assert.equal(await run(signed, "codex"), "ok");
     assert.equal(await run(approval(work, {}, { maxSteps: 50, executors: ["claude"] }), "pi"), "scope_invalid");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("the signed lifetime may be up to 30 days and no more", async () => {
+  const { root, work, ctx } = await setup();
+  try {
+    const day = 24 * 3600_000, now = Date.now();
+    const span = (ms: number) => ({ iat: new Date(now).toISOString(), nbf: new Date(now).toISOString(), exp: new Date(now + ms).toISOString() });
+    const run = (ms: number, key: string) => code(authorizeTodoStep(approval(work, span(ms), { maxSteps: 5 }), ctx, { todoId: "td_1", stepKey: key, cwd: work, sites: [] }));
+    assert.equal(await run(30 * day, "k1"), "ok");
+    assert.equal(await run(30 * day + 60_000, "k2"), "ttl_too_long");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a script check needs its sha256 inside the signed scope and is not counted as a step", async () => {
+  const { root, work, sub, outside, ctx } = await setup();
+  try {
+    const hash = "a".repeat(64);
+    const a = approval(work, {}, { maxSteps: 1, scriptHashes: [hash] });
+    const check = (scriptHash: string, cwd = sub) => code(authorizeTodoCheck(a, ctx, { todoId: "td_1", cwd, scriptHash }));
+    assert.equal(await check(hash), "ok");
+    assert.equal(await check(hash), "ok");
+    assert.equal(await check("b".repeat(64)), "script_mismatch");
+    assert.equal(await check(hash, outside), "outside_workspace");
+    assert.equal((await authorizeTodoStep(a, ctx, { todoId: "td_1", stepKey: "s1", cwd: work, sites: [] })).stepsUsed, 1);
+    assert.equal(await code(authorizeTodoCheck(approval(work), ctx, { todoId: "td_1", cwd: work, scriptHash: hash })), "script_mismatch");
+    assert.equal(await code(authorizeTodoCheck(a, ctx, { todoId: "td_2", cwd: work, scriptHash: hash })), "todo_mismatch");
   } finally { await rm(root, { recursive: true, force: true }); }
 });

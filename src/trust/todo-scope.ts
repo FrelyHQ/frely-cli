@@ -11,7 +11,7 @@ import { TrustError } from "./webauthn.js";
  */
 export const TODO_SCOPE_GRANT = "todo_scope";
 /** The device's own cap, whatever the signed expiry says. */
-export const TODO_SCOPE_MAX_TTL_MS = 12 * 60 * 60 * 1000;
+export const TODO_SCOPE_MAX_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_STEPS = 100;
 const MAX_SITES = 20;
 const SITE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/u;
@@ -25,6 +25,7 @@ function shapedScope(payload: ApprovalPayload): NonNullable<ApprovalPayload["sco
   if (!scope || typeof scope.todo !== "string" || typeof scope.workspace !== "string" || !isAbsolute(scope.workspace) || scope.workspace.includes("\0")) throw new TrustError("scope_invalid");
   if (!Array.isArray(scope.sites) || scope.sites.length > MAX_SITES || !scope.sites.every((site) => typeof site === "string" && SITE.test(site))) throw new TrustError("scope_invalid");
   if (scope.executors !== undefined && (!Array.isArray(scope.executors) || scope.executors.length < 1 || !scope.executors.every((item) => isAgentId(item)))) throw new TrustError("scope_invalid");
+  if (scope.scriptHashes !== undefined && (!Array.isArray(scope.scriptHashes) || scope.scriptHashes.length > 20 || !scope.scriptHashes.every((hash) => typeof hash === "string" && /^[0-9a-f]{64}$/u.test(hash)))) throw new TrustError("scope_invalid");
   if (!Number.isSafeInteger(scope.maxSteps) || scope.maxSteps < 1 || scope.maxSteps > MAX_STEPS) throw new TrustError("scope_invalid");
   return scope;
 }
@@ -83,4 +84,21 @@ export async function authorizeTodoStep(approval: SignedApproval, context: TodoA
   if (typeof request.stepKey !== "string" || request.stepKey.length < 1 || request.stepKey.length > 128) throw new TrustError("approval_invalid");
   const { used, duplicate } = await reserve(context.counterDirectory, payload.id, payload.exp, request.stepKey, scope.maxSteps, now);
   return { approvalId: payload.id, scope, expiresAt: payload.exp, stepsUsed: used, duplicate };
+}
+
+/**
+ * Accept or refuse one script check of a `script` todo condition. Same signature, todo, expiry and folder rules as a step, and the script's
+ * sha256 must be one the owner signed: an edited script is refused (`script_mismatch`). A check is not a step and is not counted.
+ */
+export async function authorizeTodoCheck(approval: SignedApproval, context: TodoAuthContext, request: { todoId: string; cwd: string; scriptHash: string }): Promise<{ approvalId: string; expiresAt: string }> {
+  const now = context.now ?? Date.now();
+  const payload = verifyApproval(approval, { record: context.record, device: context.device, deviceKey: context.deviceKey, now });
+  if (payload.grant.kind !== TODO_SCOPE_GRANT || payload.grant.mode !== "authorization") throw new TrustError("wrong_grant");
+  if (payload.ctl !== undefined || payload.bind !== undefined) throw new TrustError("approval_invalid");
+  const scope = shapedScope(payload);
+  if (payload.grant.resource !== request.todoId || scope.todo !== request.todoId) throw new TrustError("todo_mismatch");
+  if (Date.parse(payload.exp) - Date.parse(payload.iat) > TODO_SCOPE_MAX_TTL_MS) throw new TrustError("ttl_too_long");
+  if (!(await insideWorkspace(scope.workspace, request.cwd))) throw new TrustError("outside_workspace");
+  if (!(scope.scriptHashes ?? []).includes(request.scriptHash)) throw new TrustError("script_mismatch");
+  return { approvalId: payload.id, expiresAt: payload.exp };
 }

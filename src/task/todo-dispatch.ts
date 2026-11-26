@@ -7,11 +7,14 @@ import { observeIdentity } from "../trust/observe.js";
 import { trustDirectory, type SignedApproval } from "../trust/record.js";
 import { readTrustOrRefresh, type TrustRefresh } from "../trust/sync.js";
 import { refreshAccountTrust } from "../device/control.js";
-import { authorizeTodoStep } from "../trust/todo-scope.js";
+import { authorizeTodoCheck, authorizeTodoStep } from "../trust/todo-scope.js";
 import { NO_TRUST_MESSAGE, TrustError } from "../trust/webauthn.js";
 import { buildDefinition, removeDefinition, saveDefinition } from "./definition.js";
-import { cancelTaskRun, defaultManagerDeps, describeRun, startTask, type ManagerDeps } from "./manager.js";
+import { cancelTaskRun, defaultManagerDeps, describeRun, startTask, waitForTaskRun, type ManagerDeps } from "./manager.js";
 import { readTaskRun } from "./run-store.js";
+
+/** A condition script may run this long; longer counts as not met. */
+export const TODO_CHECK_TIMEOUT_SEC = 30;
 
 /**
  * The relay's way to run one todo step on this computer, as a hidden tool like `workspace_manage`: never listed, only relays call it,
@@ -27,7 +30,7 @@ const ANSWER_LIMIT = 4000;
 
 interface RunMap { [runKey: string]: { runId: string; task: string } }
 
-export interface TodoDispatchDeps extends ManagerDeps { now?: () => number; refreshTrust?: TrustRefresh; defaultAgent?: () => Promise<AgentId> }
+export interface TodoDispatchDeps extends ManagerDeps { /** Tests shorten how long a check is waited for. */ checkWaitMs?: number; now?: () => number; refreshTrust?: TrustRefresh; defaultAgent?: () => Promise<AgentId> }
 
 const text = (args: Record<string, unknown>, name: string, max = 4096): string => {
   const value = args[name];
@@ -59,7 +62,7 @@ async function runView(runKey: string, runId: string): Promise<Record<string, un
 
 export async function runTodoDispatch(args: Record<string, unknown>, meta: unknown, deps: TodoDispatchDeps = defaultManagerDeps): Promise<Record<string, unknown>> {
   const action = args.action;
-  if (action !== "start" && action !== "status" && action !== "cancel") throw new Error("action must be one of start, status, cancel.");
+  if (action !== "start" && action !== "status" && action !== "cancel" && action !== "check") throw new Error("action must be one of start, status, cancel, check.");
   const runKey = text(args, "runKey", 128);
   if (!RUN_KEY.test(runKey)) throw new Error("runKey is invalid.");
   const identity = observeIdentity();
@@ -67,6 +70,7 @@ export async function runTodoDispatch(args: Record<string, unknown>, meta: unkno
   const directory = trustDirectory({ relayUrl: identity.relayUrl, userId: identity.userId });
   const mapPath = join(directory, "todo-runs.json");
 
+  if (action === "check") return runTodoCheck(args, meta, identity, directory, deps);
   if (action !== "start") {
     const found = (await readRuns(mapPath))[runKey];
     if (!found) return { runKey, status: "unknown", note: "This computer has no run with that key." };
@@ -103,4 +107,32 @@ export async function runTodoDispatch(args: Record<string, unknown>, meta: unkno
       return runView(runKey, run.runId);
     } finally { await removeDefinition(name).catch(() => undefined); }
   });
+}
+
+
+/**
+ * One check of a `script` todo condition: the script runs inside the sandbox in the signed folder, with no network, no credentials (the
+ * task environment is the plain pass-through list) and at most 30 seconds. Only `met` (exit code 0) and the code go back; the output does not.
+ * The script's sha256 must be in the owner's signed scope, so an edited script is refused here whatever the cloud sent.
+ */
+async function runTodoCheck(args: Record<string, unknown>, meta: unknown, identity: { relayUrl: string; userId: string; device: string; deviceKey: string }, directory: string, deps: TodoDispatchDeps): Promise<Record<string, unknown>> {
+  const trust = await readTrustOrRefresh({ relayUrl: identity.relayUrl, userId: identity.userId }, deps.refreshTrust ?? refreshAccountTrust);
+  if (!trust) throw new TrustError("no_trust_record", NO_TRUST_MESSAGE);
+  const approval = (meta && typeof meta === "object" ? (meta as Record<string, unknown>)[TODO_SCOPE_META_KEY] : undefined) as SignedApproval | undefined;
+  if (!approval || typeof approval !== "object") throw new TrustError("approval_missing");
+  const script = text(args, "script", MAX_INSTRUCTION_BYTES);
+  const cwd = text(args, "cwd", 1024);
+  const now = deps.now?.() ?? Date.now();
+  await authorizeTodoCheck(approval, { record: trust.record, device: identity.device, deviceKey: identity.deviceKey, counterDirectory: directory, now }, {
+    todoId: text(args, "todoId", 128), cwd, scriptHash: createHash("sha256").update(script, "utf8").digest("hex"),
+  });
+  const name = `todo-check-${createHash("sha256").update(text(args, "runKey", 128)).digest("hex").slice(0, 20)}`;
+  const definition = buildDefinition({ name, runner: "script", command: script, cwd, network: [], timeoutSec: TODO_CHECK_TIMEOUT_SEC }, undefined, new Date(now));
+  await saveDefinition(definition);
+  try {
+    const run = await startTask(name, { trigger: "remote" }, deps);
+    const done = await waitForTaskRun(run.runId, deps.checkWaitMs ?? (TODO_CHECK_TIMEOUT_SEC + 10) * 1000);
+    if (done.status === "running" || done.status === "queued") { await cancelTaskRun(run.runId).catch(() => undefined); return { status: "checked", met: false, exitCode: null }; }
+    return { status: "checked", met: done.status === "completed" && done.exitCode === 0, exitCode: done.exitCode ?? null };
+  } finally { await removeDefinition(name).catch(() => undefined); }
 }
