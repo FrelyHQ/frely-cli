@@ -5,6 +5,8 @@ hosted Friday Relay control plane remains a separate service dependency.
 
 Before adding code for something the CLI may already do (sign-in, controller or approval flows, credential storage, relay calls), check [docs/capability-owners.md](docs/capability-owners.md) and reuse the owner.
 
+Many facts in this repository are copied or served elsewhere (the installers, the CLI site, the docs repository, the Skill), and some are deployed by a separate `landing/v*` tag. Read [docs/change-checklist.md](docs/change-checklist.md) before you change a command, an installer or an operation the CLI calls.
+
 ## Development setup
 
 Requirements:
