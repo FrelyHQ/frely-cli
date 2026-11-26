@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
-import test from "node:test";
+import test, { beforeEach } from "node:test";
 import { addWorkspace, listWorkspaces, reportedWorkspaces, removeWorkspace, ensureWorkspaceRegistered, workspaceRegistryPath } from "./workspace-registry.js";
 import { writePrivateFile } from "../credential-file.js";
+
+// Every test gets its own empty registry, so none depends on what an earlier test (or the developer's real config) left behind.
+beforeEach(async () => { process.env.XDG_CONFIG_HOME = await mkdtemp(join(tmpdir(), "frely-registry-config-")); });
 
 test("workspace registry: listWorkspaces returns empty array for fresh registry", async () => {
   // Override the registry path for testing
@@ -138,4 +141,17 @@ test("workspace registry: the report flags a list that does not fit", async () =
   const info = await reportedWorkspaceInfo(launch);
   assert.equal(info.workspaces[0], launch);
   assert.equal(typeof info.truncated, "boolean");
+});
+
+test("workspace registry: a removed launch workspace stays removed after a restart", async () => {
+  const launch = await mkdtemp(join(tmpdir(), "frely-registry-launch-"));
+  const other = await mkdtemp(join(tmpdir(), "frely-registry-other-"));
+  await ensureWorkspaceRegistered(launch);
+  await addWorkspace(other, launch);
+  await removeWorkspace(launch, launch);
+  // The service restarts (or the relay reconnects) with the same launch workspace.
+  await ensureWorkspaceRegistered(launch);
+  const roots = await listWorkspaces();
+  assert(!roots.includes(await realpath(launch)));
+  assert(roots.includes(await realpath(other)));
 });

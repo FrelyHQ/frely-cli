@@ -63,6 +63,8 @@ export async function ensureWorkspaceRegistered(input: string): Promise<void> {
   if (/[\x00-\x1f\x7f]/u.test(path)) throw new Error("Workspace path contains control characters.");
   
   const registry = await readRegistry();
+  // Once the owner has changed the list, `roots` is the whole list: a removed launch workspace must not come back on restart.
+  if (registry.ordered === true) return;
   if (!registry.roots.includes(path)) {
     registry.roots.push(path);
     await writeRegistry(registry);
