@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 export type DiagnosticLog = (line: string) => void;
@@ -17,6 +18,8 @@ export interface DiagnosticContext {
   sinceLastPongMs?: number;
   sinceLastFrameMs?: number;
   outcome?: "ok" | "tool_error" | "protocol_error";
+  /** Protected folders a shell command names (allow-listed labels only, never command text); see commandReachLabels. */
+  reaches?: string[];
 }
 
 const methods = new Set(["initialize", "ping", "tools/list", "tools/call", "notifications/initialized", "notifications/cancelled"]);
@@ -56,6 +59,7 @@ export function diagnostic(log: DiagnosticLog | undefined, event: string, contex
       ...(context.sinceLastPongMs !== undefined ? { sinceLastPongMs: Math.max(0, Math.round(context.sinceLastPongMs)) } : {}),
       ...(context.sinceLastFrameMs !== undefined ? { sinceLastFrameMs: Math.max(0, Math.round(context.sinceLastFrameMs)) } : {}),
       ...(context.outcome ? { outcome: context.outcome } : {}),
+      ...(context.reaches?.length ? { reaches: context.reaches.filter((label) => REACH_LABELS.has(label)) } : {}),
       ...(error !== undefined ? { error: diagnosticError(error) } : {}),
     }));
   } catch { /* A diagnostic sink must never change request execution. */ }
@@ -90,12 +94,39 @@ export function diagnosticError(error: unknown): { name: string; message: string
   return { name, message, ...(code ? { code } : {}), stack };
 }
 
-export function mcpDiagnosticContext(payload: unknown): Pick<DiagnosticContext, "method" | "tool"> {
+const PROTECTED_FOLDERS = ["Downloads", "Documents", "Desktop", "Pictures", "Movies", "Music", "Library"] as const;
+const REACH_LABELS = new Set<string>([...PROTECTED_FOLDERS, "home", "users"]);
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+
+/**
+ * Which macOS-protected folders (the ones that raise a system permission prompt) a shell command spells out, as allow-listed labels:
+ * "Downloads" for ~/Downloads, "home" when it points at the whole home directory, "users" for /Users itself. Never the command text.
+ * Only meant to tell which command caused a prompt; a command that builds the path at run time is not seen.
+ */
+export function commandReachLabels(command: string, home: string = homedir()): string[] {
+  const base = ["~", "\\$HOME", "\\$\\{HOME\\}", escapeRegExp(home)].join("|");
+  const labels: string[] = [];
+  for (const folder of PROTECTED_FOLDERS) if (new RegExp(`(?:${base})/${folder}(?=$|[/\\s"'\`;&|)<>])`, "u").test(command)) labels.push(folder);
+  if (new RegExp(`(?:^|[\\s"'=])(?:${base})/?(?=$|[\\s"'\`;&|)<>])`, "u").test(command)) labels.push("home");
+  if (/(?:^|[\s"'=])\/Users\/?(?=$|[\s"'`;&|)<>])/u.test(command)) labels.push("users");
+  return labels;
+}
+
+export function mcpDiagnosticContext(payload: unknown): Pick<DiagnosticContext, "method" | "tool" | "reaches"> {
   if (!payload || typeof payload !== "object") return {};
   const record = payload as Record<string, unknown>;
   const params = record.params && typeof record.params === "object" ? record.params as Record<string, unknown> : {};
   return {
     ...(typeof record.method === "string" ? { method: record.method } : {}),
     ...(record.method === "tools/call" && typeof params.name === "string" ? { tool: params.name } : {}),
+    ...(record.method === "tools/call" ? shellReaches(params) : {}),
   };
+}
+
+function shellReaches(params: Record<string, unknown>): { reaches?: string[] } {
+  const args = params.arguments && typeof params.arguments === "object" ? params.arguments as Record<string, unknown> : {};
+  const shell = params.name === "run_command" || params.name === "start_process" || (params.name === "process" && (args.action === "run" || args.action === "start"));
+  if (!shell || typeof args.command !== "string") return {};
+  const reaches = commandReachLabels(args.command);
+  return reaches.length ? { reaches } : {};
 }
