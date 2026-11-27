@@ -50,7 +50,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { autostartCommand, customWritePath, isKnownGrantName, SSH_PROXY_PREFIX, UNSANDBOXED_GROUP, writablePaths } from "./sandbox.js";
+import { AUTOSTART_REFUSAL, autostartCommand, customWritePath, isKnownGrantName, SSH_PROXY_PREFIX, UNSANDBOXED_GROUP, writablePaths } from "./sandbox.js";
 
 test("cache groups and custom paths open only the directories they name", () => {
   assert.ok(buildSandboxConfig("/work", ["pub-cache"]).filesystem?.allowWrite?.includes("~/.pub-cache"));
@@ -388,4 +388,9 @@ test("a call that is exactly `frely self update` runs our own executable outside
 test("scheduler and service commands are refused by name, not by substring", () => {
   for (const command of ["launchctl bootstrap gui/501 x.plist", "ls && crontab -l", "sudo launchctl load x", "echo hi; at now", "systemctl --user enable x", "echo a | crontab -", "/bin/launchctl list"]) assert.equal(autostartCommand(command), true, command);
   for (const command of ["cat launchctl.txt", "git status", "grep at file", "systemctl status x", "echo crontab"]) assert.equal(autostartCommand(command), false, command);
+});
+
+test("the autostart refusal names the Frely schedule tools that exist, remote and local", () => {
+  for (const part of ["todo.add", "script: true", "todo.schedule_add", "frely task local add", "--cron"]) assert.ok(AUTOSTART_REFUSAL.includes(part), part);
+  assert.ok(!AUTOSTART_REFUSAL.includes("todo.create"));
 });
