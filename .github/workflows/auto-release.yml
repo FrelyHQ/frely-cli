@@ -1,6 +1,7 @@
 name: Auto release
 
-# （环境：CLI 自动发版, 原因：main 上 CI 通过后自动发新补丁版，不依赖 mbp 在线；
+# （环境：CLI 自动发版, 原因：main 上 CI 通过后自动发新版，不依赖 mbp 在线；版本号由 scripts/release-level.mjs 按提交类型决定
+#   （feat 升次版本，fix 等升补丁，BREAKING 在 0.x 阶段升次版本，无法识别的提交按次版本），规则与 friday-relay 的自动发版一致。
 #   发布仍走 publish.yml（它在发布前会再跑一遍完整 CI），本 workflow 只负责“要不要发、发哪个版本”。
 #   默认关闭：仓库变量 AUTO_RELEASE_ENABLED=true 才会自动发版（发布签名上线前保持关闭，否则自动发的版本无签名，远程升级会拒绝）。
 #   关停：把 AUTO_RELEASE_ENABLED 删掉，或设 AUTO_RELEASE_DISABLED=true。mbp 上的 ./scripts/release 仍可手动发版；
@@ -58,8 +59,7 @@ jobs:
             echo "No user-facing change since ${latest}; no release." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          IFS=. read -r major minor patch <<<"${latest#v}"
-          version="${major}.${minor}.$((10#$patch + 1))"
+          version="$(node scripts/release-level.mjs "$latest")"
           tag="v${version}"
           if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
             echo "Tag ${tag} already exists; skipping." >> "$GITHUB_STEP_SUMMARY"
