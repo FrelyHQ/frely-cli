@@ -49,9 +49,9 @@ async function readReminders(run: Reminders): Promise<ReminderFacts[]> {
 async function readTodos(call: Call): Promise<TodoFacts[]> {
   const out: TodoFacts[] = [];
   for (const status of LIVE) {
-    const list = await call("todo.list", { status: [status], pageSize: 100 }) as { items?: Array<{ id: string; title: string; status: string; steps?: { total?: number } }> };
+    const list = await call("task.list", { status: [status], pageSize: 100 }) as { items?: Array<{ id: string; title: string; status: string; steps?: { total?: number } }> };
     for (const item of list.items ?? []) {
-      const shown = await call("todo.show", { todoId: item.id }) as { conditions?: Array<{ type?: string; fired?: boolean; nextCheckAt?: string | null }> };
+      const shown = await call("task.show", { todoId: item.id }) as { conditions?: Array<{ type?: string; fired?: boolean; nextCheckAt?: string | null }> };
       out.push({ id: item.id, title: item.title, status: item.status, steps: item.steps?.total ?? 0, nextFireAt: nextFireOf(shown.conditions ?? []) });
     }
   }
@@ -68,7 +68,7 @@ async function apply(action: SyncAction, run: Reminders, call: Call): Promise<vo
     case "complete": await run(["complete", REMINDER_LIST, action.reminderId]); return;
     case "uncomplete": await run(["uncomplete", REMINDER_LIST, action.reminderId]); return;
     case "delete": await run(["delete", REMINDER_LIST, action.reminderId]); return;
-    case "finish_todo": await call("todo.update", { todoId: action.todoId, status: "done" }); return;
+    case "finish_todo": await call("task.update", { todoId: action.todoId, status: "done" }); return;
     case "confirmed": return;
   }
 }

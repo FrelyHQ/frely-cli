@@ -106,7 +106,7 @@ export const AUTOSTART_PATHS: readonly string[] = [
   "~/Library/LaunchAgents", "/Library/LaunchAgents", "/Library/LaunchDaemons", "~/.config/systemd", "~/.config/autostart", "~/.config/environment.d",
 ];
 /** Message for a command that tries to install something that starts on its own. */
-export const AUTOSTART_REFUSAL = "Autostart locations and scheduler commands (launchctl, crontab, systemctl --user, at) are not available through Frely. Schedule it with Frely instead: through FrelyMCP, frely_call todo.add with a script step (script: true, the device id), then frely_call todo.schedule_add with a cron and timezone; in a terminal on this computer, frely task local add <name> --cron \"<m h dom mon dow>\" -- <command>.";
+export const AUTOSTART_REFUSAL = "Autostart locations and scheduler commands (launchctl, crontab, systemctl --user, at) are not available through Frely. Schedule it with Frely instead: through FrelyMCP, frely_call task.add with a script step (script: true, the device id), then frely_call task.schedule_add with a cron and timezone; in a terminal on this computer, frely task local add <name> --cron \"<m h dom mon dow>\" -- <command>.";
 /** Frely's own device credentials and autostart locations: never writable by a grant, not even an exact one. */
 const neverWritablePaths = (): string[] => ["~/.config/frely", ...AUTOSTART_PATHS, ...(process.env.FRELY_DATA_DIR ? [process.env.FRELY_DATA_DIR] : [])];
 /** Longest path after `path:`. Keep equal to the relay's `PATH_GRANT_CUSTOM_PATH_MAX` (device-relay path-grants.ts) so both ends accept the same paths. */

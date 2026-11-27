@@ -35,7 +35,7 @@ Run `frely doctor --json` to see whether the CLI is signed in. If not, ask the u
 
 - Never write crontab, launchd (`~/Library/LaunchAgents`), systemd timers or other autostart entries: Frely refuses them, and the Frely background service already holds a clock.
 - On this computer: `frely task local add <name> --cwd <dir> --cron "30 9 * * *" [--tz <zone>] -- <command...>` (or `--agent pi|codex|claude-code -- <prompt>`). Check it with `frely task local list`, run it once with `frely task local start <name> --wait`, change it with `frely task local schedule <name>`. It runs in the Frely sandbox: give the sites it needs with `--net` and run `frely task local approve <name>`. Full usage: `frely help --agent --json task.local`.
-- From another computer, through FrelyMCP: `frely_call todo.add`, `todo.step_add` with `script: true` and the device id, then `todo.schedule_add` with a cron and timezone (at most hourly); the owner approves the device access on the web.
+- From another computer, through FrelyMCP: `frely_call task.add`, `task.step_add` with `script: true` and the device id, then `task.schedule_add` with a cron and timezone (at most hourly); the owner approves the device access on the web. For a task that already exists: `frely task schedule <taskId> --cron "<m h dom mon dow>" --tz <zone>`.
 
 ## Account APIs
 

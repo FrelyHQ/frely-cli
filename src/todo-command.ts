@@ -1,4 +1,4 @@
-// `frely task`: read and write the signed-in account's cloud todos (a goal and a plan of steps) through the Frely todo.* tools.
+// `frely task`: read and write the signed-in account's cloud tasks (a goal and a plan of steps) through the Frely task.* tools.
 // The cloud is the only copy: the CLI needs a connection (it is online-by-default), and archived is the only delete.
 
 import { readFile } from "node:fs/promises";
@@ -14,7 +14,7 @@ export interface TodoCommandIo {
 export const TODO_STATUSES = ["open", "in_progress", "done", "cancelled", "archived"] as const;
 export const TODO_STEP_STATUSES = ["pending", "succeeded", "failed", "skipped", "cancelled"] as const;
 
-const USAGE = "Usage: frely task list|show|add|update|archive|plan|step|condition. Run frely help --agent --json task for flags.";
+const USAGE = "Usage: frely task list|show|add|update|archive|plan|step|condition|schedule. Run frely help --agent --json task for flags.";
 
 interface Parsed { positional: string[]; flags: Map<string, string[]>; json: boolean }
 
@@ -74,7 +74,7 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
     if (one(parsed, "--direction")) input.direction = oneOf(["asc", "desc"] as const, one(parsed, "--direction")!, "--direction");
     if (one(parsed, "--page")) input.page = Number(one(parsed, "--page"));
     if (one(parsed, "--page-size")) input.pageSize = Number(one(parsed, "--page-size"));
-    const result = await io.call("todo.list", input) as { items?: Todo[]; total?: number; page?: number; totalPages?: number };
+    const result = await io.call("task.list", input) as { items?: Todo[]; total?: number; page?: number; totalPages?: number };
     emit(result, parsed.json, () => (result.items?.length ? result.items.map(line).join("") + (result.totalPages && result.totalPages > 1 ? `Page ${result.page}/${result.totalPages} (${result.total} todos); use --page.\n` : "") : "No todos.\n"));
     return 0;
   }
@@ -82,7 +82,7 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
     const parsed = parseTodoArgs(rest, []);
     const todoId = parsed.positional[0];
     if (!todoId) throw new Error("Usage: frely task show <todoId> [--json]");
-    const result = await io.call("todo.show", { todoId }) as { todo?: Todo; steps?: Step[] };
+    const result = await io.call("task.show", { todoId }) as { todo?: Todo; steps?: Step[] };
     emit(result, parsed.json, () => `${line(result.todo ?? {})}${result.todo?.description ? `${result.todo.description}\n` : ""}${(result.steps ?? []).map(stepLine).join("") || "  (no steps)\n"}`);
     return 0;
   }
@@ -90,7 +90,7 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
     const parsed = parseTodoArgs(rest, ["--description", "--step", "--device"]);
     const title = parsed.positional.join(" ").trim();
     if (!title) throw new Error("Usage: frely task add <title> [--description <text>] [--step <instruction> [--device <id>]]... [--json]");
-    const result = await io.call("todo.add", { title, ...(one(parsed, "--description") ? { description: one(parsed, "--description") } : {}), ...(parsed.flags.has("--step") ? { steps: steps(parsed) } : {}) }) as { todo?: Todo };
+    const result = await io.call("task.add", { title, ...(one(parsed, "--description") ? { description: one(parsed, "--description") } : {}), ...(parsed.flags.has("--step") ? { steps: steps(parsed) } : {}) }) as { todo?: Todo };
     emit(result, parsed.json, () => `Created ${result.todo?.id}\n`);
     return 0;
   }
@@ -107,7 +107,7 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
       if (one(parsed, "--status")) input.status = oneOf(TODO_STATUSES, one(parsed, "--status")!, "--status");
       if (Object.keys(input).length === 1) throw new Error("Nothing to update: pass --title, --description or --status.");
     }
-    const result = await io.call("todo.update", input) as { todo?: Todo };
+    const result = await io.call("task.update", input) as { todo?: Todo };
     emit(result, parsed.json, () => `Updated ${result.todo?.id} (${result.todo?.status})\n`);
     return 0;
   }
@@ -115,7 +115,7 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
     const parsed = parseTodoArgs(rest, ["--step", "--device"]);
     const todoId = parsed.positional[0];
     if (!todoId) throw new Error("Usage: frely task plan <todoId> [--step <instruction> [--device <id>]]... [--json] (replaces the steps that have not started; no --step clears them)");
-    const result = await io.call("todo.plan", { todoId, steps: steps(parsed) }) as { steps?: Step[] };
+    const result = await io.call("task.plan", { todoId, steps: steps(parsed) }) as { steps?: Step[] };
     emit(result, parsed.json, () => (result.steps ?? []).map(stepLine).join("") || "  (no steps)\n");
     return 0;
   }
@@ -126,7 +126,7 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
       const [todoId, ...words] = parsed.positional;
       const instruction = words.join(" ").trim();
       if (!todoId || !instruction) throw new Error("Usage: frely task step add <todoId> <instruction> [--device <id>] [--json]");
-      const result = await io.call("todo.step_add", { todoId, instruction, ...(one(parsed, "--device") ? { deviceId: one(parsed, "--device") } : {}), ...(one(parsed, "--executor") ? { executor: oneOf(AGENT_IDS, one(parsed, "--executor")!, "--executor") } : {}) }) as { steps?: Step[] };
+      const result = await io.call("task.step_add", { todoId, instruction, ...(one(parsed, "--device") ? { deviceId: one(parsed, "--device") } : {}), ...(one(parsed, "--executor") ? { executor: oneOf(AGENT_IDS, one(parsed, "--executor")!, "--executor") } : {}) }) as { steps?: Step[] };
       emit(result, parsed.json, () => (result.steps ?? []).map(stepLine).join(""));
       return 0;
     }
@@ -140,7 +140,7 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
       if (one(parsed, "--status")) input.status = oneOf(TODO_STEP_STATUSES, one(parsed, "--status")!, "--status");
       if (one(parsed, "--result") !== undefined) input.resultSummary = one(parsed, "--result");
       if (Object.keys(input).length === 2) throw new Error("Nothing to update: pass --instruction, --device, --executor, --status or --result.");
-      const result = await io.call("todo.step_update", input) as { step?: Step };
+      const result = await io.call("task.step_update", input) as { step?: Step };
       emit(result, parsed.json, () => stepLine(result.step ?? {}));
       return 0;
     }
@@ -152,8 +152,17 @@ export async function runTodoCommand(args: readonly string[], io: TodoCommandIo)
     const todoId = parsed.positional[0];
     const file = one(parsed, "--script"), deviceId = one(parsed, "--device"), every = Number(one(parsed, "--every"));
     if (!todoId || !file || !deviceId || !Number.isInteger(every)) throw new Error("Usage: frely task condition add <todoId> --script <file> --device <id> --every <minutes> [--json] (the script runs on that device in the sandbox, with no network and no credentials; exit code 0 means met)");
-    const result = await io.call("todo.condition_add", { todoId, deviceId, script: await readFile(file, "utf8"), intervalMinutes: every }) as { condition?: { id?: string; nextCheckAt?: string | null } };
+    const result = await io.call("task.condition_add", { todoId, deviceId, script: await readFile(file, "utf8"), intervalMinutes: every }) as { condition?: { id?: string; nextCheckAt?: string | null } };
     emit(result, parsed.json, () => `Added script condition ${result.condition?.id}. Approve device access for this task on the web so the script's hash is signed; an edited script needs that approval again.\n`);
+    return 0;
+  }
+  if (action === "schedule") {
+    const parsed = parseTodoArgs(rest, ["--cron", "--tz", "--until"]);
+    const taskId = parsed.positional[0];
+    const cron = one(parsed, "--cron"), timezone = one(parsed, "--tz");
+    if (!taskId || !cron || !timezone) throw new Error("Usage: frely task schedule <taskId> --cron \"<m h dom mon dow>\" --tz <zone> [--until <iso>] [--json] (recurring, at most hourly; the plan restarts on each fire; the owner approves device access on the web)");
+    const result = await io.call("task.schedule_add", { todoId: taskId, cron, timezone, ...(one(parsed, "--until") ? { until: one(parsed, "--until") } : {}) }) as { condition?: { id?: string; nextCheckAt?: string | null } };
+    emit(result, parsed.json, () => `Scheduled ${taskId} (condition ${result.condition?.id}${result.condition?.nextCheckAt ? `, next ${result.condition.nextCheckAt}` : ""}).\n`);
     return 0;
   }
   io.out(`${USAGE}\n`);
