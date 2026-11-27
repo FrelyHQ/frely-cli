@@ -16,7 +16,7 @@ export interface TaskIo {
 }
 
 export const TASK_USAGE = `Usage:
-  frely task local add <name> [--cwd <dir>] [--net <site>]... [--env K=V]... [--timeout <seconds>] [--model <name> [--fallback-model <name>]...] [--cron "<m h dom mon dow>" [--tz <zone>]] [--replace] [--agent pi|codex|claude-code] -- <command or prompt...>
+  frely task local add <name> [--cwd <dir>] [--net <site>]... [--env K=V]... [--timeout <seconds>] [--model <name> [--fallback-model <name>]...] [--cron "<m h dom mon dow>" [--tz <zone>]] [--description "<one line>"] [--replace] [--agent pi|codex|claude-code] -- <command or prompt...>
   frely task local list [--json]
   frely task local show <name> [--json]
   frely task local remove <name>
@@ -156,6 +156,8 @@ async function add(args: string[], io: TaskIo): Promise<number> {
   }, previous);
   const cron = value(options, "--cron");
   if (cron !== undefined) { const zone = value(options, "--tz"); definition = { ...definition, schedule: buildSchedule(cron, zone) }; }
+  const description = value(options, "--description")?.replace(/\s+/gu, " ").trim().slice(0, 200);
+  if (description) definition = { ...definition, description };
   await saveDefinition(definition);
   io.out(`${previous ? "Updated" : "Added"} task ${name}.\n  runs: ${definition.command}\n  folder: ${definition.cwd} (the only place it can write besides the temp folder)\n`);
   if (definition.model) io.out(`  model: ${definition.model}${definition.fallbackModels?.length ? ` (if it cannot be started: ${definition.fallbackModels.join(", ")})` : ""}. The program calls $OPENAI_BASE_URL with any key; Frely adds the real one.\n`);

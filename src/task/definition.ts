@@ -49,6 +49,8 @@ export interface TaskDefinition {
   /** Run in a fresh git worktree of `cwd` (agents). */
   readonly worktree?: boolean;
   readonly schedule?: TaskSchedule;
+  /** One line the owner wrote for the web Tasks page. Not part of the hash. */
+  readonly description?: string;
   /** Approved site -> end of the approval (ISO). */
   readonly approvals: Readonly<Record<string, string>>;
   readonly createdAt: string;
@@ -110,7 +112,7 @@ export function buildDefinition(input: TaskDefinitionInput, previous?: TaskDefin
   // Approvals follow the sites: a site that stays keeps its approval.
   const approvals = Object.fromEntries(Object.entries(previous?.approvals ?? {}).filter(([host]) => network.includes(host)));
   return {
-    version: 1, name: input.name, ...core, approvals, ...(previous?.schedule ? { schedule: previous.schedule } : {}),
+    version: 1, name: input.name, ...core, approvals, ...(previous?.schedule ? { schedule: previous.schedule } : {}), ...(previous?.description ? { description: previous.description } : {}),
     createdAt: previous?.createdAt ?? stamp, updatedAt: stamp, hash,
   };
 }

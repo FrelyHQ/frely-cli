@@ -1,5 +1,6 @@
 import { lstat } from "node:fs/promises";
 import { runTodoDispatch, TODO_DISPATCH_TOOL } from "../task/todo-dispatch.js";
+import { controlLocalTask, LOCAL_TASK_CONTROL_TOOL } from "../task/report.js";
 import { applySecretDrop, prepareSecretDrop, SECRET_DROP_APPLY_TOOL, SECRET_DROP_PREPARE_TOOL } from "../secret-drop.js";
 import { siteLogin, siteLoginAvailable, SITE_LOGIN_TOOL } from "../vault/site-login.js";
 import { hideSecrets, vaultEnvFor, type VaultEnv } from "../vault/note-env.js";
@@ -196,6 +197,10 @@ export async function createMcpServer(workspaceInput: string, options: McpRuntim
       if (name === TODO_DISPATCH_TOOL) {
         // Relay-made, never listed. `start` needs a passkey todo_scope approval this device verifies itself.
         return { content: [{ type: "text" as const, text: JSON.stringify(await runTodoDispatch(args, request.params._meta, undefined, [...workspaces.keys()])) }] };
+      }
+      if (name === LOCAL_TASK_CONTROL_TOOL) {
+        // Relay-made, never listed: the owner's pause, resume, run now or cron change from the web Tasks page.
+        return { content: [{ type: "text" as const, text: JSON.stringify(await controlLocalTask(args)) }] };
       }
       if (name === SECRET_DROP_PREPARE_TOOL || name === SECRET_DROP_APPLY_TOOL) {
         // Relay-made, never listed. The receipt carries no part of the value; `apply` verifies the owner's passkey approval itself.
