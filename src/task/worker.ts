@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createWriteStream } from "node:fs";
+import { createWriteStream, renameSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { terminateProcessTree } from "../runtime/process-tree.js";
 import { restrictSandboxNetwork, sandboxCommandDetailed, sandboxViolationLines, shutdownSandbox } from "../runtime/sandbox.js";
@@ -8,6 +8,9 @@ import { openTaskModel, type ModelStats, type OpenedModel } from "./model-route.
 import { createAgentRunner } from "../agents/runner.js";
 import { runnableAgents } from "../agents/registry.js";
 import { scriptRunner, type Runner, type RunnerContext } from "./runner.js";
+
+/** A resident service's log file is closed and rotated at this size. */
+export const KEEP_ALIVE_LOG_BYTES = 10 * 1024 * 1024;
 
 /** Runners the worker can run. `registerRunner` replaces one (tests). */
 const runners = new Map<string, Runner>([["script", scriptRunner], ...runnableAgents().map((agent): [string, Runner] => [agent.id, createAgentRunner(agent)])]);
@@ -28,13 +31,23 @@ export async function executeTaskRun(runId: string, signal: AbortSignal = new Ab
   let record = await writeTaskRun({ ...loaded, status: "running", workerPid: process.pid, startedAt: new Date().toISOString() });
   const save = async (patch: Partial<TaskRunRecord>): Promise<void> => { record = await writeTaskRun({ ...record, ...patch }); };
   await mkdir(runsDir(), { recursive: true, mode: 0o700 });
-  const logStream = createWriteStream(taskLogPath(runId), { flags: "a", mode: 0o600 });
+  let logStream = createWriteStream(taskLogPath(runId), { flags: "a", mode: 0o600 });
   let logged = 0;
   let truncated = false;
+  const keepAlive = record.snapshot.keepAlive === true;
   const write = (text: string): void => {
     if (truncated) return;
     logged += Buffer.byteLength(text);
-    if (logged > LOG_LIMIT_BYTES) { truncated = true; logStream.write("\n[frely] The log reached 8 MiB; the rest of the output is dropped.\n"); return; }
+    if (keepAlive && logged > KEEP_ALIVE_LOG_BYTES) {
+      // A resident service logs for as long as it lives: rotate instead of dropping (the current file and two older ones stay).
+      logStream.end();
+      const path = taskLogPath(runId);
+      try { renameSync(`${path}.1`, `${path}.2`); } catch { /* no older file yet */ }
+      try { renameSync(path, `${path}.1`); } catch { /* nothing to move */ }
+      logStream = createWriteStream(path, { flags: "a", mode: 0o600 });
+      logged = Buffer.byteLength(text);
+    }
+    if (!keepAlive && logged > LOG_LIMIT_BYTES) { truncated = true; logStream.write("\n[frely] The log reached 8 MiB; the rest of the output is dropped.\n"); return; }
     logStream.write(text);
   };
   const note = (text: string): void => write(`[frely] ${text}\n`);
@@ -79,9 +92,9 @@ export async function executeTaskRun(runId: string, signal: AbortSignal = new Ab
     let timedOut = false;
     const stop = (): void => { void terminateProcessTree(child); };
     signal.addEventListener("abort", stop, { once: true });
-    const timer = setTimeout(() => { timedOut = true; note(`Timed out after ${record.snapshot.timeoutSec} seconds; stopping.`); stop(); }, record.snapshot.timeoutSec * 1000);
+    const timer = keepAlive ? undefined : setTimeout(() => { timedOut = true; note(`Timed out after ${record.snapshot.timeoutSec} seconds; stopping.`); stop(); }, record.snapshot.timeoutSec * 1000);
     const code = await new Promise<number | null>((done) => { child.once("error", (error) => { note(`Could not start: ${error.message}`); done(1); }); child.once("close", (exit) => done(exit)); });
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
     signal.removeEventListener("abort", stop);
     const blocked = [...new Set(sandboxViolationLines(wrapped.commandId))].slice(0, 10);
     if (blocked.length > 0) note(`The sandbox blocked:\n${blocked.join("\n")}\nIf a site is missing, add it with frely task local add --net <site> and approve it with frely task local approve.`);

@@ -49,6 +49,8 @@ export interface TaskDefinition {
   /** Run in a fresh git worktree of `cwd` (agents). */
   readonly worktree?: boolean;
   readonly schedule?: TaskSchedule;
+  /** A resident service: restarted when it exits, no run timeout, never with a schedule (see keep-alive.ts). `stopped` is the owner's stop, kept across restarts and not part of the hash. */
+  readonly keepAlive?: { readonly healthUrl?: string; readonly stopped?: boolean };
   /** One line the owner wrote for the web Tasks page. Not part of the hash. */
   readonly description?: string;
   /** Approved site -> end of the approval (ISO). */
@@ -69,6 +71,7 @@ export interface TaskDefinitionInput {
   readonly model?: string;
   readonly fallbackModels?: readonly string[];
   readonly worktree?: boolean;
+  readonly keepAlive?: { readonly healthUrl?: string };
 }
 
 const HOST = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/u;
@@ -76,11 +79,17 @@ const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/u;
 /** Names a definition cannot set: the sandbox and the model proxy set these. */
 const RESERVED_ENV = /^(PATH|HOME|OPENAI_.*|ANTHROPIC_.*|FRELY_.*|HTTPS?_PROXY|ALL_PROXY|NO_PROXY|http_proxy|https_proxy|LD_.*|DYLD_.*|NODE_OPTIONS|BUN_OPTIONS)$/u;
 
-export function taskHash(definition: Pick<TaskDefinition, "runner" | "command" | "cwd" | "network" | "env" | "timeoutSec" | "model" | "fallbackModels" | "worktree">): string {
+/** A health URL must stay on this computer: loopback only. */
+export function isLoopbackUrl(text: string): boolean {
+  try { const url = new URL(text); return url.protocol === "http:" && (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]") && url.username === "" && url.password === ""; } catch { return false; }
+}
+
+export function taskHash(definition: Pick<TaskDefinition, "runner" | "command" | "cwd" | "network" | "env" | "timeoutSec" | "model" | "fallbackModels" | "worktree"> & { keepAlive?: { healthUrl?: string } }): string {
   const canonical = JSON.stringify({
     runner: definition.runner, command: definition.command, cwd: definition.cwd, network: [...definition.network].sort(),
     env: Object.fromEntries(Object.entries(definition.env).sort(([a], [b]) => a.localeCompare(b))), timeoutSec: definition.timeoutSec,
     model: definition.model ?? null, fallbackModels: definition.fallbackModels ?? [], worktree: definition.worktree ?? false,
+    ...(definition.keepAlive ? { keepAlive: { healthUrl: definition.keepAlive.healthUrl ?? null } } : {}),
   });
   return createHash("sha256").update(canonical).digest("hex");
 }
@@ -99,7 +108,9 @@ export function buildDefinition(input: TaskDefinitionInput, previous?: TaskDefin
     if (!ENV_NAME.test(key) || RESERVED_ENV.test(key)) throw new Error(`Environment name ${JSON.stringify(key)} is not allowed.`);
     if (typeof value !== "string" || /[\0]/u.test(value) || Buffer.byteLength(value, "utf8") > 4096) throw new Error(`Environment value of ${key} is invalid.`);
   }
-  const timeoutSec = input.timeoutSec ?? DEFAULT_TIMEOUT_SEC;
+  if (input.keepAlive && runner !== "script") throw new Error("Only a script can be kept alive.");
+  if (input.keepAlive?.healthUrl !== undefined && !isLoopbackUrl(input.keepAlive.healthUrl)) throw new Error("--health-url must be http://127.0.0.1:<port>/... or http://localhost:<port>/... (this computer only).");
+  const timeoutSec = input.keepAlive ? MAX_TIMEOUT_SEC : (input.timeoutSec ?? DEFAULT_TIMEOUT_SEC);
   if (!Number.isInteger(timeoutSec) || timeoutSec < 1 || timeoutSec > MAX_TIMEOUT_SEC) throw new Error(`The timeout must be 1 to ${MAX_TIMEOUT_SEC} seconds.`);
   const stamp = now.toISOString();
   const core = {
@@ -107,12 +118,13 @@ export function buildDefinition(input: TaskDefinitionInput, previous?: TaskDefin
     ...(input.model === undefined ? {} : { model: input.model }),
     ...(input.fallbackModels === undefined || input.fallbackModels.length === 0 ? {} : { fallbackModels: [...input.fallbackModels] }),
     ...(input.worktree === true ? { worktree: true } : {}),
+    ...(input.keepAlive ? { keepAlive: { ...(input.keepAlive.healthUrl === undefined ? {} : { healthUrl: input.keepAlive.healthUrl }) } } : {}),
   };
   const hash = taskHash(core);
   // Approvals follow the sites: a site that stays keeps its approval.
   const approvals = Object.fromEntries(Object.entries(previous?.approvals ?? {}).filter(([host]) => network.includes(host)));
   return {
-    version: 1, name: input.name, ...core, approvals, ...(previous?.schedule ? { schedule: previous.schedule } : {}), ...(previous?.description ? { description: previous.description } : {}),
+    version: 1, name: input.name, ...core, approvals, ...(previous?.schedule && !input.keepAlive ? { schedule: previous.schedule } : {}), ...(previous?.description ? { description: previous.description } : {}),
     createdAt: previous?.createdAt ?? stamp, updatedAt: stamp, hash,
   };
 }
