@@ -32,6 +32,8 @@ export interface TaskRunSnapshot {
   readonly workspace?: TaskWorkspace;
   /** Credential groups (SENSITIVE_PATH_GROUPS names) this run may read, signed by the owner for a todo script step. */
   readonly credentials?: readonly string[];
+  /** A resident service: no timeout, and the log rotates by size. */
+  readonly keepAlive?: true;
 }
 export type TaskWorkspace = "none" | "read" | "worktree";
 
@@ -82,6 +84,7 @@ export function snapshotOf(definition: TaskDefinition, sites: readonly string[],
     ...(definition.model === undefined ? {} : { model: definition.model }),
     ...(definition.fallbackModels === undefined ? {} : { fallbackModels: definition.fallbackModels }),
     ...(definition.worktree === true ? { worktree: true } : {}),
+    ...(definition.keepAlive ? { keepAlive: true as const } : {}),
   };
 }
 
@@ -138,6 +141,7 @@ export async function pruneTaskRuns(now = Date.now()): Promise<void> {
     if (record.status === "running" || record.status === "queued" || now - Date.parse(record.updatedAt) <= TASK_RUN_RETENTION_MS) continue;
     await rm(recordPath(record.runId), { force: true });
     await rm(taskLogPath(record.runId), { force: true });
+    for (const n of [1, 2]) await rm(`${taskLogPath(record.runId)}.${n}`, { force: true });
   }
 }
 

@@ -8,6 +8,7 @@ import { approvedSites } from "./definition.js";
 import { cancelTaskRun, defaultManagerDeps, describeRun, startTask, TaskError, waitForTaskRun, type ManagerDeps } from "./manager.js";
 import { effectiveTaskStatus, listTaskRuns, resolveTaskRun, taskLogPath } from "./run-store.js";
 import { nextCronTime, parseCron } from "./cron.js";
+import { startKeepAlive, stopKeepAlive } from "./keep-alive.js";
 
 export interface TaskIo {
   out(text: string): void;
@@ -16,12 +17,13 @@ export interface TaskIo {
 }
 
 export const TASK_USAGE = `Usage:
-  frely task local add <name> [--cwd <dir>] [--net <site>]... [--env K=V]... [--timeout <seconds>] [--model <name> [--fallback-model <name>]...] [--cron "<m h dom mon dow>" [--tz <zone>]] [--description "<one line>"] [--replace] [--agent pi|codex|claude-code] -- <command or prompt...>
+  frely task local add <name> [--cwd <dir>] [--net <site>]... [--env K=V]... [--timeout <seconds>] [--model <name> [--fallback-model <name>]...] [--cron "<m h dom mon dow>" [--tz <zone>] | --keep-alive [--health-url http://127.0.0.1:<port>/health]] [--description "<one line>"] [--replace] [--agent pi|codex|claude-code] -- <command or prompt...>
   frely task local list [--json]
   frely task local show <name> [--json]
   frely task local remove <name>
   frely task local schedule <name> (--cron "<m h dom mon dow>" [--tz <zone>] | --pause | --resume | --clear)
   frely task local approve <name>
+  frely task local stop <name>    (a keep-alive service: stop it and keep it stopped)
   frely task local start <name> [--wait [--wait-sec <n>]] [--json]
 Runs (task runs and item calls share these):
   frely result list [<name>] [--json]
@@ -45,7 +47,7 @@ function values(args: readonly string[], name: string): string[] {
 }
 const value = (args: readonly string[], name: string): string | undefined => values(args, name).at(-1);
 
-const FLAGS_WITH_VALUE = new Set(["--workspace", "--description", "--cwd", "--net", "--env", "--timeout", "--cron", "--tz", "--wait-sec", "--lines", "--task", "--model", "--fallback-model", "--agent"]);
+const FLAGS_WITH_VALUE = new Set(["--workspace", "--description", "--cwd", "--net", "--env", "--timeout", "--cron", "--tz", "--health-url", "--wait-sec", "--lines", "--task", "--model", "--fallback-model", "--agent"]);
 function positional(args: readonly string[]): string[] {
   const out: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -96,6 +98,7 @@ export async function runTaskCommand(args: readonly string[], io: TaskIo, deps: 
       case "schedule": return await schedule(rest, io);
       case "approve": return await approve(rest, io, deps.approval);
       case "start": return await start(rest, io, deps);
+      case "stop": return await stop(rest, io);
       case "handled": return await handledCommand(rest, io);
       default: io.out(TASK_USAGE); return action === undefined || action === "help" || action === "--help" ? EXIT.ok : EXIT.cli;
     }
@@ -149,10 +152,16 @@ async function add(args: string[], io: TaskIo): Promise<number> {
   // An agent's prompt is plain words; a script's command is quoted word by word.
   const command = agent !== undefined ? commandWords.join(" ") : commandWords.length === 1 ? commandWords[0]! : commandWords.map(shellQuote).join(" ");
   if (fallbacks.length > 0 && model === undefined) return fail("--fallback-model needs --model.");
+  const keepAlive = has(options, "--keep-alive");
+  const healthUrl = value(options, "--health-url");
+  if (keepAlive && (has(options, "--cron") || has(options, "--tz"))) return fail("--keep-alive and --cron cannot be used together: a service runs all the time, a scheduled task runs at set times.");
+  if (keepAlive && (agent !== undefined || timeout !== undefined || model !== undefined)) return fail("--keep-alive is for a plain command; it has no --timeout, --model or --agent.");
+  if (healthUrl !== undefined && !keepAlive) return fail("--health-url needs --keep-alive.");
   let definition = buildDefinition({
     name, command, cwd, network: [...new Set([...values(options, "--net"), ...(agent?.hosts ?? [])])], ...(agent === undefined ? {} : { runner: agent.id, worktree: true }), env: parseEnv(values(options, "--env")),
     ...(timeout === undefined ? {} : { timeoutSec: Number(timeout) }),
     ...(model === undefined ? {} : { model }), ...(fallbacks.length > 0 ? { fallbackModels: fallbacks } : {}),
+    ...(keepAlive ? { keepAlive: { ...(healthUrl === undefined ? {} : { healthUrl }) } } : {}),
   }, previous);
   const cron = value(options, "--cron");
   if (cron !== undefined) { const zone = value(options, "--tz"); definition = { ...definition, schedule: buildSchedule(cron, zone) }; }
@@ -162,12 +171,14 @@ async function add(args: string[], io: TaskIo): Promise<number> {
   io.out(`${previous ? "Updated" : "Added"} task ${name}.\n  runs: ${definition.command}\n  folder: ${definition.cwd} (the only place it can write besides the temp folder)\n`);
   if (definition.model) io.out(`  model: ${definition.model}${definition.fallbackModels?.length ? ` (if it cannot be started: ${definition.fallbackModels.join(", ")})` : ""}. The program calls $OPENAI_BASE_URL with any key; Frely adds the real one.\n`);
   io.out(`  can reach: ${definition.network.length ? `${definition.network.join(", ")} after your approval (frely task local approve ${name})` : "nothing outside this computer"}\n`);
+  if (definition.keepAlive) io.out(`  keep-alive: restarted when it exits (1 s, doubling, at most 5 minutes apart)${definition.keepAlive.healthUrl ? `; restarted after 3 failed checks of ${definition.keepAlive.healthUrl}` : ""}. The background service runs it; run frely link on if it is not running.\n  stop it with: frely task local stop ${name}\n`);
   if (definition.schedule) io.out(`  schedule: ${definition.schedule.cron} (${definition.schedule.timezone}). The background service starts it; run frely link on if it is not running.\n`);
   io.out(`Start it with: frely task local start ${name}\n`);
   return EXIT.ok;
 }
 
 function scheduleText(definition: TaskDefinition): string {
+  if (definition.keepAlive) return definition.keepAlive.stopped ? "keep-alive (stopped)" : "keep-alive";
   const item = definition.schedule;
   if (!item) return "none";
   const next = nextCronTime(parseCron(item.cron), item.timezone, Date.now());
@@ -203,6 +214,7 @@ async function remove(args: string[], io: TaskIo): Promise<number> {
 async function schedule(args: string[], io: TaskIo): Promise<number> {
   const [name] = positional(args);
   const definition = await requireDefinition(name);
+  if (definition.keepAlive) return fail(`${definition.name} is a keep-alive service and has no schedule. Use frely task local stop|start ${definition.name}.`);
   const cron = value(args, "--cron");
   let next: TaskDefinition;
   if (has(args, "--clear")) { const { schedule: _gone, ...rest } = definition; next = rest as TaskDefinition; }
@@ -213,6 +225,14 @@ async function schedule(args: string[], io: TaskIo): Promise<number> {
   else return fail(TASK_USAGE);
   await updateDefinitions((current) => current.map((item) => (item.name === next.name ? { ...next, updatedAt: new Date().toISOString() } : item)));
   io.out(`${next.name}: schedule ${scheduleText(next)}.\n`);
+  return EXIT.ok;
+}
+
+async function stop(args: string[], io: TaskIo): Promise<number> {
+  const definition = await requireDefinition(positional(args)[0]);
+  if (!definition.keepAlive) return fail(`${definition.name} is not a keep-alive service. Stop a run with frely result cancel.`);
+  await stopKeepAlive(definition.name);
+  io.out(`${definition.name} stopped. It stays stopped (also after a restart) until frely task local start ${definition.name}.\n`);
   return EXIT.ok;
 }
 
@@ -238,6 +258,12 @@ async function start(args: string[], io: TaskIo, deps: { manager?: ManagerDeps; 
 /** Starts a saved task (asking for its sites first when a person is at the terminal) and prints the run, waiting with `--wait`. `frely agent run` shares this. */
 export async function startSavedTask(name: string | undefined, args: readonly string[], io: TaskIo, deps: { manager?: ManagerDeps; approval?: ApprovalDeps }, options: { approveAlways?: boolean } = {}): Promise<number> {
   const definition = await requireDefinition(name);
+  if (definition.keepAlive && (io.interactive || options.approveAlways === true) && definition.network.some((host) => !approvedSites(definition).includes(host))) await approve([definition.name], io, deps.approval);
+  if (definition.keepAlive) {
+    const run = await startKeepAlive(definition.name, deps.manager ?? defaultManagerDeps);
+    io.out(run ? `${definition.name} started (run ${run.runId}). It is restarted when it exits until you run: frely task local stop ${definition.name}\n` : `${definition.name} is already running.\n`);
+    return EXIT.ok;
+  }
   if ((io.interactive || options.approveAlways === true) && definition.network.some((host) => !approvedSites(definition).includes(host))) await approve([definition.name], io, deps.approval);
   const record = await startTask(definition.name, { trigger: "manual" }, deps.manager ?? defaultManagerDeps);
   io.err(`Run ${record.runId} started. It keeps going if this command is cut off: frely result ${record.runId} --wait\n`);

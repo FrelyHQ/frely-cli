@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { nextCronTime, parseCron } from "./cron.js";
 import { listDefinitions, tasksDir, writeTaskJson, type TaskDefinition } from "./definition.js";
 import { defaultManagerDeps, startTask, TaskError, type ManagerDeps } from "./manager.js";
+import { tickKeepAlive } from "./keep-alive.js";
 import { createTaskRun, snapshotOf } from "./run-store.js";
 import { approvedSites } from "./definition.js";
 
@@ -60,6 +61,7 @@ export async function tickSchedules(now = Date.now(), deps: ManagerDeps = defaul
 export async function superviseTasks(options: { signal: AbortSignal; log: (text: string) => void; tickMs?: number }): Promise<void> {
   while (!options.signal.aborted) {
     await tickSchedules(Date.now(), defaultManagerDeps, options.log).catch((error: unknown) => options.log(`Tasks: ${error instanceof Error ? error.message : String(error)}`));
+    await tickKeepAlive(Date.now(), defaultManagerDeps, options.log).catch((error: unknown) => options.log(`Services: ${error instanceof Error ? error.message : String(error)}`));
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, options.tickMs ?? TICK_MS);
       options.signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
