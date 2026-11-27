@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { diagnostic, diagnosticError } from "./diagnostics.js";
+import { commandReachLabels, diagnostic, diagnosticError, mcpDiagnosticContext } from "./diagnostics.js";
 
 test("diagnostics exclude untrusted messages, nested data and stack headers", () => {
   const secret = "synthetic-private-value";
@@ -36,4 +36,15 @@ test("socket close diagnostics keep only numbers and allow-listed error codes", 
     { c: 1006, e: "ECONNRESET", a: 600_123, p: 14_000, o: 29_000, f: 31_000, i: 2 },
   );
   assert.equal(second.socketErrorCode, undefined);
+});
+
+test("shell commands are labelled with the protected folders they name, never logged", () => {
+  assert.deepEqual(commandReachLabels("ls ~/Downloads/a.zip && find $HOME -name x", "/Users/u"), ["Downloads", "home"]);
+  assert.deepEqual(commandReachLabels("grep -r foo /Users/u/Documents; ls /Users", "/Users/u"), ["Documents", "users"]);
+  assert.deepEqual(commandReachLabels("ls ~/proj && cat ~/Downloadsx", "/Users/u"), []);
+  const payload = { method: "tools/call", params: { name: "process", arguments: { action: "run", command: "find ~ -name secret-token" } } };
+  const lines: string[] = [];
+  diagnostic((line) => lines.push(line), "mcp.request_started", { requestId: "a".repeat(20), ...mcpDiagnosticContext(payload) });
+  assert.deepEqual(JSON.parse(lines[0]!).reaches, ["home"]);
+  assert.doesNotMatch(lines[0]!, /secret-token/u);
 });
