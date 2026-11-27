@@ -50,6 +50,7 @@ import { findManagedSkillByInstallName } from "./skill/managed.js";
 import type { InstallRecord } from "./skill/registry.js";
 import { taskWorkerMain } from "./task/worker.js";
 import { superviseTasks } from "./task/scheduler.js";
+import { localTasksReport } from "./task/report.js";
 import { listTaskShares } from "./task/share-store.js";
 import { superviseTaskShares, unshareTask } from "./task/share.js";
 import { runOutcome, startRun, workerMain } from "./agent/run.js";
@@ -964,6 +965,8 @@ async function main(): Promise<void> {
           instance: { pid: process.pid, version: VERSION, entry: createHash("sha256").update(IS_STANDALONE ? process.execPath : process.argv[1] ?? "").digest("hex").slice(0, 16) },
           ...(providerOnly ? { workspaces: [] } : await reportedWorkspaceInfo(workspace).then((info) => ({ workspaces: info.workspaces, workspacesTruncated: info.truncated, workspaceManage: 1 }))),
           ...(localMcp ? { localMcp: localMcp.capabilities() } : {}),
+          // The local tasks (names, schedules, last runs; never commands or output) for the web Tasks page.
+          ...(providerOnly ? {} : { localTasks: await localTasksReport().catch(() => []) }),
         };
       };
       await serveDeviceRelay({ ...(workspace ? { workspace } : {}), ...(localMcp ? { localMcp } : {}), ...(providerOnly ? {} : { localModels: createLocalModelsHub() }), capabilities, managedService: Boolean(serviceConfigHome), restartForUpdate: stop, restartForStuck: () => { process.exitCode = SERVICE_STUCK_EXIT_CODE; stop(); }, signal: controller.signal, log: (message) => process.stderr.write(`${message}\n`) });
