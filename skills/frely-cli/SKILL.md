@@ -1,7 +1,7 @@
 ---
 name: frely-cli
 description: >-
-  Use when the user works with their Frely account, the Frely marketplace, or Frely agents through the frely CLI. Triggers: sign in / login / register / 注册, credits / credit balance / 余额 / 充值 / top up / payment_required / HTTP 402 / checkout, API keys, plans, orders, usage, install a Frely Skill / Prompt / MCP / marketplace item / 安装 skill, install or call a Frely Agent / item call / --read, connect a computer or an AI client to FrelyMCP / remote control / 连接电脑 / remote MCP, or any other `frely` command.
+  Use when the user works with their Frely account, the Frely marketplace, or Frely agents through the frely CLI. Triggers: sign in / login / register / 注册, credits / credit balance / 余额 / 充值 / top up / payment_required / HTTP 402 / checkout, API keys, plans, orders, usage, install a Frely Skill / Prompt / MCP / marketplace item / 安装 skill, install or call a Frely Agent / item call / --read, run something on a schedule / every day / cron / 定时任务 / 每天 / crontab / launchd / systemd timer, connect a computer or an AI client to FrelyMCP / remote control / 连接电脑 / remote MCP, or any other `frely` command.
 ---
 
 # Frely CLI Skill
@@ -20,6 +20,7 @@ Use the installed `frely` CLI. Do not rely on remembered syntax: run `frely help
 | Install or run a published Agent | `frely item install` → `frely item call` | Marketplace installs |
 | `frely item call` returned `payment_required` | credit recovery flow | Error handling |
 | Print `mcpServers` JSON for a direct MCP connection | `frely item config <username/mcp-name>` | Marketplace installs |
+| Run a command or an agent on a schedule (cron) | `frely task local add --cron` | Scheduled jobs |
 | Control another computer, use Cloud MCPs, drive a connected browser, or work from a no-shell client | FrelyMCP setup | FrelyMCP |
 
 ## Preflight
@@ -29,6 +30,12 @@ Run `frely doctor --json` once before account operations. Its output is the sour
 ## Sign in
 
 Run `frely doctor --json` to see whether the CLI is signed in. If not, ask the user for their email, run `frely login --email <address>`, ask them for the 6-digit code from the email, then run `frely login --code <code>`. New addresses are registered by the same steps.
+
+## Scheduled jobs
+
+- Never write crontab, launchd (`~/Library/LaunchAgents`), systemd timers or other autostart entries: Frely refuses them, and the Frely background service already holds a clock.
+- On this computer: `frely task local add <name> --cwd <dir> --cron "30 9 * * *" [--tz <zone>] -- <command...>` (or `--agent pi|codex|claude-code -- <prompt>`). Check it with `frely task local list`, run it once with `frely task local start <name> --wait`, change it with `frely task local schedule <name>`. It runs in the Frely sandbox: give the sites it needs with `--net` and run `frely task local approve <name>`. Full usage: `frely help --agent --json task.local`.
+- From another computer, through FrelyMCP: `frely_call todo.add`, `todo.step_add` with `script: true` and the device id, then `todo.schedule_add` with a cron and timezone (at most hourly); the owner approves the device access on the web.
 
 ## Account APIs
 
