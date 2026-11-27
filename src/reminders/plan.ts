@@ -33,7 +33,7 @@ export type SyncAction =
   | { readonly type: "finish_todo"; readonly todoId: string }
   | { readonly type: "confirmed"; readonly todoId: string };
 
-export const reminderNotes = (todoId: string, origin = "https://frely.cloud"): string => `${origin}/user/todos\nfrely:todo:${todoId}`;
+export const reminderNotes = (todoId: string, origin = "https://frely.cloud"): string => `${origin}/user/tasks\nfrely:todo:${todoId}`;
 export const todoIdOf = (reminder: Pick<ReminderFacts, "notes">): string | null => MARKER.exec(reminder.notes ?? "")?.[1] ?? null;
 
 /** Only a todo that has a date or schedule, or is in progress, is worth a reminder; the list stays short. */
