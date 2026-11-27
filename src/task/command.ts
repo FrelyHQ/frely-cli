@@ -84,10 +84,24 @@ export async function taskRunRecordCommand(action: "result" | "cancel" | "runs",
   return status(args, io, true);
 }
 
+/**
+ * Task definitions live in `~/.config/frely/tasks`, which the AI command sandbox hides and never lets a command write. Run from inside that
+ * sandbox, `frely task local ...` would read an empty folder and "save" into a copy that is thrown away when the command ends, yet exit 0.
+ * Refuse instead, and say where the task can be created.
+ */
+export function sandboxedTaskCommand(action: string | undefined, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (env.SANDBOX_RUNTIME !== "1" || action === undefined || action === "help" || action === "--help") return undefined;
+  return "frely task local cannot run inside the Frely command sandbox: the task files in ~/.config/frely are hidden from it, so nothing would be saved. "
+    + "Do not retry it here. Either ask the owner to run the same command in their own terminal, or schedule the work through FrelyMCP: frely_call task.add, task.step_add with script: true and the device id, then task.schedule_add with a cron and timezone. "
+    + "Only if the owner explicitly wants this command run here, request_permission with resource \"unsandboxed\" and this exact command.";
+}
+
 /** Runs `frely task ...`; returns the exit code. */
 export async function runTaskCommand(args: readonly string[], io: TaskIo, deps: { manager?: ManagerDeps; approval?: ApprovalDeps } = {}): Promise<number> {
   try {
     const [action, ...rest] = args;
+    const inSandbox = sandboxedTaskCommand(action);
+    if (inSandbox) { io.err(`${inSandbox}\n`); return EXIT.cli; }
     switch (action) {
       case "add": return await add(rest, io);
       case "list": return await list(rest, io);

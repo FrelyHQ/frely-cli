@@ -191,3 +191,17 @@ test("the log is capped and kept outside the task folder", async () => {
   assert.match(String((await describeRun(done, { tail: true })).logTail), /x/);
   await Promise.all(deps.jobs);
 });
+
+test("task local refuses to run inside the command sandbox instead of saving into a discarded copy", async () => {
+  const { sandboxedTaskCommand } = await import("./command.js");
+  assert.match(sandboxedTaskCommand("add", { SANDBOX_RUNTIME: "1" }) ?? "", /cannot run inside the Frely command sandbox/u);
+  assert.equal(sandboxedTaskCommand("help", { SANDBOX_RUNTIME: "1" }), undefined);
+  assert.equal(sandboxedTaskCommand("add", {}), undefined);
+  const lines: string[] = [];
+  const io = { out: () => undefined, err: (text: string) => { lines.push(text); }, interactive: false } as unknown as Parameters<typeof runTaskCommand>[1];
+  const previous = process.env.SANDBOX_RUNTIME;
+  process.env.SANDBOX_RUNTIME = "1";
+  try { assert.equal(await runTaskCommand(["add", "x", "--cwd", cwd, "--", "true"], io), 1); } finally { if (previous === undefined) delete process.env.SANDBOX_RUNTIME; else process.env.SANDBOX_RUNTIME = previous; }
+  assert.equal(await getDefinition("x"), undefined);
+  assert.match(lines.join(""), /FrelyMCP/u);
+});
