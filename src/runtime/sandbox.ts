@@ -307,6 +307,10 @@ export function buildSandboxConfig(workspaceRoot: string, allowedGroups: readonl
       allowLocalBinding: true,
       ...(options.parentProxy ? { parentProxy: options.parentProxy } : {}),
     },
+    // macOS: lets Go and other native-TLS programs (gh, gcloud, kubectl, ...) verify certificates through the system trust service
+    // (com.apple.trustd.agent). Without it every HTTPS call of such a program fails inside the sandbox. Only here: the network is already
+    // open to every site through the proxy, so the extra channel adds little; the restricted policy above keeps it off.
+    enableWeakerNetworkIsolation: true,
     filesystem: {
       denyRead: sensitiveReadPaths(allowedGroups),
       allowWrite: [workspaceRoot, tmpdir(), ...writablePaths(allowedGroups)],
@@ -586,7 +590,12 @@ function deniedPaths(lines: readonly string[]): string[] {
   const found: string[] = [];
   for (const line of lines) {
     if (!/operation not permitted|permission denied|read-only file system|deny(?:\(\d+\))? file-write/iu.test(line)) continue;
-    for (const match of line.matchAll(/(?<![\w.~-])(\/[^\s'"`:;,)<>|]+)/gu)) found.push(match[1]!);
+    // Paths under the home directory may contain spaces (~/Library/Application Support); read them whole, then drop the truncated copies.
+    const spaced = [...line.matchAll(new RegExp(`(?<![\\w.~-])(${escapeRegExp(homedir())}/[^:'"\`<>|;]+?)(?=:\\s|['"\`]|$)`, "gu"))].map((match) => match[1]!.trimEnd());
+    found.push(...spaced);
+    for (const match of line.matchAll(/(?<![\w.~-])(\/[^\s'"`:;,)<>|]+)/gu)) {
+      if (!spaced.some((full) => full.startsWith(match[1]!))) found.push(match[1]!);
+    }
   }
   return [...new Set(found)];
 }

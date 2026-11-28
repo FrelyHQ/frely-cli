@@ -394,3 +394,15 @@ test("the autostart refusal names the Frely schedule tools that exist, remote an
   for (const part of ["task.add", "script: true", "task.schedule_add", "frely task local add", "--cron"]) assert.ok(AUTOSTART_REFUSAL.includes(part), part);
   assert.ok(!AUTOSTART_REFUSAL.includes("todo.create"));
 });
+
+test("the open network lets native-TLS programs verify certificates; a restricted network does not", () => {
+  assert.equal(buildSandboxConfig("/work").enableWeakerNetworkIsolation, true);
+  assert.equal(buildSandboxConfig("/work", [], { network: { allowedDomains: ["example.com"] } }).enableWeakerNetworkIsolation, undefined);
+});
+
+test("a denied path with spaces is read whole, so every folder of one run is named", () => {
+  const home = homedir();
+  const hint = sandboxDenialHint(`mkdir: ${home}/.a-cli/x: Operation not permitted\nmkdir: ${home}/Library/Application Support/a-cli/x: Operation not permitted`, "a-cli release", 1, undefined, { workspaceRoot: "/work" }) ?? "";
+  assert.match(hint, /resource "path:~\/\.a-cli" and resource "path:~\/Library\/Application Support\/a-cli"/u);
+  assert.doesNotMatch(hint, /resource "path:~\/Library"/u);
+});
