@@ -403,6 +403,7 @@ test("the open network lets native-TLS programs verify certificates; a restricte
 test("a denied path with spaces is read whole, so every folder of one run is named", () => {
   const home = homedir();
   const hint = sandboxDenialHint(`mkdir: ${home}/.a-cli/x: Operation not permitted\nmkdir: ${home}/Library/Application Support/a-cli/x: Operation not permitted`, "a-cli release", 1, undefined, { workspaceRoot: "/work" }) ?? "";
-  assert.match(hint, /resource "path:~\/\.a-cli" and resource "path:~\/Library\/Application Support\/a-cli"/u);
+  assert.match(hint, /request_permission with resources \["path:~\/\.a-cli", "path:~\/Library\/Application Support\/a-cli"\]/u);
+  assert.equal((hint.match(/Call request_permission/gu) ?? []).length, 1);
   assert.doesNotMatch(hint, /resource "path:~\/Library"/u);
 });
