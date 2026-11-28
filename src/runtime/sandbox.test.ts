@@ -391,6 +391,6 @@ test("scheduler and service commands are refused by name, not by substring", () 
 });
 
 test("the autostart refusal names the Frely schedule tools that exist, remote and local", () => {
-  for (const part of ["task.add", "script: true", "task.schedule_add", "frely task local add", "--cron"]) assert.ok(AUTOSTART_REFUSAL.includes(part), part);
+  for (const part of ["task.add", "script: true", "task.schedule_add", "frely task local add", "--cron", "request_permission", "unsandboxed"]) assert.ok(AUTOSTART_REFUSAL.includes(part), part);
   assert.ok(!AUTOSTART_REFUSAL.includes("todo.create"));
 });
