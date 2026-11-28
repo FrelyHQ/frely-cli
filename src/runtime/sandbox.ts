@@ -582,6 +582,9 @@ const CONNECTION_FAILURE = /connection refused|econnrefused|network is unreachab
 const XPC_DENIAL = /mach-lookup|\bxpc\b|connection invalid|bootstrap_look_up/iu;
 const SEATBELT_NETWORK_DENIAL = /deny(?:\(\d+\))? network-outbound/u;
 
+/** `resource "x"` for one grant, `resources ["x","y"]` for several: one call, one approval, answered together. */
+const resourceArgument = (names: readonly string[]): string => names.length === 1 ? `resource "${names[0]}"` : `resources [${names.map((name) => `"${name}"`).join(", ")}]`;
+
 /** `~/x` for paths below the home directory, the plain path otherwise. */
 const shortPath = (path: string): string => path === homedir() ? "~" : path.startsWith(homedir() + sep) ? `~/${path.slice(homedir().length + 1)}` : path;
 
@@ -642,13 +645,13 @@ export function sandboxDenialHint(stderr: string, command?: string, exitCode?: n
   }
   const groups = [...Object.entries(SENSITIVE_PATH_GROUPS), ["friday-admin", ADMIN_SESSION_PATHS] as const]
     .filter(([, paths]) => paths.some((path) => commandNamesPath(text, path))).map(([group]) => group);
-  for (const group of groups) {
-    hints.push(`The Frely command sandbox hides these credential folders until the device owner approves them. Call request_permission with resource "${group}", the reason and this exact command; the owner approves it on the web. Then run the same command again.`);
+  if (groups.length > 0) {
+    hints.push(`The Frely command sandbox hides these credential folders until the device owner approves them. Call request_permission with ${resourceArgument(groups)}, the reason and this exact command; the owner approves it on the web. Then run the same command again.`);
   }
   if (groups.length === 0) {
     const grants = [...new Set(deniedPaths(lines).flatMap((path) => writeGrantFor(path, context.workspaceRoot) ?? []))];
     if (grants.length > 0 && !/\.git[\\/]hooks\b/u.test(text)) {
-      hints.push(`The command tried to write outside the workspace and temp directory, which the Frely command sandbox blocks. Call request_permission with ${grants.map((grant) => `resource "${grant}"`).join(" and ")}, the reason and this exact command; the owner approves it on the web. Then run the same command again.`);
+      hints.push(`The command tried to write outside the workspace and temp directory, which the Frely command sandbox blocks. Call request_permission with ${resourceArgument(grants)}, the reason and this exact command; the owner approves it on the web. Then run the same command again.`);
     }
   }
   if (rawTcp) {
