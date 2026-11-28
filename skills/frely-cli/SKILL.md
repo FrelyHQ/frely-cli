@@ -33,7 +33,7 @@ Run `frely doctor --json` to see whether the CLI is signed in. If not, ask the u
 
 ## Scheduled jobs
 
-- Never write crontab, launchd (`~/Library/LaunchAgents`), systemd timers or other autostart entries: Frely refuses them, and the Frely background service already holds a clock.
+- Do not write crontab, launchd (`~/Library/LaunchAgents`), systemd timers or other autostart entries for recurring work: use a Frely scheduled task (below). The sandbox refuses them; only when one really must exist on this computer, ask for `request_permission` with resource `unsandboxed` and that exact command, which the owner confirms on the web with a passkey or authenticator code.
 - On this computer, in the owner's own terminal (it refuses to run inside the AI command sandbox, which hides the task files; never retry it there, and do not ask for the `unsandboxed` grant unless the owner wants that): `frely task local add <name> --cwd <dir> --cron "30 9 * * *" [--tz <zone>] -- <command...>` (or `--agent pi|codex|claude-code -- <prompt>`). Check it with `frely task local list`, run it once with `frely task local start <name> --wait`, change it with `frely task local schedule <name>`. It runs in the Frely sandbox: give the sites it needs with `--net` and run `frely task local approve <name>`. Full usage: `frely help --agent --json task.local`.
 - From an AI client's command sandbox, or from another computer, through FrelyMCP: `frely_call task.add`, `task.step_add` with `script: true` and the device id, then `task.schedule_add` with a cron and timezone (at most hourly); the owner approves the device access on the web. For a task that already exists: `frely task schedule <taskId> --cron "<m h dom mon dow>" --tz <zone>`.
 
